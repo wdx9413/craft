@@ -164,28 +164,40 @@ export class TraceKernel {
     return { policy: this.store.create("trace_policy", policyId, { ...identity, identity_digest: stableDigest(identity), policy_revision: 1, archive_before_delete: true, automatic_after_archive: true, deletion_requires_review: false }), idempotent: false };
   }
 
-  /** Bounded on-use maintenance works in short-lived plugin processes without a daemon. */
+  /** Claim bounded retention work briefly; archive I/O runs outside SQLite transactions. */
   maintain(args: JsonObject = {}): JsonObject {
     const now = args.now === undefined ? new Date().toISOString() : text(args.now, "now");
     const nowMs = Date.parse(now);
     if (!Number.isFinite(nowMs)) throw new Error("now must be an ISO timestamp");
-    return this.store.transaction(() => {
+    const limit = Number(args.limit ?? 20);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error("maintenance limit must be an integer between 1 and 20");
+    const claim = this.store.transaction(() => {
       const previous = this.store.find("maintenance_component", "trace_retention");
       const due = previous?.next_retry_at || previous?.next_run_at ? Date.parse(String(previous.next_retry_at ?? previous.next_run_at)) : Date.parse(String(previous?.last_success_at ?? "")) + 3_600_000;
-      if (Number.isFinite(due) && due > nowMs) return { status: "not_due", maintenance: previous };
-      try {
-        const result = this.retentionSweep({ now, limit: 20 });
-        const next = new Date(nowMs + (Number(result.archived) === 20 ? 60_000 : 3_600_000)).toISOString();
-        const maintenance = this.store.save("maintenance_component", "trace_retention", { status: "healthy", last_attempt_at: now,
-          last_success_at: now, next_run_at: next, next_retry_at: null, consecutive_failures: 0, archived: result.archived, trigger: "operation" });
-        return { status: "completed", maintenance, result };
-      } catch (error) {
-        const maintenance = this.store.save("maintenance_component", "trace_retention", { status: "degraded", last_attempt_at: now,
-          last_success_at: previous?.last_success_at ?? null, next_retry_at: new Date(nowMs + 60_000).toISOString(),
-          consecutive_failures: Number(previous?.consecutive_failures ?? 0) + 1, error_code: "TRACE_ARCHIVE_FAILED", trigger: "operation" });
-        return { status: "failed", maintenance };
-      }
+      if (Number.isFinite(due) && due > nowMs) return { status: "not_due" as const, maintenance: previous };
+      const maintenance = this.store.save("maintenance_component", "trace_retention", { status: "running", claim_id: randomUUID(), last_attempt_at: now,
+        last_success_at: previous?.last_success_at ?? null, next_retry_at: new Date(nowMs + 60_000).toISOString(),
+        consecutive_failures: Number(previous?.consecutive_failures ?? 0), trigger: "operation" });
+      return { status: "claimed" as const, previous, maintenance };
     });
+    if (claim.status === "not_due") return claim;
+    const settle = (status: string, state: JsonObject): JsonObject => this.store.transaction(() => {
+      const current = this.store.find("maintenance_component", "trace_retention");
+      if (current?.claim_id !== claim.maintenance.claim_id) return { status: "superseded", maintenance: current };
+      return { status, maintenance: this.store.save("maintenance_component", "trace_retention", {
+        ...state, claim_id: claim.maintenance.claim_id, trigger: "operation",
+      }) };
+    });
+    try {
+      const result = this.retentionSweep({ now, limit });
+      const next = new Date(nowMs + (Number(result.archived) === limit ? 60_000 : 3_600_000)).toISOString();
+      return { ...settle("completed", { status: "healthy", last_attempt_at: now,
+        last_success_at: now, next_run_at: next, next_retry_at: null, consecutive_failures: 0, archived: result.archived }), result };
+    } catch {
+      return settle("failed", { status: "degraded", last_attempt_at: now,
+        last_success_at: claim.previous?.last_success_at ?? null, next_retry_at: new Date(nowMs + 60_000).toISOString(),
+        consecutive_failures: Number(claim.previous?.consecutive_failures ?? 0) + 1, error_code: "TRACE_ARCHIVE_FAILED" });
+    }
   }
 
   /** Archive and remove only terminal traces older than the retention window. */
@@ -196,23 +208,37 @@ export class TraceKernel {
     if (!Number.isInteger(maxDays) || maxDays < 1) throw new Error("max_days must be a positive integer");
     if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) throw new Error("limit must be an integer between 1 and 10000");
     const cutoff = Date.parse(now) - maxDays * 86_400_000;
-    const candidates = this.store.list("trace", Number.MAX_SAFE_INTEGER)
-      .filter((trace) => TERMINAL.has(String(trace.status) as TraceStatus))
-      .filter((trace) => Date.parse(String(trace.last_event_at ?? trace.updated_at ?? trace.started_at)) < cutoff)
-      .slice(0, limit);
+    const candidates = this.store.listTraceRetentionCandidates(new Date(cutoff).toISOString(), limit);
     const archives: string[] = []; let deleted = 0;
     for (const trace of candidates) {
-      const result = this.get({ trace_id: trace.id }); const events = result.events as JsonObject[]; const feedback = result.feedback as JsonObject[];
-      const telemetry = this.store.list("telemetry_event", Number.MAX_SAFE_INTEGER, event => event.trace_id === trace.id);
-      const existing = this.store.find("trace_archive", String(trace.id));
+      const traceId = String(trace.id);
+      const events = this.store.listTraceChildren("trace_event", traceId);
+      const feedback = this.store.listTraceChildren("trace_feedback", traceId);
+      const telemetry = this.store.listTraceChildren("telemetry_event", traceId);
+      const existing = this.store.find("trace_archive", traceId);
       const archive = existing ? this.archivePointer(existing) : this.archives.write({ trace_id: String(trace.id), trace_version: Number(trace.version), archived_at: now, trace, events, feedback, ...(telemetry.length ? { telemetry_events: telemetry } : {}) });
-      if (!existing) this.store.create("trace_archive", String(trace.id), { trace_id: trace.id, trace_version: trace.version, task_id: trace.task_id, status: trace.status, archived_at: now, last_event_at: trace.last_event_at ?? trace.updated_at, event_count: events.length, feedback_count: feedback.length, archive_backend_id: archive.backend_id ?? "local", archive_storage: archive.storage, archive_locator: archive.locator, archive_uri: archive.uri, archive_format: archive.format, content_digest: archive.content_digest, bytes: archive.bytes });
       // Verify durable bytes even when retrying a previously published archive pointer.
       const archived = this.archives.read(archive);
       if (archived.trace_id !== trace.id || archived.trace_version !== trace.version) throw new Error("Trace archive does not match terminal record");
+      const versions = (records: JsonObject[]): string => stableDigest(records.map(item => [item.id, item.version]).sort());
+      if (versions(archived.events) !== versions(events) || versions(archived.feedback) !== versions(feedback)
+        || versions(archived.telemetry_events ?? []) !== versions(telemetry)) throw new Error("Trace archive does not contain the current child records");
       const telemetryIds = (archived.telemetry_events ?? []).map(event => String(event.id));
-      this.store.removeTraceRecords(String(trace.id), events.map((event) => String(event.id)), feedback.map((item) => String(item.id)), telemetryIds);
-      archives.push(archive.uri); deleted += 1;
+      const unchanged = (kind: "trace_event" | "trace_feedback" | "telemetry_event", snapshot: JsonObject[]) => {
+        const current = this.store.listTraceChildren(kind, traceId);
+        return versions(current) === versions(snapshot);
+      };
+      const removed = this.store.transaction(() => {
+        const currentTrace = this.store.find("trace", traceId);
+        if (!currentTrace || Number(currentTrace.version) !== Number(trace.version)
+          || !unchanged("trace_event", events) || !unchanged("trace_feedback", feedback) || !unchanged("telemetry_event", telemetry)) return false;
+        const currentArchive = this.store.find("trace_archive", traceId);
+        if (!currentArchive) this.store.create("trace_archive", traceId, { trace_id: trace.id, trace_version: trace.version, task_id: trace.task_id, status: trace.status, archived_at: now, last_event_at: trace.last_event_at ?? trace.updated_at, event_count: events.length, feedback_count: feedback.length, archive_backend_id: archive.backend_id ?? "local", archive_storage: archive.storage, archive_locator: archive.locator, archive_uri: archive.uri, archive_format: archive.format, content_digest: archive.content_digest, bytes: archive.bytes });
+        else if (currentArchive.content_digest !== archive.content_digest) throw new Error("Trace archive idempotency conflict");
+        this.store.removeTraceRecords(traceId, events.map((event) => String(event.id)), feedback.map((item) => String(item.id)), telemetryIds);
+        return true;
+      });
+      if (removed) { archives.push(archive.uri); deleted += 1; }
     }
     return { schema: TRACE_SCHEMA_VERSION, now, policy_id: policy.id, policy_revision: policy.revision, policy_source: policy.source, max_days: maxDays, cutoff: new Date(cutoff).toISOString(), scanned: candidates.length, archived: archives.length, deleted, archives };
   }

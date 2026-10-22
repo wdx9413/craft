@@ -41,6 +41,19 @@ test("version history remains bounded and excludes the current version", async (
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("countMany returns current per-kind counts from one batched latest-version query", async () => {
+  const { root, store } = await fixture();
+  try {
+    store.create("workflow", "one", { value: 1 });
+    store.save("workflow", "one", { value: 2 });
+    store.create("workflow", "two", { value: 1 });
+    store.create("task", "task-one", { value: 1 });
+    assert.deepEqual(store.countMany(["workflow", "task", "missing", "workflow"]), { workflow: 2, task: 1, missing: 0 });
+    assert.deepEqual(store.countMany([]), {});
+    assert.throws(() => store.countMany(["", "workflow"]), /count kinds/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("scoped record reads paginate metadata and bind valid time cutoffs", async () => {
   const { root, store } = await fixture();
   try {

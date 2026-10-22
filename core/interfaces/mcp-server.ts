@@ -14,9 +14,11 @@ import { componentForSurface, surfaceToolNames as resolveSurfaceToolNames } from
 import { createActionHandlers } from "../application/actions/action-handlers.ts";
 import type { McpHandler } from "./mcp/handler-types.js";
 import { ComponentTraceKernel, type ComponentTraceResult } from "../component-trace.ts";
+import { JsonlTelemetryJournal, observeOperation, withoutOperationPersistence, type OperationEvent } from "../../common/craft-common-log/src/index.ts";
 import { validateJsonSchema, type JsonValue } from "../json-schema.ts";
 import { generatedTextLanguageInstruction } from "../config.ts";
 import { CONTEXT_ROUTED_TOOL_NAMES } from "../mcp/context-tools.ts";
+import { formatContextResponse, resolveContextResponseDetail } from "../context-response-projection.ts";
 export { COMPONENT_SURFACES, COMPONENT_SURFACE_NAMES, DOMAIN_SURFACE_NAMES, SURFACE_NAMES, SURFACE_RULES, domainSurfaceOf } from "./mcp/surface-registry.ts";
 
 export { TOOLS, ACTIVE_TOOLS } from "../mcp/tool-catalog.ts";
@@ -88,11 +90,16 @@ export class McpServer {
    */
   readonly fingerprint: JsonObject;
   readonly componentTrace: ComponentTraceKernel;
+  readonly operationJournal: JsonlTelemetryJournal;
   readonly hooks: HookPlane | undefined;
   constructor(service: CraftService, mode: string = "full") {
     this.service = service;
     this.mode = mode;
     this.hooks = (service as { hookPlane?: HookPlane }).hookPlane;
+    this.operationJournal = new JsonlTelemetryJournal(service.store.paths.runtimeDir, error => {
+      const name = error instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(error.name) ? error.name : "Error";
+      process.stderr.write(`Craft operation journal failed (${name}).\n`);
+    });
     this.componentTrace = new ComponentTraceKernel(service.trace, `mcp_${randomUUID().replaceAll("-", "")}`);
     const allowed = new Set(surfaceToolNames(mode));
     const mountedComponent = componentForSurface(mode);
@@ -161,12 +168,16 @@ export class McpServer {
     if (!this.tools.some((tool) => tool.name === name) && (this.mode !== "full" || !this.handlers[name])) {
       return this.reject(request.id, `Unknown tool: ${name}`, supplied);
     }
+    let responseDetail: "compact" | "full" | null;
+    try { responseDetail = resolveContextResponseDetail(name, supplied); }
+    catch (error) { return this.reject(request.id, error instanceof Error ? error.message : String(error), supplied); }
     // The two hook phases that stand in front of and behind an effect. `tool_before` is a gating
     // phase, so this is the point where "a hook can stop a tool call" stops being a comment: a
     // refusal returns without dispatching, and `tool_after` therefore does not run for it either.
     const context = this.hooks === undefined ? undefined : HookPlane.toolContext(name, supplied, classifyTool);
     const requestId = String(request.id);
-    const traced = name !== "craft_info" && name !== "craft_describe" && name !== "craft_list" && name !== "craft_get" && !name.startsWith("craft_trace_");
+    const readOnly = this.tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint === true;
+    const traced = !readOnly && name !== "craft_info" && name !== "craft_describe" && name !== "craft_list" && name !== "craft_get" && !name.startsWith("craft_trace_");
     const dispatch = async (): Promise<JsonObject> => {
       if (context) {
         const gate = await this.hooks!.run("tool_before", context);
@@ -174,7 +185,7 @@ export class McpServer {
           const refusal = gate.outcomes.find((entry) => entry.outcome.kind === "denied")!;
           const reason = refusal.outcome.kind === "denied" ? refusal.outcome.reason : "denied";
           const denied = { denied: true, hook: refusal.hook, capability: refusal.capability ?? null, reason };
-          if (traced) return denied;
+          if (traced || readOnly) return denied;
           const captured = await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: "hook.denied", input: supplied as JsonObject, handler: () => denied });
           return { ...denied, trace_correlation: captured.correlation, ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) };
         }
@@ -196,24 +207,38 @@ export class McpServer {
       }
       return result;
     };
-    try {
-      const captured: ComponentTraceResult = traced
-        ? await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: name, input: supplied as JsonObject, handler: dispatch })
-        : { ok: true, result: await dispatch(), correlation: null };
-      if (!captured.ok) {
-        return this.ok(request.id, { content: [{ type: "text", text: captured.error instanceof Error ? captured.error.message : String(captured.error) }],
-          structuredContent: safeFailure(captured.error), trace_correlation: captured.correlation, ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}), isError: true });
+    const response = await (async (): Promise<JsonObject> => {
+      try {
+        const captured: ComponentTraceResult = readOnly
+          ? { ok: true, result: await withoutOperationPersistence(this.service.store,
+            () => observeOperation(this.service.store, "craft-mcp", name, { ...supplied as JsonObject, request_id: requestId }, dispatch),
+            event => this.recordReadOperation(event)), correlation: null }
+          : traced
+            ? await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: name, input: supplied as JsonObject, handler: dispatch })
+            : { ok: true, result: await dispatch(), correlation: null };
+        if (!captured.ok) {
+          return this.ok(request.id, { content: [{ type: "text", text: captured.error instanceof Error ? captured.error.message : String(captured.error) }],
+            structuredContent: safeFailure(captured.error), trace_correlation: captured.correlation, ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}), isError: true });
+        }
+        let result: JsonObject = { ...(captured.result ?? {}), ...(captured.correlation === null ? {} : { trace_correlation: captured.correlation }),
+          ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) };
+        if (result.denied === true) return this.ok(request.id, { content: [{ type: "text", text: `Denied by hook ${String(result.hook)}: ${String(result.reason)}` }], structuredContent: result, isError: true });
+        if (context) {
+          if (readOnly) await withoutOperationPersistence(this.service.store, () => this.hooks!.run("tool_after", context), event => this.recordReadOperation(event));
+          else await this.hooks!.run("tool_after", context);
+        }
+        const formatted = formatContextResponse(result, responseDetail, (supplied as JsonObject).max_tokens, supplied as JsonObject);
+        result = formatted.result;
+        const contentText = formatted.contentText;
+        return this.ok(request.id, { content: [{ type: "text", text: contentText }],
+          structuredContent: result, isError: false });
+      } catch (error) {
+        return this.ok(request.id, { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+          structuredContent: safeFailure(error), isError: true });
       }
-      const result: JsonObject = { ...(captured.result ?? {}), ...(captured.correlation === null ? {} : { trace_correlation: captured.correlation }),
-        ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) };
-      if (result.denied === true) return this.ok(request.id, { content: [{ type: "text", text: `Denied by hook ${String(result.hook)}: ${String(result.reason)}` }], structuredContent: result, isError: true });
-      if (context) await this.hooks!.run("tool_after", context);
-      return this.ok(request.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        structuredContent: result, isError: false });
-    } catch (error) {
-      return this.ok(request.id, { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-        structuredContent: safeFailure(error), isError: true });
-    }
+    })();
+    if (readOnly) await this.operationJournal.flush();
+    return response;
   }
 
   private async reject(requestId: unknown, message: string, input: unknown): Promise<JsonObject> {
@@ -226,6 +251,10 @@ export class McpServer {
   private dispatchTool(name: string, args: JsonObject): JsonObject | Promise<JsonObject> | undefined {
     const handler = this.handlers[name];
     return handler ? handler(args) : undefined;
+  }
+
+  private recordReadOperation(event: OperationEvent): void {
+    void this.operationJournal.append(event.event).catch(() => undefined);
   }
 
   /**

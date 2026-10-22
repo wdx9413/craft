@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import test from "node:test";
+import test, { mock } from "node:test";
+import { HookPlane } from "../core/hook-plane.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { CORE_TOOLS, DOMAIN_SURFACE_NAMES, McpServer, TOOLS, domainSurfaceOf, surfaceToolNames } from "../core/mcp.ts";
 import { serveMcpStdio } from "../core/mcp-stdio.ts";
@@ -56,6 +57,10 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     assert.equal(((await server.handle({ id: 5, method: "tools/call", params: { name: "craft_info" } }))?.result as Record<string, unknown>).isError, false);
     const info = (await server.handle({ id: 6, method: "tools/call", params: { name: "craft_info" } }))?.result as Record<string, unknown>;
     assert.equal((info.structuredContent as Record<string, unknown>).content_language, "ja-JP");
+    const fullInfo = await server.handle({ id: 6, method: "tools/call", params: { name: "craft_info", arguments: { include_zero_counts: true } } });
+    assert.equal(((((fullInfo?.result as Record<string, unknown>).structuredContent as Record<string, unknown>).counts as Record<string, number>).task), 0);
+    const infoTool = (((await server.handle({ id: 7, method: "tools/list" }))?.result as Record<string, unknown>).tools as Record<string, unknown>[]).find(item => item.name === "craft_info")!;
+    assert.equal(((((infoTool.inputSchema as Record<string, unknown>).properties as Record<string, unknown>).include_zero_counts as Record<string, unknown>).type), "boolean");
     const invalidDiscovery = await server.handle({ id: 6, method: "tools/call", params: { name: "craft_context_tools_discover", arguments: { intent: "knowledge evaluation" } } });
     const invalidDiscoveryResult = invalidDiscovery?.result as Record<string, unknown>;
     const invalidDiscoveryFailure = invalidDiscoveryResult.structuredContent as Record<string, unknown>;
@@ -418,7 +423,7 @@ test("MCP stdio closes the runtime when background startup fails", async () => {
   assert.equal(runtimeClosed, true);
 });
 
-test("Context MCP runs both learning polls through traced calls without writing worker output to MCP stdout", async () => {
+test("Context MCP keeps background read polls out of Trace storage and MCP stdout", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-context-learning-loop-"));
   try {
     const child = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("../bin/craft-mcp.ts", import.meta.url)), "--product", "context"], {
@@ -428,14 +433,6 @@ test("Context MCP runs both learning polls through traced calls without writing 
     child.stdout.setEncoding("utf8").on("data", chunk => { output += chunk; });
     child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25" } })}\n`);
-    const expected = new Set(["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list", "craft_knowledge_source_list"]);
-    let observed = new Set<string>();
-    for (let attempt = 0; attempt < 100 && observed.size < expected.size; attempt++) {
-      const probe = await new CraftStore(craftPaths(root)).open();
-      try { observed = new Set(probe.list("trace_event", 10_000, event => expected.has(String(event.operation_id))).map(event => String(event.operation_id))); }
-      finally { probe.close(); }
-      if (observed.size < expected.size) await new Promise(resolve => setTimeout(resolve, 50));
-    }
     child.stdin.end();
     const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
       child.once("error", reject); child.once("close", (code, signal) => resolve({ code, signal }));
@@ -444,13 +441,48 @@ test("Context MCP runs both learning polls through traced calls without writing 
     const lines = output.trim().split("\n");
     assert.equal(lines.length, 1);
     assert.equal(JSON.parse(lines[0]!).result.serverInfo.version, CRAFT_RELEASE_VERSION);
-    assert.deepEqual(observed, expected);
     const store = await new CraftStore(craftPaths(root)).open();
     try {
-      const calls = store.list("trace_event", 10_000, event => expected.has(String(event.operation_id)));
-      assert.deepEqual(new Set(calls.map(event => String(event.operation_id))), expected);
+      const readPolls = new Set(["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list", "craft_knowledge_source_list"]);
+      assert.equal(store.list("trace_event", 10_000, event => readPolls.has(String(event.operation_id))).length, 0);
+      assert.equal(store.list("telemetry_event", 10_000, event => readPolls.has(String(event.operation))).length, 0);
     } finally { store.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("stdio MCP runs bounded Trace retention maintenance without a Host tool invocation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-trace-retention-"));
+  const child = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("../bin/craft-mcp.ts", import.meta.url)), "--product", "context"], {
+    env: { ...process.env, CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "0", CRAFT_TRACE_RETENTION_INTERVAL_MS: "1000" },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let output = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { output += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  let processClosed = false;
+  const exited = new Promise<{ code: number | null }>((resolve, reject) => {
+    child.once("error", reject); child.once("close", code => { processClosed = true; resolve({ code }); });
+  });
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25" } })}\n`);
+  try {
+    let maintenance: JsonObject | null = null;
+    for (let attempt = 0; attempt < 120 && !maintenance; attempt += 1) {
+      const probe = await new CraftStore(craftPaths(root)).open();
+      try { maintenance = probe.find("maintenance_component", "trace_retention"); }
+      finally { probe.close(); }
+      if (!maintenance) await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.ok(["running", "healthy"].includes(String(maintenance?.status)), stderr);
+    child.stdin.end();
+    const exit = await exited;
+    assert.equal(exit.code, 0, stderr);
+    assert.equal(JSON.parse(output.trim()).result.serverInfo.version, CRAFT_RELEASE_VERSION);
+  } finally {
+    if (!child.stdin.destroyed) child.stdin.end();
+    if (!processClosed) child.kill("SIGTERM");
+    await Promise.race([exited.catch(() => undefined), new Promise(resolve => setTimeout(resolve, 3_000))]);
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("MCP stdio waits for a Host request that arrives after startup", async () => {
@@ -526,4 +558,87 @@ test("stdio initialization failure closes its reader instead of leaving clients 
   const input = new PassThrough();
   await assert.rejects(serveMcpStdio({ mode: "core", input, write: () => assert.fail("no response before initialization"), start: async () => { throw new Error("fixture startup failure"); } }), /fixture startup failure/);
   assert.equal(input.isPaused(), true); input.destroy();
+});
+
+test("MCP rejects invalid Context response options before dispatch and retains capture diagnostics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-response-options-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const server = new McpServer(new CraftService(store));
+    let dispatched = 0;
+    server.handlers.craft_context_open = () => { dispatched++; return {}; };
+    for (const args of [{ response_detail: "invalid" }, { response_detail: "full" },
+      { get response_detail(): string { throw "invalid option accessor"; } }]) {
+      const response = await server.handle({ id: 1, method: "tools/call", params: { name: "craft_context_open", arguments: args } });
+      assert.equal((response!.error as JsonObject).code, -32602);
+    }
+    assert.equal(dispatched, 0);
+    server.handlers.craft_info = () => { throw "read failure"; };
+    const failure = await server.handle({ id: 2, method: "tools/call", params: { name: "craft_info" } });
+    assert.equal((failure!.result as JsonObject).isError, true);
+    assert.equal(((failure!.result as JsonObject).content as JsonObject[])[0]!.text, "read failure");
+    const capture = mock.method(server.componentTrace, "capture", async () => ({ ok: false, error: "capture failure", correlation: null, telemetry_error: "JournalUnavailable" }));
+    try {
+      const response = await server.handle({ id: 3, method: "tools/call", params: { name: "craft_task_open" } });
+      assert.equal((response!.result as JsonObject).isError, true);
+      assert.equal((response!.result as JsonObject).telemetry_error, "JournalUnavailable");
+    } finally { capture.mock.restore(); }
+    const empty = mock.method(server.componentTrace, "capture", async () => ({ ok: true, correlation: null, telemetry_error: "JournalUnavailable" }));
+    try {
+      const response = await server.handle({ id: 4, method: "tools/call", params: { name: "craft_task_open" } });
+      assert.equal((response!.result as JsonObject).isError, false);
+      assert.equal(((response!.result as JsonObject).structuredContent as JsonObject).telemetry_error, "JournalUnavailable");
+    } finally { empty.mock.restore(); }
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Trace retention child reports a safe terminal error for an unusable data root", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-retention-child-failure-"));
+  const blocker = join(root, "private-path-do-not-report");
+  await writeFile(blocker, "not a directory");
+  const child = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("../bin/craft-mcp.ts", import.meta.url)), "--trace-retention-worker"], {
+    env: { ...process.env, CRAFT_DATA_DIR: blocker }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { output += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  try {
+    const code = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+    assert.equal(code, 1);
+    assert.equal(output, "");
+    assert.match(stderr, /Craft Trace retention worker failed\./u);
+    assert.equal(stderr.includes(blocker), false);
+  } finally { child.kill(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("MCP journal failures redact diagnostics and trace hook denials still retain evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-journal-failure-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = new CraftService(store);
+  const messages: string[] = [];
+  const stderr = mock.method(process.stderr, "write", (chunk: string) => { messages.push(String(chunk)); return true; });
+  try {
+    const server = new McpServer(service);
+    server.operationJournal.onError(new TypeError("sensitive error body"));
+    server.operationJournal.onError(Object.assign(new Error("secret"), { name: "unsafe name\nsecret" }));
+    server.operationJournal.onError("sensitive raw diagnostic");
+    assert.deepEqual(messages, ["Craft operation journal failed (TypeError).\n", "Craft operation journal failed (Error).\n", "Craft operation journal failed (Error).\n"]);
+    Object.defineProperty(service, "hookPlane", { value: new HookPlane([{ name: "deny-trace", phase: "tool_before", order: 1,
+      run: async () => ({ kind: "denied", reason: "not permitted" }) }]), configurable: true });
+    const denied = new McpServer(service);
+    const capture = denied.componentTrace.capture.bind(denied.componentTrace);
+    const telemetry = mock.method(denied.componentTrace, "capture", async (args: Parameters<typeof capture>[0]) => ({ ...await capture(args), telemetry_error: "JournalUnavailable" }));
+    const response = await denied.handle({ id: 1, method: "tools/call", params: { name: "craft_trace_retention_sweep", arguments: {} } });
+    telemetry.mock.restore();
+    const result = response!.result as JsonObject;
+    assert.equal(result.isError, true);
+    assert.equal((result.structuredContent as JsonObject).denied, true);
+    assert.ok((result.structuredContent as JsonObject).trace_correlation);
+    const readDenial = await denied.handle({ id: 3, method: "tools/call", params: { name: "craft_info", arguments: {} } });
+    assert.equal(((readDenial!.result as JsonObject).structuredContent as JsonObject).denied, true);
+    const flush = mock.method(server.operationJournal, "flush", async () => { throw new Error("unexpected journal flush failure"); });
+    try { await assert.rejects(server.handle({ id: 2, method: "tools/call", params: { name: "craft_info", arguments: {} } }), /unexpected journal flush failure/); }
+    finally { flush.mock.restore(); }
+  } finally { stderr.mock.restore(); store.close(); await rm(root, { recursive: true, force: true }); }
 });

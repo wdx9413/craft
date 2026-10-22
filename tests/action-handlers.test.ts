@@ -52,6 +52,7 @@ test("constructing MCP transports cannot install or replace internal action hand
   const target = new Proxy({}, { get: (_target, name) => {
     if (name === "registerCanonicalHandlers") return () => { throw new Error("Transport attempted application mutation"); };
     if (name === "trace" || name === "hookPlane") return undefined;
+    if (name === "store") return { paths: { runtimeDir: "/tmp" } };
     return () => ({});
   } }) as CraftService;
   const memory = new McpServer(target, "component-memory");

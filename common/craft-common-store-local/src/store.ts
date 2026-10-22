@@ -598,6 +598,42 @@ export class CraftStore {
     return selected;
   }
 
+  listTraceRetentionCandidates(cutoff: string, limit: number): JsonObject[] {
+    const bounded = validLimit(limit);
+    const rows = this.database.prepare(`SELECT r.* FROM records r JOIN (
+      SELECT id,MAX(version) version FROM records WHERE kind='trace' GROUP BY id
+      ) latest ON latest.id=r.id AND latest.version=r.version
+      WHERE r.kind='trace'
+        AND json_extract(r.payload_json,'$.status') IN ('completed','failed','cancelled','blocked')
+        AND COALESCE(json_extract(r.payload_json,'$.last_event_at'),r.updated_at,json_extract(r.payload_json,'$.started_at')) < ?
+      ORDER BY COALESCE(json_extract(r.payload_json,'$.last_event_at'),r.updated_at,json_extract(r.payload_json,'$.started_at')) ASC
+      LIMIT ?`).all(cutoff, bounded) as Array<Record<string, unknown>>;
+    return rows.map(row => this.record(row, true));
+  }
+
+  listTraceChildren(kind: "trace_event" | "trace_feedback" | "telemetry_event", traceId: string): JsonObject[] {
+    const rows = this.database.prepare(`SELECT r.* FROM records r JOIN (
+      SELECT id,MAX(version) version FROM records WHERE kind=? AND json_extract(payload_json,'$.trace_id')=? GROUP BY id
+      ) latest ON latest.id=r.id AND latest.version=r.version
+      WHERE r.kind=? AND json_extract(r.payload_json,'$.trace_id')=? ORDER BY r.id`).all(kind, traceId, kind, traceId) as Array<Record<string, unknown>>;
+    return rows.map(row => this.record(row, true));
+  }
+
+  countMany(kinds: readonly string[]): Record<string, number> {
+    if (!Array.isArray(kinds) || kinds.length > 1_000 || kinds.some(kind => typeof kind !== "string" || !kind.trim())) {
+      throw new Error("record count kinds exceed bounds");
+    }
+    const unique = [...new Set(kinds)];
+    const counts = Object.fromEntries(unique.map(kind => [kind, 0]));
+    if (!unique.length) return counts;
+    const rows = this.database.prepare(`SELECT kind,COUNT(*) AS count FROM (
+      SELECT kind,id,MAX(version) AS version FROM records
+      WHERE kind IN (SELECT value FROM json_each(?)) GROUP BY kind,id
+      ) latest GROUP BY kind`).all(JSON.stringify(unique)) as Array<{ kind: string; count: number }>;
+    for (const row of rows) counts[row.kind] = Number(row.count);
+    return counts;
+  }
+
   count(kind: string): number {
     return Number((this.database.prepare(`SELECT COUNT(*) count FROM records r JOIN (
       SELECT id,MAX(version) version FROM records WHERE kind=? GROUP BY id

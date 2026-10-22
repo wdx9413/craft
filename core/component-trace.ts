@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { TraceKernel } from "./trace-kernel.ts";
-import { currentOperation, observeOperation, operationErrorCode, operationResultStatus } from "../common/craft-common-log/src/index.ts";
+import { currentOperation, observeOperation, operationErrorCode, operationPersistenceEnabled, operationResultStatus } from "../common/craft-common-log/src/index.ts";
 
 export type ComponentTraceResult = {
   ok: boolean;
@@ -29,12 +29,17 @@ export class ComponentTraceKernel {
   run<T>(args: { requestId: string; component: string; operation: string; input: JsonObject; handler: () => T;
     correlated?: (value: JsonObject) => void; telemetryFailed?: (error: unknown) => void }): T {
     const input = args.input, parent = currentOperation(this.trace.store);
+    if (!operationPersistenceEnabled(this.trace.store)) {
+      // A read-only MCP call can pass through the SDK facade, whose normal
+      // instrumentation enters this kernel. Preserve the call result while
+      // inheriting the read-only context and skipping every Trace write.
+      return observeOperation(this.trace.store, args.component, args.operation, input, args.handler);
+    }
     const supplied = input.trace_id ?? input.correlation_trace_id;
     const explicit = typeof supplied === "string" && supplied.trim() ? supplied.trim() : null;
     let traceId = explicit ?? parent?.traceId ?? `component:${this.sessionId}:${randomUUID()}`;
     const telemetryFailed = args.telemetryFailed ?? parent?.onError;
     const observe = (write: () => void): void => { try { write(); } catch (error) { telemetryFailed?.(error); } };
-    if (!parent) observe(() => { this.trace.maintain(); });
     let existing: JsonObject | null = null, archived = false;
     observe(() => { existing = this.trace.store.find("trace", traceId); archived = this.trace.store.find("trace_archive", traceId) !== null; });
     const prior = existing as JsonObject | null;

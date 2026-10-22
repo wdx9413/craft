@@ -6,7 +6,7 @@ import { telemetryEvent, type TelemetryEvent } from "./telemetry.ts";
 import { StoreTelemetrySink } from "./store-sink.ts";
 
 export type OperationEvent = { event: TelemetryEvent; phase: "started" | "completed" | "failed"; refs: string[] };
-type OperationContext = { store: CraftStore; traceId: string; spanId: string; observe?: (event: OperationEvent) => void; onError?: (error: unknown) => void };
+type OperationContext = { store: CraftStore; traceId: string; spanId: string; persist: boolean; observe?: (event: OperationEvent) => void; onError?: (error: unknown) => void };
 // Standalone bundles each include common-log; share only the async carrier across copies.
 const contextKey = Symbol.for("craft.operation.context");
 const processState = globalThis as typeof globalThis & { [contextKey]?: AsyncLocalStorage<OperationContext> };
@@ -53,12 +53,26 @@ export function currentOperation(store: CraftStore): OperationContext | undefine
   return current?.store.paths.root === store.paths.root ? current : undefined;
 }
 
+export function operationPersistenceEnabled(store: CraftStore): boolean {
+  return currentOperation(store)?.persist !== false;
+}
+
+/** Run a known read-only operation without acquiring SQLite writer locks for observability. */
+export function withoutOperationPersistence<T>(store: CraftStore, run: () => T,
+  observe?: OperationContext["observe"]): T {
+  const parent = currentOperation(store);
+  const active: OperationContext = { store, traceId: parent?.traceId ?? `read_${randomUUID()}`,
+    spanId: `span_${randomUUID()}`, persist: false, observe: observe ?? parent?.observe, onError: parent?.onError };
+  return context.run(active, run);
+}
+
 /** Preserve sync SDK contracts and propagate the same context through awaited child calls. */
 export function observeOperation<T>(store: CraftStore, component: string, operation: string, input: unknown, run: () => T,
   options: { traceId?: string; parentSpanId?: string; observe?: OperationContext["observe"]; onError?: OperationContext["onError"] } = {}): T {
   const parent = currentOperation(store);
   const spanId = `span_${randomUUID()}`, traceId = options.traceId ?? parent?.traceId ?? `sdk_${randomUUID()}`;
-  const active: OperationContext = { store, traceId, spanId, observe: options.observe ?? parent?.observe, onError: options.onError ?? parent?.onError };
+  const active: OperationContext = { store, traceId, spanId, persist: parent?.persist ?? true,
+    observe: options.observe ?? parent?.observe, onError: options.onError ?? parent?.onError };
   const started = performance.now();
   const emit = (phase: OperationEvent["phase"], result?: unknown, error?: unknown): void => {
     try {
@@ -70,6 +84,7 @@ export function observeOperation<T>(store: CraftStore, component: string, operat
         attributes: { stage: phase, status, duration_ms: Math.max(0, performance.now() - started),
           ...(phase === "started" ? { input_digest: stableDigest(input ?? null) } : phase === "failed" ? { reason_code: operationErrorCode(error), error_digest: stableDigest(error instanceof Error ? `${error.name}:${error.message}` : String(error)) } : { result_digest: stableDigest(result ?? null) }),
           ...Object.fromEntries(refs.map((id, index) => [`${phase === "started" ? "input" : "output"}_ref_${index}_id`, id])) } });
+      if (!active.persist) { active.observe?.({ event, phase, refs }); return; }
       // Independent sinks: a failed Trace projection must not suppress common-log.
       try { new StoreTelemetrySink(store).append(event); } catch (failure) { active.onError?.(failure); }
       try { active.observe?.({ event, phase, refs }); } catch (failure) { active.onError?.(failure); }

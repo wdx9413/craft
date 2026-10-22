@@ -1810,6 +1810,27 @@
         "tests/knowledge-promotion-policy.test.ts"
       ],
       "branches": true
+    },
+    {
+      "name": "trace-retention-worker",
+      "include": [
+        "core/interfaces/trace-retention-worker.ts"
+      ],
+      "tests": [
+        "tests/trace-retention-worker.test.ts",
+        "tests/mcp.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-response-projection",
+      "include": [
+        "core/context-response-projection.ts"
+      ],
+      "tests": [
+        "tests/context-response-projection.test.ts"
+      ],
+      "branches": true
     }
   ]
 }

@@ -150,6 +150,26 @@ test("service persists capabilities, tasks, feedback, artifacts, evidence, and v
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("service info batches counts without issuing one count query per kind", async () => {
+  const root = join(tmpdir(), `craft-service-info-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true });
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const service = new CraftService(store);
+    store.create("workflow", "visible", { value: 1 });
+    const count = store.count;
+    store.count = () => { throw new Error("info must not issue per-kind count queries"); };
+    const compactCounts = service.info().counts as Record<string, number>;
+    assert.equal(compactCounts.workflow, 1);
+    assert.equal("task" in compactCounts, false);
+    const completeCounts = service.info({ include_zero_counts: true }).counts as Record<string, number>;
+    assert.equal(completeCounts.workflow, 1);
+    assert.equal(completeCounts.task, 0);
+    assert.throws(() => service.info({ include_zero_counts: "true" }), /must be boolean/u);
+    store.count = count;
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("service validates required text", async () => {
   const root = join(tmpdir(), `craft-service-invalid-${process.pid}-${Date.now()}`);
   const store = await new CraftStore(craftPaths(root)).open();

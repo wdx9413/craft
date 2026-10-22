@@ -4,7 +4,7 @@ import { CraftService } from "../application/craft-service.ts";
 import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
 
 type Mode = string;
-type Server = Pick<McpServer, "handle">;
+type Server = Pick<McpServer, "handle"> & { service?: CraftService };
 type Start = (mode: Mode) => Promise<{ server: Server; close: () => void }>;
 type BackgroundStop = () => void | Promise<void>;
 

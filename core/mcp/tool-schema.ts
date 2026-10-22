@@ -76,11 +76,13 @@ const schemaFor = (name: string): JsonObject => {
 
 const ENUMS_BY_TOOL: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
   craft_context_tools_discover: { intent: CONTEXT_TOOL_INTENTS },
+  craft_context_open: { response_detail: ["compact", "full"] },
 };
 
 // Domain contracts override the legacy name heuristic. Keep ambiguous names local
 // to their tool so fixing one product cannot change unrelated admin operations.
 const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>>> = {
+  craft_info: { include_zero_counts: "boolean" },
   craft_evaluation_model_ticket_issue: { project_root: "string" },
   craft_procedure_configuration_save: { scope: "string", definition: "object", scope_envelope: "object", principal_ids: "array" },
   craft_knowledge_evaluation_run: { expected_relevant_refs: "array", retrieved_refs: "array", citation_judgements: "array" },

@@ -19,7 +19,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       ...createWorkHandlers(service),
       ...createEvaluationHandlers(service),
       ...createWorkspaceHandlers(service),
-      craft_info: () => service.info(),
+      craft_info: (a) => service.info(a),
       craft_context_tools_discover: service.contextToolsDiscover.bind(service),
       craft_context_open: (a) => service.contextOpen(a),
       craft_learning_cycle_finalize: (a) => service.learningCycleFinalize(a),
