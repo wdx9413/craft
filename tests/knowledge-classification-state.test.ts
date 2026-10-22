@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { recordKnowledgeClassificationFailure, shouldSuppressKnowledgeClassification, type KnowledgeClassificationAttempt } from "../deploy/experience-learning/knowledge-classification-state.ts";
+import { recordKnowledgeClassificationFailure, shouldSuppressKnowledgeClassification, readKnowledgeClassificationCursor, recordKnowledgeClassificationCursor, type KnowledgeClassificationAttempt } from "../deploy/experience-learning/knowledge-classification-state.ts";
 
 const digest = `sha256:${"a".repeat(64)}`;
 const attempt: KnowledgeClassificationAttempt = { input_digest: digest, failure_stage: "response_parse", failure_code: "response_not_json", failed_at: "2026-10-18T00:00:00.000Z" };
@@ -59,5 +59,24 @@ test("classification attempt state keeps only the newest bounded entries", async
     assert.equal(Object.keys(state.attempts).length, 500);
     assert.equal("ticket-0" in state.attempts, false);
     assert.equal("ticket-504" in state.attempts, true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("classification cursor persists independently of failed inputs and rejects invalid identities", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-classification-cursor-")), path = join(root, "knowledge", "attempts.json");
+  try {
+    assert.equal(readKnowledgeClassificationCursor(path), undefined);
+    await recordKnowledgeClassificationCursor(path, "claim-02");
+    await recordKnowledgeClassificationFailure(path, "ticket-1", attempt);
+    assert.equal(readKnowledgeClassificationCursor(path), "claim-02");
+    await recordKnowledgeClassificationCursor(path, "claim-03");
+    assert.equal(shouldSuppressKnowledgeClassification(path, "ticket-1", digest), true);
+    await recordKnowledgeClassificationCursor(path, "claim-03");
+    for (const id of ["", "bad claim", "x".repeat(201)]) await assert.rejects(recordKnowledgeClassificationCursor(path, id), /cursor identity/u);
+    for (const last_claim_id of [null, 3, "", "bad claim"]) {
+      await writeFile(path, JSON.stringify({ schema: "craft.knowledge-classification-attempts.v1", attempts: {}, last_claim_id }));
+      assert.throws(() => readKnowledgeClassificationCursor(path), /state is invalid/u);
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

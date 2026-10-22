@@ -731,3 +731,53 @@ test("classifier validates every model and Claim boundary with safe defaults", a
     assert.equal(JSON.stringify(failed).includes("private service diagnostic"), false);
   }
 });
+
+
+function queueFixture(count: number, blocked = 0) {
+  const f = fixture();
+  const call = f.client.call.bind(f.client);
+  const ids = Array.from({ length: count }, (_, index) => `claim-${String(index + 1).padStart(2, "0")}`);
+  f.client.call = async (name, args = {}) => {
+    if (name === "craft_knowledge_claim_list") return { claims: ids.map(id => ({ ...claim, id })) };
+    if (name === "craft_knowledge_semantic_review_packet" && ids.indexOf(String(args.claim_id)) < blocked) return { status: "unavailable" };
+    const result = await call(name, args);
+    if (name === "craft_knowledge_semantic_review_packet") {
+      const packet = result.packet as JsonObject;
+      return { ...result, packet: { ...packet, claim: { ...packet.claim as JsonObject, id: args.claim_id } } };
+    }
+    if (name === "craft_evaluation_model_ticket_issue") return { ticket: { id: `ticket-${args.knowledge_claim_id}`, status: "ready_for_adapter" } };
+    return result;
+  };
+  return { ...f, ids };
+}
+
+test("classification advances beyond a full batch of unavailable Claims after restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-classification-fairness-"));
+  try {
+    const stateFile = join(root, "knowledge", "classification.json"), f = queueFixture(9, 8);
+    const first = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport, state_file: stateFile });
+    assert.equal(first.processed, 8);
+    assert.equal(f.requests.length, 0);
+    const second = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport, state_file: stateFile });
+    assert.equal((second.outcomes as JsonObject[])[0]?.claim_id, f.ids[8]);
+    assert.equal((second.outcomes as JsonObject[])[0]?.status, "classified");
+    assert.equal(f.requests.length, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("classification leaves the first budget-blocked Claim next in the persisted queue", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-classification-budget-"));
+  try {
+    const f = queueFixture(3), stateFile = join(root, "classification.json");
+    const run = () => {
+      let used = false;
+      return runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], state_file: stateFile,
+        transport: { acquireCall: () => { if (used) return false; used = true; return true; }, complete: f.transport.complete.bind(f.transport) } });
+    };
+    const first = await run();
+    assert.equal((first.outcomes as JsonObject[])[1]?.reason, "model_call_budget_exhausted");
+    const second = await run();
+    assert.equal((second.outcomes as JsonObject[])[0]?.claim_id, f.ids[1]);
+    assert.equal(f.requests.length, 2);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

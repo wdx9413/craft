@@ -2898,20 +2898,26 @@ export class CraftService extends ServiceFoundation {
   }
   wikiContextCompile(args: JsonObject): JsonObject {
     const query = assertNoSecret(text(args.query, "query"), "query"); const scope = String(args.scope ?? "global"); const maxItems = finiteInteger(args.max_items, "max_items", 8, 1, 50); const maxChars = finiteInteger(args.max_chars, "max_chars", 6_000, 100, 100_000);
-    const now = args.now === undefined ? Date.now() : validIsoTime(args.now, "now"); const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])]; const excluded: JsonObject[] = [];
-    const matched = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
+    const now = args.now === undefined ? Date.now() : validIsoTime(args.now, "now"); const excluded: JsonObject[] = [];
+    const index = new Bm25Index();
+    const candidates = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
       if (claim.status !== "reviewed") { excluded.push({ claim_id: claim.id, reason: "not_reviewed" }); return []; }
       if (claim.valid_until && Date.parse(String(claim.valid_until)) < now) { excluded.push({ claim_id: claim.id, reason: "expired" }); return []; }
       if (claim.scope !== "global" && claim.scope !== scope) { excluded.push({ claim_id: claim.id, reason: "out_of_scope" }); return []; }
       const claimContent = claim.content_ref ? this.store.contentStore.readCompatSync(claim.content_ref as never, typeof claim.scope === "string" ? claim.scope : undefined).body : String(claim.content ?? "");
-      const haystack = `${claimContent} ${(claim.tags as string[]).join(" ")}`.toLowerCase(); const score = terms.reduce((total, term) => total + Number(haystack.includes(term)), 0);
-      if (!score) { excluded.push({ claim_id: claim.id, reason: "not_matched" }); return []; }
-      return [{ claim, score }];
+      const haystack = `${claimContent} ${(claim.tags as string[]).join(" ")}`;
+      if (haystack.trim()) index.add(String(claim.id), haystack);
+      return [{ claim, content: claimContent }];
+    });
+    const scores = new Map(index.score(query).map(hit => [hit.id, hit.score]));
+    const matched = candidates.flatMap(item => {
+      const score = scores.get(String(item.claim.id));
+      if (score === undefined) { excluded.push({ claim_id: item.claim.id, reason: "not_matched" }); return []; }
+      return [{ ...item, score }];
     }).sort((left, right) => right.score - left.score || String(left.claim.id).localeCompare(String(right.claim.id)));
     const included: JsonObject[] = []; let usedChars = 0;
     for (const item of matched) {
-      const rawContent = item.claim.content_ref ? this.store.contentStore.readCompatSync(item.claim.content_ref as never, typeof item.claim.scope === "string" ? item.claim.scope : undefined).body : item.claim.content;
-      const content = assertNoSecret(text(rawContent, "claim.content"), "claim.content"); const rendered = `[Knowledge ${item.claim.id}]\n${content}\nEvidence: ${(item.claim.evidence_ids as string[]).join(", ")}\n`;
+      const content = assertNoSecret(text(item.content, "claim.content"), "claim.content"); const rendered = `[Knowledge ${item.claim.id}]\n${content}\nEvidence: ${(item.claim.evidence_ids as string[]).join(", ")}\n`;
       if (included.length >= maxItems || usedChars + rendered.length > maxChars) { excluded.push({ claim_id: item.claim.id, reason: "budget" }); continue; }
       usedChars += rendered.length; included.push({ claim_id: item.claim.id, claim_version: item.claim.version, content, evidence_ids: item.claim.evidence_ids, score: item.score, valid_until: item.claim.valid_until });
     }

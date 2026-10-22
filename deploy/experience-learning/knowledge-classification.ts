@@ -6,7 +6,7 @@ import { dataRoot } from "../../core/infrastructure/paths.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { generatedTextLanguageInstruction } from "../../core/config.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
-import { recordKnowledgeClassificationFailure, shouldSuppressKnowledgeClassification } from "./knowledge-classification-state.ts";
+import { recordKnowledgeClassificationFailure, shouldSuppressKnowledgeClassification, readKnowledgeClassificationCursor, recordKnowledgeClassificationCursor } from "./knowledge-classification-state.ts";
 
 const scenarioDefinitionSchema = { type: ["object", "null"], properties: {
   summary: { type: "string", minLength: 1, maxLength: 500 }, applies_when: { type: "string", minLength: 1, maxLength: 500 },
@@ -140,7 +140,7 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
       && (String(claim.scope ?? "").startsWith("project:") || claim.scope === "global")
       && (!projectScope || claim.scope === projectScope || claim.scope === `project:${projectScope}` || claim.scope === "global"));
   let skippedTemporaryCount = 0;
-  const claims = claimCandidates.filter(claim => {
+  const eligible = claimCandidates.filter(claim => {
     if (!deps.project_root && claim.scope !== "global") {
       const projectRoot = projectRootFromClaim(claim);
       if (projectRoot && isTemporaryProjectRoot(projectRoot)) {
@@ -149,7 +149,11 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
       }
     }
     return true;
-  }).sort((a, b) => String(a.id).localeCompare(String(b.id))).slice(0, maxClaims);
+  }).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const cursor = deps.state_file ? readKnowledgeClassificationCursor(deps.state_file) : undefined;
+  const next = eligible.findIndex(claim => cursor === undefined || String(claim.id).localeCompare(cursor) > 0);
+  const start = next < 0 ? 0 : next;
+  const claims = [...eligible.slice(start), ...eligible.slice(0, start)].slice(0, maxClaims);
   if (!claims.length) return { processed: 0, outcomes: [], ...(skippedTemporaryCount > 0 ? { skipped_temporary_count: skippedTemporaryCount } : {}) };
   const profileResult = await deps.client.call("craft_evaluation_model_profile_ensure_single", { purpose: "knowledge_scenario_classification" });
   if (profileResult.status !== "ready_for_adapter" || !profileResult.profile) return { processed: 0, outcomes: [], skipped: true, skipped_temporary_count: skippedTemporaryCount, reason: profileResult.reason ?? profileResult.status ?? "model_profile_unavailable" };
@@ -381,6 +385,13 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
       outcomes.push({ claim_id: claim.id, ticket_id: ticketId, ...(traceId ? { trace_id: traceId } : {}), status: "failed",
         failure_kind: safeErrorClass(error), failure_stage: processingStage, failure_code: failureCode });
     }
+  }
+  // A budget refusal is still pending, so resume immediately before it next time.
+  const lastProcessed = outcomes.filter(outcome => outcome.reason !== "model_call_budget_exhausted").at(-1);
+  if (deps.state_file && lastProcessed) {
+    try { await recordKnowledgeClassificationCursor(deps.state_file, String(lastProcessed.claim_id)); }
+    catch (error) { return { status: "failed", failure_kind: safeErrorClass(error), failure_stage: "queue_state_save",
+      processed: outcomes.length, outcomes, skipped_temporary_count: skippedTemporaryCount }; }
   }
   return { processed: outcomes.length, outcomes, skipped_temporary_count: skippedTemporaryCount };
 }

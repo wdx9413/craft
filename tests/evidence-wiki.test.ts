@@ -11,6 +11,7 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 test("editable Wiki material remains separate from evidence-backed claim review", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-wiki-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
+    service.scopeAliasBind({ scope_kind: "project", scope_id: "project:a", alias_kind: "path", alias: root });
     const evidence = service.evidenceRecord({ evidence_id: "e1", source_type: "program", claim: "Observed stable result.", confidence: "confirmed" });
     const claim = service.knowledgeClaimSave({ claim_id: "claim-1", kind: "rule", content: "Use the stable result.", scope: "project:a", tags: ["safe"], evidence_ids: [evidence.id], valid_until: "2030-01-01T00:00:00.000Z" }).claim as JsonObject;
     assert.equal(claim.status, "candidate"); assert.equal((service.knowledgeClaimSave({ claim_id: "claim-1", kind: "rule", content: "Use the stable result.", scope: "project:a", tags: ["safe"], evidence_ids: [evidence.id], valid_until: "2030-01-01T00:00:00.000Z" }) as JsonObject).idempotent, true);
