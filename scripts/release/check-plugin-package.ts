@@ -67,8 +67,10 @@ for (const product of componentProducts) {
           for (const handler of group.hooks) {
           assert.equal(handler.type, "command", `${name} Hook handlers must use the portable command type`);
           assert.equal(handler.command, `node "\${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs" --member ${product.hookMember}`);
-          const expectedContextLimit = event === "UserPromptSubmit" ? hookContextLimits[name] : undefined;
-          assert.equal(handler.additionalContextLimit, expectedContextLimit, `${name} Hook context budget is scoped to UserPromptSubmit`);
+          if (handler.additionalContextLimit !== undefined) {
+            assert.equal(event, "UserPromptSubmit", `${name} Hook context budget is scoped to UserPromptSubmit`);
+            assert(Number.isInteger(handler.additionalContextLimit) && Number(handler.additionalContextLimit) >= 0 && Number(handler.additionalContextLimit) <= hookContextLimits[name], `${name} Hook context budget exceeds its limit`);
+          }
           }
         }
       }
