@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,10 +52,14 @@ for (const product of componentProducts) {
     await access(join(componentRoot, "dist", "plugin", "craft-experience-learning-worker.js"));
   }
     if (product.hookMember) {
-      const portable = JSON.parse(await readFile(join(componentRoot, "plugin.json"), "utf8")) as { extensions?: { "com.openai"?: { hooks?: string; interface?: { composerIcon?: string; logo?: string } } } };
-      assert.equal(portable.extensions?.["com.openai"]?.hooks, "./hooks/codex-hooks.json", `${name} portable manifest must expose Codex hooks`);
-      assert.equal(portable.extensions?.["com.openai"]?.interface?.composerIcon, componentManifest.interface?.composerIcon);
-      assert.equal(portable.extensions?.["com.openai"]?.interface?.logo, componentManifest.interface?.logo);
+      if (name === "craft-context") {
+        assert.equal(existsSync(join(componentRoot, "plugin.json")), false, "Craft Context must use the Codex compatibility manifest for hooks");
+      } else {
+        const portable = JSON.parse(await readFile(join(componentRoot, "plugin.json"), "utf8")) as { extensions?: { "com.openai"?: { hooks?: string; interface?: { composerIcon?: string; logo?: string } } } };
+        assert.equal(portable.extensions?.["com.openai"]?.hooks, "./hooks/codex-hooks.json", `${name} portable manifest must expose Codex hooks`);
+        assert.equal(portable.extensions?.["com.openai"]?.interface?.composerIcon, componentManifest.interface?.composerIcon);
+        assert.equal(portable.extensions?.["com.openai"]?.interface?.logo, componentManifest.interface?.logo);
+      }
       assert.equal(componentManifest.hooks, "./hooks/codex-hooks.json");
       const hookPath = join(componentRoot, "hooks", "codex-hooks.json");
       await access(hookPath);

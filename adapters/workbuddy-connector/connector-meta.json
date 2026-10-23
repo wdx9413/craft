@@ -7,7 +7,7 @@
   "description_en": "Use durable tasks, evidence, verification, and reusable workflows for substantial work.",
   "source": "craft-agent-harness",
   "type": "mcp",
-  "version": "0.12.102",
+  "version": "0.12.103",
   "examples_zh": [
     "\u4e3a\u8fd9\u9879\u5de5\u4f5c\u5efa\u7acb\u53ef\u7eed\u63a5\u76ee\u6807\uff0c\u5217\u51fa\u4e0b\u4e00\u6b65\u548c\u9a8c\u6536\u8bc1\u636e",
     "\u6839\u636e\u5df2\u6709\u8d44\u6599\u9009\u62e9\u5df2\u9a8c\u8bc1\u6d41\u7a0b\uff0c\u907f\u514d\u76f4\u63a5\u6267\u884c\u672a\u5ba1\u6838\u80fd\u529b"

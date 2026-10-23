@@ -75,12 +75,17 @@ for (const component of components) {
   const product = RELEASE_PRODUCTS.find(item => item.name === component)!;
   const codexManifest = JSON.parse(await readFile(resolve(componentRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const { defaultPrompt: _ignoredPrompt, ...codexInterface } = codexManifest.interface ?? {};
-  // Codex reads portable plugin hooks from the OpenAI extension. Keep the
-  // compatibility manifest for older Hosts without relying on it for hooks.
-  const extensions = product.hookMember
-    ? { extensions: { "com.openai": { interface: codexInterface, hooks: "./hooks/codex-hooks.json" } } }
-    : {};
-  await writeFile(resolve(componentRoot, "plugin.json"), JSON.stringify({ $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", name: component, version: CRAFT_RELEASE_VERSION, description: `Standalone ${component} Skill and MCP`, license: "MIT", ...extensions }, null, 2) + "\n");
+  // Codex currently selects the root portable manifest over the compatibility
+  // manifest, but does not load hooks from its OpenAI extension. Let the
+  // compatibility manifest own craft-context hooks until Codex supports them.
+  if (component === "craft-context") {
+    await rm(resolve(componentRoot, "plugin.json"), { force: true });
+  } else {
+    const extensions = product.hookMember
+      ? { extensions: { "com.openai": { interface: codexInterface, hooks: "./hooks/codex-hooks.json" } } }
+      : {};
+    await writeFile(resolve(componentRoot, "plugin.json"), JSON.stringify({ $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", name: component, version: CRAFT_RELEASE_VERSION, description: `Standalone ${component} Skill and MCP`, license: "MIT", ...extensions }, null, 2) + "\n");
+  }
   const hostEnv = component === "craft-context" ? { env: { CRAFT_LEARNING_MODEL_HOST: "codex-cli" } } : {};
   const mcpServer = { command: "node", args: ["${PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", component.replace("craft-", "")], ...hostEnv };
   await writeFile(resolve(componentRoot, "mcp.json"), JSON.stringify({ $schema: "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json", mcpServers: { [component]: { type: "stdio", ...mcpServer } } }, null, 2) + "\n");
