@@ -24,10 +24,11 @@ test("independent Datasec is discoverable in release catalogs without joining th
   assert.equal(allReleaseProducts().length, 3);
   assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context", "craft-datasec"]);
   const contract = externalDistributionContract();
-  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.1.1");
+  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.1.2");
   assert.equal(contract.products.find(product => product.name === "craft-context")!.hook_member, "context");
   assert(releaseManifest().plugins.some(product => product.name === "craft-datasec"));
 });
+
 function fixture() {
   const temp = mkdtempSync(join(tmpdir(), "craft-datasec-test-"));
   return { temp, root: join(temp, "vault"), close() { rmSync(temp, { recursive: true, force: true }); } };
@@ -44,7 +45,7 @@ function invoke(args: string[], raw: string, root?: string, config?: string, bun
 test("all default categories redact locally, preserve field names, and make optional names configurable", () => {
   const samples: Record<string, string> = {
     phone: `+86 ${phone.slice(0, 3)} ${phone.slice(3, 7)} ${phone.slice(7)}`,
-    identity, email: "person@example.invalid", ipv4: ["192", "168", "1", "100"].join("."), bank,
+    identity, ipv4: ["192", "168", "1", "100"].join("."), bank,
     api_key: '"api_key": "fictional_access_key_abcdefghijklmnop"', password: "password=FictionalPassword!",
     jwt: "eyJfictionalHeaderPart.eyJfictionalPayloadPart.fictionalSignaturePart",
     private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\nfictional\n-----END OPENSSH PRIVATE KEY-----",
@@ -60,6 +61,23 @@ test("all default categories redact locally, preserve field names, and make opti
   assert.equal(new Sanitizer(names, () => "hidden").text(text), "姓名：hidden");
   assert.equal(new Sanitizer(DEFAULT_RULES, () => "hidden").text(`"password": "fictional"`), '"password": "hidden"');
   assert.equal(new Sanitizer(DEFAULT_RULES, () => "hidden").text(`const mobile = "${phone}";`), 'const mobile = "hidden";');
+});
+
+test("default email rule keeps the first local character and domain without storing a mapping", () => {
+  const email = ["w1231321312", "123.com"].join("@");
+  const masked = ["w*", "123.com"].join("@");
+  const sanitizer = new Sanitizer(DEFAULT_RULES, () => { throw new Error("email must not create a token"); });
+  assert.equal(sanitizer.text(`contact ${email}`), `contact ${masked}`);
+  assert.equal(sanitizer.text(["a", "example.com"].join("@")), ["a*", "example.com"].join("@"));
+  assert.equal(sanitizer.count, 2);
+  assert.throws(() => new Sanitizer([{ name: "email", pattern: "local" }], () => "hidden").text("local"), /Invalid email rule match/);
+
+  const f = fixture();
+  try {
+    const result = run("claude", "PostToolUse", { tool_response: { stdout: email } }, f.root);
+    assert.equal(result.hookSpecificOutput.updatedToolOutput.stdout, masked);
+    assert.equal(existsSync(f.root), false);
+  } finally { f.close(); }
 });
 
 test("boundaries, overlap priority, captures, zero-width patterns and existing placeholders are safe", () => {

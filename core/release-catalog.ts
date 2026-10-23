@@ -24,7 +24,7 @@ export const RELEASE_PRODUCTS: readonly ReleaseProduct[] = [
 
 /** Independent hook-only products never enter the MCP/Context packer or runtime. */
 export const INDEPENDENT_HOOK_PRODUCTS: readonly ReleaseProduct[] = [
-  { name: "craft-datasec", surface: "standalone-hooks", version: "0.1.1", category: "Developer Tools", external_marketplace: true },
+  { name: "craft-datasec", surface: "standalone-hooks", version: "0.1.2", category: "Developer Tools", external_marketplace: true },
 ];
 export function allReleaseProducts(): readonly ReleaseProduct[] { return [...RELEASE_PRODUCTS, ...INDEPENDENT_HOOK_PRODUCTS]; }
 

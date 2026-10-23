@@ -40,7 +40,12 @@ export class Sanitizer {
     let end = 0, result = "";
     for (const match of matches) {
       if (match.start < end || protectedRanges.some(([start, stop]) => match.start < stop && match.end > start)) continue;
-      result += text.slice(end, match.start) + this.token(match.name, text.slice(match.start, match.end));
+      const value = text.slice(match.start, match.end);
+      if (match.name === "email" && !/^[^@]+@[^@]+$/.test(value)) throw new Error("Invalid email rule match");
+      const replacement = match.name === "email"
+        ? `${value[0]}*@${value.slice(value.indexOf("@") + 1)}`
+        : this.token(match.name, value);
+      result += text.slice(end, match.start) + replacement;
       end = match.end;
       this.count++;
     }

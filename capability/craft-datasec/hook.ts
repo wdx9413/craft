@@ -53,7 +53,7 @@ export function handleHook(host: Host, event: Event, input: HookInput, root: str
     if (input.tool_response === undefined) throw new Error("Missing tool result");
     const safe = sanitizer.value(input.tool_response);
     if (!sanitizer.count) return {};
-    getVault().flush();
+    vault?.flush();
     return hidden(host, `craft-datasec：已在本地脱敏 ${sanitizer.count} 处内容。`, safe);
   };
   let output: object;
