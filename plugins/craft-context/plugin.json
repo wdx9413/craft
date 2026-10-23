@@ -1,7 +1,30 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "craft-context",
-  "version": "0.12.101",
+  "version": "0.12.102",
   "description": "Standalone craft-context Skill and MCP",
-  "license": "MIT"
+  "license": "MIT",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Craft Context",
+        "shortDescription": "One complete entry point for Craft Knowledge, Memory, Experience, and Codebase.",
+        "longDescription": "Expose the full supported Knowledge, Memory, Experience, and read-only Codebase MCP tool surfaces through one plugin. Context resolution still produces bounded receipts; Codebase operations remain explicit and snapshot-pinned. The plugin does not grant execution authority or silently import private chat history.",
+        "developerName": "wdx9413",
+        "category": "Productivity",
+        "brandColor": "#000000",
+        "composerIcon": "./assets/craft-icon.svg",
+        "logo": "./assets/craft-icon.svg",
+        "capabilities": [
+          "Complete Knowledge tools",
+          "Complete Memory tools",
+          "Complete Experience tools",
+          "Read-only Codebase tools",
+          "Unified context resolution",
+          "Repository indexing"
+        ]
+      },
+      "hooks": "./hooks/codex-hooks.json"
+    }
+  }
 }

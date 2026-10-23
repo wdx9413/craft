@@ -8,6 +8,7 @@ import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const pluginRoot = join(root, "plugins", "craft");
 const componentProducts = RELEASE_PRODUCTS.filter((product) => product.name !== "craft");
+const hookContextLimits: Record<string, number> = { "craft-context": 1_200, "craft-knowledge": 400, "craft-memory": 400, "craft-experience": 400 };
 const normalizeText = (value: string): string => value.replaceAll("\r\n", "\n");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string };
 const pluginManifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string; interface?: { composerIcon?: string; logo?: string } };
@@ -50,6 +51,10 @@ for (const product of componentProducts) {
     await access(join(componentRoot, "dist", "plugin", "craft-experience-learning-worker.js"));
   }
     if (product.hookMember) {
+      const portable = JSON.parse(await readFile(join(componentRoot, "plugin.json"), "utf8")) as { extensions?: { "com.openai"?: { hooks?: string; interface?: { composerIcon?: string; logo?: string } } } };
+      assert.equal(portable.extensions?.["com.openai"]?.hooks, "./hooks/codex-hooks.json", `${name} portable manifest must expose Codex hooks`);
+      assert.equal(portable.extensions?.["com.openai"]?.interface?.composerIcon, componentManifest.interface?.composerIcon);
+      assert.equal(portable.extensions?.["com.openai"]?.interface?.logo, componentManifest.interface?.logo);
       assert.equal(componentManifest.hooks, "./hooks/codex-hooks.json");
       const hookPath = join(componentRoot, "hooks", "codex-hooks.json");
       await access(hookPath);
@@ -57,11 +62,14 @@ for (const product of componentProducts) {
       const hooks = JSON.parse(await readFile(hookPath, "utf8")) as { hooks: Record<string, Array<{ hooks: Array<{ type?: string; command?: string; additionalContextLimit?: unknown }> }>> };
       assert(!JSON.stringify(hooks).includes("mcp_tool"), `${name} must not require an MCP Hook handler`);
       assert(!JSON.stringify(hooks).includes("${CLAUDE_PLUGIN_ROOT}"), `${name} must use the Codex root variable`);
-      for (const group of Object.values(hooks.hooks).flat()) {
-        for (const handler of group.hooks) {
+      for (const [event, groups] of Object.entries(hooks.hooks)) {
+        for (const group of groups) {
+          for (const handler of group.hooks) {
           assert.equal(handler.type, "command", `${name} Hook handlers must use the portable command type`);
           assert.equal(handler.command, `node "\${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs" --member ${product.hookMember}`);
-          assert.equal(handler.additionalContextLimit, undefined, `${name} must keep the shared Hook file portable`);
+          const expectedContextLimit = event === "UserPromptSubmit" ? hookContextLimits[name] : undefined;
+          assert.equal(handler.additionalContextLimit, expectedContextLimit, `${name} Hook context budget is scoped to UserPromptSubmit`);
+          }
         }
       }
     }
