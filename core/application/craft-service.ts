@@ -2577,7 +2577,10 @@ export class CraftService extends ServiceFoundation {
   workbenchMemoryCompatSave(args: JsonObject): JsonObject {
     const memoryId = optionalText(args.memory_id, "memory_id");
     const previous = memoryId === undefined ? null : this.store.get("memory_item", memoryId);
-    return this.memoryRemember({ kind: firstDefined(args.kind, previous?.kind, "fact"), scope: firstDefined(args.scope, previous?.scope, "user"),
+    const rawScope = firstDefined(args.scope, previous?.scope, "user");
+    const scope = typeof rawScope === "string" ? rawScope
+      : rawScope && typeof rawScope === "object" && !Array.isArray(rawScope) ? String((rawScope as JsonObject).kind ?? "") : "";
+    return this.memoryRemember({ kind: firstDefined(args.kind, previous?.kind, "fact"), scope,
       content: args.content, source: "studio_user", task_id: firstDefined(args.task_id, previous?.task_id),
       workspace_id: firstDefined(args.workspace_id, previous?.workspace_id), applies_to: firstDefined(args.applies_to, previous?.applies_to, []),
       evidence_ids: [], ...(previous ? { supersedes_id: previous.id } : {}) });

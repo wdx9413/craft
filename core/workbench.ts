@@ -31,10 +31,12 @@ function revision(value: unknown, fallback: number): number {
 }
 
 function matchesScope(memory: JsonObject, taskId?: string, workspaceId?: string): boolean {
-  const scope = String(memory.scope);
-  if (scope === "user") return true;
+  const raw = memory.scope;
+  const scope = typeof raw === "string" ? raw : raw && typeof raw === "object" && !Array.isArray(raw)
+    ? String((raw as JsonObject).kind ?? "") : "";
+  if (scope === "user" || scope === "global") return true;
   if (scope === "task") return memory.task_id === taskId;
-  if (scope === "workspace") return memory.workspace_id === workspaceId;
+  if (scope === "workspace" || scope === "project") return memory.workspace_id === workspaceId;
   return false;
 }
 

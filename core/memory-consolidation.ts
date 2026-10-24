@@ -21,7 +21,11 @@ function storedScopeKey(value: unknown): string | null {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as JsonObject;
-  return typeof record.kind === "string" && typeof record.id === "string" ? `${record.kind}:${record.id}` : null;
+  if (typeof record.kind !== "string" || typeof record.id !== "string") return null;
+  // Older records used the plain scope name (`user`, `task`); the partitioned
+  // store returns an envelope. Preserve that read compatibility without
+  // conflating named project scopes.
+  return record.kind === record.id ? record.kind : `${record.kind}:${record.id}`;
 }
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|passwd|secret|token)\s*[:=]\s*[^\s]{6,}/iu;
 
