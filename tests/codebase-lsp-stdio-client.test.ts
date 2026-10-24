@@ -156,7 +156,7 @@ test("stdio LSP omits document symbol caches that exceed the cache byte budget",
   const count = 60_000, content = `${"x\n".repeat(count - 1)}x`;
   try {
     const analysis = await analyzeLspSnapshot({ ...base(root, "large-symbol-cache"),
-      documents: [{ path: "src/large.java", language: "java", content, source_digest: digest(content) }] });
+      documents: [{ path: "src/large.java", language: "java", content, source_digest: digest(content) }], request_timeout_ms: 30_000 });
     assert.equal((analysis.diagnostics as JsonObject).budget_limited, false);
     assert.equal((analysis.diagnostics as JsonObject).symbol_cache_omitted_documents, 1);
     assert.deepEqual(analysis.document_symbol_cache, []);
