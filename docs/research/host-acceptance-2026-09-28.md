@@ -26,7 +26,7 @@
 | 入口 | 可证明的内容 | 不可据此宣称 |
 | --- | --- | --- |
 | [组件 stdio conformance](../../scripts/smoke/component-conformance.ts) | 真实 bundle 的 initialize、tools/list、参数 schema、四组件工作流调用；临时独立数据目录 | 某 IDE 已挂载、模型理解 Skill、真实项目效果 |
-| [通用安装器](../../../craft-common-use/init.mjs) / [可移植性测试](../../../craft-common-use/tests/portability.test.mjs) | 多客户端配置方言、保留用户配置、失败回滚、Skill 完整目录、实际工具探测 | 运行探测器的 Node 进程就是目标 Host |
+| [通用安装器](https://github.com/wdx9413/craft-common-use/blob/cc10d119de26a908306df3c9435856c8e02aa615/init.mjs) / [可移植性测试](https://github.com/wdx9413/craft-common-use/blob/cc10d119de26a908306df3c9435856c8e02aa615/tests/portability.test.mjs) | 多客户端配置方言、保留用户配置、失败回滚、Skill 完整目录、实际工具探测 | 运行探测器的 Node 进程就是目标 Host |
 | [Readiness](../../core/component-readiness.ts) / [测试](../../tests/component-standalone-readiness.test.ts) | 当前 release、可见工具面、已有执行回执的过滤和缺失诊断 | readiness 请求本身是上下文检索；历史 hook 回执证明当前模型已用结果 |
 | [HTTPS 验收](../../deploy/components/acceptance.mjs) / [部署说明](../../deploy/components/README.md) | 有真实配置后检验 HTTPS、鉴权与服务器响应 | 已部署、真实 IdP 已接通、客户端 OAuth discovery 已实现 |
 

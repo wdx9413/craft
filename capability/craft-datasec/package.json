@@ -10,5 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "coverage": "cd ../.. && c8 --all --src=capability/craft-datasec --src=bin --src=core --include=core/release-catalog.ts --include=capability/craft-datasec/rules.ts --include=capability/craft-datasec/vault.ts --include=capability/craft-datasec/hook.ts --include=capability/craft-datasec/build.ts --include=bin/craft-datasec-hook.ts --reporter=text --reporter=json --reports-dir=coverage/craft-datasec --check-coverage --lines=100 --branches=100 --functions=100 node --experimental-strip-types --test tests/craft-datasec.test.ts"
   },
-  "engines": { "node": ">=23" }
+  "engines": {
+    "node": ">=23"
+  }
 }

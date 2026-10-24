@@ -106,7 +106,7 @@ Context 应有跨组件总预算和去重。本地 resolver 当前分别给 Memo
 
 ## 多工具接入：复用已有 common-use，扩展能力矩阵
 
-仓库已经有无 Hook 方案：[craft-common-use README](../../../craft-common-use/README.md)、[agents.mjs](../../../craft-common-use/agents.mjs)、[init.mjs](../../../craft-common-use/init.mjs)。Cline、Qoder、Trae、WorkBuddy、DSH 的 MCP/Skill 配置差异已被集中在安装适配层；本次未运行安装、未修改这些工具的配置。README 中历史安装记录不是本次宿主执行证据。
+仓库已经有无 Hook 方案：[craft-common-use README](https://github.com/wdx9413/craft-common-use/blob/cc10d119de26a908306df3c9435856c8e02aa615/README.md)、[agents.mjs](https://github.com/wdx9413/craft-common-use/blob/cc10d119de26a908306df3c9435856c8e02aa615/agents.mjs)、[init.mjs](https://github.com/wdx9413/craft-common-use/blob/cc10d119de26a908306df3c9435856c8e02aa615/init.mjs)。Cline、Qoder、Trae、WorkBuddy、DSH 的 MCP/Skill 配置差异已被集中在安装适配层；本次未运行安装、未修改这些工具的配置。README 中历史安装记录不是本次宿主执行证据。
 
 建议将接入分成四种可核验等级，避免简单写“支持某某工具”：
 
@@ -181,7 +181,7 @@ Context 应有跨组件总预算和去重。本地 resolver 当前分别给 Memo
 
 ### 通用脚手架核验补充
 
-同级 `craft-common-use` 已实现无 Hook 的 Skill + MCP 安装入口，不应重新造一个安装器。其 README 明确不承诺每个任务自动开始/结束各调用一次；`agents.mjs` 已有以下五个适配声明。本轮只读检查代码与 README，未重新安装或进入宿主验证；README 记载的历史安装结果不升级为本轮 live_verified。[README](../../../craft-common-use/README.md)、[agents.mjs](../../../craft-common-use/agents.mjs)
+同级 `craft-common-use` 已实现无 Hook 的 Skill + MCP 安装入口，不应重新造一个安装器。其 README 明确不承诺每个任务自动开始/结束各调用一次；`agents.mjs` 已有以下五个适配声明。本轮只读检查代码与 README，未重新安装或进入宿主验证；README 记载的历史安装结果不升级为本轮 live_verified。[README](https://github.com/wdx9413/craft-common-use/blob/cc10d119de26a908306df3c9435856c8e02aa615/README.md)、[agents.mjs](https://github.com/wdx9413/craft-common-use/blob/cc10d119de26a908306df3c9435856c8e02aa615/agents.mjs)
 
 | 宿主 | 已存在的仓库适配 | 本轮证据级别 |
 | --- | --- | --- |
@@ -191,7 +191,7 @@ Context 应有跨组件总预算和去重。本地 resolver 当前分别给 Memo
 | WorkBuddy | 用户级 MCP 与 Skill，command/args 绑定 Trust 提示 | source_inspected；未测真实会话 |
 | DSH | cordis.patch.yml loader 块与 tool-management/skills | source_inspected；未测真实会话 |
 
-脚手架当前探针确实执行 `initialize` + `tools/list`，其中声明协议版本为 `2024-11-05`；该探针验证子进程与工具列表，不能验证宿主是否信任加载、Skill 是否生效或完整四组件工作流。建议在现有探针上增加协议版本适配及独立的宿主工作流验收，而不是取消现有有用的进程检查。[init.mjs](../../../craft-common-use/init.mjs)
+脚手架当前探针确实执行 `initialize` + `tools/list`，其中声明协议版本为 `2024-11-05`；该探针验证子进程与工具列表，不能验证宿主是否信任加载、Skill 是否生效或完整四组件工作流。建议在现有探针上增加协议版本适配及独立的宿主工作流验收，而不是取消现有有用的进程检查。[init.mjs](https://github.com/wdx9413/craft-common-use/blob/cc10d119de26a908306df3c9435856c8e02aa615/init.mjs)
 
 
 Craft 当前源码的 MCP preferred revision 为 `2025-11-25`，`2026-07-28` 仅列为 assessed revision，不能宣称已实现新版本。服务端协议升级、common-use 探针与客户端兼容矩阵应一起验收；当前使用旧版不是自动判定为故障。[当前协议实现](../../core/distribution-and-first-run.ts)（106–167 行）
