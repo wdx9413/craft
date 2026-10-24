@@ -53,14 +53,17 @@ export class CognitiveSearchCoordinator {
       if (claim.sensitivity === "restricted" && args.allow_restricted !== true) return [];
       if (!includeCandidates && claim.status !== "reviewed") return [];
       if (claim.status !== "candidate" && claim.status !== "reviewed") return [];
+      // Parse before the raw scope comparison so malformed claims cannot bypass scenario isolation.
+      let claimScope;
+      if (scenarioKey !== null) {
+        try { claimScope = scopeFromKey(String(claim.scope ?? "global")); } catch { return []; }
+      }
       if (scope !== null && claim.scope !== "global" && claim.scope !== scope) return [];
       if (scenarioKey !== null && (!scenarioActive || claim.scenario_key !== scenarioKey && claim.coarse_scenario_key !== scenarioKey)) return [];
       if (scenarioKey !== null) {
-        let claimScope;
-        try { claimScope = scopeFromKey(String(claim.scope ?? "global")); } catch { return []; }
         // A project filter never borrows an identically named scene from the global catalog,
         // and a global filter never borrows a project taxonomy.
-        if (scenarioKind !== claimScope.kind || (scenarioKind === "project" && scenarioId !== claimScope.id)) return [];
+        if (scenarioKind !== claimScope!.kind || (scenarioKind === "project" && scenarioId !== claimScope!.id)) return [];
       }
       if (claim.valid_until !== undefined && claim.valid_until !== null
         && (typeof claim.valid_until !== "string" || !Number.isFinite(Date.parse(claim.valid_until)) || Date.parse(claim.valid_until) < Date.now())) return [];

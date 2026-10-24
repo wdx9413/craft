@@ -94,6 +94,11 @@ test("evaluation run and program grader reject invalid provenance and grade idem
       subject_id: subject.id, subject_version: subject.version, trial_ids: [wrongSubject] }), /subject mismatch/);
     assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "held_out", subject_type: "workflow",
       subject_id: subject.id, subject_version: subject.version, trial_ids: [wrongPartition] }), /suite partition/);
+    const legacySuite = store.create("evaluation_suite", "missing-suite-cases", {
+      id: "missing-suite-cases", version: 1, name: "Legacy suite without cases",
+    });
+    assert.throws(() => service.evaluationRunRecord({ suite_id: legacySuite.id, split: "held_out", subject_type: "workflow",
+      subject_id: subject.id, subject_version: subject.version, trial_ids: [validA] }), /suite partition/);
     assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "held_out", subject_type: "workflow",
       subject_id: subject.id, subject_version: subject.version, trial_ids: ["edge-no-case"] }), /suite partition/);
     assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "held_out", subject_type: "workflow",

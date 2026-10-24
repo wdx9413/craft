@@ -53,14 +53,16 @@ export class TraceShardStore {
       database.exec("PRAGMA busy_timeout=15000; PRAGMA foreign_keys=ON;");
       if (create && String((database.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toLowerCase() !== "wal")
         database.exec("PRAGMA journal_mode=WAL;");
-      if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get()) database.exec(`CREATE TABLE records(
+      if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get()) database.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS records(
       kind TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,
       payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
       PRIMARY KEY(kind,id,version));
-      CREATE INDEX records_latest ON records(kind,id,version DESC);
-      CREATE INDEX records_trace_id ON records(kind,json_extract(payload_json,'$.trace_id'),id,version DESC);
-      CREATE TABLE events(stream TEXT NOT NULL,sequence INTEGER NOT NULL,event_type TEXT NOT NULL,
-        payload_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(stream,sequence));`);
+      CREATE INDEX IF NOT EXISTS records_latest ON records(kind,id,version DESC);
+      CREATE INDEX IF NOT EXISTS records_trace_id ON records(kind,json_extract(payload_json,'$.trace_id'),id,version DESC);
+      CREATE TABLE IF NOT EXISTS events(stream TEXT NOT NULL,sequence INTEGER NOT NULL,event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(stream,sequence));
+      COMMIT;`);
     } catch (error) { database.close(); throw error; }
     this.#databases.set(shard, database);
     return database;
