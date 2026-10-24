@@ -13,6 +13,7 @@ import { KnowledgeContribution } from "../capability/craft-knowledge/contributio
 import { payload, stableDigest } from "../core/digest.ts";
 import { bindRemoteIdentity } from "../deploy/components/server.ts";
 import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-context-policy-")), repo = join(root, "repo");
@@ -40,13 +41,34 @@ test("Context entry preserves source, required memory, principal, purpose and re
     const args = { project_root: f.repo, query: "alpha", include_codebase: false, memory_ids: ["private"], principal_ids: ["alice"], tenant_id: "red", cognitive_purpose: "preference", source_ids: [source], retrieval_adapter_id: "keyword" };
     const pack = await call(server, "craft_context_open", args);
     assert.equal(pack.items[0].memory_id, "private"); assert.equal(pack.receipt.retrieval_adapter_id, "keyword");
-    assert.equal(pack.contributions.flatMap((part: any) => part.items).length, 0);
+    const contributionSummaries = pack.contributions as JsonObject[];
+    const selectedKnowledge = contributionSummaries.flatMap(part => Array.isArray(part.items) ? part.items as JsonObject[] : []);
+    assert.equal(selectedKnowledge.length, 0, "purpose-mismatched Knowledge must not enter Context");
+    assert.equal(JSON.stringify(contributionSummaries).includes("Alpha testing"), false);
     assert.equal(pack.codebase.reason, "not_requested"); assert.equal(f.store.list("codebase_index").length, 0);
     await assert.rejects(f.service.contextOpen({ ...args, principal_ids: ["bob"] }), /Required Memory/);
     await assert.rejects(f.service.contextOpen({ ...args, source_ids: ["missing"] }), /Source/);
     await assert.rejects(f.service.contextOpen({ ...args, include_codebase: "false" }), /include_codebase/);
+    await assert.rejects(f.service.contextOpen({ ...args, max_chars: 100_000 }), /configured maximum/);
     const narrow = await call(server, "craft_context_open", { ...args, memory_ids: [], source_ids: [], principal_id: "alice", allow_restricted: false, include_working_notes: false, include_global: false, now: "2026-10-04T00:00:00Z" });
     assert.equal(narrow.receipt.scope_access.purpose, "preference");
+    const knowledgeOnly = await f.service.contextOpen({ project_root: f.repo, query: "alpha", task_kind: "knowledge" });
+    assert.deepEqual((knowledgeOnly.working_set as JsonObject).retrieval_members, ["knowledge"]);
+    assert.equal((knowledgeOnly.codebase as JsonObject).reason, "not_requested");
+    const knowledgeWithRequiredMemory = await f.service.contextOpen({ project_root: f.repo, query: "alpha", task_kind: "knowledge",
+      required_refs: [{ member: "memory", id: "private", version: 1 }], principal_ids: ["alice"], tenant_id: "red", cognitive_purpose: "preference",
+      history_refs: [{ id: "host-history", version: 1 }], state_refs: [{ id: "host-state", version: 1 }] });
+    assert.deepEqual((knowledgeWithRequiredMemory.working_set as JsonObject).retrieval_members, ["knowledge", "memory"]);
+    assert.deepEqual((knowledgeWithRequiredMemory.working_set as JsonObject).host_owned_members, ["history", "state"]);
+    assert.equal((knowledgeWithRequiredMemory.codebase as JsonObject).reason, "not_requested");
+    const general = await f.service.contextOpen({ project_root: f.repo, query: "summarize the project notes", task_kind: "general" });
+    assert.equal((general.codebase as JsonObject).reason, "not_requested");
+    assert.equal(f.store.list("codebase_index").length, 0, "general Context must not synchronously initialize a Codebase index");
+    const codeTask = await f.service.contextOpen({ project_root: f.repo, query: "summarize the project notes", task_kind: "code" });
+    assert.equal((codeTask.codebase as JsonObject).status, "ready");
+    assert.equal(f.store.list("codebase_index").length, 1, "code tasks must initialize the Codebase index");
+    const explicitCodebase = await f.service.contextOpen({ project_root: f.repo, query: "summarize the project notes", task_kind: "general", include_codebase: true });
+    assert.equal((explicitCodebase.codebase as JsonObject).status, "ready");
   } finally { f.close(); }
 });
 
@@ -65,7 +87,8 @@ test("Cross-component deduplication uses content without search tags and retains
   const f = await fixture();
   try {
     const body = "Alpha testing"; f.memory("memory", body);
-    f.store.create("knowledge_claim", "claim", { scope: `${f.scope.kind}:${f.scope.id}`, source_id: "builtin.evidence-wiki", status: "reviewed", content: body, content_digest: stableDigest(body), tags: ["tests"], evidence_ids: [] });
+    const claim = f.store.create("knowledge_claim", "claim", { scope: `${f.scope.kind}:${f.scope.id}`, source_id: "builtin.evidence-wiki", status: "candidate", content: body, content_digest: stableDigest(body), tags: ["tests"], evidence_ids: [] });
+    attachVerifiedPromotionFixture(f.store, claim);
     const resolver = new ContextResolutionKernel(f.store, [new KnowledgeContribution(f.store)]);
     const args = { query: "alpha", scope_kind: f.scope.kind, scope_id: f.scope.id, deduplicate: true };
     const result = await resolver.resolve(args); const receipt = result.receipt as JsonObject;
@@ -82,22 +105,22 @@ test("Cross-component deduplication uses content without search tags and retains
 test("Context pack exposes partial coverage, budget omissions, disabled and unavailable index states", async () => {
   const f = await fixture();
   try {
-    const ready = await f.service.contextOpen({ project_root: f.repo, query: "alpha" });
+    const ready = await f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: true });
     assert.equal(ready.context_status, "resolved"); assert.equal(ready.pack_status, "ready"); assert.equal(ready.partial, false);
     assert.equal((ready.codebase as JsonObject).analysis_confidence, "partial");
-    const repeated = await f.service.contextOpen({ project_root: f.repo, query: "alpha" });
+    const repeated = await f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: true });
     assert.equal((repeated.pack_receipt as JsonObject).id, (ready.pack_receipt as JsonObject).id);
     const stateId = `${String((ready.codebase as JsonObject).workspace_id)}_basic`;
     const state = f.store.get("codebase_repository_state", stateId) as JsonObject;
-    f.store.save("codebase_repository_state", stateId, { workspace_id: state.workspace_id, checkpoint_id: state.checkpoint_id, policy_version: state.policy_version, adapter_config_digest: state.adapter_config_digest, index_id: state.index_id, summary: { ...(state.summary as JsonObject), unsupported_file_count: 1 } });
-    const unsupported = await f.service.contextOpen({ project_root: f.repo, query: "alpha" });
+    f.store.save("codebase_repository_state", stateId, { workspace_id: state.workspace_id, checkpoint_id: state.checkpoint_id, policy_version: state.policy_version, adapter_config_digest: state.adapter_config_digest, repository_policy_digest: state.repository_policy_digest, index_id: state.index_id, summary: { ...(state.summary as JsonObject), unsupported_file_count: 1 } });
+    const unsupported = await f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: true });
     assert.equal(unsupported.pack_status, "partial");
     assert(((unsupported.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_analyzer_unsupported_files"));
-    const tiny = await f.service.contextOpen({ project_root: f.repo, query: "alpha", max_chars: 1 });
+    const tiny = await f.service.contextOpen({ project_root: f.repo, query: "alpha", max_chars: 1, include_codebase: true });
     assert(Number((tiny.codebase as JsonObject).budget_omitted_count) > 0);
     assert(((tiny.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_budget_exhausted"));
     writeFileSync(join(f.repo, ".craft-codebase.json"), "bad json");
-    const unavailable = await f.service.contextOpen({ project_root: f.repo, query: "alpha" });
+    const unavailable = await f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: true });
     assert(((unavailable.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_unavailable"));
     assert.equal((unavailable.codebase as JsonObject).failure_code, "OPERATION_FAILED");
     assert.equal((unavailable.codebase as JsonObject).failure_stage, "repository_ensure");
@@ -177,7 +200,7 @@ test("Restored repository checkpoints rebuild stale indexes and legacy analyzer 
     writeFileSync(join(f.repo, "a.ts"), "export function beta() {}\n");
     f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     f.service.workspaceRestore({ workspace_id: first.workspace_id, checkpoint_id: first.checkpoint_id, approved: true });
-    const cache = new ProjectAnalysisCache(f.repo, String(first.workspace_id));
+    const cache = new ProjectAnalysisCache(f.repo, String(first.workspace_id), f.store.paths);
     const cached = cache.list("codebase_file_analysis", 10)[0]!;
     cache.save("codebase_file_analysis", String(cached.id), { ...payload(cached), analyzer_version: "legacy" });
     const restored = f.service.codebaseRepositoryEnsure({ project_root: f.repo });
@@ -212,13 +235,12 @@ test("Context reports query truncation, omitted files and unavailable contributi
   try {
     writeFileSync(join(f.repo, "a.ts"), "export function alphaOne() {}\nexport function alphaTwo() {}\n");
     writeFileSync(join(f.repo, "large.ts"), "x".repeat(512 * 1024 + 1));
-    const limited = await f.service.contextOpen({ project_root: f.repo, query: "alpha", max_items: 1 });
+    const limited = await f.service.contextOpen({ project_root: f.repo, query: "alpha", max_items: 1, include_codebase: true });
     const reasons = (limited.pack_receipt as JsonObject).partial_reasons as string[];
     assert(reasons.includes("codebase_budget_exhausted"));
     assert(reasons.includes("codebase_files_omitted"));
     assert.equal((limited.codebase as JsonObject).query_omitted_count, 0);
-    const claim = { scope: `${f.scope.kind}:${f.scope.id}`, source_id: "builtin.evidence-wiki", status: "reviewed", content: "alpha", evidence_ids: [] };
-    f.store.database.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<10001) INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) SELECT 'knowledge_claim','claim_'||i,1,?,'2026-01-01','2026-01-01' FROM n").run(JSON.stringify(claim));
+    Object.assign(f.service.contextResolution, { contributors: [{ member: "knowledge", async contribute() { throw new Error("synthetic contributor failure"); } }] });
     const partial = await f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: false });
     assert.deepEqual((partial.pack_receipt as JsonObject).partial_reasons, ["context_contribution_unavailable"]);
   } finally { f.close(); }

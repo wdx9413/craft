@@ -2,13 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { text } from "../../common/craft-common-base/src/validation.ts";
 import { scopeEnvelope, scopeFromKey } from "../../common/craft-common-base/src/scope-policy.ts";
-import { KnowledgeSourceRegistry } from "./knowledge-source-registry.ts";
 import { claimReadable } from "./claim-access.ts";
 import { knowledgeScenarioCanClassify, updateKnowledgeScenarioClaim, validateKnowledgeScenarioDefinition } from "./scenario-catalog.ts";
 import { knowledgeDirectoryForScope } from "../../core/project-knowledge-content.ts";
 import { recordKnowledgeSessionEvidence } from "./session-evidence.ts";
 const KNOWLEDGE_KINDS = new Set(["fact", "rule", "decision", "term", "failure_mode"]);
-const KNOWLEDGE_STATUSES = new Set(["candidate", "reviewed", "disputed", "superseded", "expired", "stale"]);
+const KNOWLEDGE_REVIEW_EXIT_STATUSES = new Set(["disputed", "superseded", "expired", "stale"]);
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 function valueDigest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function rawContentDigest(value: string): string { return `sha256:${createHash("sha256").update(value).digest("hex")}`; }
@@ -60,9 +59,8 @@ function recordPayload(record: JsonObject): JsonObject {
 }
 
 export class KnowledgeClaimGovernance {
-  readonly sources: KnowledgeSourceRegistry;
   readonly store: CraftStore;
-  constructor(store: CraftStore) { this.store = store; this.sources = new KnowledgeSourceRegistry(store); }
+  constructor(store: CraftStore) { this.store = store; }
   knowledgeSessionEvidenceRecord(args: JsonObject): JsonObject { return recordKnowledgeSessionEvidence(this.store, args); }
   knowledgeClaimSave(args: JsonObject): JsonObject {
     const kind = text(args.kind, "kind"); if (!KNOWLEDGE_KINDS.has(kind)) throw new Error("Knowledge claim kind is unsupported");
@@ -171,26 +169,11 @@ export class KnowledgeClaimGovernance {
   }
   knowledgeClaimReview(args: JsonObject): JsonObject {
     const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id")); const status = text(args.status, "status");
-    if (!KNOWLEDGE_STATUSES.has(status) || status === "candidate") throw new Error("Knowledge claim review status is unsupported");
+    if (status === "reviewed") throw new Error("Formal Knowledge promotion requires managed Host review and independent effectiveness evaluation");
+    if (!KNOWLEDGE_REVIEW_EXIT_STATUSES.has(status)) throw new Error("Knowledge claim review status is unsupported");
     const reviewer = text(args.reviewer, "reviewer"); const reason = assertNoSecret(document(args.reason, "reason"), "reason");
-    if (status === "reviewed") {
-      const evidenceIds = Array.isArray(claim.evidence_ids) ? claim.evidence_ids as unknown[] : [];
-      const supported = evidenceIds.some((e) => ["bounded", "confirmed"].includes(String(this.store.get("evidence", String(e)).confidence)));
-      if (!supported) throw new Error("Reviewed knowledge claim requires bounded or confirmed Evidence");
-      // Review is a controlled transition, not a way to bless a legacy import.
-      // The source must be an explicit, currently active trust boundary so later
-      // revocation can remove the claim from Context deterministically.
-      const sourceId = typeof claim.source_id === "string" ? claim.source_id : null;
-      if (!sourceId) throw new Error("Reviewed knowledge claim requires an explicit active Source");
-      // Earlier in-process callers could save a new Claim before mounting the
-      // built-in source descriptor.  It is a local, deterministic descriptor,
-      // so install it here rather than weakening the source requirement.  This
-      // does not repair a legacy Claim with no explicit source_id.
-      if (sourceId === "builtin.evidence-wiki" && !this.store.find("knowledge_source", sourceId)) this.sources.installBuiltins();
-      const source = this.store.find("knowledge_source", sourceId);
-      if (!source || source.status !== "active" || source.trust === "untrusted") throw new Error("Reviewed knowledge claim requires an active trusted Source");
-    }
-    const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, review: { reviewer, ...(status === "reviewed" ? { source_digest: this.store.get("knowledge_source", String(claim.source_id)).content_digest } : {}), reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
+    const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status,
+      review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
     const scenarioCatalog = updateKnowledgeScenarioClaim(knowledgeDirectoryForScope(this.store, String(claim.scope ?? "global"), {
       ...((claim.content_ref as JsonObject | undefined)?.path ? { reference_path: String((claim.content_ref as JsonObject).path) } : {}),
     }), saved);

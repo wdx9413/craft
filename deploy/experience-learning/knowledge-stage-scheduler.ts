@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { atomicPrivateJson } from "../../common/craft-common-store-local/src/paths.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 
-export const KNOWLEDGE_LEARNING_STAGES = ["classification", "session_candidate", "session_evaluation"] as const;
+export const KNOWLEDGE_LEARNING_STAGES = ["classification", "session_candidate", "session_evaluation", "session_adjudication"] as const;
 export type KnowledgeLearningStage = typeof KNOWLEDGE_LEARNING_STAGES[number];
 const SCHEMA = "craft.knowledge-learning-stage-cursor.v1";
 const PASS_ORDER_SCHEMA = "craft.learning-pass-order.v1";

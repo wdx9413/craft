@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,7 +7,7 @@ import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { CraftService } from "../../core/service.ts";
 import { CraftStore } from "../../core/infrastructure/store.ts";
-import { craftPaths } from "../../core/infrastructure/paths.ts";
+import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory, sessionStorageDirectory } from "../../core/infrastructure/paths.ts";
 import { defaultSettings } from "../../core/settings.ts";
 import { projectIdentityFromRoot } from "../../core/scope-identity.ts";
 import { stableDigest } from "../../core/digest.ts";
@@ -32,7 +31,7 @@ const isUnder = (root: string, path: unknown): boolean => {
   return canonicalPath === canonicalRoot || canonicalPath.startsWith(`${canonicalRoot}${sep}`);
 };
 function temporaryMemoryDirectory(sessionId: string): string {
-  return join("/tmp", ".craft_data", "memory", createHash("sha256").update(sessionId).digest("hex").slice(0, 32));
+  return join(sessionStorageDirectory(paths, "codex", sessionId), "memory");
 }
 function scenarioCatalog(projectRoot: string, heldOutPath: string, scenarioKey = "auto-build"): JsonObject {
   const cases = (caseId: string, casePath: string) => [{ case_id: caseId, project_root: projectRoot, inputs: { case_path: casePath } }];
@@ -54,10 +53,6 @@ const previousNodeOptions = process.env.NODE_OPTIONS;
 const previousLearningApiKey = process.env.CRAFT_LEARNING_E2E_API_KEY;
 async function providerCallCount(): Promise<number> {
   try { return Number((JSON.parse(await readFile(providerStatePath, "utf8")) as JsonObject).calls ?? 0); }
-  catch { return 0; }
-}
-async function knowledgeClassificationCallCount(): Promise<number> {
-  try { return Number((JSON.parse(await readFile(providerStatePath, "utf8")) as JsonObject).knowledge_classification_calls ?? 0); }
   catch { return 0; }
 }
 function callPackagedMemoryHook(dataRoot: string, input: JsonObject): JsonObject {
@@ -97,7 +92,7 @@ async function verifyContextWorker(component: "knowledge" | "experience", expect
   try { await probe.seed?.(root); }
   catch (error) { await rm(root, { recursive: true, force: true }); await probe.cleanup?.(); throw error; }
   const processHandle = spawn(process.execPath, [entrypoint, "--product", "context"], { env: { ...process.env,
-    ...probe.environment, CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "1", CRAFT_KNOWLEDGE_POLL_MS: "60000", CRAFT_EXPERIENCE_POLL_MS: "1000" },
+    ...probe.environment, CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "1", CRAFT_KNOWLEDGE_POLL_MS: "1000", CRAFT_EXPERIENCE_POLL_MS: "1000" },
     stdio: ["pipe", "pipe", "pipe"] });
   let output = "", errors = "";
   processHandle.stdout.setEncoding("utf8").on("data", chunk => { output += chunk; });
@@ -174,7 +169,9 @@ try {
   const store = await new CraftStore(paths).open();
   try {
     const service = new CraftService(store);
+    ensureProjectStorageDirectory(paths, projectRoot);
     const project = projectIdentityFromRoot(projectRoot).canonical_scope as JsonObject;
+    service.scopeAliasBind({ scope_kind: "project", scope_id: project.id, alias_kind: "path", alias: projectRoot });
     for (const [index, sourceRoot] of knowledgeSourceRoots.entries()) service.knowledgeSourceRegister({ source_id: `e2e-knowledge-${index}`,
       kind: "readme", label: `Verified fixture ${index}`, scope_kind: "project", scope_id: project.id, locator: sourceRoot,
       content_digest: `fixture:${index}`, trust: "verified", access: "read_only" });
@@ -188,7 +185,7 @@ try {
     try {
       assert.match(await readFile(join(dataRoot, "memory", "memory.md"), "utf8"), /Node\.js/u,
         "three projects with repeated independent sessions must automatically promote Memory to global tier");
-      for (const root of memoryProjectRoots) assert.match(await readFile(join(root, ".craft_data", "memory", "memory.md"), "utf8"), /Node\.js/u,
+      for (const root of memoryProjectRoots) assert.match(await readFile(join(projectStorageDirectory(paths, root), "memory", "memory.md"), "utf8"), /Node\.js/u,
         "repeated independent sessions must promote Memory to each project tier");
       assert(store.list("activation_proof_receipt", 1_000, proof => proof.component === "memory" && proof.event === "UserPromptSubmit" && proof.memory_written === true).length > 0,
         "automatic Memory capture and promotion must leave a current Host invocation receipt");
@@ -201,7 +198,7 @@ try {
         assert(!existsSync(temporaryMemoryDirectory(sessionId)), "archived Memory sessions must delete their temporary directories");
       }
     }
-    const scenarioDirectory = join(projectRoot, ".craft_data", "experience");
+    const scenarioDirectory = join(ensureProjectStorageDirectory(paths, projectRoot), "experience");
     await mkdir(scenarioDirectory, { recursive: true });
     await writeFile(join(scenarioDirectory, "experience-scenarios.json"), JSON.stringify(scenarioCatalog(projectRoot, "held-out-sentinel.txt")));
     recordVerifiedContextTask(dataRoot, "experience-session-one", "experience-turn-one");
@@ -228,7 +225,7 @@ try {
 
   child = spawn(process.execPath, [plugin, "--product", "context"], { env: { ...process.env, CRAFT_DATA_DIR: dataRoot,
     CRAFT_CONTINUOUS_LEARNING: "1", CRAFT_LEARNING_E2E_API_KEY: "local-test-credential", CRAFT_EXPERIENCE_POLL_MS: "1000",
-    CRAFT_KNOWLEDGE_POLL_MS: "60000", CRAFT_LEARNING_E2E_PROVIDER_STATE: providerStatePath,
+    CRAFT_KNOWLEDGE_POLL_MS: "1000", CRAFT_LEARNING_E2E_PROVIDER_STATE: providerStatePath,
     CRAFT_LEARNING_E2E_WORKFLOWS: JSON.stringify([generatedWorkflow, revisedWorkflow]) }, stdio: ["pipe", "pipe", "pipe"] });
   child.stdout.setEncoding("utf8").on("data", chunk => { childOutput += chunk; });
   child.stderr.setEncoding("utf8").on("data", chunk => { childError += chunk; });
@@ -241,20 +238,18 @@ try {
   let evidenceCount = 0;
   let evidenceStages = new Set<string>();
   let runCount = 0;
-  let knowledgeClaimPromoted = false;
-  let promotedKnowledgeClaim: JsonObject | undefined;
+  let knowledgeCandidateReady = false;
+  let knowledgeCandidate: JsonObject | undefined;
+  let knowledgeReviewReasons: string[] = [];
   let knowledgeIngestCallsBeforeUpdate = 0;
   let revisedKnowledgeClaim: JsonObject | undefined;
   let originalKnowledgeClaimStale = false;
   let revisedKnowledgeSupportCount = 0;
   let knowledgeIngestCallsAfterUpdate = 0;
-  let knowledgeClassificationEvents: JsonObject[] = [];
-  let classifiedKnowledgeClaim = false;
   let tracedCalls = new Set<string>();
   let diagnostic: JsonObject = {};
-  const expectedCalls = new Set(["handle", "craft_evaluation_model_ticket_list", "craft_experience_learning_request_get", "craft_experience_procedure_submit",
-    "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run",
-    "craft_knowledge_source_list", "craft_knowledge_source_ingest"]);
+  const expectedCalls = new Set(["handle", "craft_experience_procedure_submit", "craft_experience_learning_evaluation_dispatch",
+    "craft_experience_learning_evaluation_run", "craft_knowledge_source_ingest"]);
   for (let attempt = 0; attempt < 300; attempt += 1) {
     const observed = await new CraftStore(paths).open();
     try {
@@ -267,31 +262,26 @@ try {
       evidenceCount = evaluationEvidence.length;
       evidenceStages = new Set(evaluationEvidence.map(row => String((row.metadata as JsonObject).stage)));
       runCount = observed.list("workflow_run", 100, row => typeof row.evaluator_dispatch_id === "string").length;
-      promotedKnowledgeClaim = observed.list("knowledge_claim", 100, row => row.status === "reviewed").find(claim =>
+      knowledgeCandidate = observed.list("knowledge_claim", 100, row => row.status === "candidate").find(claim =>
         observed.list("knowledge_claim_support", 1_000, support => support.claim_id === claim.id).length >= 2);
-      knowledgeClaimPromoted = Boolean(promotedKnowledgeClaim);
-      classifiedKnowledgeClaim = observed.list("knowledge_claim", 100, row => row.id === promotedKnowledgeClaim?.id && row.status === "reviewed"
-        && row.scenario_key === "project.delivery.verification").length === 1;
-      knowledgeClassificationEvents = observed.list("trace_event", 10_000, row => row.actor === "knowledge-classification-worker")
-        .sort((a, b) => Number(a.sequence) - Number(b.sequence))
-        .map(({ event_kind, error_class, status, operation_id, data }) => ({ event_kind, error_class, status, operation_id,
-          failure_stage: (data as JsonObject | undefined)?.failure_stage }));
+      knowledgeCandidateReady = Boolean(knowledgeCandidate);
+      knowledgeReviewReasons = knowledgeCandidate ? observed.list("knowledge_auto_review", 100, row => row.claim_id === knowledgeCandidate!.id)
+        .flatMap(row => Array.isArray(row.reasons) ? row.reasons.map(String) : []) : [];
       knowledgeIngestCallsBeforeUpdate = observed.list("trace_event", 10_000, row => row.operation_id === "craft_knowledge_source_ingest").length;
       tracedCalls = new Set(observed.list("trace_event", 10_000, row => expectedCalls.has(String(row.operation_id))).map(row => String(row.operation_id)));
       diagnostic = { requests: observed.list("workflow_evolution_request", 20).map(({ id, lifecycle }) => ({ id, lifecycle })),
         knowledge_claims: observed.list("knowledge_claim", 100).map(({ id, status, scenario_key, scope }) => ({ id, status, scenario_key: scenario_key ?? null, scope })),
         knowledge_classification_tickets: observed.list("evaluation_model_ticket", 100, row => row.purpose === "knowledge_scenario_classification")
           .map(({ id, status, target }) => ({ id, status, target })),
-        knowledge_classification_calls: await knowledgeClassificationCallCount(),
-        knowledge_classification_events: knowledgeClassificationEvents,
         tickets: observed.list("evaluation_model_ticket", 20).map(({ id, lifecycle, readiness, target }) => ({ id, lifecycle, readiness, target })),
         procedures: observed.list("experience_procedure", 20).map(({ id, lifecycle, title, procedure_kind, routeable }) => ({ id, lifecycle, title, procedure_kind, routeable })),
         dispatches: observed.list("experience_evaluation_dispatch", 20).map(({ id, stage, status, reason }) => ({ id, stage, status, reason })),
-        provider_calls: await providerCallCount(), knowledge_claim_promoted: knowledgeClaimPromoted, traced_calls: [...tracedCalls] };
+        provider_calls: await providerCallCount(), knowledge_candidate_ready: knowledgeCandidateReady, knowledge_review_reasons: knowledgeReviewReasons,
+        traced_calls: [...tracedCalls] };
     } finally { observed.close(); }
-    if (routeable && evidenceCount === 4 && evidenceStages.size === 4 && runCount === 3 && knowledgeClaimPromoted && classifiedKnowledgeClaim
-      && knowledgeClassificationEvents.length === 3
-      && tracedCalls.size === expectedCalls.size && await providerCallCount() === 1 && await knowledgeClassificationCallCount() > 0) break;
+    if (routeable && evidenceCount === 4 && evidenceStages.size === 4 && runCount === 3 && knowledgeCandidateReady
+      && knowledgeReviewReasons.includes("independent_effectiveness_evaluation_required")
+      && tracedCalls.size === expectedCalls.size && await providerCallCount() === 1) break;
     await delay(100);
   }
 
@@ -299,22 +289,20 @@ try {
   assert.equal(evidenceCount, 4, "Shadow, Held-out, Signoff and Canary must each persist bound Evidence");
   assert.deepEqual(evidenceStages, new Set(["shadow", "held_out", "signoff", "canary"]), "all four ordered gates must persist Evidence");
   assert.equal(runCount, 3, "Shadow, Held-out and Canary each execute the evaluator; automatic Signoff consumes their Evidence");
-  assert(knowledgeClaimPromoted, "two independently registered verified Knowledge sources must auto-promote their shared Claim");
-  assert(classifiedKnowledgeClaim, `the continuous Knowledge classifier must classify the reviewed Claim without changing its review status; state=${JSON.stringify(diagnostic)}; stderr=${childError}`);
-  assert.deepEqual(knowledgeClassificationEvents.map(event => event.event_kind), ["model.request", "model.completed", "classification.saved", "model.result_bound"],
-    "Knowledge classification must persist the model request, response and saved candidate Trace without content");
-  assert((await knowledgeClassificationCallCount()) > 0, "the packaged learning worker must use its model to classify Knowledge");
+  assert(knowledgeCandidateReady, `two independently registered verified Knowledge sources must produce a supported candidate; state=${JSON.stringify(diagnostic)}; stderr=${childError}`);
+  assert(knowledgeReviewReasons.includes("independent_effectiveness_evaluation_required"),
+    `Knowledge must remain unpromoted until independent held-out effectiveness evidence exists; state=${JSON.stringify(diagnostic)}; stderr=${childError}`);
   assert(existsSync(paths.knowledgeDatabaseFile), "Knowledge artifacts must persist in the central .craft_data/knowledge store");
-  assert(isUnder(join(projectRoot, ".craft_data", "knowledge", "md"), (promotedKnowledgeClaim!.content_ref as JsonObject | undefined)?.path),
-    "Project-scoped Knowledge Markdown must stay under that project's .craft_data/knowledge/md directory");
-  assert(isUnder(join(projectRoot, ".craft_data", "experience", "md"), (routeable!.content_ref as JsonObject | undefined)?.path),
-    "Project-scoped Experience review content must stay under that project's .craft_data/experience/md directory");
-  assert(isUnder(join(projectRoot, ".craft_data", "experience", "graph"), (routeable!.definition_ref as JsonObject | undefined)?.path),
-    "Project-scoped Experience definitions must stay under that project's .craft_data/experience/graph directory");
+  assert(isUnder(join(projectStorageDirectory(paths, projectRoot), "knowledge", "md"), (knowledgeCandidate!.content_ref as JsonObject | undefined)?.path),
+    "Project-scoped Knowledge Markdown must stay under shared project storage");
+  assert(isUnder(join(projectStorageDirectory(paths, projectRoot), "experience", "md"), (routeable!.content_ref as JsonObject | undefined)?.path),
+    "Project-scoped Experience review content must stay under shared project storage");
+  assert(isUnder(join(projectStorageDirectory(paths, projectRoot), "experience", "graph"), (routeable!.definition_ref as JsonObject | undefined)?.path),
+    "Project-scoped Experience definitions must stay under shared project storage");
   assert.deepEqual(tracedCalls, expectedCalls, "worker model, submission, evaluation and Knowledge calls must be traced");
   assert.equal(await providerCallCount(), 1, "the packaged worker must execute one model request against the local fixture");
 
-  const originalKnowledgeDigest = String(promotedKnowledgeClaim!.content_digest);
+  const originalKnowledgeDigest = String(knowledgeCandidate!.content_digest);
   const revisedKnowledgeText = "# Project rule\nRun focused and full verification before delivery.\n";
   for (const sourceRoot of knowledgeSourceRoots) await writeFile(join(sourceRoot, "README.md"), revisedKnowledgeText);
   let knowledgeRevisionDiagnostic: JsonObject = {};
@@ -325,7 +313,7 @@ try {
       knowledgeIngestCallsAfterUpdate = observed.list("trace_event", 10_000, row => row.operation_id === "craft_knowledge_source_ingest").length;
       const original = claims.find(claim => claim.content_digest === originalKnowledgeDigest);
       originalKnowledgeClaimStale = original?.status === "stale";
-      revisedKnowledgeClaim = claims.find(claim => claim.status === "reviewed" && claim.content_digest !== originalKnowledgeDigest
+      revisedKnowledgeClaim = claims.find(claim => claim.status === "candidate" && claim.content_digest !== originalKnowledgeDigest
         && observed.list("knowledge_claim_support", 1_000, support => support.claim_id === claim.id).length >= 2);
       revisedKnowledgeSupportCount = revisedKnowledgeClaim
         ? observed.list("knowledge_claim_support", 1_000, support => support.claim_id === revisedKnowledgeClaim!.id).length : 0;
@@ -337,19 +325,19 @@ try {
     await delay(100);
   }
   assert(originalKnowledgeClaimStale,
-    `a changed trusted Source must stale the previously promoted Knowledge Claim; state=${JSON.stringify(knowledgeRevisionDiagnostic)}`);
+    `a changed trusted Source must stale the prior Knowledge candidate; state=${JSON.stringify(knowledgeRevisionDiagnostic)}`);
   assert(revisedKnowledgeClaim,
-    `independent updated Sources must create and auto-promote a new Knowledge Claim; state=${JSON.stringify(knowledgeRevisionDiagnostic)}`);
+    `independent updated Sources must create a revised Knowledge candidate; state=${JSON.stringify(knowledgeRevisionDiagnostic)}`);
   assert.notEqual(revisedKnowledgeClaim!.content_digest, originalKnowledgeDigest, "Knowledge iteration must create a new immutable Claim identity");
   assert.equal(revisedKnowledgeSupportCount, 2,
     "the revised Claim must retain independent support from both verified Sources");
   assert(knowledgeIngestCallsAfterUpdate > knowledgeIngestCallsBeforeUpdate,
-    "the second Knowledge promotion must be caused by a later, traceable worker ingestion pass");
+    "the revised Knowledge candidate must be caused by a later, traceable worker ingestion pass");
 
   const firstProcedureId = String(routeable.id), firstProcedureVersion = Number(routeable.version);
   await writeFile(join(projectRoot, "sentinel-v2.txt"), "newly observed marker");
   await writeFile(join(projectRoot, "held-out-sentinel-v2.txt"), "independent held-out fixture for iteration two");
-  const scenarioPath = join(projectRoot, ".craft_data", "experience", "experience-scenarios.json");
+  const scenarioPath = join(projectStorageDirectory(paths, projectRoot), "experience", "experience-scenarios.json");
   await writeFile(scenarioPath, JSON.stringify(scenarioCatalog(projectRoot, "held-out-sentinel-v2.txt")));
 
   const nextStore = await new CraftStore(paths).open();
@@ -416,6 +404,7 @@ try {
       const standalonePaths = craftPaths(standaloneRoot);
       const store = await new CraftStore(standalonePaths).open();
       try {
+        ensureProjectStorageDirectory(standalonePaths, standaloneKnowledgeProject);
         const project = projectIdentityFromRoot(standaloneKnowledgeProject).canonical_scope as JsonObject;
         const service = new CraftService(store);
         service.scopeAliasBind({ scope_kind: "project", scope_id: project.id, alias_kind: "path", alias: standaloneKnowledgeProject });
@@ -428,27 +417,31 @@ try {
       const standalonePaths = craftPaths(standaloneRoot);
       let promoted: JsonObject | undefined;
       let calls = new Set<string>();
+      let reviewReasons: string[] = [];
       for (let attempt = 0; attempt < 200; attempt += 1) {
         const store = await new CraftStore(standalonePaths).open();
         try {
-          promoted = store.list("knowledge_claim", 100, claim => claim.status === "reviewed").find(claim =>
+          promoted = store.list("knowledge_claim", 100, claim => claim.status === "candidate").find(claim =>
             store.list("knowledge_claim_support", 1_000, support => support.claim_id === claim.id).length >= 2);
+          reviewReasons = promoted ? store.list("knowledge_auto_review", 100, item => item.claim_id === promoted!.id)
+            .flatMap(item => Array.isArray(item.reasons) ? item.reasons.map(String) : []) : [];
           calls = new Set(store.list("trace_event", 10_000, event => ["craft_knowledge_source_list", "craft_knowledge_source_ingest"].includes(String(event.operation_id)))
             .map(event => String(event.operation_id)));
         } finally { store.close(); }
-        if (promoted && calls.size === 2) break;
+        if (promoted && calls.size === 1) break;
         await delay(100);
       }
-      assert(promoted, "Context Knowledge worker must generate and auto-promote a Claim from two independent verified Sources");
-      assert.deepEqual(calls, new Set(["craft_knowledge_source_list", "craft_knowledge_source_ingest"]), "Context Knowledge reads and ingests must be traced");
+      assert(promoted, "Context Knowledge worker must generate a supported candidate from two independent verified Sources");
+      assert(reviewReasons.includes("independent_effectiveness_evaluation_required"),
+        "Context Knowledge worker must refuse promotion without an independent held-out effectiveness run");
+      assert.deepEqual(calls, new Set(["craft_knowledge_source_ingest"]), "Context Knowledge ingestion must be traced");
       assert(existsSync(standalonePaths.knowledgeDatabaseFile), "Context Knowledge records must persist under the configured .craft_data root");
-      assert(isUnder(join(standaloneKnowledgeProject, ".craft_data", "knowledge", "md"), (promoted!.content_ref as JsonObject | undefined)?.path),
-        "Project-scoped Context Knowledge content must remain under the project's .craft_data/knowledge/md directory");
+      assert(isUnder(join(projectStorageDirectory(standalonePaths, standaloneKnowledgeProject), "knowledge", "md"), (promoted!.content_ref as JsonObject | undefined)?.path),
+        "Project-scoped Context Knowledge content must remain under shared project storage");
     },
     cleanup: async () => { await rm(standaloneKnowledgeProject, { recursive: true, force: true }); },
   };
-  await verifyContextWorker("knowledge", ["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list",
-    "craft_knowledge_source_list", "craft_knowledge_source_ingest"], [], standaloneKnowledgeProbe);
+  await verifyContextWorker("knowledge", ["craft_knowledge_source_ingest"], [], standaloneKnowledgeProbe);
 
   const standaloneExperienceProject = await mkdtemp(join(tmpdir(), "craft-standalone-experience-project-"));
   const standaloneExperienceState = join(tmpdir(), `craft-standalone-experience-provider-${process.pid}-${Date.now()}.json`);
@@ -475,7 +468,7 @@ try {
             verified: true, verification_outcome: "passed", verification_ref: `standalone:${taskId}`, scenario_key: "standalone-auto" });
           assert.equal(result.status, taskId.endsWith("two") ? "candidate_request" : "observed");
         }
-        const scenarioDirectory = join(standaloneExperienceProject, ".craft_data", "experience");
+        const scenarioDirectory = join(ensureProjectStorageDirectory(standalonePaths, standaloneExperienceProject), "experience");
         await mkdir(scenarioDirectory, { recursive: true });
         await writeFile(join(scenarioDirectory, "experience-scenarios.json"),
           JSON.stringify(scenarioCatalog(standaloneExperienceProject, "held-out-sentinel.txt", "standalone-auto")));
@@ -488,8 +481,7 @@ try {
       let stages = new Set<string>();
       let runCount = 0;
       let calls = new Set<string>();
-      const expected = ["craft_evaluation_model_ticket_list", "craft_experience_learning_request_get", "craft_experience_procedure_submit",
-        "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run"];
+      const expected = ["craft_experience_procedure_submit", "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_run"];
       for (let attempt = 0; attempt < 300; attempt += 1) {
         const store = await new CraftStore(standalonePaths).open();
         try {
@@ -508,10 +500,10 @@ try {
       assert.deepEqual(calls, new Set(expected), "Context Experience ticket, distillation, submission and evaluation calls must be traced");
       assert.equal(Number((JSON.parse(await readFile(standaloneExperienceState, "utf8")) as JsonObject).calls), 1,
         "Context Experience must send one bounded provider request to the local model fixture");
-      assert(isUnder(join(standaloneExperienceProject, ".craft_data", "experience", "md"), (procedure!.content_ref as JsonObject | undefined)?.path),
-        "Project-scoped Context Experience review content must remain under the project's .craft_data/experience/md");
-      assert(isUnder(join(standaloneExperienceProject, ".craft_data", "experience", "graph"), (procedure!.definition_ref as JsonObject | undefined)?.path),
-        "Project-scoped Context Experience definitions must remain under the project's .craft_data/experience/graph");
+      assert(isUnder(join(projectStorageDirectory(standalonePaths, standaloneExperienceProject), "experience", "md"), (procedure!.content_ref as JsonObject | undefined)?.path),
+        "Project-scoped Context Experience review content must remain under shared project storage");
+      assert(isUnder(join(projectStorageDirectory(standalonePaths, standaloneExperienceProject), "experience", "graph"), (procedure!.definition_ref as JsonObject | undefined)?.path),
+        "Project-scoped Context Experience definitions must remain under shared project storage");
       const releaseStore = await new CraftStore(standalonePaths).open();
       try { assert.equal(releaseStore.find("experience_release", String(procedure!.id))?.record_version, procedure!.version,
         "only the passing Canary may publish the current Experience release"); }
@@ -519,10 +511,9 @@ try {
     },
     cleanup: async () => { await Promise.all([rm(standaloneExperienceProject, { recursive: true, force: true }), rm(standaloneExperienceState, { force: true })]); },
   };
-  await verifyContextWorker("experience", ["craft_evaluation_model_ticket_list", "craft_experience_learning_request_get", "craft_experience_procedure_submit",
-    "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run",
-    "craft_knowledge_source_list"], [], standaloneExperienceProbe);
-  process.stdout.write("Context Hook promoted Memory across tiers; the complete Context worker generated and promoted a reviewed Knowledge Claim and an Experience Workflow; a later Canary evolved the same Procedure against its released baseline.\n");
+  await verifyContextWorker("experience", ["craft_experience_procedure_submit", "craft_experience_learning_evaluation_dispatch",
+    "craft_experience_learning_evaluation_run"], [], standaloneExperienceProbe);
+  process.stdout.write("Context Hook promoted Memory across tiers; the complete Context worker generated and held a supported Knowledge candidate pending independent effectiveness evidence, promoted an Experience Workflow, and evolved the same Procedure against its released baseline after a later Canary.\n");
 } finally {
   if (child && child.exitCode === null) {
     child.stdin.end();

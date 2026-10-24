@@ -3,7 +3,7 @@ import { CodeSymbolSearchIndex, codeContextCandidates } from "./context-search.t
 import { matchDefinitionEdges } from "./definition-query.ts";
 import { buildControlFlowGraph } from "./control-flow.ts";
 import { buildDataFlowGraph } from "./data-flow.ts";
-import { queryCheckpointDiagnostics } from "./lsp-diagnostics-query.ts";
+import { queryCheckpointCallers, queryCheckpointDiagnostics } from "./lsp-diagnostics-query.ts";
 import { contextAssetMatches, contextAssetRef, requiredContextRef } from "../../common/craft-common-base/src/context-assets.ts";
 import { assertContextReadCurrent, type ContextReadRef } from "../../common/craft-common-store-local/src/context-access-guard.ts";
 import { analyzeTypeScript } from "./typescript-analysis.ts";
@@ -529,6 +529,19 @@ export class CodebaseIndexKernel {
     return this.receipt("callers_find", index, workspace, { symbol_id: symbol.id, returned_edge_ids: edges.map((edge) => edge.id), omitted_count: Math.max(0, all.length - edges.length) }, { symbol, callers });
   }
 
+  queryCallers(args: JsonObject): Promise<JsonObject> {
+    return observeOperation(this.store, "codebase", "callers_query", args, async () => {
+      const { index, workspace } = this.readyIndex(args);
+      const symbol = this.findNode(index, text(args.symbol_id ?? args.node_id, args.symbol_id === undefined ? "node_id" : "symbol_id"));
+      if (symbol.kind !== "symbol") throw new Error("Codebase caller query requires a symbol node");
+      const checkpoint = this.store.get("workspace_checkpoint", String(index.checkpoint_id));
+      const result = await queryCheckpointCallers({ store: this.store, checkpoint, project_root: String(workspace.root_path), target: symbol,
+        limit: bounded(args.limit, "limit", 20), readSource: (root, entry) => this.sourceFile(root, entry) });
+      this.readyIndex(args);
+      return this.receipt("callers_query", index, workspace, result.query, { symbol, ...result.payload });
+    });
+  }
+
   /** Query imported semantic relations without upgrading adapter assertions to runtime proof. */
   findRelations(args: JsonObject): JsonObject {
     const { index, workspace } = this.readyIndex(args);
@@ -727,7 +740,7 @@ export class CodebaseIndexKernel {
   private projectGraphStore(index: JsonObject): ProjectGraphStore {
     const workspace = this.store.get("workspace", String(index.workspace_id));
     if (workspace.snapshot_storage !== "project_codebase") throw new Error("Project Codebase graph storage is not enabled for this workspace");
-    return new ProjectGraphStore(String(workspace.root_path), String(workspace.id));
+    return new ProjectGraphStore(String(workspace.root_path), String(workspace.id), this.store.paths);
   }
   private graphRecord(index: JsonObject, kind: "codebase_index_shard" | "codebase_index_edge_route", id: string): JsonObject {
     return index.graph_storage === PROJECT_GRAPH_STORAGE ? this.projectGraphStore(index).read(id) : this.store.get(kind, id);
@@ -829,7 +842,7 @@ export class CodebaseIndexKernel {
     const manifest = { location_route_version: 2, shard_ids: shardIds, shard_digests: shardDigests, node_shard_ids: nodeShardIds, edge_shard_ids: edgeShardIds,
       node_count: nodes.length, edge_count: edges.length, graph_digest: graphDigest, node_digest: nodeDigest, edge_digest: edgeDigest, edge_route_shards: edgeRouteShards };
     const workspace = this.store.get("workspace", String(identity.workspace_id));
-    const projectGraphStore = workspace.snapshot_storage === "project_codebase" ? new ProjectGraphStore(String(workspace.root_path), String(identity.workspace_id)) : null;
+    const projectGraphStore = workspace.snapshot_storage === "project_codebase" ? new ProjectGraphStore(String(workspace.root_path), String(identity.workspace_id), this.store.paths) : null;
     const immutableGraphRecords: SaveEntry[] = shards.map((shard, ordinal) => ({ kind: "codebase_index_shard", id: shardIds[ordinal]!, payload: {
       node_count: shard.nodes.length, edge_count: shard.edges.length, nodes: shard.nodes, edges: shard.edges, graph_digest: shardDigests[ordinal] } }));
     if (projectGraphStore) {
@@ -875,7 +888,7 @@ export class CodebaseIndexKernel {
   private symbolSearch(index: JsonObject): CodeSymbolSearchIndex {
     const shardIds = Array.isArray(index.node_shard_ids) ? index.node_shard_ids as string[] : [];
     const payloadDigest = shardIds.length
-      ? index.graph_storage === PROJECT_GRAPH_STORAGE ? this.projectGraphStore(index).recordsDigest(shardIds)
+      ? index.graph_storage === PROJECT_GRAPH_STORAGE ? this.projectGraphStore(index).recordsFingerprint(shardIds)
         : this.store.latestRecordsDigest("codebase_index_shard", shardIds)
       : stableDigest(Array.isArray(index.nodes) ? index.nodes : []);
     const fingerprint = stableDigest({ index_id: index.id, identity_digest: index.identity_digest, node_digest: index.node_digest,

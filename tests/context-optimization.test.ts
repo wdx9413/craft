@@ -12,6 +12,7 @@ import { KeywordRetrievalPort } from "../common/craft-common-base/src/retrieval-
 import { ContextBudget, ContextBudgetError } from "../common/craft-common-base/src/context-assets.ts";
 import { ContextReadGuard } from "../common/craft-common-store-local/src/context-access-guard.ts";
 import { payload } from "../core/digest.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-context-optimization-"));
   const store = await new CraftStore(craftPaths(root)).open(), writer = await new CraftStore(craftPaths(root)).open();
@@ -27,7 +28,8 @@ for (const mutation of ["claim", "source", "document", "alias", "delete"] as con
       const envelope = { audience: { mode: "private", principal_ids: ["owner"] } };
       f.store.create("knowledge_document", "doc", { status: "current", content_digest: "document" });
       f.store.create("scope_alias", "alias", { scope: { kind: "project", id: "p" }, alias: "/repo", status: "active" });
-      f.store.create("knowledge_claim", "claim", { source_id: "source", document_id: "doc", document_digest: "document", scope: "project:p", status: "reviewed", scope_envelope: envelope, content: "alpha", content_digest: "body" });
+      const claim = f.store.create("knowledge_claim", "claim", { source_id: "source", document_id: "doc", document_digest: "document", scope: "project:p", status: "candidate", scope_envelope: envelope, content: "alpha", content_digest: "body", evidence_ids: [] });
+      attachVerifiedPromotionFixture(f.store, claim);
       const original = KeywordRetrievalPort.prototype.search;
       t.mock.method(KeywordRetrievalPort.prototype, "search", async function(this: KeywordRetrievalPort, query: string, documents: readonly { id: string; body: string }[]) {
         const kind = mutation === "claim" || mutation === "delete" ? "knowledge_claim" : mutation === "source" ? "knowledge_source" : mutation === "document" ? "knowledge_document" : "scope_alias";
@@ -43,7 +45,10 @@ for (const mutation of ["claim", "source", "document", "alias", "delete"] as con
 test("required nonmatching Knowledge has nonnegative omission; unselected mutation preserves receipt", async () => {
   const f = await fixture();
   try {
-    for (const id of ["required", "other"]) f.store.create("knowledge_claim", id, { source_id: "source", scope: "project:p", status: "reviewed", content: id === "required" ? "unrelated" : "alpha", content_digest: id });
+    for (const id of ["required", "other"]) {
+      const claim = f.store.create("knowledge_claim", id, { source_id: "source", scope: "project:p", status: "candidate", content: id === "required" ? "unrelated" : "alpha", content_digest: id, evidence_ids: [] });
+      attachVerifiedPromotionFixture(f.store, claim);
+    }
     const kernel = new ContextResolutionKernel(f.store, [new KnowledgeContribution(f.store)]);
     const result = await kernel.resolve({ query: "alpha", scope_kind: "project", scope_id: "p", members: ["knowledge"], max_items: 1, required_refs: [{ member: "knowledge", id: "required" }] });
     const contribution = (result.contributions as JsonObject[])[0]!;

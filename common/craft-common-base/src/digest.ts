@@ -157,7 +157,7 @@ export function stableDigestStreaming(value: unknown): string {
     }
     if (item && typeof item === "object") {
       const entries = Object.entries(item as JsonObject);
-      const signature = JSON.stringify(entries.map(([key]) => key).sort());
+      const signature = JSON.stringify(entries.map(([key]) => key));
       let orderedKeys = keyOrderCache.get(signature);
       if (!orderedKeys) {
         orderedKeys = entries.map(([key]) => key).sort((left, right) => left.localeCompare(right, "zh"));

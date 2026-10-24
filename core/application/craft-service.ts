@@ -2,7 +2,7 @@ import { ComponentTraceKernel } from "../component-trace.ts";
 import { observeMethods } from "../../common/craft-common-log/src/index.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { ContextHostEvaluation } from "../context-host-evaluation.ts";
-import { assessKnowledgeEvaluationProvenance, knowledgeEvaluationEvidence } from "../knowledge-evaluation-provenance.ts";
+import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationCaseBindingDigest, knowledgeEvaluationEvidence } from "../knowledge-evaluation-provenance.ts";
 import { procedureHostControl } from "./procedure-host-control.ts";
 import { procedureDecisionEvaluate } from "./procedure-decision.ts";
 import { readFileSync } from "node:fs";
@@ -64,6 +64,11 @@ import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
 import { array, finiteInteger, object, text } from "../validation.ts";
 import { canonicalJson, payload as recordPayload, stableDigest } from "../digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
+import { CodexCliModelTransport } from "../codex-cli-model-transport.ts";
+import { redactKnowledgeModelText } from "../knowledge-model-redaction.ts";
+import { generatedTextLanguageInstruction } from "../config.ts";
+import type { ModelTransport } from "../model-gateway.ts";
+import { acquireLearningWorkerLocks } from "../infrastructure/learning-worker-lock.ts";
 import type { EvaluationContractInput, EvaluationStage } from "../evaluation-contract.ts";
 import { WorkControl } from "./coordinators/work-control.ts";
 import { ForgeDispatchCoordinator } from "./coordinators/forge-dispatch.ts";
@@ -224,6 +229,7 @@ function validateModelInput(args: JsonObject, id: string): CraftModelConfig {
 
 export class CraftService extends ServiceFoundation {
   readonly contentLanguage: string;
+  private readonly knowledgeAdjudicationTransportFactory: () => ModelTransport;
   contextToolsDiscover(args: JsonObject): JsonObject { return discoverContextTools(args); }
   readonly workControl: WorkControl;
   readonly forgeDispatch: ForgeDispatchCoordinator;
@@ -236,10 +242,11 @@ export class CraftService extends ServiceFoundation {
     dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("../host-registry.ts").HostProfile[],
     modelProviders?: readonly import("../model-gateway.ts").ModelProviderSpec[],
     modelTransport?: import("../model-gateway.ts").ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[],
-    contentLanguage = "zh-CN") {
+    contentLanguage = "zh-CN", knowledgeAdjudicationTransportFactory: () => ModelTransport = () => new CodexCliModelTransport()) {
     super(store, semanticProvider, isolatedAdapter as never, dockerSandbox as never, egressBroker as never, hostOwnerId,
       hostProfiles, modelProviders, modelTransport, traceArchiveBackends);
     this.contentLanguage = contentLanguage;
+    this.knowledgeAdjudicationTransportFactory = knowledgeAdjudicationTransportFactory;
     this.workControl = new WorkControl(store, {
       prepare: (args) => this.verifiedWorkLoopPrepareInternal(args),
       advance: (args) => this.verifiedWorkLoopAdvanceInternal(args),
@@ -594,7 +601,7 @@ export class CraftService extends ServiceFoundation {
       "maintenance_status",
       "maintenance_tick",
       "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "task_benchmark_canary_sample", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "eval_campaign_report", "managed_write_guard", "managed_write_settlement", "adaptive_harness_recommendation", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation", "runtime_assurance_attestation", "runtime_intervention", "runtime_assurance_campaign",
-      "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt", "evaluation_program", "evaluation_program_run", "enterprise_identity_provider", "enterprise_principal", "enterprise_adapter_binding", "enterprise_access_ticket", "a2a_agent_trust", "a2a_collaboration_session", "a2a_delegation", "a2a_delegation_receipt", "federated_agent_health", "federated_delegation_grant", "federated_artifact_grant", "federated_remote_receipt", "federated_remote_incident", "harness_topology", "harness_topology_selection", "runtime_readiness_assessment", "sealed_evaluation_case", "sealed_evaluation_access", "runtime_recovery_drill", "assured_work_pilot", "project_brain", "project_goal", "project_decision", "project_material", "project_outcome", "project_experience", "work_session", "long_task_checkpoint", "trust_profile", "web_operation", "web_operation_receipt"];
+      "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "knowledge_evaluation_adjudication", "knowledge_evaluation_adjudication_result", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt", "evaluation_program", "evaluation_program_run", "enterprise_identity_provider", "enterprise_principal", "enterprise_adapter_binding", "enterprise_access_ticket", "a2a_agent_trust", "a2a_collaboration_session", "a2a_delegation", "a2a_delegation_receipt", "federated_agent_health", "federated_delegation_grant", "federated_artifact_grant", "federated_remote_receipt", "federated_remote_incident", "harness_topology", "harness_topology_selection", "runtime_readiness_assessment", "sealed_evaluation_case", "sealed_evaluation_access", "runtime_recovery_drill", "assured_work_pilot", "project_brain", "project_goal", "project_decision", "project_material", "project_outcome", "project_experience", "work_session", "long_task_checkpoint", "trust_profile", "web_operation", "web_operation_receipt"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     const allCounts = this.store.countMany(kinds);
     const counts = args.include_zero_counts === true ? allCounts : Object.fromEntries(Object.entries(allCounts).filter(([, count]) => count > 0));
@@ -2030,6 +2037,7 @@ export class CraftService extends ServiceFoundation {
   workspaceOpen(args: JsonObject): JsonObject { return this.workspace.open(args); }
   workspaceGet(args: JsonObject): JsonObject { return this.workspace.get(args); }
   workspaceCheckpoint(args: JsonObject): JsonObject { return this.workspace.checkpoint(args); }
+  workspaceCheckpointFromRepositoryFiles(args: JsonObject): JsonObject { return this.workspace.checkpointFromRepositoryFiles(args); }
   workspaceDiff(args: JsonObject): JsonObject { return this.workspace.diff(args); }
   workspaceHumanChange(args: JsonObject): JsonObject { return this.workspace.humanChange(args); }
   workspaceRestore(args: JsonObject): JsonObject { return this.workspace.restore(args); }
@@ -2846,12 +2854,20 @@ export class CraftService extends ServiceFoundation {
   knowledgeClaimSave(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimSave(args); }
   knowledgeSessionEvidenceRecord(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeSessionEvidenceRecord(args); }
   knowledgeClaimGet(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimGet(args); }
+  knowledgeStorageReconcile(args: JsonObject): JsonObject {
+    if (args.dry_run !== undefined && typeof args.dry_run !== "boolean") throw new Error("dry_run must be boolean");
+    return this.store.reconcileKnowledgeStorage({ max_records: finiteInteger(args.max_records, "max_records", 100, 1, 500),
+      ...(args.cursor === undefined ? {} : { cursor: text(args.cursor, "cursor") }),
+      ...(typeof args.dry_run === "boolean" ? { dry_run: args.dry_run } : {}) });
+  }
   knowledgeClaimList(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimList(args); }
   knowledgeClaimReview(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimReview(args); }
   async wikiPageSave(args: JsonObject): Promise<JsonObject> {
-    const title = assertNoSecret(text(args.title, "title"), "title"); const body = assertNoSecret(document(args.body, "body"), "body"); const scope = String(args.scope ?? "global");
+    const title = assertNoSecret(text(args.title, "title"), "title"); const body = assertNoSecret(document(args.body, "body"), "body");
     const claimIds = optionalTextArray(args.claim_ids, "claim_ids"); claimIds.forEach((item) => this.store.get("knowledge_claim", item));
     const pageId = String(args.page_id ?? id("wiki_page")); const existing = this.store.find("wiki_page", pageId);
+    const scope = String(args.scope ?? existing?.scope ?? "global");
+    if (existing && scope !== existing.scope) throw new Error("Wiki page cannot change storage scope");
     const identity = { title, body_digest: valueDigest(body), scope, claim_ids: claimIds };
     if (existing && existing.identity_digest === valueDigest(identity)) return { page: existing, idempotent: true };
     const nextVersion = existing ? Number(existing.version) + 1 : 1;
@@ -2898,14 +2914,19 @@ export class CraftService extends ServiceFoundation {
   }
   wikiContextCompile(args: JsonObject): JsonObject {
     const query = assertNoSecret(text(args.query, "query"), "query"); const scope = String(args.scope ?? "global"); const maxItems = finiteInteger(args.max_items, "max_items", 8, 1, 50); const maxChars = finiteInteger(args.max_chars, "max_chars", 6_000, 100, 100_000);
+    const candidateIds = optionalTextArray(args.candidate_claim_ids, "candidate_claim_ids");
+    if (candidateIds.length > 100) throw new Error("candidate_claim_ids exceeds the evaluation limit");
+    const candidateSet = new Set(candidateIds);
     const now = args.now === undefined ? Date.now() : validIsoTime(args.now, "now"); const excluded: JsonObject[] = [];
     const index = new Bm25Index();
     const candidates = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
-      if (claim.status !== "reviewed") { excluded.push({ claim_id: claim.id, reason: "not_reviewed" }); return []; }
+      const formallyReviewed = claim.status === "reviewed" && knowledgeClaimPromotionProofVerified(this.store, claim);
+      if (!formallyReviewed && !(claim.status === "candidate" && candidateSet.has(String(claim.id)))) { excluded.push({ claim_id: claim.id, reason: "not_reviewed" }); return []; }
       if (claim.valid_until && Date.parse(String(claim.valid_until)) < now) { excluded.push({ claim_id: claim.id, reason: "expired" }); return []; }
       if (claim.scope !== "global" && claim.scope !== scope) { excluded.push({ claim_id: claim.id, reason: "out_of_scope" }); return []; }
       const claimContent = claim.content_ref ? this.store.contentStore.readCompatSync(claim.content_ref as never, typeof claim.scope === "string" ? claim.scope : undefined).body : String(claim.content ?? "");
-      const haystack = `${claimContent} ${(claim.tags as string[]).join(" ")}`;
+      const tags = Array.isArray(claim.tags) ? claim.tags.map(String) : [];
+      const haystack = `${claimContent} ${tags.join(" ")}`;
       if (haystack.trim()) index.add(String(claim.id), haystack);
       return [{ claim, content: claimContent }];
     });
@@ -2917,12 +2938,12 @@ export class CraftService extends ServiceFoundation {
     }).sort((left, right) => right.score - left.score || String(left.claim.id).localeCompare(String(right.claim.id)));
     const included: JsonObject[] = []; let usedChars = 0;
     for (const item of matched) {
-      const content = assertNoSecret(text(item.content, "claim.content"), "claim.content"); const rendered = `[Knowledge ${item.claim.id}]\n${content}\nEvidence: ${(item.claim.evidence_ids as string[]).join(", ")}\n`;
+      const content = assertNoSecret(text(item.content, "claim.content"), "claim.content"); const evidenceIds = Array.isArray(item.claim.evidence_ids) ? item.claim.evidence_ids.map(String) : []; const rendered = `[Knowledge ${item.claim.id}]\n${content}\nEvidence: ${evidenceIds.join(", ")}\n`;
       if (included.length >= maxItems || usedChars + rendered.length > maxChars) { excluded.push({ claim_id: item.claim.id, reason: "budget" }); continue; }
-      usedChars += rendered.length; included.push({ claim_id: item.claim.id, claim_version: item.claim.version, content, evidence_ids: item.claim.evidence_ids, score: item.score, valid_until: item.claim.valid_until });
+      usedChars += rendered.length; included.push({ claim_id: item.claim.id, claim_version: item.claim.version, content, evidence_ids: evidenceIds, score: item.score, valid_until: item.claim.valid_until });
     }
     const context = included.map((item) => `[Knowledge ${item.claim_id}]\n${item.content}\nEvidence: ${(item.evidence_ids as string[]).join(", ")}\n`).join("\n"); const bundleId = String(args.bundle_id ?? id("wiki_context_bundle")); const existing = this.store.find("wiki_context_bundle", bundleId);
-    const identity = { query, scope, max_items: maxItems, max_chars: maxChars, now: args.now ?? null };
+    const identity = { query, scope, max_items: maxItems, max_chars: maxChars, now: args.now ?? null, candidate_claim_ids: [...candidateSet].sort() };
     if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Wiki context bundle idempotency conflict"); return { bundle: existing, context, included, excluded, idempotent: true }; }
     const bundle = this.store.create("wiki_context_bundle", bundleId, { ...identity, identity_digest: valueDigest(identity), context_digest: valueDigest(context), claim_refs: included.map((item) => ({ claim_id: item.claim_id, claim_version: item.claim_version })), excluded, used_chars: usedChars, semantic_retrieval: "disabled_by_default" });
     return { bundle, context, included, excluded, idempotent: false };
@@ -2931,7 +2952,7 @@ export class CraftService extends ServiceFoundation {
   wikiContextBundleList(args: JsonObject): JsonObject { return this.list("wiki_context_bundle", "bundles", args); }
   wikiSkillCandidateCreate(args: JsonObject): JsonObject {
     const title = assertNoSecret(text(args.title, "title"), "title"); const kind = text(args.kind, "kind"); if (!new Set(["skill", "workflow"]).has(kind)) throw new Error("Wiki capability candidate kind is unsupported");
-    const claimIds = uniqueTextArray(args.claim_ids, "claim_ids", 2); const claims = claimIds.map((item) => this.store.get("knowledge_claim", item)); if (claims.some((item) => item.status !== "reviewed")) throw new Error("Wiki capability candidate requires reviewed claims");
+    const claimIds = uniqueTextArray(args.claim_ids, "claim_ids", 2); const claims = claimIds.map((item) => this.store.get("knowledge_claim", item)); if (claims.some((item) => !knowledgeClaimPromotionProofVerified(this.store, item))) throw new Error("Wiki capability candidate requires independently verified formal Knowledge claims");
     const instructions = assertNoSecret(document(args.instructions, "instructions"), "instructions"); const applicability = assertNoSecret(document(args.applicability, "applicability"), "applicability"); const fallback = assertNoSecret(document(args.fallback_condition, "fallback_condition"), "fallback_condition");
     const candidateId = String(args.candidate_id ?? id("wiki_skill_candidate")); const existing = this.store.find("wiki_skill_candidate", candidateId); const identity = { title, kind, claim_ids: claimIds, instructions, applicability, fallback_condition: fallback };
     if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Wiki capability candidate idempotency conflict"); return { candidate: existing, idempotent: true }; }
@@ -3022,6 +3043,23 @@ export class CraftService extends ServiceFoundation {
   assuredPilotGet(args: JsonObject): JsonObject { return this.assuredPilot.get(args); }
   knowledgeEvaluationCaseSave(args: JsonObject): JsonObject {
     const query = assertNoSecret(text(args.query, "query"), "query"); const scope = String(args.scope ?? "global"); const expected = uniqueTextArray(args.expected_claim_ids, "expected_claim_ids"); expected.forEach((item) => this.store.get("knowledge_claim", item));
+    const candidateClaimRefs = args.candidate_claim_refs === undefined ? undefined : (() => {
+      if (!Array.isArray(args.candidate_claim_refs) || args.candidate_claim_refs.length > 100) throw new Error("candidate_claim_refs must be an array of at most 100 current candidate refs");
+      const refs = args.candidate_claim_refs.map((value, index) => {
+        const ref = object(value, `candidate_claim_refs[${index}]`);
+        const claimId = text(ref.claim_id, `candidate_claim_refs[${index}].claim_id`);
+        const claim = this.store.get("knowledge_claim", claimId);
+        const version = finiteInteger(ref.claim_version, `candidate_claim_refs[${index}].claim_version`, 1);
+        if (claim.status !== "candidate" || claim.version !== version
+          || (claim.identity_digest ?? null) !== (ref.identity_digest ?? null)
+          || (claim.content_digest ?? null) !== (ref.content_digest ?? null)) throw new Error("candidate_claim_refs must bind current candidate Claim versions");
+        return { claim_id: claimId, claim_version: version, identity_digest: claim.identity_digest ?? null, content_digest: claim.content_digest ?? null };
+      });
+      if (new Set(refs.map((ref) => ref.claim_id)).size !== refs.length || expected.some((claimId) => !refs.some((ref) => ref.claim_id === claimId))) {
+        throw new Error("candidate_claim_refs must be unique and include every expected candidate Claim");
+      }
+      return refs;
+    })();
     const provenance = {
       ...(args.source_session_id === undefined ? {} : { source_session_id: text(args.source_session_id, "source_session_id") }),
       ...(args.source_task_id === undefined ? {} : { source_task_id: text(args.source_task_id, "source_task_id") }),
@@ -3031,20 +3069,315 @@ export class CraftService extends ServiceFoundation {
       ...(args.label_source === undefined ? {} : { label_source: text(args.label_source, "label_source") }),
       ...(args.sanitized === undefined ? {} : { sanitized: args.sanitized }),
     };
-    const caseId = String(args.case_id ?? id("knowledge_evaluation_case")); const existing = this.store.find("knowledge_evaluation_case", caseId); const identity = { query, scope, expected_claim_ids: expected, ...provenance };
+    const caseId = String(args.case_id ?? id("knowledge_evaluation_case")); const existing = this.store.find("knowledge_evaluation_case", caseId); const identity = { query, scope, expected_claim_ids: expected, ...provenance,
+      ...(candidateClaimRefs === undefined ? {} : { candidate_claim_refs: candidateClaimRefs }) };
     if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge evaluation case idempotency conflict"); return { case: existing, idempotent: true }; }
     const evidence = knowledgeEvaluationEvidence(this.store, identity);
+    if (identity.label_source === "host_adjudicated") throw new Error("host_adjudicated labels can only be created from a completed Knowledge adjudication Trace");
     const assessment = assessKnowledgeEvaluationProvenance(identity, evidence.sourceEvidence, evidence.claimEvidence);
     return { case: this.store.create("knowledge_evaluation_case", caseId, { ...identity, ...assessment, identity_digest: valueDigest(identity) }), idempotent: false };
   }
-  knowledgeEvaluationCaseList(args: JsonObject): JsonObject { return this.list("knowledge_evaluation_case", "cases", args); }
+  /** The public MCP path owns both the model execution and its Trace. */
+  async knowledgeEvaluationCaseAdjudicateManaged(args: JsonObject): Promise<JsonObject> {
+    const caseId = text(args.case_id, "case_id");
+    const release = await acquireLearningWorkerLocks(this.store.paths.runtimeDir,
+      [`knowledge-adjudication-${stableDigest(caseId).slice(-24)}`]);
+    if (!release) throw new Error("Knowledge adjudication is already running for this case");
+    try { return await this.knowledgeEvaluationCaseAdjudicateManagedLocked(args); }
+    finally { await release(); }
+  }
+  private async knowledgeEvaluationCaseAdjudicateManagedLocked(args: JsonObject): Promise<JsonObject> {
+    const caseId = text(args.case_id, "case_id");
+    const expectedVersion = finiteInteger(args.expected_version, "expected_version", 1);
+    const current = this.store.get("knowledge_evaluation_case", caseId);
+    if (current.version !== expectedVersion || current.label_source !== "model_candidate" || current.adjudication_id
+      || current.dataset_partition !== "held_out" || current.evaluation_channel !== "real_session" || current.sanitized !== true) {
+      throw new Error("Knowledge case is not a current sanitized held-out candidate");
+    }
+    const candidateRefs = Array.isArray(current.candidate_claim_refs) && current.candidate_claim_refs.length
+      ? current.candidate_claim_refs as JsonObject[] : [];
+    const claimRefs: JsonObject[] = candidateRefs.length ? candidateRefs
+      : (current.expected_claim_ids as string[]).map(claim_id => ({ claim_id }));
+    const independentCase = { ...current, label_source: "host_adjudicated", expected_claim_ids: claimRefs.map(ref => String(ref.claim_id)) };
+    const independentEvidence = knowledgeEvaluationEvidence(this.store, independentCase);
+    if (!assessKnowledgeEvaluationProvenance(independentCase, independentEvidence.sourceEvidence,
+      independentEvidence.claimEvidence, true).evaluation_eligible) throw new Error("Knowledge adjudication requires independent verified task Evidence");
+    const claims: JsonObject[] = [];
+    for (const ref of claimRefs) {
+      const packetResult = this.knowledgeSemanticReviewPacket({ claim_id: ref.claim_id });
+      if (packetResult.status !== "ready" || !["candidate", "reviewed"].includes(String(packetResult.claim_status))) {
+        throw new Error("Knowledge adjudication Claim is unavailable");
+      }
+      const claim = object(object(packetResult.packet, "Knowledge review packet").claim, "Knowledge Claim");
+      const storedClaim = this.store.get("knowledge_claim", String(ref.claim_id));
+      if (claim.id !== ref.claim_id || candidateRefs.length && (claim.version !== ref.claim_version
+        || storedClaim.identity_digest !== ref.identity_digest || claim.content_digest !== ref.content_digest)
+        || typeof claim.content !== "string" || !claim.content.trim()) throw new Error("Knowledge adjudication Claim changed");
+      claims.push({ claim_id: claim.id, claim_version: claim.version, title: claim.title ?? "", content: claim.content, tags: claim.tags ?? [] });
+    }
+    const evidence: JsonObject[] = [];
+    for (const evidenceId of current.source_evidence_ids as string[]) {
+      const item = this.store.get("evidence", evidenceId);
+      const metadata = item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? item.metadata as JsonObject : {};
+      if (!["confirmed", "program"].includes(String(item.confidence)) || metadata.source_session_id !== current.source_session_id
+        || metadata.task_id !== current.source_task_id) throw new Error("Knowledge held-out Evidence is not verified");
+      evidence.push({ evidence_id: item.id, source_type: item.source_type, confidence: item.confidence,
+        claim: typeof item.claim === "string" ? item.claim : "", source_session_id: metadata.source_session_id, task_id: metadata.task_id });
+    }
+    const binding = knowledgeEvaluationCaseBindingDigest(current);
+    const resultId = `knowledge_adjudication_result_${stableDigest({ case_id: caseId, binding }).slice(-24)}`;
+    const previousResult = this.store.find("knowledge_evaluation_adjudication_result", resultId);
+    if (previousResult) return this.finishManagedKnowledgeAdjudication(current, previousResult);
+    const profileResult = this.evaluationModelProfileEnsureSingle({ purpose: "knowledge_scenario_classification" });
+    if (profileResult.status !== "ready_for_adapter") throw new Error("Knowledge adjudication model profile is not ready");
+    const profile = object(profileResult.profile, "Knowledge adjudication profile");
+    const detail = this.evaluationModelProfileGet({ profile_id: profile.id, version: profile.version });
+    if (object(detail.readiness, "Knowledge adjudication readiness").status !== "ready_for_adapter"
+      || profile.provider !== "codex-cli" || profile.model !== "gpt-6-luna") throw new Error("Knowledge adjudication requires ready Codex CLI gpt-6-luna");
+    const provider = this.modelProviders.find(item => item.provider === "codex-cli");
+    if (!provider) throw new Error("Codex CLI provider is unavailable");
+    const packet = redactKnowledgeModelText({ query: current.query, initial_expected_claim_ids: current.expected_claim_ids,
+      candidate_claims: claims, verified_held_out_evidence: evidence, sanitized: true, source_content_stored: false }) as JsonObject;
+    const inputDigest = stableDigest({ purpose: "knowledge_held_out_adjudication.v1", candidate_binding: binding, packet });
+    const system = `你是留出评测标签的第二阶段审定器。独立核对任务目标、该任务的可验证结果证据和初始标签。decision=accepted 表示原 expected_claim_ids 全部正确；decision=corrected 表示给出正确的 Claim ID；证据不足或冲突时选择 uncertain；标签与证据矛盾时选择 rejected。只能返回给定 Claim ID，不能推断未提供的事实。返回 JSON，包含 decision 和 expected_claim_ids。该审定是机器判断，不是人工真值。${generatedTextLanguageInstruction(this.contentLanguage)}`;
+    const request = buildChatRequest(provider, { model: "gpt-6-luna", messages: [{ role: "system", content: system },
+      { role: "user", content: JSON.stringify(packet) }], max_tokens: Math.min(Number(profile.max_output_tokens ?? 1_024), 1_024), temperature: 0 });
+    request.body.codex_output_schema = { type: "object", properties: { decision: { type: "string", enum: ["accepted", "corrected", "rejected", "uncertain"] },
+      expected_claim_ids: { type: "array", items: { type: "string", minLength: 1, maxLength: 160 }, maxItems: 8 } },
+    required: ["decision", "expected_claim_ids"], additionalProperties: false };
+    const transport = this.knowledgeAdjudicationTransportFactory();
+    if (transport.acquireCall && !transport.acquireCall(provider.provider)) throw new Error("Knowledge adjudication model call budget exhausted");
+    const fingerprint = stableDigest({ provider: provider.provider, model: profile.model });
+    const traceId = String(object(this.traceStart({ task_id: `knowledge:adjudication:${caseId}`, operation_id: caseId,
+      model_fingerprint: fingerprint, capability_fingerprint: `craft-knowledge:${CRAFT_RELEASE_VERSION}`,
+      metadata: { purpose: "knowledge_held_out_adjudication", case_binding_digest: binding, input_digest: inputDigest,
+        content_stored: false } }).trace, "Knowledge adjudication Trace").id);
+    let resultPersisted = false;
+    try {
+      this.traceAppend({ trace_id: traceId, event_kind: "model.request", actor: "knowledge-session-adjudication-worker",
+        source: "codex-cli-learning-transport", trust: "observed", input_refs: [binding, inputDigest], model_fingerprint: fingerprint,
+        data: { case_binding_digest: binding, input_digest: inputDigest, content_stored: false }, summary: "已提交绑定到留出案例版本的脱敏二次审定请求" });
+      const response = await transport.complete(provider, request);
+      if (response.model !== "gpt-6-luna") throw new Error("Knowledge adjudication Host returned a different model");
+      let output: JsonObject;
+      try { output = object(JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, "")), "Knowledge adjudication output"); }
+      catch { throw new Error("Knowledge adjudicator must return one JSON object"); }
+      const decision = text(output.decision, "decision");
+      const labels = Array.isArray(output.expected_claim_ids) ? output.expected_claim_ids : null;
+      const allowed = new Set(claimRefs.map(ref => String(ref.claim_id)));
+      if (!labels || labels.length > 8 || labels.some(id => typeof id !== "string" || !allowed.has(id))
+        || !["accepted", "corrected", "rejected", "uncertain"].includes(decision)
+        || decision === "accepted" && stableDigest(labels) !== stableDigest(current.expected_claim_ids)
+        || decision === "corrected" && (labels.length === 0 || !candidateRefs.length || stableDigest(labels) === stableDigest(current.expected_claim_ids))
+        || ["rejected", "uncertain"].includes(decision) && labels.length !== 0) throw new Error("Knowledge adjudication output does not match the bound candidate labels");
+      const responseDigest = stableDigest(response.text);
+      const result = this.store.create("knowledge_evaluation_adjudication_result", resultId, {
+        scope: current.scope, case_id: caseId, case_version: expectedVersion, case_binding_digest: binding,
+        trace_id: traceId, input_digest: inputDigest, response_digest: responseDigest,
+        decision, expected_claim_ids: labels, model_fingerprint: fingerprint, usage: response.usage ?? null,
+        content_stored: false, execution_origin: "managed_codex_cli",
+      });
+      resultPersisted = true;
+      return this.finishManagedKnowledgeAdjudication(current, result, 1);
+    } catch (error) {
+      if (!resultPersisted) {
+        this.traceAppend({ trace_id: traceId, event_kind: "model.failed", actor: "knowledge-session-adjudication-worker",
+          source: "craft-knowledge", trust: "observed", model_fingerprint: fingerprint,
+          data: { case_binding_digest: binding, input_digest: inputDigest,
+            failure_kind: error instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(error.name) ? error.name : "Error" },
+          summary: "留出案例二次审定未完成" });
+        this.traceFinalize({ trace_id: traceId, status: "failed", summary: "留出案例二次审定未完成" });
+      }
+      throw error;
+    }
+  }
+  private finishManagedKnowledgeAdjudication(current: JsonObject, result: JsonObject, modelCalls = 0): JsonObject {
+    const caseId = String(current.id), binding = knowledgeEvaluationCaseBindingDigest(current);
+    if (result.execution_origin !== "managed_codex_cli" || result.case_id !== caseId
+      || result.case_version !== current.version || result.case_binding_digest !== binding
+      || result.scope !== current.scope || typeof result.trace_id !== "string") {
+      throw new Error("Knowledge adjudication recovery result does not match the current case");
+    }
+    const bundle = object(this.trace.get({ trace_id: result.trace_id }), "Knowledge adjudication recovery Trace");
+    const trace = object(bundle.trace, "Knowledge adjudication recovery Trace");
+    const events = Array.isArray(bundle.events) ? bundle.events as JsonObject[] : [];
+    if (trace.task_id !== `knowledge:adjudication:${caseId}` || trace.model_fingerprint !== result.model_fingerprint
+      || !["running", "completed"].includes(String(trace.status))) throw new Error("Knowledge adjudication recovery Trace is invalid");
+    const hasEvent = (kind: string) => events.some(event => event.event_kind === kind);
+    if (!hasEvent("model.request")) throw new Error("Knowledge adjudication recovery is missing its model request");
+    if (trace.status === "running") {
+      if (!hasEvent("model.completed")) this.traceAppend({ trace_id: result.trace_id, event_kind: "model.completed",
+        actor: "knowledge-session-adjudication-worker", source: "codex-cli-learning-transport", trust: "observed",
+        model_fingerprint: result.model_fingerprint, ...(result.usage ? { usage: result.usage } : {}),
+        data: { case_binding_digest: binding, input_digest: result.input_digest, response_digest: result.response_digest },
+        summary: "Codex Host 返回了二次审定结果摘要" });
+      if (!hasEvent("knowledge.evaluation_adjudication_candidate")) this.traceAppend({ trace_id: result.trace_id,
+        event_kind: "knowledge.evaluation_adjudication_candidate", actor: "knowledge-session-adjudication-worker",
+        source: "craft-knowledge", trust: "observed", model_fingerprint: result.model_fingerprint,
+        data: { case_binding_digest: binding, input_digest: result.input_digest, response_digest: result.response_digest,
+          decision: result.decision, expected_claim_ids: result.expected_claim_ids },
+        output_refs: [caseId], summary: "已记录留出案例的机器二次审定候选" });
+      this.traceFinalize({ trace_id: result.trace_id, status: "completed", summary: "Knowledge 留出案例二次审定结束" });
+    }
+    return { ...this.knowledgeEvaluationCaseAdjudicate({ case_id: caseId, expected_version: current.version,
+      trace_id: result.trace_id, input_digest: result.input_digest, response_digest: result.response_digest,
+      decision: result.decision, expected_claim_ids: result.expected_claim_ids }, true),
+    trace_id: result.trace_id, model_calls: modelCalls };
+  }
+  knowledgeEvaluationCaseAdjudicate(args: JsonObject, trustedExecution = false): JsonObject {
+    if (!trustedExecution) throw new Error("Knowledge adjudication requires server-owned Host execution");
+    const caseId = text(args.case_id, "case_id"), traceId = text(args.trace_id, "trace_id");
+    const adjudicationId = `knowledge_adjudication_${stableDigest(traceId).slice(-24)}`;
+    const existing = this.store.find("knowledge_evaluation_adjudication", adjudicationId);
+    const currentCase = this.store.get("knowledge_evaluation_case", caseId);
+    if (existing) {
+      if (existing.case_id !== caseId || existing.trace_id !== traceId) throw new Error("Knowledge adjudication idempotency conflict");
+      return { case: currentCase, adjudication: existing, idempotent: true };
+    }
+    const expectedVersion = finiteInteger(args.expected_version, "expected_version", 1);
+    if (currentCase.version !== expectedVersion) throw new Error("Knowledge evaluation case version changed before adjudication");
+    if (currentCase.label_source !== "model_candidate" || currentCase.adjudication_id) throw new Error("Knowledge evaluation case is not awaiting adjudication");
+    const bindingDigest = knowledgeEvaluationCaseBindingDigest(currentCase);
+    const bundle = object(this.trace.get({ trace_id: traceId }), "Knowledge adjudication Trace bundle");
+    const trace = object(bundle.trace, "Knowledge adjudication Trace");
+    const events = Array.isArray(bundle.events) ? bundle.events as JsonObject[] : [];
+    if (trace.status !== "completed" || trace.task_id !== `knowledge:adjudication:${caseId}` || typeof trace.model_fingerprint !== "string") {
+      throw new Error("Knowledge adjudication requires a completed Host Trace bound to the exact case");
+    }
+    const eventFor = (kind: string) => events.find((event) => event.event_kind === kind && event.actor === "knowledge-session-adjudication-worker");
+    const request = eventFor("model.request"), completed = eventFor("model.completed"), result = eventFor("knowledge.evaluation_adjudication_candidate");
+    const inputDigest = text(args.input_digest, "input_digest");
+    const responseDigest = text(args.response_digest, "response_digest");
+    const decision = text(args.decision, "decision");
+    const labels = uniqueTextArray(args.expected_claim_ids, "expected_claim_ids", 0);
+    const expectedRequestDigest = stableDigest({ case_binding_digest: bindingDigest, input_digest: inputDigest, content_stored: false });
+    const expectedCompletionDigest = stableDigest({ case_binding_digest: bindingDigest, input_digest: inputDigest, response_digest: responseDigest });
+    const expectedResultDigest = stableDigest({ case_binding_digest: bindingDigest, input_digest: inputDigest, response_digest: responseDigest,
+      decision, expected_claim_ids: labels });
+    if (!request || !completed || !result || request.source !== "codex-cli-learning-transport" || completed.source !== "codex-cli-learning-transport"
+      || request.trust !== "observed" || completed.trust !== "observed"
+      || request.data_digest !== expectedRequestDigest || completed.data_digest !== expectedCompletionDigest
+        || result.source !== "craft-knowledge" || result.trust !== "observed"
+        || result.data_digest !== expectedResultDigest
+      || request.model_fingerprint !== trace.model_fingerprint || completed.model_fingerprint !== trace.model_fingerprint
+      || result.model_fingerprint !== trace.model_fingerprint || !Array.isArray(request.input_refs) || !request.input_refs.includes(bindingDigest)) {
+      throw new Error("Knowledge adjudication Trace is incomplete or not bound to the current case");
+    }
+    if (!new Set(["accepted", "corrected", "rejected", "uncertain"]).has(decision)) throw new Error("Knowledge adjudication decision is unsupported");
+    if (labels.length > 8) throw new Error("Knowledge adjudication labels must not exceed eight Claims");
+    const candidateRefs = Array.isArray(currentCase.candidate_claim_refs) ? currentCase.candidate_claim_refs as JsonObject[] : [];
+    for (const ref of candidateRefs) {
+      const claim = this.store.get("knowledge_claim", String(ref.claim_id));
+      if (claim.status !== "candidate" || claim.version !== ref.claim_version || (claim.identity_digest ?? null) !== (ref.identity_digest ?? null)
+        || (claim.content_digest ?? null) !== (ref.content_digest ?? null)) throw new Error("Knowledge adjudication candidate Claim changed");
+    }
+    const originalLabels = Array.isArray(currentCase.expected_claim_ids) ? currentCase.expected_claim_ids as string[] : [];
+    const allowedLabels = candidateRefs.length ? candidateRefs.map((ref) => String(ref.claim_id)) : originalLabels;
+    if (labels.some((id) => !allowedLabels.includes(id))) throw new Error("Knowledge adjudication labels must refer to the bound Claims");
+    if (decision === "accepted" && stableDigest(labels) !== stableDigest(originalLabels)
+      || decision === "corrected" && (labels.length === 0 || candidateRefs.length === 0 || stableDigest(labels) === stableDigest(originalLabels))
+      || (decision === "rejected" || decision === "uncertain") && labels.length !== 0) throw new Error("Knowledge adjudication result does not match its decision");
+    const accepted = decision === "accepted" || decision === "corrected";
+    const identity = { query: currentCase.query, scope: currentCase.scope,
+      expected_claim_ids: accepted ? labels : originalLabels,
+      source_session_id: currentCase.source_session_id, source_task_id: currentCase.source_task_id,
+      source_evidence_ids: currentCase.source_evidence_ids, evaluation_channel: currentCase.evaluation_channel,
+      dataset_partition: currentCase.dataset_partition, sanitized: currentCase.sanitized,
+      label_source: accepted ? "host_adjudicated" : "model_candidate", candidate_claim_refs: candidateRefs,
+      adjudication_id: adjudicationId };
+    const nextCaseVersion = Number(currentCase.version) + 1;
+    const nextCaseIdentityDigest = valueDigest(identity);
+    return this.store.transaction(() => {
+      const adjudication = this.store.create("knowledge_evaluation_adjudication", adjudicationId, {
+        scope: currentCase.scope, case_id: caseId, source_case_version: currentCase.version, result_case_version: nextCaseVersion,
+        result_case_identity_digest: nextCaseIdentityDigest, trace_id: traceId, trace_model_fingerprint: trace.model_fingerprint,
+        case_binding_digest: bindingDigest, input_digest: inputDigest, response_digest: responseDigest,
+        decision, expected_claim_ids: accepted ? labels : [], status: accepted ? "adjudicated" : decision,
+        execution_origin: "managed_codex_cli",
+      });
+      const evidence = knowledgeEvaluationEvidence(this.store, identity);
+      const assessment = assessKnowledgeEvaluationProvenance(identity, evidence.sourceEvidence, evidence.claimEvidence, accepted);
+      const nextCase = this.store.save("knowledge_evaluation_case", caseId, { ...recordPayload(currentCase), ...identity,
+        adjudication_id: adjudication.id, adjudication_created_at: adjudication.created_at, adjudication_status: decision,
+        ...assessment, identity_digest: nextCaseIdentityDigest });
+      return { case: nextCase, adjudication, idempotent: false };
+    });
+  }
+  knowledgeEvaluationCaseList(args: JsonObject): JsonObject {
+    if (args.after_id === undefined) return this.list("knowledge_evaluation_case", "cases", args);
+    const afterId = args.after_id === "" ? "" : text(args.after_id, "after_id");
+    if (afterId && !/^[A-Za-z0-9._:-]{1,200}$/u.test(afterId)) throw new Error("after_id is invalid");
+    const limit = finiteInteger(args.limit, "limit", 100, 1, 1_000);
+    const query = String(args.query ?? "").toLowerCase();
+    const page = this.store.listByIdPage("knowledge_evaluation_case", afterId, limit);
+    return { cases: query ? page.records.filter(item => JSON.stringify(item).toLowerCase().includes(query)) : page.records,
+      has_more: page.has_more, next_cursor: page.next_cursor };
+  }
   knowledgeEvaluationRun(args: JsonObject): JsonObject {
     if (args.mode === "citation_support") return { assessment: new ContextHostEvaluation(this.store).evaluateKnowledge(args), changes_routing: false };
-    const caseIds = args.case_ids === undefined ? this.store.list("knowledge_evaluation_case", 10_000).map((item) => String(item.id)) : uniqueTextArray(args.case_ids, "case_ids"); if (!caseIds.length) throw new Error("Knowledge evaluation requires at least one case");
-    const topK = finiteInteger(args.top_k, "top_k", 5, 1, 50); const now = args.now ?? new Date().toISOString(); const results = caseIds.map((caseId) => { const item = this.store.get("knowledge_evaluation_case", caseId); const compiled = this.wikiContextCompile({ query: item.query, scope: item.scope, max_items: topK, max_chars: 100_000, now }); const selected = (compiled.included as JsonObject[]).map((claim) => String(claim.claim_id)); const expected = item.expected_claim_ids as string[]; const matched = expected.filter((claim) => selected.includes(claim)); const evidenceCovered = matched.filter((claim) => Array.isArray(this.store.get("knowledge_claim", claim).evidence_ids) && (this.store.get("knowledge_claim", claim).evidence_ids as unknown[]).length > 0); const provenanceEvidence = knowledgeEvaluationEvidence(this.store, item); const provenance = assessKnowledgeEvaluationProvenance(item, provenanceEvidence.sourceEvidence, provenanceEvidence.claimEvidence); return { case_id: item.id, selected_claim_ids: selected, expected_claim_ids: expected, matched_claim_ids: matched, recall: matched.length / expected.length, evidence_coverage: evidenceCovered.length / expected.length, candidate_leaks: selected.filter((claim) => this.store.get("knowledge_claim", claim).status !== "reviewed"), provenance_status: provenance.status, evaluation_eligible: provenance.evaluation_eligible }; });
-    const recall = results.reduce((total, item) => total + item.recall, 0) / results.length; const evidenceCoverage = results.reduce((total, item) => total + item.evidence_coverage, 0) / results.length; const leaked = results.reduce((total, item) => total + item.candidate_leaks.length, 0); const provenanceEligible = results.every((item) => item.evaluation_eligible); const minRecall = Number(args.min_recall ?? 1); const minEvidence = Number(args.min_evidence_coverage ?? 1); if (![minRecall, minEvidence].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) throw new Error("Knowledge evaluation thresholds must be between 0 and 1");
-    const runId = String(args.run_id ?? id("knowledge_evaluation_run")); const existing = this.store.find("knowledge_evaluation_run", runId); const identity = { case_ids: caseIds, top_k: topK, now, min_recall: minRecall, min_evidence_coverage: minEvidence }; if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge evaluation run idempotency conflict"); return { run: existing, idempotent: true }; }
-    const run = this.store.create("knowledge_evaluation_run", runId, { ...identity, identity_digest: valueDigest(identity), results, metrics: { recall, evidence_coverage: evidenceCoverage, candidate_leaks: leaked, provenance_eligible: provenanceEligible }, status: recall >= minRecall && evidenceCoverage >= minEvidence && leaked === 0 && provenanceEligible ? "eligible" : "insufficient", changes_routing: false }); return { run, idempotent: false };
+    const mode = args.mode === undefined ? "retrieval" : text(args.mode, "mode");
+    if (mode !== "retrieval" && mode !== "candidate_shadow") throw new Error("Knowledge evaluation mode is unsupported");
+    const caseIds = args.case_ids === undefined ? this.store.list("knowledge_evaluation_case", 10_000).map((item) => String(item.id)) : uniqueTextArray(args.case_ids, "case_ids");
+    if (!caseIds.length) throw new Error("Knowledge evaluation requires at least one case");
+    const candidateClaimIds = mode === "candidate_shadow" ? uniqueTextArray(args.candidate_claim_ids, "candidate_claim_ids") : [];
+    if (mode === "retrieval" && args.candidate_claim_ids !== undefined) throw new Error("candidate_claim_ids require candidate_shadow mode");
+    const candidateClaims = candidateClaimIds.map((claimId) => this.store.get("knowledge_claim", claimId));
+    if (candidateClaims.some((claim) => claim.status !== "candidate")) throw new Error("Candidate shadow evaluation requires current candidate Claims");
+    const candidateRefs = candidateClaims.map((claim) => ({ claim_id: claim.id, claim_version: claim.version,
+      identity_digest: claim.identity_digest ?? null, content_digest: claim.content_digest ?? null }));
+    const topK = finiteInteger(args.top_k, "top_k", 5, 1, 50);
+    const now = args.now ?? new Date().toISOString();
+    const caseRefs: JsonObject[] = [];
+    let truePositives = 0, falsePositives = 0, falseNegatives = 0;
+    const results = caseIds.map((caseId) => {
+      const item = this.store.get("knowledge_evaluation_case", caseId);
+      if (mode === "candidate_shadow" && ["model_candidate", "host_adjudicated"].includes(String(item.label_source))) {
+        const boundRefs = Array.isArray(item.candidate_claim_refs) ? item.candidate_claim_refs as JsonObject[] : [];
+        if (valueDigest(boundRefs) !== valueDigest(candidateRefs)) throw new Error("Model-labeled candidate-shadow cases require exact current candidate Claim refs");
+      }
+      caseRefs.push({ case_id: item.id, case_version: item.version, identity_digest: item.identity_digest ?? null });
+      const compiled = typeof item.query === "string" && item.query.trim()
+        ? this.wikiContextCompile({ query: item.query, scope: item.scope, max_items: topK, max_chars: 100_000, now,
+          ...(mode === "candidate_shadow" ? { candidate_claim_ids: candidateClaimIds } : {}) })
+        : { included: [] };
+      const selected = (compiled.included as JsonObject[]).map((claim) => String(claim.claim_id));
+      const expected = item.expected_claim_ids as string[];
+      const matched = expected.filter((claim) => selected.includes(claim));
+      const evidenceCovered = matched.filter((claim) => Array.isArray(this.store.get("knowledge_claim", claim).evidence_ids) && (this.store.get("knowledge_claim", claim).evidence_ids as unknown[]).length > 0);
+      const provenanceEvidence = knowledgeEvaluationEvidence(this.store, item);
+      const provenance = assessKnowledgeEvaluationProvenance(item, provenanceEvidence.sourceEvidence, provenanceEvidence.claimEvidence,
+        knowledgeEvaluationAdjudicationVerified(this.store, item));
+      const selectedCandidates = selected.filter((claim) => candidateClaimIds.includes(claim));
+      const expectedCandidates = expected.filter((claim) => candidateClaimIds.includes(claim));
+      const matchedCandidates = expectedCandidates.filter((claim) => selectedCandidates.includes(claim));
+      truePositives += matchedCandidates.length;
+      falsePositives += selectedCandidates.filter((claim) => !expectedCandidates.includes(claim)).length;
+      falseNegatives += expectedCandidates.filter((claim) => !selectedCandidates.includes(claim)).length;
+      return { case_id: item.id, selected_claim_ids: selected, expected_claim_ids: expected, matched_claim_ids: matched,
+        recall: matched.length / expected.length, evidence_coverage: evidenceCovered.length / expected.length,
+        candidate_leaks: selected.filter((claim) => this.store.get("knowledge_claim", claim).status !== "reviewed" && !candidateClaimIds.includes(claim)),
+        candidate_false_positive_claim_ids: selectedCandidates.filter((claim) => !expectedCandidates.includes(claim)),
+        provenance_status: provenance.status, evaluation_eligible: provenance.evaluation_eligible };
+    });
+    const recall = results.reduce((total, item) => total + item.recall, 0) / results.length;
+    const evidenceCoverage = results.reduce((total, item) => total + item.evidence_coverage, 0) / results.length;
+    const leaked = results.reduce((total, item) => total + item.candidate_leaks.length, 0);
+    const provenanceEligible = results.every((item) => item.evaluation_eligible);
+    const candidatePrecision = truePositives + falsePositives === 0 ? 1 : truePositives / (truePositives + falsePositives);
+    const candidateRecall = truePositives + falseNegatives === 0 ? 1 : truePositives / (truePositives + falseNegatives);
+    const minRecall = Number(args.min_recall ?? 1), minEvidence = Number(args.min_evidence_coverage ?? 1), minCandidatePrecision = Number(args.min_candidate_precision ?? 1);
+    if (![minRecall, minEvidence, minCandidatePrecision].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) throw new Error("Knowledge evaluation thresholds must be between 0 and 1");
+    const runId = String(args.run_id ?? id("knowledge_evaluation_run"));
+    const existing = this.store.find("knowledge_evaluation_run", runId);
+    const identity = { mode, case_ids: caseIds, candidate_claim_refs: candidateRefs, top_k: topK, now,
+      min_recall: minRecall, min_evidence_coverage: minEvidence, min_candidate_precision: minCandidatePrecision };
+    if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge evaluation run idempotency conflict"); return { run: existing, idempotent: true }; }
+    const status = recall >= minRecall && evidenceCoverage >= minEvidence && candidatePrecision >= minCandidatePrecision
+      && leaked === 0 && provenanceEligible ? "eligible" : "insufficient";
+    const run = this.store.create("knowledge_evaluation_run", runId, { ...identity, case_refs: caseRefs, identity_digest: valueDigest(identity), results,
+      metrics: { recall, evidence_coverage: evidenceCoverage, candidate_leaks: leaked, candidate_precision: candidatePrecision,
+        candidate_recall: candidateRecall, provenance_eligible: provenanceEligible }, status, changes_routing: false });
+    return { run, idempotent: false };
   }
   knowledgeEvaluationRunGet(args: JsonObject): JsonObject { return { run: this.store.get("knowledge_evaluation_run", text(args.run_id, "run_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
   knowledgeEvaluationRunList(args: JsonObject): JsonObject { return this.list("knowledge_evaluation_run", "runs", args); }

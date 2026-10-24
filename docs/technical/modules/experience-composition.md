@@ -34,3 +34,10 @@ Procedure 是复用资产；Entry/Exit 是任务范围契约；Route 是选定�
 - 前置 Evidence 校验其 confidence、scope、condition_ref；时效与当前任务材料关联仍由 Host 验证。
 - 当前是组合 Workflow 的 Host 计划，不含自动重入、持久子流程调度、Graph 子调用展开或视觉流程编辑器。
 - 本轮未执行各厂商编程工具的真实会话验证，未升级正在运行的插件缓存，未上线远程服务。
+
+
+## 定义文件迁移与历史引用
+
+`craft_experience_graph_edit(action: migrate)` 每页最多处理 100 条历史记录。先校验定义摘要并原子发布到所属项目或全局的 Experience 目录，再更新该历史记录的 `definition_ref` 路径。记录版本、定义版本、摘要、状态和时间戳保持不变；旧文件保留，已固定的运行引用仍可读取。
+
+文件复制不持有主库写事务。引用切换只使用对应 Experience 分区的短事务，并校验旧引用；迁移过程中出现新的记录版本或引用变化时拒绝覆盖。失败可能留下已完成迁移的较早记录或尚未被引用的新文件，按当前版本重试即可继续。`has_more` 和 `next_before_version` 保持分页含义；迁移成功不代表晋升或执行授权。MCP 后台任务每分钟最多扫描 5 条历史记录，游标存于全局 Experience 数据区，重启后继续；初始化不执行扫描，可用 `CRAFT_EXPERIENCE_ASSET_MIGRATION=0` 关闭。损坏或不合法的定义会写入所属作用域的 `experience_asset_migration_failure`，仅记录固定原因码和版本等诊断元数据；同批后续条目继续处理，后续扫描重试，修复后标记为 `resolved`。失败诊断写入本身出错时不推进游标。旧文件回收尚未实现。

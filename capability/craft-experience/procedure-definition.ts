@@ -4,7 +4,7 @@
  * Workflow and Graph are machine-readable assets, so Markdown can only be their
  * review view. Prompt Procedures remain Markdown-native and do not use this store.
  */
-import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { linkSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
@@ -140,9 +140,58 @@ export class ProcedureDefinitionStore {
     return value;
   }
 
+  /** Incremental local maintenance; no model calls and no work during initialization. */
+  maintain(limit = 5): JsonObject {
+    const state = this.store.find("experience_asset_migration", "definition-locations");
+    const page = this.store.experienceDefinitionMigrationPage(String(state?.after_id ?? ""), Number(state?.after_version ?? 0), limit);
+    if (!page.length) {
+      if (state && state.after_id !== "") this.store.save("experience_asset_migration", "definition-locations", { ...state, after_id: "", after_version: 0 });
+      return { processed: 0, migrated: 0, status: "idle" };
+    }
+    let migrated = 0, failed = 0;
+    for (const record of page) {
+      const failureId = stableDigest([record.id, record.version]);
+      const prior = this.store.find("experience_asset_migration_failure", failureId);
+      try {
+        if (record.definition_ref != null) {
+          if (!procedureDefinitionRef(record.definition_ref)) throw new Error("Invalid definition reference");
+          const expected = record.definition_ref, next = this.migrate(expected);
+          if (expected.path !== next.path || expected.scope !== next.scope) {
+            this.store.relocateExperienceDefinition(String(record.id), Number(record.version), { ...expected }, { ...next });
+            migrated++;
+          }
+        }
+      } catch {
+        // Keep error bodies and paths out of diagnostic records; retry on a later scan.
+        this.store.save("experience_asset_migration_failure", failureId, { ...prior, scope: record.scope,
+          procedure_id: record.id, procedure_version: record.version, status: "retry_pending",
+          reason: "definition_migration_failed", attempts: Number(prior?.attempts ?? 0) + 1 });
+        failed++;
+        continue;
+      }
+      if (prior?.status === "retry_pending") this.store.save("experience_asset_migration_failure", failureId, { ...prior, status: "resolved" });
+    }
+    const last = page[page.length - 1]!;
+    this.store.save("experience_asset_migration", "definition-locations", { ...state, scope: "global", after_id: last.id, after_version: last.version });
+    return { processed: page.length, migrated, ...(failed ? { failed } : {}), status: "progress" };
+  }
+
   /** Copy a checked legacy revision; old references and active invocations stay valid. */
   migrate(ref: ProcedureDefinitionRef): ProcedureDefinitionRef {
-    const value = this.read(ref); return this.write(value, value.trigger);
+    const value = this.read(ref);
+    const baseDirectory = this.scopeDirectory(value.scope, true);
+    const path = checkedExperiencePath(this.paths, join(experienceGraphDirectory(this.paths, value.procedure_id, false, baseDirectory),
+      "versions", `${String(value.procedure_version).padStart(6, "0")}.json`), true, baseDirectory);
+    const target: ProcedureDefinitionRef = { ...ref, scope: value.scope, path };
+    if (resolve(ref.path) === path) return target;
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    try {
+      try { linkSync(temporary, path); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+      this.read(target);
+    } finally { unlinkSync(temporary); }
+    return target;
   }
 }
 

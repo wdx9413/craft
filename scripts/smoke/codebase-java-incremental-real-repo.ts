@@ -54,7 +54,7 @@ try {
   const incrementalService = new CraftService(incrementalStore);
   const initial = incrementalService.codebaseRepositoryEnsure({ project_root: projectRoot, index_depth: "semantic" });
   assert.equal(initial.status, "ready", JSON.stringify(initial));
-  const analysisCache = new ProjectAnalysisCache(projectRoot, String(initial.workspace_id));
+  const analysisCache = new ProjectAnalysisCache(projectRoot, String(initial.workspace_id), incrementalStore.paths);
   const cachedUnits = analysisCache.list("codebase_java_file_analysis", 2_000) as JsonObject[];
   assert.equal(cachedUnits.length, javaFiles.length, "initial analysis must cache every bounded Java file unit");
   const safeUnits = cachedUnits.filter(unit => unit.incremental_safe === true).sort((left, right) => String(left.path).localeCompare(String(right.path)));

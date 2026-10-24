@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
+import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
 import { canonicalJson, payload, stableDigest } from "./digest.ts";
 import type { ScopeRef } from "./validation.ts";
 
@@ -92,12 +93,14 @@ export class ScopeIdentityKernel {
 
   resolveStack(scope: ScopeRef, args: JsonObject = {}): ScopeResolution {
     const attempted: ScopeRef[] = []; const aliases: JsonObject[] = []; const excluded: JsonObject[] = [];
+    const host = typeof args.session_host === "string" ? args.session_host : undefined;
+    const requested = scope.kind === "session" && host ? { ...scope, id: sessionStorageScopeId(host, scope.id) } : scope;
     // A scope stack is a read order, not an ownership tree.  Work-local scopes
     // form one lane; the explicitly named personal lane is appended separately
     // below.  Team/organization scopes are never discovered by scanning data.
-    if (["task", "session", "team", "organization", "user", "global"].includes(scope.kind)) attempted.push(scope);
-    if (scope.kind === "project" || scope.kind === "workspace" || scope.kind === "task" || scope.kind === "session") {
-      const project = scope.kind === "project" ? scope : this.projectFromArgs(args);
+    if (["task", "session", "team", "organization", "user", "global"].includes(requested.kind)) attempted.push(requested);
+    if (requested.kind === "project" || requested.kind === "workspace" || requested.kind === "task" || requested.kind === "session") {
+      const project = requested.kind === "project" ? requested : this.projectFromArgs(args);
       if (project) {
         const candidates = this.store.list("scope_alias", 10_000, (item) => item.status === "active" && String(item.alias) === project.id);
         const direct = this.store.find("project_identity", project.id);
@@ -113,31 +116,32 @@ export class ScopeIdentityKernel {
         } else attempted.push(project);
       }
     }
-    if (scope.kind !== "session" && typeof args.session_scope_id === "string" && args.session_scope_id.trim()) {
+    if (requested.kind !== "session" && typeof args.session_scope_id === "string" && args.session_scope_id.trim()) {
       // Only a task may inherit another session. A project request cannot silently
       // read arbitrary transient notes from a session supplied by another Host.
       // The current Host may explicitly include its own session when both
       // session identifiers match; Hook memory then remains useful until archive.
-      if (scope.kind === "task") attempted.splice(1, 0, { kind: "session", id: args.session_scope_id.trim() });
-      else if (typeof args.session_id === "string" && args.session_id.trim() === args.session_scope_id.trim()) attempted.push({ kind: "session", id: args.session_scope_id.trim() });
-      else excluded.push({ scope: { kind: "session", id: args.session_scope_id.trim() }, reason: "session_scope_requires_task_request" });
+      const sessionScopeId = host ? sessionStorageScopeId(host, args.session_scope_id.trim()) : args.session_scope_id.trim();
+      if (requested.kind === "task") attempted.splice(1, 0, { kind: "session", id: sessionScopeId });
+      else if (typeof args.session_id === "string" && args.session_id.trim() === args.session_scope_id.trim()) attempted.push({ kind: "session", id: sessionScopeId });
+      else excluded.push({ scope: { kind: "session", id: sessionScopeId }, reason: "session_scope_requires_task_request" });
     }
     for (const kind of ["team", "organization"] as const) {
       const key = `${kind}_scope_id`;
-      if (scope.kind === kind) continue;
+      if (requested.kind === kind) continue;
       if (typeof args[key] === "string" && args[key].trim()) attempted.push({ kind, id: args[key].trim() });
       else excluded.push({ scope: { kind, id: null }, reason: `${key}_not_supplied` });
     }
     // A project/task turn may inherit one *explicitly named* user scope.  It
     // never guesses a user id and never scans user records, which keeps the
     // task → project → user order useful without creating a global fallback.
-    if (scope.kind !== "user" && typeof args.user_scope_id === "string" && args.user_scope_id.trim()) {
+    if (requested.kind !== "user" && typeof args.user_scope_id === "string" && args.user_scope_id.trim()) {
       attempted.push({ kind: "user", id: args.user_scope_id.trim() });
-    } else if (scope.kind !== "user") excluded.push({ scope: { kind: "user", id: null }, reason: "explicit_user_scope_not_supplied" });
+    } else if (requested.kind !== "user") excluded.push({ scope: { kind: "user", id: null }, reason: "explicit_user_scope_not_supplied" });
     if (args.include_global === true) attempted.push({ kind: "global", id: "global" });
     else excluded.push({ scope: { kind: "global", id: "global" }, reason: "explicit_global_not_requested" });
     const unique = attempted.filter((item, index, list) => list.findIndex((other) => other.kind === item.kind && other.id === item.id) === index);
-    return { canonical_scope: unique.find((item) => item.kind === scope.kind) ?? scope, matched_aliases: aliases, attempted_scopes: unique, excluded_scopes: excluded };
+    return { canonical_scope: unique.find((item) => item.kind === requested.kind) ?? requested, matched_aliases: aliases, attempted_scopes: unique, excluded_scopes: excluded };
   }
 
   private projectFromArgs(args: JsonObject): ScopeRef | null {

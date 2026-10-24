@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,9 +10,11 @@ import { stableDigest as digest } from "../common/craft-common-base/src/digest.t
 import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
 import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
+import type { ContextContributionProvider } from "../core/capability-protocol.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
+import { contextAssetRef } from "../common/craft-common-base/src/context-assets.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-contribution-"));
@@ -28,15 +31,26 @@ const request = (query: string, overrides: Partial<{ max_items: number; max_char
 
 function procedure(store: CraftStore, args: { id: string; title: string; trigger: string; kind?: "workflow" | "graph" | "prompt"; lifecycle?: string; scope?: string }): JsonObject {
   const kind = args.kind ?? "workflow";
+  const scope = args.scope ?? "project:p";
+  ensureProjectScope(store, scope);
   const ref = store.contentStore.writeSync({
     kind: "experience", record_id: args.id, version: 1, title: args.title, folder: kind === "workflow" ? "workflows" : kind === "graph" ? "graphs" : "prompts",
-    scope: args.scope ?? "project:p", status: args.lifecycle ?? "routeable", sensitivity: "internal", source_id: "fixture", body: `# ${args.title}\n\nUse this verified procedure.`,
+    scope, status: args.lifecycle ?? "routeable", sensitivity: "internal", source_id: "fixture", body: `# ${args.title}\n\nUse this verified procedure.`,
   });
   return store.create("experience_procedure", args.id, {
-    procedure_kind: kind, scope: args.scope ?? "project:p", trigger: args.trigger, title: args.title,
+    procedure_kind: kind, scope, trigger: args.trigger, title: args.title,
     acceptance_ref: "acceptance:fixture", scenario_signature: { project: "p", target_class: "fixture" },
     lifecycle: args.lifecycle ?? "routeable", routeable: (args.lifecycle ?? "routeable") === "routeable", content_ref: ref, content_digest: ref.digest,
   });
+}
+
+function ensureProjectScope(store: CraftStore, scope: string): void {
+  if (!scope.startsWith("project:")) return;
+  const id = scope.slice("project:".length);
+  if (store.list("scope_alias", 10_000, item => item.alias_kind === "path" && (item.scope as JsonObject | undefined)?.id === `project:${id}`).length) return;
+  const projectRoot = join(store.paths.root, `fixture-project-${id}`); mkdirSync(projectRoot, { recursive: true });
+  store.create("scope_alias", `fixture-project-${id}`, { status: "active", scope: { kind: "project", id: `project:${id}` },
+    alias_kind: "path", alias: projectRoot, alias_digest: digest(projectRoot) });
 }
 
 test("Experience is a Context member, but only routeable Procedure projections are injected", async () => {
@@ -75,6 +89,32 @@ test("Experience honors scope, query and budget without falling back to diagnost
   } finally { await close(f); }
 });
 
+test("Experience keeps an exact required Procedure in its bounded shortlist", async () => {
+  const f = await fixture();
+  try {
+    procedure(f.store, { id: "a", title: "Rollback one", trigger: "rollback" });
+    procedure(f.store, { id: "b", title: "Rollback two", trigger: "rollback" });
+    const target = (await f.contribution.contribute(request("rollback"))).items.find(item => item.procedure_id === "b")!;
+    const selected = await f.contribution.contribute({ ...request("rollback", { max_items: 1 }), candidate_mode: true,
+      required_refs: [contextAssetRef("experience", target, target.scope as JsonObject)] });
+    assert.deepEqual(selected.items.map(item => item.procedure_id), ["b"]);
+  } finally { await close(f); }
+});
+
+test("Experience candidate shortlist ranks a late matching Procedure before the cap", async () => {
+  const f = await fixture();
+  try {
+    for (let index = 0; index < 25; index += 1) procedure(f.store, {
+      id: `a-${String(index).padStart(2, "0")}`, title: "Generic procedure", trigger: "ordinary task",
+    });
+    procedure(f.store, { id: "z-target", title: "Precise task", trigger: "needle verification" });
+    const selected = await f.contribution.contribute({ ...request("needle", { max_items: 24, max_chars: 100_000 }), candidate_mode: true });
+    assert.equal(selected.items.length, 24);
+    assert.equal(selected.items[0]?.procedure_id, "z-target");
+    assert.equal(selected.omitted_count, 2);
+  } finally { await close(f); }
+});
+
 test("Experience reaches Context Resolution beside Knowledge and remains replayable", async () => {
   const f = await fixture();
   try {
@@ -91,6 +131,27 @@ test("Experience reaches Context Resolution beside Knowledge and remains replaya
   } finally { await close(f); }
 });
 
+test("Context retrieval handles Experience text fallbacks only when each field is present", async () => {
+  const f = await fixture();
+  try {
+    const records = [
+      f.store.create("experience_procedure", "content-fallback", { scope: "project:p", procedure_kind: "workflow", content: "alpha content" }),
+      f.store.create("experience_procedure", "trigger-fallback", { scope: "project:p", procedure_kind: "workflow", trigger: "alpha trigger" }),
+      f.store.create("experience_procedure", "empty-fallback", { scope: "project:p", procedure_kind: "workflow" }),
+    ];
+    const items = records.map(record => ({ ...record, procedure_id: record.id, procedure_version: record.version }));
+    const provider: ContextContributionProvider = { member: "experience", async contribute() {
+      return { member: "experience", items, receipt_id: "experience-fallbacks", omitted_count: 0 };
+    } };
+    const kernel = new ContextResolutionKernel(f.store, [provider]);
+    const resolved = await kernel.resolve({ ...request("alpha"), members: ["experience"], required_refs: items.map(item => ({
+      member: "experience", id: item.procedure_id, version: item.procedure_version,
+    })) });
+    const projected = (resolved.contributions as JsonObject[]).flatMap(part => part.items as JsonObject[]);
+    assert.equal(projected.length, 3);
+  } finally { await close(f); }
+});
+
 test("Fresh or candidate-only Experience produces an empty Context contribution", async () => {
   const f = await fixture();
   try {
@@ -99,6 +160,7 @@ test("Fresh or candidate-only Experience produces an empty Context contribution"
       diagnostics: { scoped_procedure_count: 1, has_draft: false, routeable_count: 0, candidate_count: 1, reason: "no_promoted_release", next_tool: "craft_experience_graph_inspect", next_action: "diagnose", execution_started: false } });
     const empty = await f.contribution.contribute({ ...request("anything"), scope_id: "empty" });
     assert.equal((empty.diagnostics as JsonObject).reason, "no_accessible_procedure_in_scope");
+    ensureProjectScope(f.store, "project:draft-only");
     f.store.create("experience_graph_draft", "draft-only", { scope: "project:draft-only", lifecycle: "draft" });
     const draft = await f.contribution.contribute({ ...request("anything"), scope_id: "draft-only" });
     assert.equal((draft.diagnostics as JsonObject).reason, "draft_not_submitted");

@@ -1,6 +1,7 @@
 import { ComponentTraceKernel } from "../component-trace.ts";
 import { randomUUID as hookRequestId } from "node:crypto";
 import { assertContextReadCurrent } from "../context-access-guard.ts";
+import { contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
 /**
  * Bounded Codex lifecycle integration for Craft Context and its standalone products.
  *
@@ -14,6 +15,8 @@ import { join, relative, resolve, sep } from "node:path";
 import { projectIdentityFromRoot } from "../scope-identity.ts";
 import type { CraftService } from "../application/craft-service.ts";
 import type { JsonObject } from "../infrastructure/store.ts";
+import { estimateTokens } from "../token-budget.ts";
+import { retrievalExcerpt } from "../../common/craft-common-base/src/retrieval-excerpt.ts";
 import { payload, stableDigest } from "../digest.ts";
 import { projectExperienceDirectory } from "../project-experience-directory.ts";
 import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGoal } from "../experience-task-goals.ts";
@@ -22,6 +25,43 @@ import { CRAFT_RELEASE_VERSION } from "../version.ts";
 
 type ComponentHookMember = "knowledge" | "memory" | "experience";
 export type CodexHookMember = "context" | ComponentHookMember;
+const HOOK_ADDITIONAL_CONTEXT_BUDGET: Record<CodexHookMember, number> = { context: 400, knowledge: 150, memory: 150, experience: 150 };
+interface HookCandidate { member: string; item: JsonObject; output: JsonObject }
+interface HookEmissionCandidate { candidate: HookCandidate; ref: JsonObject | null }
+
+function compactHookItem(item: JsonObject, query: string, maxChars: number): JsonObject {
+  const content = String(item.content);
+  const prior = item.content_excerpt && typeof item.content_excerpt === "object" ? item.content_excerpt as JsonObject : {};
+  // A previous projection with unknown source offsets cannot safely be treated
+  // as a complete source. Keep its reference but never compact its body again:
+  // doing so would attach a new excerpt range to text whose origin is unknown.
+  if (item.content_excerpt && !Number.isSafeInteger(prior.source_start)) {
+    return { ...item, content: "", content_excerpt: {
+      ...prior, source_start: null, source_end: null,
+      source_chars: Number.isSafeInteger(prior.source_chars) ? prior.source_chars : content.length,
+      reason: "requires_expansion",
+    } };
+  }
+  const excerpt = retrievalExcerpt(content, query, maxChars);
+  const sourceStart = Number.isSafeInteger(prior.source_start) ? Number(prior.source_start) : 0;
+  return { ...item, content: excerpt.text, content_excerpt: {
+    source_start: excerpt.source_start === null ? null : sourceStart + excerpt.source_start,
+    source_end: excerpt.source_end === null ? null : sourceStart + excerpt.source_end,
+    source_chars: Number.isSafeInteger(prior.source_chars) ? Number(prior.source_chars) : excerpt.source_chars,
+    reason: excerpt.reason,
+    ...(excerpt.matched_terms ? { matched_terms: excerpt.matched_terms } : {}),
+  } };
+}
+
+function knowledgeHookProjection(item: JsonObject): JsonObject {
+  return Object.fromEntries(["claim_id", "claim_version", "content", "content_excerpt", "content_digest", "source_id", "evidence_ids"]
+    .filter(key => item[key] !== undefined).map(key => [key, item[key]]));
+}
+
+function experienceHookProjection(item: JsonObject): JsonObject {
+  return Object.fromEntries(["procedure_id", "procedure_version", "procedure_kind", "trigger", "content_digest", "definition_digest", "routeable", "host_next_step"]
+    .filter(key => item[key] !== undefined).map(key => [key, item[key]]));
+}
 const CONTEXT_MEMBERS: readonly ComponentHookMember[] = ["knowledge", "memory", "experience"];
 type HookEvent = "SessionStart" | "SessionEnd" | "UserPromptSubmit" | "PostToolUse" | "Stop";
 type HookInput = JsonObject & {
@@ -86,8 +126,9 @@ export function automaticMemoryFact(prompt: unknown): string | null {
   const source = text(prompt);
   if (!source || source.length > 1_000 || /(?:无需|不用|不要|别)(?:记录|记住|保存)|(?:do not|don't)\s+(?:remember|save|store)/iu.test(source) || SECRET.test(source)) return null;
   const match = /^(?:(?:本项目|这个项目|该项目)(?:的)?(?:约定|规范|默认规则)(?:是)?\s*[:：,，]?\s*|(?:本项目|这个项目|该项目)(?:目前)?(?:默认)?(?:使用|采用|基于)\s*[:：,，]?\s*|(?:以后|今后)(?:在本项目中)?(?:请)?(?:默认)?(?:使用|采用|遵循|保持|优先|避免|不要|总是)\s*[:：,，]?\s*|(?:我们约定|项目要求|编码规范是)\s*[:：,，]?\s*|(?:我偏好|我更喜欢|我的默认偏好是|我长期使用|我习惯)\s*[:：,，]?\s*|(?:this project uses|our project uses|by default,? use|from now on,? use|our convention is|I prefer|I usually use)\s*[:：,，]?\s*)(.+)$/iu.exec(source);
-  const fact = match?.[1]?.trim();
-  return fact && fact.length <= 700 ? fact : null;
+  // Classification must not strip the subject, negation, priority or conditions
+  // from a stable fact: those words determine what a promoted Memory means.
+  return match && source.length <= 700 ? source : null;
 }
 
 /** Keep only a short, redacted task goal for project Experience classification. */
@@ -129,7 +170,7 @@ function projectScenarioKey(input: HookInput, signal: Signal, service: CraftServ
     const scope = codexProjectScope(root)!;
     const directory = projectExperienceDirectory(service.store, scope.id, root);
     const path = join(directory, "experience-scenarios.json");
-    for (const entry of [join(root, ".craft_data"), directory, path]) {
+    for (const entry of [directory, path]) {
       const info = lstatSync(entry);
       if (info.isSymbolicLink() || (entry === path && !info.isFile())) return null;
       if (entry === path && info.size > 16_384) return null;
@@ -429,13 +470,15 @@ export class CodexHookBridge {
       const sessionId = text(input.session_id);
       if (statement && sessionId) {
         try {
+          this.service.store.bindSessionStorageHost(sessionId, hookHost(input));
           const capture = explicitStatement ? this.service.memoryCaptureUserStatement.bind(this.service) : this.service.memoryCaptureObservedFact.bind(this.service);
-          const captured = capture({ content: statement, kind: "preference", session_id: sessionId,
+          const captured = capture({ content: statement, kind: "preference", session_id: sessionId, session_host: hookHost(input),
             scope_kind: "session", scope_id: sessionId, project_scope_id: scope.id, project_root: input.cwd, sensitivity: "internal" });
           memoryWritten = captured.auto_committed === true;
           captureSummary = { candidate_id: (captured.candidate as JsonObject | null)?.id ?? null, next_action: captured.next_action,
-            topic_suggestions: captured.topic_suggestions ?? [], memory_file: captured.memory_file ?? null,
-            promotions: Array.isArray(captured.promotions) ? (captured.promotions as JsonObject[]).map(item => ({ tier: item.tier, auto_committed: item.auto_committed === true, memory_file: item.memory_file ?? null })) : [],
+            ...(statement.length <= 32 ? { captured_fact: statement } : {}),
+            topic_suggestions: Array.isArray(captured.topic_suggestions) ? captured.topic_suggestions.slice(0, 2) : [],
+            promotions: Array.isArray(captured.promotions) ? (captured.promotions as JsonObject[]).map(item => ({ tier: item.tier, auto_committed: item.auto_committed === true })) : [],
             capture_mode: explicitStatement ? "explicit" : "automatic_stable_fact", memory_written: memoryWritten };
         } catch (error) {
           this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "memory", event: "UserPromptSubmit", error_type: error instanceof Error ? error.name : "unknown" });
@@ -443,22 +486,63 @@ export class CodexHookBridge {
       }
     }
     const sessionId = text(input.session_id);
-    const resolved = await this.service.contextWorkingSets.resolve({ query: prompt, session_id: sessionId ?? undefined, session_scope_id: sessionId ?? undefined, turn_id: text(input.turn_id) ?? undefined, scope_kind: scope.kind, scope_id: scope.id,
-      members: [...members], max_items: 6, max_chars: 3_000 });
+    const resolved = await this.service.contextWorkingSets.resolve({ query: prompt, session_id: sessionId ?? undefined, session_scope_id: sessionId ?? undefined, session_host: hookHost(input), turn_id: text(input.turn_id) ?? undefined, scope_kind: scope.kind, scope_id: scope.id,
+      members: [...members], include_global: true });
     const items = resolved.items as JsonObject[];
     const contributions = resolved.contributions as JsonObject[];
-    const selected = [...items.map((item) => ({ type: "memory", id: item.memory_id, version: item.memory_version, content: item.content })),
-      ...contributions.flatMap((contribution) => Array.isArray(contribution.items) ? contribution.items : [])];
+    const candidates: HookCandidate[] = [
+      ...items.map(item => ({ member: "memory", item, output: { type: "memory", id: item.memory_id, version: item.memory_version, content: item.content,
+        ...(item.content_digest ? { content_digest: item.content_digest } : {}), ...(item.content_excerpt ? { content_excerpt: item.content_excerpt } : {}) } })),
+      ...contributions.flatMap(contribution => {
+        if (!Array.isArray(contribution.items)) return [];
+        if (contribution.member === "knowledge") return (contribution.items as JsonObject[]).map(item => ({ member: "knowledge", item, output: knowledgeHookProjection(item) }));
+        if (contribution.member === "experience") return (contribution.items as JsonObject[]).map(item => ({ member: "experience", item, output: experienceHookProjection(item) }));
+        return [];
+      }),
+    ];
+    const resolvedRefs = Array.isArray(resolved.asset_refs) ? resolved.asset_refs as JsonObject[] : null;
+    const candidateRefs: HookEmissionCandidate[] | null = resolvedRefs
+      ? candidates.map(candidate => ({ candidate, ref: contextAssetRef(candidate.member, candidate.item, scope) }))
+        .filter(entry => resolvedRefs.some(ref => contextAssetMatches(ref, entry.ref)))
+      : null;
     const receipt = resolved.receipt as JsonObject | null;
     if (receipt) this.journal.bindContextReceipt(input, receipt);
     return this.service.store.transaction(() => {
       assertContextReadCurrent(this.service.store, receipt);
+      let available: HookEmissionCandidate[] = candidateRefs ?? candidates.map(candidate => ({ candidate, ref: null }));
+      available = available.map(entry => ({ ...entry, candidate: { ...entry.candidate, output: { ...entry.candidate.output } } }));
+      const response = (selected: JsonObject[]) => JSON.stringify({ source: `craft-${member}`, scope, receipt_id: receipt?.id ?? null,
+        session_id: text(input.session_id), turn_id: text(input.turn_id), memory_capture: captureSummary, selected });
+      let selected = available.map(entry => entry.candidate.output);
+      let additionalContext = response(selected);
+      while (selected.length > 0 && estimateTokens(additionalContext) > HOOK_ADDITIONAL_CONTEXT_BUDGET[member]) {
+        const longest = available.reduce((best, entry, index) => {
+          const currentLength = typeof entry.candidate.output.content === "string" ? entry.candidate.output.content.length : 0;
+          const bestContent = best < 0 ? null : available[best]!.candidate.output.content;
+          const bestLength = typeof bestContent === "string" ? bestContent.length : 0;
+          return currentLength > 32 && (best < 0 || currentLength > bestLength) ? index : best;
+        }, -1);
+        if (longest >= 0) {
+          const output = available[longest]!.candidate.output;
+          const content = String(output.content);
+          available[longest]!.candidate.output = compactHookItem(output, prompt, Math.max(32, Math.floor(content.length / 2)));
+        } else available = available.slice(0, -1);
+        selected = available.map(entry => entry.candidate.output);
+        additionalContext = response(selected);
+      }
+      if (estimateTokens(additionalContext) > HOOK_ADDITIONAL_CONTEXT_BUDGET[member]) return {};
+      if (resolvedRefs && available.length > 0) {
+        const novelRefs = this.service.contextWorkingSets.claimEmission({ query: prompt, session_id: sessionId ?? undefined,
+          turn_id: text(input.turn_id) ?? undefined, scope_kind: scope.kind, scope_id: scope.id }, { asset_refs: available.map(entry => entry.ref!), receipt });
+        available = available.filter(entry => novelRefs.some(ref => contextAssetMatches(ref, entry.ref!)));
+        selected = available.map(entry => entry.candidate.output);
+        additionalContext = response(selected);
+      }
       for (const component of members) this.service.activationProofRecord({ host: hookHost(input), component, event: "UserPromptSubmit", session_id: text(input.session_id) ?? "unknown",
         turn_id: text(input.turn_id), context_receipt_id: receipt?.id ?? undefined, memory_written: component === "memory" && memoryWritten, observation_written: false,
         plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
       if (!selected.length && !captureSummary) return {};
-      if (selected.length) this.service.contextWorkingSets.recordEmission({ query: prompt, session_id: text(input.session_id) ?? undefined, turn_id: text(input.turn_id) ?? undefined, scope_kind: scope.kind, scope_id: scope.id }, resolved);
-      return { additionalContext: JSON.stringify({ source: `craft-${member}`, scope, receipt_id: receipt?.id ?? null, session_id: text(input.session_id), turn_id: text(input.turn_id), memory_capture: captureSummary, selected }) };
+      return { additionalContext };
     });
   }
 
@@ -528,7 +612,10 @@ export class CodexHookBridge {
       turn_id: text(input.turn_id), memory_written: false, observation_written: false,
       plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
     if (event === "SessionEnd" && member === "memory" && text(input.session_id)) {
-      try { this.service.memorySessionArchive({ session_id: text(input.session_id) }); }
+      try {
+        this.service.store.bindSessionStorageHost(text(input.session_id)!, hookHost(input));
+        this.service.memorySessionArchive({ session_id: text(input.session_id), session_host: hookHost(input) });
+      }
       catch (error) { this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, event, error_type: error instanceof Error ? error.name : "unknown" }); }
     }
     if (event === "SessionEnd" && scheduleMaintenance) this.service.memoryMaintenanceSchedule({ stage: "light", lease_id: `codex-${member}-${text(input.session_id) ?? "unknown"}` });

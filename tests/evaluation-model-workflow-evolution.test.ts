@@ -228,7 +228,7 @@ test("Knowledge classification tickets track the live candidate and keep result 
       profile_id: profile.id, profile_version: profile.version, purpose: "knowledge_scenario_classification", status: "ready_for_adapter", target: staleTarget,
     });
     const preExistingListedTickets = kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[];
-    assert.equal(preExistingListedTickets.length, 3);
+    assert.equal(preExistingListedTickets.length, 2, "only candidates whose current scope and Source resolve may be listed");
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: "bad" }), /SHA-256/u);
     const resultDigest = `sha256:${"a".repeat(64)}`;
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: "missing-trace" }), /exact model and result Trace/u);
@@ -250,7 +250,7 @@ test("Knowledge classification tickets track the live candidate and keep result 
     assert.equal((completed.ticket as JsonObject).trace_id, traceId);
     const differentValidTrace = bindKnowledgeTrace(ticket, resultDigest, "trace-knowledge-ticket-alt");
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: differentValidTrace }), /Trace conflicts/u);
-    assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 2);
+    assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 1);
     f.store.create("evaluation_model_ticket", "not-ready-ticket", { purpose: "knowledge_scenario_classification", status: "needs_credential" });
     assert.throws(() => kernel.ticketComplete({ ticket_id: "not-ready-ticket", result_digest: resultDigest }), /not ready for completion/u);
     const reviewedTicketId = String(reviewedTicket.id);
@@ -356,12 +356,11 @@ test("Knowledge classification tickets track the live candidate and keep result 
   } finally { await close(f); }
 });
 
-test("Knowledge Ticket listing resolves a legacy Claim through its registered Source when project aliases are ambiguous", async () => {
+test("Knowledge Ticket listing fails closed without throwing when a project root becomes ambiguous", async () => {
   const f = await fixture();
   try {
     const readme = join(f.root, "README.md"); await writeFile(readme, "Registered project source.");
     const secondRoot = join(f.root, "alternate-checkout"); await mkdir(secondRoot);
-    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: secondRoot });
     f.store.create("knowledge_source", "legacy-project-source", { status: "active", trust: "verified", kind: "readme", locator: readme });
     f.store.create("knowledge_claim", "legacy-project-claim", { status: "candidate", scope: "project:demo", version: 1,
       content_digest: "sha256:legacy-project-claim", source_id: "legacy-project-source",
@@ -372,9 +371,6 @@ test("Knowledge Ticket listing resolves a legacy Claim through its registered So
     const ticket = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "legacy-project-claim",
       project_root: f.root, input_ref: "craft-knowledge://claim/legacy-project-claim/v1/catalog/0",
       output_contract_ref: "craft-knowledge-scenario-classification-v1" }).ticket as JsonObject;
-
-    const listed = kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[];
-    assert.equal(listed.some(item => item.id === ticket.id), true);
 
     f.store.create("knowledge_claim", "project-claim-without-content-ref", { status: "candidate", scope: "project:demo", version: 1,
       content_digest: "sha256:project-claim-without-content-ref", source_id: "legacy-project-source" });
@@ -402,6 +398,12 @@ test("Knowledge Ticket listing resolves a legacy Claim through its registered So
       purpose: "knowledge_scenario_classification", status: "ready_for_adapter",
       target: { kind: "knowledge_scenario_classification", id: "project-claim-with-outside-content-path", version: 1,
         content_digest: "sha256:project-claim-with-outside-content-path", scope: "project:demo", catalog_version: candidateCatalogVersion } });
+    f.store.create("knowledge_claim", "ticket-claim-no-source", { status: "candidate", scope: "project:demo", version: 1,
+      content_digest: "sha256:ticket-claim-no-source" });
+    f.store.create("evaluation_model_ticket", "ticket-no-source", { profile_id: profile.id, profile_version: profile.version,
+      purpose: "knowledge_scenario_classification", status: "ready_for_adapter",
+      target: { kind: "knowledge_scenario_classification", id: "ticket-claim-no-source", version: 1,
+        content_digest: "sha256:ticket-claim-no-source", scope: "project:demo", project_root: f.root, catalog_version: candidateCatalogVersion } });
     for (const [id, sourceId, status, trust] of [
       ["claim-without-source", undefined, "candidate", "verified"],
       ["claim-with-revoked-source", "revoked-project-source", "candidate", "verified"],
@@ -415,11 +417,18 @@ test("Knowledge Ticket listing resolves a legacy Claim through its registered So
         target: { kind: "knowledge_scenario_classification", id, version: 1, content_digest: `sha256:${id}`,
           scope: "project:demo", catalog_version: candidateCatalogVersion } });
     }
+    const beforeAmbiguity = kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[];
+    assert.equal(beforeAmbiguity.some(item => item.id === "ticket-no-source"), false,
+      "a ticket without a persisted Claim source is not dispatchable even before project identity becomes ambiguous");
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: secondRoot });
+    const listed = kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[];
+    assert.equal(listed.some(item => item.id === ticket.id), false);
     const afterAdditionalCases = kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[];
-    assert.equal(afterAdditionalCases.some(item => item.id === noContentRefTicket.id), true);
-    assert.equal(afterAdditionalCases.some(item => item.id === customSourceTicket.id), true);
+    assert.equal(afterAdditionalCases.some(item => item.id === noContentRefTicket.id), false);
+    assert.equal(afterAdditionalCases.some(item => item.id === customSourceTicket.id), false);
     assert.equal(afterAdditionalCases.some(item => item.id === "ticket-without-resolvable-root"), false);
     assert.equal(afterAdditionalCases.some(item => item.id === "ticket-with-outside-content-path"), false);
+    assert.equal(afterAdditionalCases.some(item => item.id === "ticket-no-source"), false);
     assert.equal(afterAdditionalCases.some(item => item.id === "ticket-claim-without-source"), false);
     assert.equal(afterAdditionalCases.some(item => item.id === "ticket-claim-with-revoked-source"), false);
     assert.equal(afterAdditionalCases.some(item => item.id === "ticket-claim-with-untrusted-source"), false);
@@ -516,6 +525,7 @@ test("Experience classification tickets bind one awaiting project request throug
       purpose: "evaluation", status: "ready_for_adapter", target: ticket.target });
     assert.equal((kernel.ticketList().tickets as JsonObject[]).some(item => item.id === "wrong-purpose-scenario-ticket"), false);
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    assert.throws(() => f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope: "project:other" }), /cannot change storage scope/u);
     f.store.save("evaluation_model_ticket", String(ticket.id), { ...ticket, target: { ...ticket.target as JsonObject, scope: "project:other" } });
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
     f.store.save("evaluation_model_ticket", String(ticket.id), { ...f.store.get("evaluation_model_ticket", String(ticket.id)), target: ticket.target });
@@ -624,6 +634,8 @@ test("rejects malformed evolution inputs and keeps generated drafts, ticket chec
   const f = await fixture();
   try {
     const kernel = f.service.workflowEvolution;
+    assert.throws(() => kernel.observe({ scenario_key: "bad-host-session", source_kind: "host:codex", source_id: "one", source_digest: "one",
+      source_session_id: "host\nsession", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }), /bounded Host session identifier/u);
     assert.throws(() => kernel.observe({ scenario_key: "", source_kind: "external", source_id: "one", source_digest: "d", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }), /scenario_key/);
     assert.throws(() => kernel.observe({ scenario_key: "x", source_kind: "token=abcdefgh", source_id: "one", source_digest: "d", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }), /credentials/);
     assert.throws(() => kernel.observe({ scenario_key: "x", source_kind: "external", source_id: "one", source_digest: "d", outcome: "passed", evidence_ids: "confirmed", sanitized: true }), /array/);
@@ -648,7 +660,7 @@ test("rejects malformed evolution inputs and keeps generated drafts, ticket chec
     const draft = kernel.submit({ request_id: fresh.id, workflow_id: "generated-draft", name: "Generated", description: "Generated", inputs: [], steps: [{ id: "check", type: "assertion" }] });
     assert.match(String((draft.proposal as JsonObject).id), /^workflow_evolution_proposal_/);
     assert.equal(kernel.get({ proposal_id: (draft.proposal as JsonObject).id }).request, null);
-    f.store.create("workflow_evolution_proposal", "wrong-prior", { request_id: "other" });
+    f.store.create("workflow_evolution_proposal", "wrong-prior", { request_id: "other", scope: "global" });
     assert.throws(() => kernel.submit({ proposal_id: "wrong-prior", request_id: fresh.id, workflow_id: "x", name: "x", description: "x", inputs: [], steps: [{ type: "assertion" }] }), /idempotency/);
     const thirdOne = kernel.observe({ scenario_key: "generated-three", source_kind: "external", source_id: "one", source_digest: "one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }).observation as JsonObject;
     const thirdTwo = kernel.observe({ scenario_key: "generated-three", source_kind: "external", source_id: "two", source_digest: "two", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }).observation as JsonObject;
@@ -681,5 +693,15 @@ test("Workflow Evolution covers graph evidence, signature drift, and prompt-only
     f.store.create("workflow_evolution_observation", "legacy-signature-two", { scenario_key: "legacy-signature", source: { kind: "external", id: "legacy-two", digest: "two" }, outcome: "passed", evidence_ids: ["confirmed"], execution_shape: [], lifecycle: "accepted" });
     assert.equal(((kernel.propose({ scenario_key: "legacy-signature", hypothesis: "legacy", design_axes: ["tools"], output_contract_ref: "contract" }).request as JsonObject).scenario_signature as JsonObject).source, "legacy_scenario_key");
     assert.equal(((kernel.propose({ scenario_key: "legacy-signature", hypothesis: "legacy with explicit input", design_axes: ["tools"], output_contract_ref: "contract", scenario_signature: { digest: "explicit" } }).request as JsonObject).scenario_signature as JsonObject).digest, "explicit");
+
+    const hostObservation = (scenario: string, id: string, sourceId: string, sessionId?: string) => f.store.create("workflow_evolution_observation", id, {
+      scenario_key: scenario, source: { kind: "host:codex", id: sourceId, digest: sourceId, ...(sessionId === undefined ? {} : { session_id: sessionId }) },
+      outcome: "passed", evidence_ids: ["confirmed"], lifecycle: "accepted", scope: "project:demo" });
+    hostObservation("host-missing", "host-missing-one", "one"); hostObservation("host-missing", "host-missing-two", "two", "session-two");
+    assert.throws(() => kernel.propose({ scenario_key: "host-missing", hypothesis: "h", design_axes: ["output"], output_contract_ref: "contract" }), /require source session identifiers/u);
+    hostObservation("host-duplicate", "host-duplicate-one", "duplicate-one", "same-session"); hostObservation("host-duplicate", "host-duplicate-two", "duplicate-two", "same-session");
+    assert.throws(() => kernel.propose({ scenario_key: "host-duplicate", hypothesis: "h", design_axes: ["output"], output_contract_ref: "contract" }), /independent Host sessions/u);
+    hostObservation("host-valid", "host-distinct-one", "distinct-one", "host-session-one"); hostObservation("host-valid", "host-distinct-two", "distinct-two", "host-session-two");
+    assert.equal((kernel.propose({ scenario_key: "host-valid", hypothesis: "h", design_axes: ["output"], output_contract_ref: "contract" }).request as JsonObject).lifecycle, "awaiting_model");
   } finally { await close(f); }
 });

@@ -22,6 +22,8 @@ import { CraftService } from "../core/service.ts";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-memory-package-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  const service = new CraftService(store);
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "p", alias_kind: "path", alias: root });
   const core: Record<string, unknown> = {
     [CORE_KERNELS.store]: store,
     [CORE_KERNELS.modelProviders]: PROVIDER_CATALOG,
@@ -34,7 +36,7 @@ async function fixture() {
     locator: "notes.md", content_digest: "sha256:notes", trust: "verified", access: "proposal_only",
   }).source as { id: string };
   store.create("evidence", "confirmed", { confidence: "confirmed" });
-  return { root, store, core, sourceId: String(source.id), service: new CraftService(store) };
+  return { root, store, core, sourceId: String(source.id), service };
 }
 async function close(f: Awaited<ReturnType<typeof fixture>>) {
   f.store.close();

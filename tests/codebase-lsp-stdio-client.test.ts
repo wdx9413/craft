@@ -110,8 +110,8 @@ test("stdio LSP returns bounded push and pull diagnostics without confusing clea
     assert.equal((unpublished.diagnostics as JsonObject).status, "partial");
     assert.deepEqual((unpublished.diagnostics as JsonObject).unpublished_paths, [document.path]);
     await assert.rejects(analyzeLspSnapshot({ ...base(root), diagnostics_only: "yes" as never }), /Invalid or over-budget/);
-    await assert.doesNotReject(analyzeLspSnapshot({ ...base(root, "relation-budget-max"), relation_symbol_limit: 12_000 }));
-    await assert.rejects(analyzeLspSnapshot({ ...base(root, "relation-budget-over"), relation_symbol_limit: 12_001 }), /Invalid or over-budget/);
+    await assert.doesNotReject(analyzeLspSnapshot({ ...base(root, "relation-budget-max"), relation_symbol_limit: 1_000 }));
+    await assert.rejects(analyzeLspSnapshot({ ...base(root, "relation-budget-over"), relation_symbol_limit: 1_001 }), /Invalid or over-budget/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -233,6 +233,28 @@ test("stdio LSP references and call hierarchy become checkpoint-bound graph edge
     const declarationDefinition = service.codebaseDefinitionFind({ workspace_id: workspace.id, index_id: indexId, path: "src/relations.js", offset: content.indexOf("caller") });
     assert.deepEqual(declarationDefinition.definitions, []);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("stdio LSP queries exact relation targets without spending budget on unrelated symbols", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-lsp-targeted-relations-"));
+  const content = "function target() {}\nfunction caller() { target(); }\nfunction extra() {}\n";
+  const documents = [{ path: "src/calls.js", language: "javascript", content, source_digest: digest(content) }];
+  try {
+    const result = await analyzeLspSnapshot({ ...base(root, "relations"), documents, relations: ["calls"], relation_symbol_limit: 1,
+      relation_targets: [{ path: "src/calls.js", name: "target", start_offset: content.indexOf("target") }] });
+    const diagnostics = result.diagnostics as JsonObject;
+    assert.equal(diagnostics.relations, "analyzed");
+    assert.equal(diagnostics.relation_candidate_symbol_count, 3);
+    assert.equal(diagnostics.relation_symbol_count, 1);
+    assert.equal(diagnostics.relation_query_omitted_count, 0);
+    assert.equal((result.edges as JsonObject[]).filter(edge => edge.kind === "calls").length, 1);
+
+    const missing = await analyzeLspSnapshot({ ...base(root, "relations"), documents, relations: ["calls"], relation_symbol_limit: 1,
+      relation_targets: [{ path: "src/calls.js", name: "missing", start_offset: 0 }] });
+    assert.equal((missing.diagnostics as JsonObject).relations, "partial");
+    assert.equal((missing.diagnostics as JsonObject).relation_query_omitted_count, 1);
+    await assert.rejects(analyzeLspSnapshot({ ...base(root), documents, relation_targets: [{ path: "../outside.js", name: "target", start_offset: 0 }] }), /Invalid or over-budget/u);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("stdio LSP asks call hierarchy only for callable symbols", async () => {
@@ -681,7 +703,9 @@ test("stdio LSP serializes implementation queries in stable symbol order", async
 test("stdio LSP marks relation results partial when active work-done progress times out", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-lsp-progress-timeout-"));
   try {
-    const result = await analyzeLspSnapshot({ ...base(root, "relations-progress-timeout"), relations: ["implementations"] }, 50);
+    // Leave enough time for the fixture to initialize when branch coverage is
+    // enabled; the timeout under test is the progress wait after didOpen.
+    const result = await analyzeLspSnapshot({ ...base(root, "relations-progress-timeout"), relations: ["implementations"] }, 500);
     const diagnostics = result.diagnostics as JsonObject;
     assert.equal(diagnostics.work_done_progress_waited, true);
     assert.equal(diagnostics.work_done_progress_timed_out, true);

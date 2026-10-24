@@ -11,7 +11,8 @@ import { collectLspRelations, selectLspRelationSymbols } from "./lsp-relations.t
 export type LspSnapshotDocument = { readonly path: string; readonly language: string; readonly content: string; readonly source_digest: string;
   readonly cached_symbols?: readonly JsonObject[]; readonly cached_symbols_digest?: string };
 export type LspRelationKind = "references" | "calls" | "implementations" | "type_definitions" | "definitions" | "type_hierarchy";
-export type LspStdioRequest = { readonly command: string; readonly args?: readonly string[]; readonly cwd: string; readonly analyzer: string; readonly analyzer_version: string; readonly documents: readonly LspSnapshotDocument[]; readonly relations?: readonly LspRelationKind[]; readonly relation_symbol_limit?: number; readonly request_timeout_ms?: number; readonly diagnostics_only?: boolean };
+export type LspRelationTarget = { readonly path: string; readonly name: string; readonly start_offset: number };
+export type LspStdioRequest = { readonly command: string; readonly args?: readonly string[]; readonly cwd: string; readonly analyzer: string; readonly analyzer_version: string; readonly documents: readonly LspSnapshotDocument[]; readonly relations?: readonly LspRelationKind[]; readonly relation_symbol_limit?: number; readonly relation_targets?: readonly LspRelationTarget[]; readonly request_timeout_ms?: number; readonly diagnostics_only?: boolean };
 
 const MAX_DOCUMENT_BYTES = 2_000_000;
 const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
@@ -43,10 +44,10 @@ export function ignoreLspStdinError(_error: Error): void {}
  * documents. No shell is used, and this adapter is never invoked by automatic
  * repository indexing. The caller owns the server trust decision and snapshot.
  */
-export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = input.request_timeout_ms ?? DEFAULT_TIMEOUT_MS): Promise<JsonObject> {
+export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = input.request_timeout_ms ?? DEFAULT_TIMEOUT_MS, environment: NodeJS.ProcessEnv = process.env): Promise<JsonObject> {
   validateRequest(input, timeoutMs);
   const cwd = realpathSync(resolve(input.cwd));
-  const child = spawn(input.command, [...(input.args ?? [])], { cwd, shell: false, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(input.command, [...(input.args ?? [])], { cwd, shell: false, stdio: ["pipe", "pipe", "pipe"], env: environment });
   const pending = new Map<number | string, Pending>();
   let nextId = 0;
   let buffer = Buffer.alloc(0);
@@ -255,14 +256,23 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
     const symbols = (symbolAnalysis.nodes as JsonObject[]).filter(node => node.kind === "symbol");
     const relationLimit = input.relation_symbol_limit ?? 100;
     const otherRelationsRequested = requestedRelations.some(kind => kind !== "type_hierarchy");
-    const ordinaryRelationSymbols = otherRelationsRequested ? selectLspRelationSymbols(symbols, relationLimit, callsAvailable) : [];
+    const relationTargetSymbols = input.relation_targets === undefined ? undefined : input.relation_targets.flatMap(target => {
+      const found = symbols.find(symbol => symbol.path === target.path && symbol.name === target.name
+        && Number((symbol.span as JsonObject).start_offset) === target.start_offset);
+      return found ? [found] : [];
+    });
+    const relationTargetOmissions = input.relation_targets === undefined ? 0
+      : input.relation_targets.length - relationTargetSymbols!.length + Math.max(0, relationTargetSymbols!.length - relationLimit);
+    const ordinaryRelationSymbols = relationTargetSymbols === undefined
+      ? otherRelationsRequested ? selectLspRelationSymbols(symbols, relationLimit, callsAvailable) : []
+      : relationTargetSymbols.slice(0, relationLimit);
     const hierarchyCandidates = typeHierarchyAvailable ? symbols.filter(symbol => TYPE_HIERARCHY_SYMBOL_KINDS.has(Number(symbol.symbol_kind))) : [];
     const hierarchySymbols = hierarchyCandidates.slice(0, relationLimit);
     const hierarchySymbolIds = new Set(hierarchySymbols.map(symbol => String(symbol.id)));
     const relationSymbols = [...new Map([...ordinaryRelationSymbols, ...hierarchySymbols].map(symbol => [String(symbol.id), symbol])).values()];
     const hierarchySymbolOmissions = Math.max(0, hierarchyCandidates.length - hierarchySymbols.length);
     relationQueryOmissions += hierarchySymbolOmissions;
-    const ordinaryRelationOmissions = otherRelationsRequested ? Math.max(0, symbols.length - ordinaryRelationSymbols.length) : 0;
+    const ordinaryRelationOmissions = relationTargetSymbols === undefined && otherRelationsRequested ? Math.max(0, symbols.length - ordinaryRelationSymbols.length) : relationTargetOmissions;
     for (let index = 0; index < relationSymbols.length; index += LSP_REQUEST_CONCURRENCY) {
       await Promise.all(relationSymbols.slice(index, index + LSP_REQUEST_CONCURRENCY).map(async symbol => {
         const { document, selection } = resolveLspSymbolPosition(input.documents, symbol);
@@ -443,7 +453,10 @@ function validateRequest(input: LspStdioRequest, timeoutMs: number): void {
     || !input.documents.length || input.documents.length > MAX_LSP_DOCUMENTS
       || (input.relations !== undefined && (!Array.isArray(input.relations) || input.relations.some(kind => !["references", "calls", "implementations", "type_definitions", "definitions", "type_hierarchy"].includes(kind))
       || new Set(input.relations).size !== input.relations.length))
-    || (input.relation_symbol_limit !== undefined && (!Number.isSafeInteger(input.relation_symbol_limit) || input.relation_symbol_limit < 1 || input.relation_symbol_limit > MAX_RELATION_SYMBOLS))) throw new Error("Invalid or over-budget LSP request");
+    || (input.relation_symbol_limit !== undefined && (!Number.isSafeInteger(input.relation_symbol_limit) || input.relation_symbol_limit < 1 || input.relation_symbol_limit > MAX_RELATION_SYMBOLS))
+    || (input.relation_targets !== undefined && (!Array.isArray(input.relation_targets) || input.relation_targets.length < 1 || input.relation_targets.length > 100
+      || input.relation_targets.some(target => !target || typeof target.path !== "string" || !target.path || typeof target.name !== "string" || !target.name
+        || !Number.isSafeInteger(target.start_offset) || target.start_offset < 0)))) throw new Error("Invalid or over-budget LSP request");
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) throw new Error("LSP timeout is outside budget");
   const cwd = resolve(input.cwd); let totalBytes = 0, cacheBytes = 0; const paths = new Set<string>();
   for (const document of input.documents) {
@@ -463,6 +476,15 @@ function validateRequest(input: LspStdioRequest, timeoutMs: number): void {
       if (cacheBytes > MAX_SYMBOL_CACHE_BYTES) throw new Error("LSP symbol cache exceeds byte budget");
     }
     paths.add(document.path);
+  }
+  if (input.relation_targets) {
+    const seen = new Set<string>();
+    for (const target of input.relation_targets) {
+      const document = input.documents.find(candidate => candidate.path === target.path);
+      const key = `${target.path}\0${target.name}\0${target.start_offset}`;
+      if (!document || target.start_offset > document.content.length || seen.has(key)) throw new Error("Invalid or over-budget LSP relation target");
+      seen.add(key);
+    }
   }
 }
 

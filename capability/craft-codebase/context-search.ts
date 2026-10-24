@@ -102,7 +102,10 @@ export class CodeSymbolSearchIndex {
     if (!queryText) return [];
     const terms = codeQueryTerms(queryText);
     const bm25 = this.#index.score(terms.join(" "));
-    const contextBm25 = new Map(this.#contextIndex.score(terms.join(" ")).map(hit => [hit.id, hit.score]));
+    const contextHits = this.#contextIndex.score(terms.join(" "));
+    const contextBm25 = new Map(contextHits.map(hit => [hit.id, hit.score]));
+    const candidates = new Map(bm25.map(hit => [hit.id, hit]));
+    for (const hit of contextHits) if (!candidates.has(hit.id)) candidates.set(hit.id, { ...hit, score: 0 });
     const queryTerms = new Set(terms);
     const queryActionTerms = new Set(terms.filter(term => SYMBOL_ACTION_TERMS.has(term)));
     const queryNameTerms = identifierTerms(queryText);
@@ -116,7 +119,7 @@ export class CodeSymbolSearchIndex {
     const analyzerIntent = identifierTerms(queryText).includes("analyzer");
     const actionIntent = terms.some(term => ACTION_TERMS.has(term));
     const lowered = queryText.toLowerCase();
-    const results = new Map(bm25.map(hit => {
+    const results = new Map([...candidates.values()].map(hit => {
       const node = this.#byId.get(hit.id)!;
       const name = typeof node.name === "string" ? node.name.toLowerCase() : "";
       const nameTerms = this.#nameTermsById.get(hit.id)!;

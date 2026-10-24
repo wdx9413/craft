@@ -76,10 +76,14 @@ test("analysis precedes repository publication and changing discovered source ca
   const store = await new CraftStore(craftPaths(join(root, "data"))).open(), service = new CraftService(store);
   try {
     const original = service.workspaceOpen.bind(service);
+    let sourceChanged = false;
     t.mock.method(service, "workspaceOpen", (args: JsonObject) => {
-      assert.equal(new ProjectAnalysisCache(repo, String(args.workspace_id)).list("codebase_file_analysis", 10).length, 1);
+      assert.equal(new ProjectAnalysisCache(repo, String(args.workspace_id), store.paths).list("codebase_file_analysis", 10).length, 1);
       const result = original(args);
-      writeFileSync(join(repo, "login.ts"), "export function changed() {}\n");
+      if (!sourceChanged) {
+        sourceChanged = true;
+        writeFileSync(join(repo, "login.ts"), "export function changed() {}\n");
+      }
       return result;
     });
     const built = service.codebaseRepositoryEnsure({ project_root: repo });
@@ -141,14 +145,15 @@ test("semantic analysis is prepared outside publication and source digests remai
 
 test("semantic repositories automatically analyze Python checkpoint files", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-unsupported-"));
+  const dataRoot = mkdtempSync(join(tmpdir(), "craft-codebase-unsupported-data-"));
   execFileSync("git", ["-C", root, "init", "-q"]);
   writeFileSync(join(root, "main.py"), "def run(): pass\n");
-  const store = await new CraftStore(craftPaths(join(root, "data"))).open(), service = new CraftService(store);
+  const store = await new CraftStore(craftPaths(dataRoot)).open(), service = new CraftService(store);
   try {
     const built = service.codebaseRepositoryEnsure({ project_root: root, index_depth: "semantic" });
     assert.equal((built.summary as JsonObject).certainty, "partial");
     assert.equal((built.summary as JsonObject).analyzer, "python-ast-static");
     assert.equal((built.summary as JsonObject).supported_file_count, 1);
     assert.equal((built.summary as JsonObject).unsupported_file_count, 0);
-  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); rmSync(dataRoot, { recursive: true, force: true }); }
 });

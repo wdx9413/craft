@@ -13,6 +13,9 @@ import { ContextReadGuard, type ContextReadRef } from "../../common/craft-common
 import { contentReference } from "../../common/craft-common-store-local/src/content-store.ts";
 import { scopeAllows, scopeEnvelope, sourceAllows, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
 import { KeywordRetrievalPort } from "../../common/craft-common-base/src/keyword-retrieval.ts";
+import { retrievalExcerpt } from "../../common/craft-common-base/src/retrieval-excerpt.ts";
+import { contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
+import { knowledgeClaimPromotionProofVerified } from "../../core/knowledge-evaluation-provenance.ts";
 
 function recordScope(value: unknown): { kind: string; id: string } {
   if (value === "global") return { kind: "global", id: "global" };
@@ -71,7 +74,9 @@ export class KnowledgeContribution implements ContextContributionProvider {
     // SQL scope selection and metadata predicates precede content hydration.
     const eligible = this.store.listScoped("knowledge_claim", [...(request.scope_stack ?? [{ kind: request.scope_kind, id: request.scope_id }]), ...projectAliases.map(alias => recordScope(alias))], 10_001, (claim) => {
         const applicability = recordScope(claim.scope);
-        if ((claim.status !== "reviewed" && !(includeCandidates && claim.status === "candidate")) || !scopeMatches(claim.scope, request, projectAliases) || !scopeAllows(scopeEnvelope(claim.scope_envelope, applicability), access(request))
+        if ((claim.status !== "reviewed" && !(includeCandidates && claim.status === "candidate"))
+          || claim.status === "reviewed" && !knowledgeClaimPromotionProofVerified(this.store, claim)
+          || !scopeMatches(claim.scope, request, projectAliases) || !scopeAllows(scopeEnvelope(claim.scope_envelope, applicability), access(request))
           || claim.sensitivity === "restricted" && request.allow_restricted !== true || !validAt(claim.valid_until, now)) return false;
         // Legacy records without a persisted source cannot become execution Context
         // merely because an old Markdown frontmatter happened to name one.  The
@@ -89,7 +94,9 @@ export class KnowledgeContribution implements ContextContributionProvider {
         const document = claim.document_id ? this.store.find("knowledge_document", String(claim.document_id)) : null;
         if (claim.document_id && (!document || document.status !== "current" || document.content_digest !== claim.document_digest)) return false;
         const review = claim.review as JsonObject | undefined;
-        if (claim.status === "reviewed" && review?.source_digest !== undefined && review.source_digest !== source.content_digest) return false;
+        // A reviewed Claim must carry the source digest required by its verified
+        // promotion proof; missing and mismatched digests both fail closed.
+        if (claim.status === "reviewed" && review?.source_digest !== source.content_digest) return false;
         dependencies.set(String(claim.id), { source, document }); return true;
       });
     if (eligible.length > 10_000) throw new Error("Knowledge candidate budget exceeded; narrow scope or source filters");
@@ -112,14 +119,15 @@ export class KnowledgeContribution implements ContextContributionProvider {
     const ranking = await new KeywordRetrievalPort().search(request.query, matches.map(match => ({ id: String(match.claim.id), body: match.body })));
     guard.assertCurrent();
     const scores = new Map(ranking.hits.map(hit => [hit.id, hit.score]));
+    const isRequired = (item: JsonObject) => (request.required_refs ?? []).some(ref => contextAssetMatches(ref, contextAssetRef("knowledge", item, item.scope as JsonObject)));
     const ranked = matches.filter(match => request.candidate_mode || scores.has(String(match.claim.id)))
-      .sort((a, b) => (scores.get(String(b.claim.id)) ?? 0) - (scores.get(String(a.claim.id)) ?? 0) || String(a.claim.id).localeCompare(String(b.claim.id)));
+      .sort((a, b) => Number(isRequired(b.claim)) - Number(isRequired(a.claim)) || (scores.get(String(b.claim.id)) ?? 0) - (scores.get(String(a.claim.id)) ?? 0) || String(a.claim.id).localeCompare(String(b.claim.id)));
 
     const items: JsonObject[] = [];
     let usedChars = 0;
     for (const match of ranked) {
       if (items.length >= request.max_items) break;
-      const item = {
+      let item: JsonObject = {
         kind: "knowledge_claim",
         scope: recordScope(match.claim.scope),
         claim_id: match.claim.id,
@@ -131,7 +139,18 @@ export class KnowledgeContribution implements ContextContributionProvider {
         evidence_ids: match.claim.evidence_ids,
         source_id: match.claim.source_id,
         reason: match.claim.status === "reviewed" ? "reviewed_bm25" : "candidate_diagnostic_only",
-      } satisfies JsonObject;
+      };
+      if (request.candidate_mode === true) {
+        const { retrieval_text: _retrievalText, ...bounded } = item;
+        item = bounded;
+        if (!isRequired(item) && typeof item.content === "string") {
+          const excerpt = retrievalExcerpt(item.content, request.query, 600);
+          if (excerpt.reason !== "complete") item = { ...item, content: excerpt.text, content_excerpt: {
+            source_start: excerpt.source_start, source_end: excerpt.source_end, source_chars: excerpt.source_chars, reason: excerpt.reason,
+            ...(excerpt.matched_terms ? { matched_terms: excerpt.matched_terms } : {}),
+          } };
+        }
+      }
       const size = JSON.stringify(item).length;
       if (usedChars + size > request.max_chars) continue;
       usedChars += size;
@@ -149,6 +168,6 @@ export class KnowledgeContribution implements ContextContributionProvider {
   private content(claim: JsonObject): string {
     if (typeof claim.content === "string") return claim.content;
     if (!contentReference(claim.content_ref)) throw new Error("Knowledge content reference is missing");
-    return this.store.contentStore.readCompatSync(claim.content_ref, typeof claim.scope === "string" ? claim.scope : undefined).body;
+    return this.store.contentStore.readCompatSync(claim.content_ref, String(claim.scope)).body;
   }
 }

@@ -8,6 +8,7 @@ import { productSurfaceOf } from "../core/interfaces/mcp/product-launch.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-procedure-graph-"));
@@ -47,7 +48,7 @@ test("standalone Knowledge registers a source, writes a candidate, and only revi
     f.store.create("evidence", "knowledge-evidence", { confidence: "bounded", summary: "fixture source observation" });
     const candidate = await knowledge.handlers.craft_knowledge_claim_save({ claim_id: "source-rule", source_id: "builtin.evidence-wiki", kind: "rule", scope: "project:craft", content: "Use the focused regression command before a broad suite.", evidence_ids: ["knowledge-evidence"], tags: ["testing"] }) as JsonObject;
     assert.equal(((candidate.claim as JsonObject).status), "candidate");
-    await knowledge.handlers.craft_knowledge_claim_review({ claim_id: "source-rule", status: "reviewed", reviewer: "fixture-review", reason: "Evidence and active source agree." });
+    attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", "source-rule"));
     const result = await knowledge.handlers.craft_knowledge_search({ query: "focused regression", scope: "project:craft" }) as JsonObject;
     assert((result.hits as JsonObject[]).some((hit) => hit.claim_id === "source-rule" && hit.status === "reviewed"));
   } finally { await dispose(f); }
@@ -58,8 +59,8 @@ test("Experience turns independent observations into a draft Graph Procedure wit
   try {
     const experience = new McpServer(f.service, productSurfaceOf("experience"));
     f.store.create("evidence", "evidence", { confidence: "bounded", summary: "sanitized fixture evidence" });
-    const first = await experience.handlers.craft_experience_observe({ observation_id: "first", scenario_key: "coding.retry", source_kind: "outcome", source_id: "one", source_digest: "sha256:one", outcome: "failed", evidence_ids: ["evidence"], execution_shape: ["branch", "approval"], sanitized: true }) as JsonObject;
-    const second = await experience.handlers.craft_experience_observe({ observation_id: "second", scenario_key: "coding.retry", source_kind: "outcome", source_id: "two", source_digest: "sha256:two", outcome: "passed", evidence_ids: ["evidence"], execution_shape: ["branch", "approval"], sanitized: true }) as JsonObject;
+    const first = await experience.handlers.craft_experience_observe({ observation_id: "first", scope: "project:craft", scenario_key: "coding.retry", source_kind: "outcome", source_id: "one", source_digest: "sha256:one", outcome: "failed", evidence_ids: ["evidence"], execution_shape: ["branch", "approval"], sanitized: true }) as JsonObject;
+    const second = await experience.handlers.craft_experience_observe({ observation_id: "second", scope: "project:craft", scenario_key: "coding.retry", source_kind: "outcome", source_id: "two", source_digest: "sha256:two", outcome: "passed", evidence_ids: ["evidence"], execution_shape: ["branch", "approval"], sanitized: true }) as JsonObject;
     const request = (await experience.handlers.craft_experience_procedure_draft({ request_id: "graph-request", scenario_key: "coding.retry", observation_ids: [(first.observation as JsonObject).id, (second.observation as JsonObject).id], hypothesis: "Bound retries and stop for an explicit approval.", design_axes: ["orchestration"], procedure_kind: "graph", output_contract_ref: "acceptance:tests-pass" })).request as JsonObject;
     assert.throws(() => f.service.workflowEvolutionPropose({ request_id: "graph-request", scenario_key: "coding.retry", observation_ids: [(first.observation as JsonObject).id, (second.observation as JsonObject).id], hypothesis: "Bound retries and stop for an explicit approval.", design_axes: ["orchestration"], procedure_kind: "workflow", output_contract_ref: "acceptance:tests-pass" }), /idempotency/u);
     assert.throws(() => f.service.workflowEvolution.submit({ request_id: request.id, workflow_id: "invalid-graph", name: "Invalid graph", description: "No nodes.", inputs: [], nodes: [] }), /graph nodes/u);

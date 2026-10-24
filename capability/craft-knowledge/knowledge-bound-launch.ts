@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { object, text } from "../../common/craft-common-base/src/validation.ts";
 import { digestJson } from "../../common/craft-common-base/src/digest.ts";
+import { knowledgeClaimPromotionProofVerified } from "../../core/knowledge-evaluation-provenance.ts";
 
 function array(value: unknown, name: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
@@ -61,7 +62,7 @@ export class KnowledgeBoundLaunchKernel {
       const current = this.store.get("knowledge_claim", ref.claim_id);
       if (current.version !== ref.claim_version) throw new Error("Knowledge Claim version changed since context compilation");
       const claim = this.store.get("knowledge_claim", ref.claim_id, ref.claim_version);
-      if (claim.status !== "reviewed") throw new Error("Knowledge Claim is no longer reviewed");
+      if (!knowledgeClaimPromotionProofVerified(this.store, claim)) throw new Error("Knowledge Claim no longer has verified formal promotion evidence");
       if (claim.scope !== "global" && claim.scope !== scope) throw new Error("Knowledge Claim is outside the context scope");
       if (claim.valid_until !== null && claim.valid_until !== undefined) {
         const validUntil = Date.parse(text(claim.valid_until, "knowledge_claim.valid_until"));

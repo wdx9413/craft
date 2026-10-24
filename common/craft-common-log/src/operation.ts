@@ -17,8 +17,10 @@ const object = (value: unknown): Record<string, unknown> => value && typeof valu
 /** Stable categories only: exception messages may contain user material or credentials. */
 export function operationErrorCode(error: unknown): string {
   const value = object(error);
-  if (typeof value.code === "string" && /^(?:ERR_[A-Z_]+|EACCES|ENOENT|EEXIST|EPERM|ETIMEDOUT)$/u.test(value.code)) return value.code;
+  if (value.code === "ERR_SQLITE_ERROR" && [5, 6].includes(Number(value.errcode))) return "STORAGE_BUSY";
   const message = error instanceof Error ? error.message : "";
+  if (/database (?:is )?(?:locked|busy)|sqlite_busy|sqlite_locked/iu.test(message)) return "STORAGE_BUSY";
+  if (typeof value.code === "string" && /^(?:ERR_[A-Z_]+|EACCES|ENOENT|EEXIST|EPERM|ETIMEDOUT)$/u.test(value.code)) return value.code;
   if (/denied|unauthorized|forbidden/iu.test(message)) return "ACCESS_DENIED";
   if (/conflict|stale|drift/iu.test(message)) return "STATE_CONFLICT";
   if (/budget|limit|exceed/iu.test(message)) return "LIMIT_EXCEEDED";

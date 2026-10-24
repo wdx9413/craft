@@ -7,7 +7,7 @@ import { HookPlane } from "../core/hook-plane.ts";
 import { ownerOfTool } from "../core/capability-catalog.ts";
 import { buildCapabilityRegistry, CORE_KERNELS, type CraftCapability, type Hook, type HookContext } from "../core/capability-protocol.ts";
 import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
-import { CraftStore } from "../core/infrastructure/store.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
 import { CraftService } from "../core/service.ts";
@@ -80,7 +80,10 @@ test("stops a tool call at tool_before and does not dispatch it", async () => {
     // that no longer happens would be deciding about nothing.
     assert.deepEqual(f.plane.records.map((record) => record.phase), ["tool_before"]);
     assert.equal(f.plane.records[0]!.denied, true);
-    assert.ok(f.store.list("trace_event", 100).some(event => event.status === "denied"));
+    const correlation = result.structuredContent as typeof result.structuredContent & { trace_correlation: { trace_id: string } };
+    const trace = f.service.traceGet({ trace_id: correlation.trace_correlation.trace_id });
+    assert.equal((trace.trace as JsonObject).status, "completed");
+    assert.ok((trace.events as JsonObject[]).some(event => event.operation_id === "hook.denied"));
   } finally { await close(f); }
 });
 

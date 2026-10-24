@@ -92,7 +92,7 @@ function graphDifference(store: CraftStore, leftIndexId: string, rightStore: Cra
     const index = source.get("codebase_index", id);
     const workspace = source.get("workspace", String(index.workspace_id));
     const projectGraph = workspace.snapshot_storage === "project_codebase"
-      ? new ProjectGraphStore(String(workspace.root_path), String(workspace.id)) : null;
+      ? new ProjectGraphStore(String(workspace.root_path), String(workspace.id), source.paths) : null;
     const shards = (index.shard_ids as string[]).map(shardId => projectGraph
       ? projectGraph.read(shardId) : source.get("codebase_index_shard", shardId));
     return { nodes: shards.flatMap(shard => shard.nodes as JsonObject[]), edges: shards.flatMap(shard => shard.edges as JsonObject[]) };

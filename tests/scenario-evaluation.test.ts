@@ -90,9 +90,9 @@ async function fixture() {
   service.scopeIdentityResolveProject({ project_root: projectRoot });
   const signature = { schema: "craft.scenario-signature.v1", project, scenario_key: "auto-build", target_class: "host_task_completion" };
   const sourceEvidence = service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "Source observation" });
-  const first = service.workflowEvolutionObserve({ scenario_key: "scenario:auto-build", scenario_signature: signature, scope: `project:${project.id}`,
+  const first = service.workflowEvolutionObserve({ scenario_key: "scenario:auto-build", scenario_signature: signature, scope: String(project.id),
     source_kind: "test", source_id: "task-1", source_digest: "source-1", outcome: "passed", evidence_ids: [sourceEvidence.id], sanitized: true }).observation as JsonObject;
-  const second = service.workflowEvolutionObserve({ scenario_key: "scenario:auto-build", scenario_signature: signature, scope: `project:${project.id}`,
+  const second = service.workflowEvolutionObserve({ scenario_key: "scenario:auto-build", scenario_signature: signature, scope: String(project.id),
     source_kind: "test", source_id: "task-2", source_digest: "source-2", outcome: "passed", evidence_ids: [sourceEvidence.id], sanitized: true }).observation as JsonObject;
   const request = service.workflowEvolutionPropose({ scenario_key: "scenario:auto-build", observation_ids: [first.id, second.id], hypothesis: "Check sentinel", design_axes: ["output"], output_contract_ref: "acceptance:sentinel" }).request as JsonObject;
   store.create("evaluation_model_ticket", "ticket", { purpose: "workflow_evolution", target: { id: request.id, version: request.version } });
@@ -169,16 +169,17 @@ test("missing project evaluation config leaves the dispatch awaiting an adapter 
   } finally { await f.close(); }
 });
 
-test("automatic evaluation leaves a valid project scene awaiting an adapter when its local root is unregistered", async () => {
+test("automatic evaluation rejects a formerly valid project scene when its root is unregistered", async () => {
   const f = await fixture();
   try {
-    const procedure = f.store.get("experience_procedure", String(f.procedure.id));
-    const signature = { ...(procedure.scenario_signature as JsonObject), project: { kind: "project", id: "project:unregistered" } };
-    f.store.save("experience_procedure", String(procedure.id), { ...procedure, scope: "project:unregistered", scenario_signature: signature });
-    const dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: procedure.id }).dispatch as JsonObject;
-    const result = f.service.experienceLearningEvaluationRun({ dispatch_id: dispatch.id });
-    assert.equal((result.dispatch as JsonObject).status, "awaiting_adapter");
-    assert.equal(result.reason, "project_scenario_evaluator_not_configured");
+    const scope = String(f.procedure.scope);
+    for (const alias of f.store.list("scope_alias", 100, item => (item.scope as JsonObject | undefined)?.id === scope)) {
+      f.store.remove("scope_alias", String(alias.id));
+    }
+    for (const identity of f.store.list("project_identity", 100, item => (item.canonical_scope as JsonObject | undefined)?.id === scope)) {
+      f.store.remove("project_identity", String(identity.id));
+    }
+    assert.throws(() => f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }), /root is not registered/u);
   } finally { await f.close(); }
 });
 
@@ -189,11 +190,8 @@ test("automatic evaluation surfaces an invalid registered project root", async (
     await writeFile(fileRoot, "not a directory");
     f.store.create("scope_alias", "invalid-project-root", { status: "active", alias_kind: "path", alias: fileRoot,
       alias_digest: stableDigest(fileRoot), scope: { kind: "project", id: "project:invalid-root" } });
-    const procedure = f.store.get("experience_procedure", String(f.procedure.id));
-    f.store.save("experience_procedure", String(procedure.id), { ...procedure, scope: "project:invalid-root",
-      scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "project", id: "project:invalid-root" },
-        scenario_key: "auto-build" } });
     const evaluator = new ExperienceLearningEvaluation(f.store) as unknown as { readScenarioEvaluation(projectId: string, scenarioKey: string): JsonObject | null };
+    assert.equal(evaluator.readScenarioEvaluation("unregistered-project", "auto-build"), null);
     assert.throws(() => evaluator.readScenarioEvaluation("invalid-root", "auto-build"), /project root must be a directory/u);
   } finally { await f.close(); }
 });

@@ -3,27 +3,28 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { CraftStore } from "../common/craft-common-store-local/src/store.ts";
 import { stableDigest } from "../common/craft-common-base/src/digest.ts";
 import { scopeFromKey } from "../common/craft-common-base/src/scope-policy.ts";
+import { canonicalCandidatePath, ensureProjectStorageDirectory, existingProjectStorageDirectory, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
 
-/** Resolve Experience data only inside the registered project's .craft_data tree. */
+/** Resolve Experience data only inside the registered project's shared storage tree. */
 export function projectExperienceDirectory(store: CraftStore, scopeId: string, requestedRoot?: string, create = false,
   aliasDigest?: string): string {
   if (!/^project:[A-Za-z0-9_-]{1,96}$/u.test(scopeId)) throw new Error("Experience project scope is invalid");
   const aliases = store.list("scope_alias", 10_000, item => item.status === "active" && item.alias_kind === "path"
     && (item.scope as Record<string, unknown> | undefined)?.kind === "project"
     && (item.scope as Record<string, unknown> | undefined)?.id === scopeId)
-    .filter(item => typeof item.alias === "string" && isAbsolute(item.alias) && item.alias_digest === stableDigest(item.alias)
-      && (!aliasDigest || item.alias_digest === aliasDigest))
-    .map(item => { try { return realpathSync(item.alias as string); } catch { return ""; } }).filter(Boolean);
-  const roots = [...new Set(aliases)];
+    .filter(item => typeof item.alias === "string" && isAbsolute(item.alias) && item.alias_digest === stableDigest(item.alias))
+    .map(item => { try { return { root: realpathSync(item.alias as string), digest: String(item.alias_digest) }; } catch { return null; } })
+    .filter((item): item is { root: string; digest: string } => item !== null);
+  const roots = [...new Set(aliases.map(item => item.root))];
+  if (roots.length > 1) throw new Error("Experience project root is ambiguous");
   const root = requestedRoot === undefined ? (roots.length === 1 ? roots[0] : undefined) : realpathSync(resolve(requestedRoot));
-  if (!root || !roots.includes(root)) throw new Error(roots.length > 1 ? "Experience project root is ambiguous" : "Experience project root is not registered");
+  if (!root || !roots.includes(root)) throw new Error("Experience project root is not registered");
+  if (aliasDigest && !aliases.some(item => item.root === root && item.digest === aliasDigest)) throw new Error("Experience project root is not registered");
   if (!lstatSync(root).isDirectory()) throw new Error("Experience project root must be a directory");
-  const metadata = join(root, ".craft_data"), directory = join(metadata, "experience");
-  if (create) {
-    if (!existsSync(metadata)) mkdirSync(metadata, { mode: 0o700 });
-    if (!existsSync(directory)) mkdirSync(directory, { mode: 0o700 });
-  }
-  for (const path of [metadata, directory]) {
+  const projectDirectory = create ? ensureProjectStorageDirectory(store.paths, root) : existingProjectStorageDirectory(store.paths, root);
+  const directory = join(projectDirectory ?? projectStorageDirectory(store.paths, root), "experience");
+  if (create && !existsSync(directory)) mkdirSync(directory, { mode: 0o700 });
+  for (const path of [directory]) {
     try {
       const stat = lstatSync(path);
       if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Experience project data path must contain regular directories");
@@ -60,19 +61,26 @@ export function projectExperienceContentDirectory(store: CraftStore, scope: stri
     .map(item => { try { return realpathSync(item.alias as string); } catch { return ""; } }).filter(Boolean))];
   const requested = options.project_root === undefined ? undefined : realpathSync(resolve(options.project_root));
   if (requested && !roots.includes(requested)) throw new Error("Project root is not registered for this Experience scope");
+  if (roots.length > 1) throw new Error("Experience project root is ambiguous");
   let matches = requested ? roots.filter(root => root === requested) : roots;
   if (options.reference_path !== undefined) {
-    const target = resolve(options.reference_path), global = resolve(store.paths.experienceContentDir);
+    const referenceStat = lstatSync(resolve(options.reference_path), { throwIfNoEntry: false });
+    if (referenceStat?.isSymbolicLink()) throw new Error("Project Experience content path must use regular files and directories");
+    const target = canonicalCandidatePath(options.reference_path), global = canonicalCandidatePath(store.paths.experienceContentDir);
     if (target === global || target.startsWith(`${global}${sep}`)) return null;
-    matches = matches.filter(root => {
-      const base = join(root, ".craft_data", "experience", "md"), part = relative(base, target);
-      return part !== "" && part !== ".." && !part.startsWith(`..${sep}`);
-    });
+    matches = matches.filter(root => [join(projectStorageDirectory(store.paths, root), "experience", "md"),
+      join(root, ".craft_data", "experience", "md")].some(base => {
+      const part = relative(canonicalCandidatePath(base), target);
+      return part !== "" && part !== ".." && !part.startsWith(`..${sep}`) && !isAbsolute(part);
+    }));
     if (!matches.length) return null;
   }
-  if (matches.length > 1) throw new Error("Experience project root is ambiguous");
   const root = matches[0];
   if (!root) return null;
+  if (options.reference_path && options.create !== true) {
+    const legacy = join(root, ".craft_data", "experience", "md");
+    if (canonicalCandidatePath(options.reference_path).startsWith(`${canonicalCandidatePath(legacy)}${sep}`)) return legacy;
+  }
   const experience = projectExperienceDirectory(store, scopeId, root, options.create === true);
   const directory = join(experience, "md");
   if (options.create && !existsSync(directory)) mkdirSync(directory, { mode: 0o700 });
@@ -99,8 +107,9 @@ export function projectPathAliasDigest(store: CraftStore, scopeId: string, reque
     .map(item => ({ digest: String(item.alias_digest), root: (() => { try { return realpathSync(String(item.alias)); } catch { return ""; } })() }))
     .filter(item => item.root && /^sha256:[a-f0-9]{64}$/u.test(item.digest));
   const requested = requestedRoot === undefined ? undefined : realpathSync(resolve(requestedRoot));
+  if (new Set(aliases.map(item => item.root)).size > 1) throw new Error("Project root is ambiguous for this scope");
   const matches = aliases.filter(item => requested ? item.root === requested : true);
   const unique = [...new Map(matches.map(item => [item.root, item])).values()];
-  if (unique.length !== 1) throw new Error(unique.length ? "Project root is ambiguous for this scope" : "Project root is not registered for this scope");
+  if (!unique.length) throw new Error("Project root is not registered for this scope");
   return unique[0]!.digest;
 }

@@ -3,7 +3,7 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { CraftStore } from "./infrastructure/store.ts";
-import { scopeEnvelope, scopeFromKey } from "./scope-policy.ts";
+import { knowledgeClaimPromotionProofVerified } from "./knowledge-evaluation-provenance.ts";
 
 const CATEGORIES = new Set(["projects", "domains", "troubleshooting", "decisions", "workflows"]);
 const TYPES = new Map<string, string>([["domain_rule", "fact"], ["technical_decision", "decision"], ["workflow", "rule"], ["troubleshooting", "failure_mode"], ["stable_project_fact", "fact"]]);
@@ -137,9 +137,9 @@ export class LegacyKnowledgeMigrationKernel {
    * The model is allowed to judge whether the immutable page is coherent and
    * useful enough to enter Context as historical, bounded knowledge.  It is not
    * allowed to turn that page into confirmed live-system truth.  A supported
-   * assessment therefore creates bounded Evidence, restores the complete
-   * sanitised page body, and moves the Claim to `reviewed`; an uncertain or
-   * negative assessment only records the decision.
+   * assessment therefore creates bounded Evidence and restores the complete
+   * sanitised page body as a candidate. It cannot replace independent held-out
+   * effectiveness evaluation or grant formal Context eligibility.
    */
   async reviewCandidates(args: JsonObject): Promise<JsonObject> {
     const migration = this.store.get("legacy_knowledge_migration", text(args.migration_id, "migration_id"));
@@ -170,10 +170,26 @@ export class LegacyKnowledgeMigrationKernel {
       const review = prior ?? this.store.create("knowledge_model_review", reviewId, { ...reviewIdentity, automated: true, reviewed_at: new Date().toISOString(), content_free: true });
       if (assessment.decision !== "supported") { deferred.push({ candidate_id: candidate.id, decision: assessment.decision, review_id: review.id }); continue; }
       const claim = this.store.get("knowledge_claim", String(candidate.claim_id));
-      const reviewedScope = candidate.scope === "shared" ? "global"
-        : candidate.project ? `project:${String(candidate.project)}` : "project:unbound";
-      if (claim.status === "reviewed" && claim.scope === reviewedScope) { reviewed.push({ candidate_id: candidate.id, claim_id: claim.id, review_id: review.id, idempotent: true }); continue; }
+      if (prior && claim.status === "candidate" && (claim.review as JsonObject | undefined)?.review_id === review.id) {
+        reviewed.push({ candidate_id: candidate.id, claim_id: claim.id, review_id: review.id, idempotent: true, claim_status: "candidate" }); continue;
+      }
+      // Storage scope is immutable once a Claim has entered a partition. When
+      // the historical Claim no longer carries that scope, its original
+      // partition cannot be reconstructed safely from candidate metadata.
+      const reviewedScope = typeof claim.scope === "string" && claim.scope.trim() ? claim.scope : null;
+      if (!reviewedScope) { failures.push({ candidate_id: candidate.id, code: "claim_scope_unavailable" }); continue; }
+      if (claim.status === "reviewed" && claim.scope === reviewedScope && knowledgeClaimPromotionProofVerified(this.store, claim)) {
+        reviewed.push({ candidate_id: candidate.id, claim_id: claim.id, review_id: review.id, idempotent: true, claim_status: "reviewed" }); continue;
+      }
       if (!new Set(["candidate", "reviewed"]).has(String(claim.status))) { failures.push({ candidate_id: candidate.id, code: "claim_not_candidate" }); continue; }
+      const nextVersion = Number(claim.version) + 1;
+      let contentRef;
+      try {
+        contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: String(claim.id), version: nextVersion,
+          scope: reviewedScope, status: "candidate", sensitivity: "internal", source_id: String(candidate.source_id), title: String(candidate.title), body: page.body.trim() });
+      } catch {
+        failures.push({ candidate_id: candidate.id, code: "candidate_scope_storage_unavailable" }); continue;
+      }
       const evidenceId = `evidence_${reviewId}`;
       const evidence = this.store.find("evidence", evidenceId) ?? this.store.create("evidence", evidenceId, {
         source_type: "model_source_review", confidence: "bounded",
@@ -181,17 +197,13 @@ export class LegacyKnowledgeMigrationKernel {
         locator: String(page.metadata.evidence_ref), observed_at: new Date().toISOString(),
         metadata: { source_id: candidate.source_id, source_locator: candidate.source_locator, source_digest: candidate.source_digest, review_id: review.id, reviewer, model_ref: modelRef },
       });
-      const nextVersion = Number(claim.version) + 1;
-      const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: String(claim.id), version: nextVersion,
-        scope: reviewedScope, status: "reviewed", sensitivity: "internal", source_id: String(candidate.source_id), title: String(candidate.title), body: page.body.trim() });
       const evidenceIds = [...new Set([...(Array.isArray(claim.evidence_ids) ? claim.evidence_ids.map(String) : []), String(evidence.id)])].sort();
-      const saved = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), source_id: candidate.source_id,
-        source_locator: candidate.source_locator, source_page_digest: candidate.source_digest, legacy_scope: claim.scope, scope: reviewedScope,
-        scope_envelope: scopeEnvelope(undefined, scopeFromKey(reviewedScope)), content_ref: contentRef,
-        content_digest: contentRef.digest, evidence_ids: evidenceIds, status: "reviewed",
-        review: { reviewer, model_ref: modelRef, review_id: review.id, reason_digest: digest(assessment.reason), reviewed_at: new Date().toISOString(), automated: true, confidence: "bounded" } });
+      const saved = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), scope: reviewedScope, source_id: candidate.source_id,
+        source_locator: candidate.source_locator, source_page_digest: candidate.source_digest, content_ref: contentRef,
+        content_digest: contentRef.digest, evidence_ids: evidenceIds, status: "candidate",
+        review: { reviewer, model_ref: modelRef, review_id: review.id, reason_digest: digest(assessment.reason), reviewed_at: new Date().toISOString(), automated: true, confidence: "bounded", qualification_status: "pending_independent_effectiveness" } });
       this.store.save("legacy_knowledge_migration_candidate", String(candidate.id), { ...payload(candidate), model_review_id: review.id, reviewed_claim_version: saved.version });
-      reviewed.push({ candidate_id: candidate.id, claim_id: saved.id, claim_version: saved.version, review_id: review.id, evidence_id: evidence.id, idempotent: false });
+      reviewed.push({ candidate_id: candidate.id, claim_id: saved.id, claim_version: saved.version, claim_status: saved.status, review_id: review.id, evidence_id: evidence.id, idempotent: false });
     }
     return { migration_id: migration.id, reviewed, deferred, failures, reviewer, model_ref: modelRef };
   }
@@ -200,7 +212,8 @@ export class LegacyKnowledgeMigrationKernel {
     const candidate = this.store.get("legacy_knowledge_migration_candidate", text(args.candidate_id, "candidate_id"));
     if (candidate.status === "published") return { candidate, idempotent: true };
     if (candidate.status !== "candidate") throw new Error("Only a non-duplicate candidate can be published");
-    const claim = this.store.get("knowledge_claim", text(candidate.claim_id, "candidate claim_id")); if (claim.status !== "reviewed") throw new Error("Candidate Claim must be independently reviewed before publication");
+    const claim = this.store.get("knowledge_claim", text(candidate.claim_id, "candidate claim_id"));
+    if (!knowledgeClaimPromotionProofVerified(this.store, claim)) throw new Error("Candidate Claim requires verified managed promotion and independent effectiveness evaluation before publication");
     return { candidate, claim, idempotent: false };
   }
 

@@ -6,7 +6,7 @@ import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 
 export const CODEBASE_LSP_CONFIG = "codebase-lsp.json";
 export const MAX_LSP_DOCUMENTS = 1_000;
-export const MAX_RELATION_SYMBOLS = 12_000;
+export const MAX_RELATION_SYMBOLS = 1_000;
 export const LSP_LANGUAGE_IDS: Readonly<Record<string, string>> = Object.freeze({
   ts: "typescript", mts: "typescript", cts: "typescript", tsx: "typescriptreact",
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascriptreact",

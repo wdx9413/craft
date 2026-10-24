@@ -8,13 +8,16 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { CodexHookBridge, HookSignalSanitizer, automaticMemoryFact, codexProjectScope, explicitMemoryStatement } from "../core/codex-hook-bridge.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
-import { craftPaths } from "../core/infrastructure/paths.ts";
+import { craftPaths, sessionStorageDirectory, sessionStorageScopeId } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { defaultSettings } from "../core/settings.ts";
 import { stableDigest } from "../core/digest.ts";
 import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
 import { sanitizedExperienceTaskGoal } from "../core/codex-hook-bridge.ts";
 import { codexTaskGoalDigest } from "../core/codex-task-prose.ts";
+import { estimateTokens } from "../core/token-budget.ts";
+import { contextAssetRef } from "../common/craft-common-base/src/context-assets.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture(models?: ReturnType<typeof defaultSettings>["models"]) {
   const root = await mkdtemp(join(tmpdir(), "craft-codex-hook-"));
@@ -86,13 +89,56 @@ test("Codex hook scope and explicit memory parser never retain arbitrary prompts
   assert.equal(explicitMemoryStatement("记住： "), null);
   assert.equal(explicitMemoryStatement(""), null);
   assert.equal(explicitMemoryStatement(`记住：${"x".repeat(1_001)}`), null);
-  assert.equal(automaticMemoryFact("本项目默认使用 Node.js"), "Node.js");
-  assert.equal(automaticMemoryFact("以后请优先运行 focused tests"), "运行 focused tests");
-  assert.equal(automaticMemoryFact("我偏好无糖咖啡"), "无糖咖啡");
-  assert.equal(automaticMemoryFact("I prefer terminal reviews"), "terminal reviews");
+  assert.equal(automaticMemoryFact("本项目默认使用 Node.js"), "本项目默认使用 Node.js");
+  assert.equal(automaticMemoryFact("以后请优先运行 focused tests"), "以后请优先运行 focused tests");
+  assert.equal(automaticMemoryFact("我偏好无糖咖啡"), "我偏好无糖咖啡");
+  assert.equal(automaticMemoryFact("I prefer terminal reviews"), "I prefer terminal reviews");
   assert.equal(automaticMemoryFact("普通的任务对话"), null);
   assert.equal(automaticMemoryFact("本项目使用 token=abcdefghijklmnopqrstuvwxyz"), null);
   assert.equal(automaticMemoryFact("不要记录：本项目使用 Node.js"), null);
+});
+
+test("automatic Memory facts preserve negation, avoidance, scope and conditional qualifiers", () => {
+  for (const statement of [
+    "以后请不要使用 Redis",
+    "以后请避免运行全量测试",
+    "本项目约定：仅在测试通过后发布，否则不要发布",
+    "本项目使用 Redis，但仅限测试环境",
+    "以后请不要删除历史数据，除非已经完成备份",
+    "本项目约定：如果评测失败，不要晋升候选",
+    `本项目约定：${"规".repeat(694)}`,
+  ]) assert.equal(automaticMemoryFact(`  ${statement}  `), statement);
+  for (const prompt of ["请不要使用 Redis 修复这次故障", "请避免运行全量测试", "如果评测失败就检查日志",
+    "", null, 7, "do not remember: I prefer Redis", `本项目约定：${"规".repeat(695)}`, "x".repeat(1_001)]) {
+    assert.equal(automaticMemoryFact(prompt), null);
+  }
+});
+
+test("Memory Hook preserves a conditional prohibition through two independent sessions and project promotion", async () => {
+  const f = await fixture();
+  const sessions = ["one", "two"].map(id => `negation-${stableDigest(f.root).slice(-12)}-${id}`);
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    const statement = "以后请不要删除历史数据，除非已经完成备份";
+    const scope = codexProjectScope(f.root)!;
+    for (const [index, sessionId] of sessions.entries()) {
+      await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: sessionId, prompt: statement });
+      const sessionMemories = f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId }).memories as JsonObject[];
+      assert.equal(sessionMemories.length, 1);
+      assert.equal(sessionMemories[0]!.content, statement);
+      const projectMemories = f.service.memoryLedgerList({ scope_kind: "project", scope_id: scope.id }).memories as JsonObject[];
+      assert.equal(projectMemories.length, index);
+      if (index === 1) {
+        assert.equal(projectMemories[0]!.content, statement);
+        assert.equal(projectMemories[0]!.status, "active");
+        const path = f.service.memoryGovernance.ledger.files.pathFor(scope)!;
+        assert.match(await readFile(path, "utf8"), /以后请不要删除历史数据，除非已经完成备份/u);
+      }
+    }
+  } finally {
+    for (const sessionId of sessions) f.service.memorySessionArchive({ session_id: sessionId });
+    await dispose(f);
+  }
 });
 
 test("Memory Hook automatically captures only classified stable project facts into the session tier", async () => {
@@ -103,7 +149,7 @@ test("Memory Hook automatically captures only classified stable project facts in
     await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "automatic-memory-session", prompt: "请修复这个测试" });
     const records = f.service.memoryLedgerList({ scope_kind: "session", scope_id: "automatic-memory-session", include_history: true }).memories as JsonObject[];
     assert.equal(records.length, 1);
-    assert.equal(records[0]!.content, "Node.js");
+    assert.equal(records[0]!.content, "本项目默认使用 Node.js");
     assert.equal(records[0]!.status, "active");
     const evidence = f.store.get("evidence", String((records[0]!.evidence_ids as string[])[0]));
     assert.equal((evidence.metadata as JsonObject).capture_mode, "host-observed-stable-fact");
@@ -122,7 +168,7 @@ test("Hook Memory output projects promotion summaries and legacy journals defaul
     const output = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root,
       session_id: "promotion-session", prompt: "本项目默认使用 Node.js" });
     const emitted = JSON.parse(String(output.additionalContext)) as JsonObject;
-    assert.deepEqual((emitted.memory_capture as JsonObject).promotions, [{ tier: "session", auto_committed: false, memory_file: null }]);
+    assert.deepEqual((emitted.memory_capture as JsonObject).promotions, [{ tier: "session", auto_committed: false }]);
 
     const turn = "legacy-unknown-session", scope = codexProjectScope(f.root)!;
     const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope, turn })).digest("hex").slice(-20)}`;
@@ -140,14 +186,15 @@ test("Memory SessionEnd removes the temporary Memory body and ledger rows", asyn
     const bridge = new CodexHookBridge(f.service);
     f.service.knowledgeMemoryInstallBuiltins();
     const sessionId = "session-end-memory-cleanup";
-    f.service.memoryCaptureUserStatement({ content: "Temporary session fact", kind: "episodic", topic: "temporary-fact", session_id: sessionId });
-    const sessionFile = f.service.memoryGovernance.ledger.files.pathFor({ kind: "session", id: sessionId });
+    f.service.memoryCaptureUserStatement({ content: "Temporary session fact", kind: "episodic", topic: "temporary-fact", session_id: sessionId, session_host: "codex" });
+    const internalSessionScopeId = sessionStorageScopeId("codex", sessionId);
+    const sessionFile = f.service.memoryGovernance.ledger.files.pathFor({ kind: "session", id: internalSessionScopeId });
     assert(sessionFile && existsSync(sessionFile));
 
     await bridge.handle("memory", { hook_event_name: "SessionEnd", cwd: f.root, session_id: sessionId });
 
     assert.equal(existsSync(sessionFile), false);
-    assert.equal(f.store.listScoped("memory_ledger", [{ kind: "session", id: sessionId }], 100).length, 0);
+    assert.equal(f.store.listScoped("memory_ledger", [{ kind: "session", id: internalSessionScopeId }], 100).length, 0);
 
     const originalArchive = f.service.memorySessionArchive;
     const mutableService = f.service as CraftService & { memorySessionArchive: (args: JsonObject) => JsonObject };
@@ -159,6 +206,27 @@ test("Memory SessionEnd removes the temporary Memory body and ledger rows", asyn
     const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed");
     assert.equal(failures.length, 2);
     assert.deepEqual(failures.map(event => (event.payload as JsonObject).error_type), ["Error", "unknown"]);
+  } finally { await dispose(f); }
+});
+
+test("the same Host session ID resolves, stores and archives Memory in separate Host partitions", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    const sessionId = "same-id-across-hosts";
+    await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", source: "codex", cwd: f.root,
+      session_id: sessionId, prompt: "本项目默认使用 Node.js" });
+    await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", source: "claude", cwd: f.root,
+      session_id: sessionId, prompt: "本项目默认使用 Python" });
+    const codex = f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId, session_host: "codex" }).memories as JsonObject[];
+    const claude = f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId, session_host: "claude" }).memories as JsonObject[];
+    assert.equal(codex.length, 1);
+    assert.equal(claude.length, 1);
+    assert.match(String(codex[0]!.content), /Node\.js/u);
+    assert.match(String(claude[0]!.content), /Python/u);
+    f.service.memorySessionArchive({ session_id: sessionId, session_host: "codex" });
+    assert.equal(f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId, session_host: "codex" }).count, 0);
+    assert.equal(f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId, session_host: "claude" }).count, 1);
   } finally { await dispose(f); }
 });
 
@@ -181,7 +249,7 @@ test("Knowledge, Memory and Experience hooks resolve only their named Context me
     f.service.knowledgeMemoryInstallBuiltins();
     const evidence = f.service.evidenceRecord({ evidence_id: "hook-evidence", source_type: "program", confidence: "confirmed", claim: "fixture" });
     const claim = f.service.knowledgeClaimSave({ claim_id: "hook-claim", source_id: "builtin.evidence-wiki", kind: "rule", scope: `project:${canonicalScope.id}`, content: "Use a focused verification command.", evidence_ids: [evidence.id] }).claim as JsonObject;
-    f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "fixture", reason: "verified" });
+    attachVerifiedPromotionFixture(f.store, claim);
     f.service.memoryLedgerRemember({ memory_id: "hook-memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: canonicalScope.id, content: "Prefer short feedback.", confidence: "bounded" });
     const bridge = new CodexHookBridge(f.service);
     const knowledge = await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: scope, prompt: "Which verification command should I use?" });
@@ -206,6 +274,7 @@ test("Knowledge, Memory and Experience hooks resolve only their named Context me
     assert.equal(components.find((item) => item.component === "memory")!.explicit_memory_written, true);
     assert.equal(components.find((item) => item.component === "experience")!.context_receipt_id !== null, true);
     const sessionMemoryPath = f.service.memoryGovernance.ledger.files.pathFor({ kind: "session", id: "memory-session" })!;
+    assert.equal(sessionMemoryPath, join(sessionStorageDirectory(f.store.paths, "codex", "memory-session"), "memory", "memory.md"));
     assert.equal(existsSync(sessionMemoryPath), true);
     await bridge.handle("memory", { hook_event_name: "SessionEnd", cwd: scope, session_id: "memory-session" });
     assert.equal(existsSync(sessionMemoryPath), false);
@@ -220,21 +289,138 @@ test("Context Hook resolves one shared receipt and records each component withou
     f.service.knowledgeMemoryInstallBuiltins();
     const evidence = f.service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "fixture" });
     const claim = f.service.knowledgeClaimSave({ source_id: "builtin.evidence-wiki", kind: "rule", scope: `project:${scope.id}`, content: "Run focused verification.", evidence_ids: [evidence.id] }).claim as JsonObject;
-    f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "fixture", reason: "verified" });
+    attachVerifiedPromotionFixture(f.store, claim);
     f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: scope.id, content: "Prefer short feedback.", confidence: "bounded" });
+    f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "global", scope_id: "global", content: "Global verification feedback rule.", confidence: "bounded" });
     const bridge = new CodexHookBridge(f.service);
     const response = await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "context-session", turn_id: "context-turn", prompt: "verification feedback" });
     const injected = JSON.parse(String(response.additionalContext)) as JsonObject;
     assert.equal(injected.source, "craft-context");
     assert.equal(f.store.count("context_resolution_receipt"), 1);
     const receipt = f.store.get("context_resolution_receipt", String(injected.receipt_id));
+    assert.equal(receipt.max_items, 3);
+    assert.equal(receipt.max_chars, 1_200);
     assert.deepEqual(receipt.members, ["experience", "knowledge", "memory"]);
-    assert.match(JSON.stringify(injected.selected), /focused verification|short feedback/u);
+    assert.match(JSON.stringify(injected.selected), /Global verification feedback rule/u);
+    assert((receipt.attempted_scopes as JsonObject[]).some(item => item.kind === "global" && item.id === "global"));
     const proofs = f.store.list("activation_proof_receipt", 10);
     assert.deepEqual(proofs.map((item) => item.component).sort(), ["experience", "knowledge", "memory"]);
     assert(proofs.every((item) => item.context_receipt_id === receipt.id));
+    assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd, session_id: "context-session", turn_id: "context-turn", prompt: "verification feedback" }), {});
     await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "context-session", prompt: "记住：我偏好无糖咖啡" });
     assert.equal((f.service.memoryLedgerList({ scope_kind: "session", scope_id: "context-session", include_history: true }).memories as JsonObject[]).length, 1);
+  } finally { await dispose(f); }
+});
+
+test("Hook responses fit their declared token caps before recording emitted references", async () => {
+  const f = await fixture();
+  try {
+    const cwd = f.root, scope = codexProjectScope(cwd)!;
+    f.service.knowledgeMemoryInstallBuiltins();
+    const content = `verification ${"verified detail. ".repeat(100)}`;
+    f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: scope.id,
+      content, confidence: "bounded" });
+    const bridge = new CodexHookBridge(f.service);
+    for (const [member, limit, turn] of [["context", 400, "context-budget"], ["memory", 150, "memory-budget"]] as const) {
+      const response = await bridge.handle(member, { hook_event_name: "UserPromptSubmit", cwd, session_id: "budget-session", turn_id: turn, prompt: "verification" });
+      assert.equal(typeof response.additionalContext, "string");
+      assert(estimateTokens(String(response.additionalContext)) <= limit);
+      const injected = JSON.parse(String(response.additionalContext)) as JsonObject;
+      const selected = injected.selected as JsonObject[];
+      assert.equal(selected.length, 1);
+      const projected = selected[0]!;
+      assert(String(projected.content).length < content.length);
+      const excerpt = projected.content_excerpt as JsonObject;
+      assert.equal(content.slice(Number(excerpt.source_start), Number(excerpt.source_end)), projected.content);
+      const receipt = f.store.list("context_emission", 10).find(item => item.session_id === "budget-session" && item.turn_id === turn);
+      assert.equal((receipt?.asset_refs as JsonObject[]).length, 1);
+    }
+  } finally { await dispose(f); }
+});
+
+test("Hook excerpt compaction preserves offsets and refuses oversized capture metadata", async () => {
+  const f = await fixture();
+  try {
+    const cwd = f.root, scope = codexProjectScope(cwd)!;
+    const short = { memory_id: "short-memory", memory_version: 1, content: `needle ${"detail ".repeat(400)}` };
+    const priorExcerpt = { memory_id: "prior-memory", memory_version: 1, content: `needle ${"detail ".repeat(400)}`,
+      content_excerpt: { source_start: 20, source_chars: 4_000, reason: "query_match" } };
+    const unrelated = { memory_id: "unrelated-memory", memory_version: 1, content: `unrelated ${"background ".repeat(500)}` };
+    const experience = { procedure_id: "procedure", procedure_version: 1, procedure_kind: "workflow", routeable: true };
+    f.service.contextWorkingSets.resolve = (async () => ({ items: [short, priorExcerpt, unrelated], contributions: [{ member: "experience", items: [experience] }],
+      asset_refs: [contextAssetRef("memory", short, scope), contextAssetRef("memory", priorExcerpt, scope), contextAssetRef("memory", unrelated, scope), contextAssetRef("experience", experience, scope)], receipt: null })) as typeof f.service.contextWorkingSets.resolve;
+    const bridge = new CodexHookBridge(f.service);
+    const response = await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, prompt: "needle" });
+    const selected = JSON.parse(String(response.additionalContext)).selected as JsonObject[];
+    assert(selected.every(item => String(item.content).length < 2_800));
+    const excerpt = selected.find(item => item.id === "prior-memory")!.content_excerpt as JsonObject;
+    assert(Number(excerpt.source_start) >= 20);
+
+    f.service.contextWorkingSets.resolve = (async () => ({ items: [], contributions: [{ member: "unknown", items: [{ content: "must not be injected" }] }], receipt: null })) as typeof f.service.contextWorkingSets.resolve;
+    assert.deepEqual(await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, prompt: "needle" }), {});
+
+    f.service.memoryCaptureUserStatement = (() => ({ auto_committed: false, candidate: { id: "candidate" }, next_action: "review",
+      topic_suggestions: ["a".repeat(800), "b".repeat(800)], promotions: [] })) as typeof f.service.memoryCaptureUserStatement;
+    const oversized = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd, session_id: "oversized-capture",
+      prompt: `记住：${"我偏好简洁表达".repeat(5)}` });
+    assert.deepEqual(oversized, {});
+  } finally { await dispose(f); }
+});
+
+test("Hook never assigns a source range to a body whose prior excerpt offsets are unknown", async () => {
+  const f = await fixture();
+  try {
+    const scope = codexProjectScope(f.root)!;
+    const item = { memory_id: "unknown-offset-memory", memory_version: 1,
+      content: `needle ${"background ".repeat(500)}`,
+      content_excerpt: { source_start: null, source_end: null, source_chars: 6_000, reason: "no_lexical_match" } };
+    const missingSourceSize = { ...item, memory_id: "unknown-size-memory",
+      content_excerpt: { source_start: null, source_end: null, reason: "no_lexical_match" } };
+    f.service.contextWorkingSets.resolve = (async () => ({ items: [item, missingSourceSize], contributions: [],
+      asset_refs: [contextAssetRef("memory", item, scope), contextAssetRef("memory", missingSourceSize, scope)], receipt: null })) as typeof f.service.contextWorkingSets.resolve;
+
+    const response = await new CodexHookBridge(f.service).handle("memory", {
+      hook_event_name: "UserPromptSubmit", cwd: f.root, prompt: "needle",
+    });
+    assert.equal(typeof response.additionalContext, "string");
+    assert(estimateTokens(String(response.additionalContext)) <= 150);
+    const selected = (JSON.parse(String(response.additionalContext)) as JsonObject).selected as JsonObject[];
+    assert.equal(selected.length, 2);
+    for (const projected of selected) {
+      assert.equal(projected.content, "");
+      const excerpt = projected.content_excerpt as JsonObject;
+      assert.equal(excerpt.source_start, null);
+      assert.equal(excerpt.source_end, null);
+      assert.equal(excerpt.reason, "requires_expansion");
+    }
+    assert.equal((selected[0]!.content_excerpt as JsonObject).source_chars, 6_000);
+    assert.equal((selected[1]!.content_excerpt as JsonObject).source_chars, item.content.length);
+  } finally { await dispose(f); }
+});
+
+test("parallel Context and component Hooks atomically divide shared material without duplicate injection", async () => {
+  const f = await fixture();
+  try {
+    const cwd = f.root, scope = codexProjectScope(cwd)!;
+    f.service.knowledgeMemoryInstallBuiltins();
+    const evidence = f.service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "fixture" });
+    const claim = f.service.knowledgeClaimSave({ source_id: "builtin.evidence-wiki", kind: "rule", scope: `project:${scope.id}`, content: "Run focused verification.", evidence_ids: [evidence.id] }).claim as JsonObject;
+    attachVerifiedPromotionFixture(f.store, claim);
+    f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: scope.id, content: "Prefer short feedback.", confidence: "bounded" });
+    const bridge = new CodexHookBridge(f.service);
+    const input = { hook_event_name: "UserPromptSubmit", cwd, session_id: "parallel-hooks", turn_id: "same-turn", prompt: "verification feedback" };
+    const outputs = await Promise.all([bridge.handle("context", input), bridge.handle("knowledge", input)]);
+    const selected = outputs.flatMap(output => {
+      if (typeof output.additionalContext !== "string") return [];
+      return (JSON.parse(output.additionalContext) as JsonObject).selected as JsonObject[];
+    });
+    const identities = selected.map(item => String(item.id ?? item.claim_id ?? item.procedure_id));
+    assert.equal(identities.length, 2);
+    assert.equal(new Set(identities).size, identities.length);
+    const emission = f.store.list("context_emission", 10).find(item => item.session_id === "parallel-hooks" && item.turn_id === "same-turn");
+    assert(emission);
+    assert.equal((emission.asset_refs as JsonObject[]).length, 2);
+    assert.equal(emission.model_use_verified, false);
   } finally { await dispose(f); }
 });
 
@@ -1076,6 +1262,7 @@ test("Hook journal covers missing identity, updates signals, and learning record
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service); const cwd = f.root;
+    await mkdir(join(cwd, "src"), { recursive: true }); await writeFile(join(cwd, "src/feature.ts"), "export const feature = true;\n");
     const sanitizer = new HookSignalSanitizer();
     const signal = sanitizer.signal({ tool_name: "Edit", tool_input: {} });
     assert(signal);
@@ -1094,7 +1281,8 @@ test("Hook journal covers missing identity, updates signals, and learning record
     for (const turn of ["failed-one", "failed-two"]) {
       await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: turn, turn_id: turn, prompt: "Fix and verify" });
       assert.equal(typeof bridge.journal.find({ cwd, session_id: turn, turn_id: turn })?.context_receipt_id, "string");
-      await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Edit" });
+      await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Edit",
+        tool_input: { file_path: "src/feature.ts" } });
       await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { status: "failed" } });
       await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: turn, turn_id: turn, scenario_key: "coding.feature-implementation" });
     }
@@ -1324,9 +1512,12 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
     assert.throws(() => f.service.experienceScenarioClassificationRequestGet({ request_id: " ", scope, project_root: f.root }), /explicit project scope/u);
     assert.throws(() => f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, scope: "project:other", project_root: f.root }), /reference scope/u);
     const originalHookReference = f.store.find("experience_scenario_classification_request_ref", requestId)!;
-    f.store.save("experience_scenario_classification_request_ref", requestId, { ...originalHookReference, project_path_alias_digest: "invalid" });
+    const saveReference = (changes: JsonObject = {}) => f.store.save("experience_scenario_classification_request_ref", requestId, {
+      ...originalHookReference, ...changes, version: f.store.get("experience_scenario_classification_request_ref", requestId).version,
+    });
+    saveReference({ project_path_alias_digest: "invalid" });
     assert.throws(() => f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, scope, project_root: f.root }), /alias digest is invalid/u);
-    f.store.save("experience_scenario_classification_request_ref", requestId, originalHookReference);
+    saveReference();
     const request = f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, scope, project_root: f.root }).request as JsonObject;
     assert.equal((f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, scope }).request as JsonObject).scope, scope);
     const unaliasedReference = references.find(reference => reference.id !== requestId)!;
@@ -1342,13 +1533,12 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
       expected_version: request.version, status: "unclassified", result_digest: `sha256:${"1".repeat(64)}` }), /request scope does not match/u);
     await writeFile(requestPath, requestSource);
     for (const status of ["classified", "unclassified"] as const) {
-      f.store.save("experience_scenario_classification_request_ref", requestId, { ...originalHookReference,
-        status: "unclassified", result_digest: `sha256:${"2".repeat(64)}` });
+      saveReference({ status: "unclassified", result_digest: `sha256:${"2".repeat(64)}` });
       assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
         project_root: f.root, expected_version: request.version, status, result_digest: `sha256:${"3".repeat(64)}` }), /reference conflicts/u);
       await writeFile(requestPath, requestSource);
     }
-    f.store.save("experience_scenario_classification_request_ref", requestId, originalHookReference);
+    saveReference();
     const context = request.context as JsonObject;
     assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
       project_root: f.root, expected_version: request.version, status: "pending", result_digest: `sha256:${"d".repeat(64)}` }), /status is invalid/u);
@@ -1358,14 +1548,14 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
       expected_version: request.version, status: "unclassified", result_digest: `sha256:${"e".repeat(64)}` }), /explicit project scope/u);
     assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
       expected_version: request.version, status: "unclassified", result_digest: null }), /completion is invalid/u);
-    f.store.save("experience_scenario_classification_request_ref", requestId, { ...originalHookReference, project_path_alias_digest: "invalid" });
+    saveReference({ project_path_alias_digest: "invalid" });
     assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
       project_root: f.root, expected_version: request.version, status: "unclassified", result_digest: `sha256:${"f".repeat(64)}` }), /alias digest is invalid/u);
-    f.store.save("experience_scenario_classification_request_ref", requestId, originalHookReference);
-    f.store.save("experience_scenario_classification_request_ref", requestId, { ...originalHookReference, scope: "project:other" });
-    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
+    saveReference();
+    assert.throws(() => saveReference({ scope: "project:other" }), /cannot change storage scope/u);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope: "project:other",
       project_root: f.root, expected_version: request.version, status: "unclassified", result_digest: `sha256:${"f".repeat(64)}` }), /reference scope/u);
-    f.store.save("experience_scenario_classification_request_ref", requestId, originalHookReference);
+    saveReference();
     assert.equal(context.task_goal, "修复 Experience 场景分类触发链路");
     assert.equal(context.sanitized, true);
     assert.equal(context.content_stored, false);
@@ -1389,7 +1579,7 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
     const resultDigest = `sha256:${"a".repeat(64)}`;
     assert.throws(() => f.service.evaluationModelTicketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
     const requestContext = request.context as JsonObject;
-    f.store.save("experience_scenario_classification_request_ref", requestId, { ...hookReference, identity_digest: "sha256:tampered" });
+    saveReference({ identity_digest: "sha256:tampered" });
     assert.throws(() => f.service.learningCycleFinalize({ host: requestContext.host, task_id: requestContext.task_id, session_id: requestContext.source_session_id, turn_id: requestContext.turn_id,
       context_receipt_id: requestContext.context_receipt_id, verified: true, verification_outcome: requestContext.outcome,
       verification_ref: requestContext.verification_ref, project_root: f.root, scenario_context: {

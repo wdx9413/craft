@@ -1,23 +1,27 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { ensureProjectStorageDirectory, type CraftPaths } from "../../common/craft-common-store-local/src/paths.ts";
 
 const CACHE_KINDS = new Set(["codebase_file_analysis", "codebase_semantic_file_analysis", "codebase_python_file_analysis", "codebase_java_file_analysis", "codebase_lsp_file_analysis"]);
 const CACHE_ID = /^codebase_(?:file|[a-z_]+_file)_[A-Za-z0-9_-]{1,128}$/u;
 const CACHE_FORMAT = "craft-project-codebase-analysis-cache-v1";
 
-function ensureDirectory(path: string): string {
-  const resolved = resolve(path);
-  const rootStat = lstatSync(resolved);
-  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error("Project Codebase cache root is unsafe");
-  let current = resolved;
-  for (const part of [".craft_data", "codebase", "indexes"]) {
+function ensureRegularDirectory(path: string, message: string): void {
+  // Recursive mkdir is idempotent when parallel indexers create the same path.
+  // Parents are validated one level at a time by the caller before this point.
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(message);
+}
+
+function ensureDirectory(path: string, paths: CraftPaths): string {
+  let current = ensureProjectStorageDirectory(paths, path);
+  for (const part of ["codebase", "indexes"]) {
     current = join(current, part);
-    if (!existsSync(current)) mkdirSync(current, { mode: 0o700 });
-    const stat = lstatSync(current);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Project Codebase cache path is unsafe");
+    ensureRegularDirectory(current, "Project Codebase cache path is unsafe");
   }
   return current;
 }
@@ -27,18 +31,14 @@ export class ProjectAnalysisCache {
   readonly directory: string;
   readonly workspaceId: string;
 
-  constructor(projectRoot: string, workspaceId: string) {
+  constructor(projectRoot: string, workspaceId: string, paths: CraftPaths) {
     if (!/^[A-Za-z0-9_-]{1,128}$/u.test(workspaceId)) throw new Error("Invalid Codebase workspace id");
     this.workspaceId = workspaceId;
-    const root = ensureDirectory(projectRoot);
+    const root = ensureDirectory(projectRoot, paths);
     let current = join(root, workspaceId);
-    if (!existsSync(current)) mkdirSync(current, { mode: 0o700 });
-    let stat = lstatSync(current);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Project Codebase cache path is unsafe");
+    ensureRegularDirectory(current, "Project Codebase cache path is unsafe");
     current = join(current, "analysis_cache");
-    if (!existsSync(current)) mkdirSync(current, { mode: 0o700 });
-    stat = lstatSync(current);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Project Codebase cache path is unsafe");
+    ensureRegularDirectory(current, "Project Codebase cache path is unsafe");
     this.directory = current;
   }
 
@@ -47,12 +47,14 @@ export class ProjectAnalysisCache {
     const stat = lstatSync(path, { throwIfNoEntry: false });
     if (!stat) return null;
     if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Project Codebase cache record is unsafe");
-    const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Project Codebase cache record is invalid");
+    let value: unknown;
+    try { value = JSON.parse(readFileSync(path, "utf8")); }
+    catch { return null; }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const record = value as JsonObject;
     if (record.format !== CACHE_FORMAT || record.kind !== kind || record.workspace_id !== this.workspaceId || record.id !== id
       || !Number.isSafeInteger(record.version) || Number(record.version) < 1 || !record.payload || typeof record.payload !== "object" || Array.isArray(record.payload)
-      || record.payload_digest !== stableDigest(record.payload)) throw new Error("Project Codebase cache integrity failure");
+      || record.payload_digest !== stableDigest(record.payload)) return null;
     return { ...(record.payload as JsonObject), id, version: record.version, workspace_id: this.workspaceId };
   }
 
@@ -62,9 +64,10 @@ export class ProjectAnalysisCache {
     const prefix = `${kind}--`;
     const names = readdirSync(this.directory).filter(name => name.startsWith(prefix) && name.endsWith(".json")).sort();
     if (names.length > limit) throw new Error("Project Codebase cache exceeds requested limit");
-    return names.map(name => {
+    return names.flatMap(name => {
       const id = name.slice(prefix.length, -5);
-      return this.find(kind, id)!;
+      const record = this.find(kind, id);
+      return record ? [record] : [];
     });
   }
 
@@ -72,11 +75,18 @@ export class ProjectAnalysisCache {
     const path = this.path(kind, id);
     if (payload.workspace_id !== undefined && payload.workspace_id !== this.workspaceId) throw new Error("Project Codebase cache workspace mismatch");
     const previous = this.find(kind, id);
+    const nextPayload = { ...payload, workspace_id: this.workspaceId };
+    if (previous) {
+      const priorPayload = Object.fromEntries(Object.entries(previous).filter(([key]) => key !== "id" && key !== "version"));
+      if (stableDigest(priorPayload) === stableDigest(nextPayload)) return previous;
+    }
     const next = { format: CACHE_FORMAT, kind, workspace_id: this.workspaceId, id, version: Number(previous?.version ?? 0) + 1,
-      payload: { ...payload, workspace_id: this.workspaceId }, payload_digest: stableDigest({ ...payload, workspace_id: this.workspaceId }) };
+      payload: nextPayload, payload_digest: stableDigest(nextPayload) };
     const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
     const fd = openSync(temporary, "wx", 0o600);
-    try { writeFileSync(fd, `${JSON.stringify(next)}\n`, "utf8"); fsyncSync(fd); }
+    // Analysis records are rebuildable caches; atomic rename prevents partial reads without
+    // paying a synchronous durable-media flush for every source file in the snapshot.
+    try { writeFileSync(fd, `${JSON.stringify(next)}\n`, "utf8"); }
     finally { closeSync(fd); }
     try { renameSync(temporary, path); }
     finally { rmSync(temporary, { force: true }); }

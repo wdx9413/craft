@@ -11,6 +11,7 @@ import { payload } from "../core/digest.ts";
 import { sourceAllows } from "../core/scope-policy.ts";
 import { McpServer } from "../core/mcp.ts";
 import { bindRemoteIdentity } from "../deploy/components/server.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 const scope = { scope_kind: "project", scope_id: "access-fixture" } as const;
 const privateEnvelope = { audience: { mode: "private", principal_ids: ["owner"] }, tenant_id: "tenant" };
@@ -34,7 +35,7 @@ test("Source audience gates Knowledge independently of derivative purpose and fo
   try {
     for (const source_id of ["public", "private"]) {
       f.service.knowledgeClaimSave({ claim_id: source_id, source_id, kind: "fact", content: "alpha fact", scope: "project:access-fixture", evidence_ids: ["e"] });
-      f.service.knowledgeClaimReview({ claim_id: source_id, status: "reviewed", reviewer: "fixture", reason: "evidence checked" });
+      attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", source_id));
     }
     const reader = new KnowledgeContribution(f.store), request = { query: "alpha", ...scope, max_items: 20, max_chars: 10000 } as const;
     assert.deepEqual((await reader.contribute(request)).items.map(i => i.claim_id), ["public"]);

@@ -107,11 +107,15 @@ test("traverse is bounded, terminates on a cycle, and honours max_depth", async 
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("edges pointing at an object that does not exist are not surfaced", async () => {
+test("relations require existing custody parents and stop surfacing after an endpoint is removed", async () => {
   const f = await fixture();
   try {
     const a = await claim(f.service, "c-a", "Observed behaviour of A.");
+    assert.throws(() => f.service.relationSave({ relation_id: "unbound", source: { kind: "knowledge_claim", id: a },
+      target: { kind: "knowledge_claim", id: "c-missing" }, relation: "references" }), /storage parent is unavailable/u);
+    await claim(f.service, "c-missing", "A source later removed.");
     f.service.relationSave({ relation_id: "ghost", source: { kind: "knowledge_claim", id: a }, target: { kind: "knowledge_claim", id: "c-missing" }, relation: "references" });
+    f.store.remove("knowledge_claim", "c-missing");
     assert.equal((f.service.relationNeighbors({ kind: "knowledge_claim", id: a }).relations as JsonObject[]).length, 0);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
@@ -120,6 +124,7 @@ test("relation endpoints must be distinct, known kinds, and free of secrets", as
   const f = await fixture();
   try {
     const a = await claim(f.service, "c-a", "Observed behaviour of A.");
+    await claim(f.service, "c-x", "Observed behaviour of X.");
     assert.throws(() => f.service.relationSave({ source: { kind: "knowledge_claim", id: a }, target: { kind: "knowledge_claim", id: a }, relation: "supports" }), /differ/u);
     assert.throws(() => f.service.relationSave({ source: { kind: "nonsense", id: a }, target: { kind: "knowledge_claim", id: a }, relation: "supports" }), /unsupported/u);
     assert.throws(() => f.service.relationSave({ source: { kind: "knowledge_claim", id: a }, target: { kind: "knowledge_claim", id: "c-x" }, relation: "not-a-kind" }), /unsupported/u);
@@ -142,6 +147,7 @@ test("knowledge search carries a one-hop relation summary for both directions", 
     await mkdir(docs, { recursive: true });
     await writeFile(join(docs, "guide.md"), "# Guide\n\nrunbook zeta for the incident queue");
     f.service.knowledgeIndexSync({ project_root: docs });
+    f.store.create("knowledge_document", "guide.md", { scope: "global", path: "guide.md", status: "active" });
     const claimId = await claim(f.service, "c-a", "Observed behaviour of A.");
     f.service.relationSave({ relation_id: "forward", source: { kind: "knowledge_document", id: "guide.md" }, target: { kind: "knowledge_claim", id: claimId }, relation: "supports" });
     f.service.relationSave({ relation_id: "inverse", source: { kind: "knowledge_claim", id: claimId }, target: { kind: "knowledge_document", id: "guide.md" }, relation: "references" });

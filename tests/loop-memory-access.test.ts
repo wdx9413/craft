@@ -70,6 +70,7 @@ test("the loop's memory tools dispatch against a real store", async (t) => {
   const store = await new CraftStore(craftPaths(root)).open();
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });
   const service = new CraftService(store);
+  store.create("scope_alias", "project-root", { scope: { kind: "project", id: "proj-1" }, alias_kind: "path", alias: root, status: "active" });
 
   // Register a source and a memory the way the governed path requires.
   service.knowledgeSourceRegister({
@@ -91,16 +92,34 @@ test("the loop's memory tools dispatch against a real store", async (t) => {
     scope_kind: "project", scope_id: "proj-1", content: "the ledger port is 8080",
     evidence_ids: [String(evidence.id)],
   });
+  for (const suffix of ["a", "b", "c"]) service.memoryLedgerRemember({
+    memory_id: `mem-ledger-${suffix}`, source_id: "src-1", kind: "working",
+    scope_kind: "project", scope_id: "proj-1", content: `ledger port note ${suffix}: ${"verified ".repeat(10)}`,
+    evidence_ids: [String(evidence.id)],
+  });
+  service.memoryLedgerRemember({
+    memory_id: "mem-ledger-long", source_id: "src-1", kind: "working",
+    scope_kind: "project", scope_id: "proj-1", content: `${"ledger port verification. ".repeat(30)}${"background detail ".repeat(100)}`,
+    evidence_ids: [String(evidence.id)],
+  });
 
   // The read path returns the memory with its provenance intact.
   const found = await service.memorySearch({ query: "ledger port", scope_id: "proj-1", scope_kind: "project" });
   const memories = found.memories as JsonObject[];
-  assert.equal(memories.length, 1);
-  assert.equal(memories[0]!.memory_id, "mem-ledger");
-  assert.equal(memories[0]!.reason, "keyword_bm25");
+  assert.equal(memories.length, 3);
+  assert(memories.some(memory => memory.memory_id === "mem-ledger"));
+  assert(memories.every(memory => memory.reason === "keyword_bm25"));
+  assert(JSON.stringify(memories).length <= 1_200);
+  assert.equal(found.omitted_count, 2);
+  const longMemory = memories.find(memory => memory.memory_id === "mem-ledger-long");
+  assert(longMemory);
+  assert(String(longMemory.content).length <= 600);
+  assert.equal((longMemory.content_excerpt as JsonObject).reason, "matched_passage");
   // A receipt is still produced, so reading did not cost the audit trail.
   assert.equal(found.content_free_receipt, true);
   assert.match(String(found.receipt_id), /^standalone-ctx-|^context_resolution_/u);
+  await assert.rejects(service.memorySearch({ query: "ledger port", scope_id: "proj-1", scope_kind: "project", max_items: 9 }), /max_items must be an integer between/u);
+  await assert.rejects(service.memorySearch({ query: "ledger port", scope_id: "proj-1", scope_kind: "project", max_chars: 4_001 }), /max_chars must be an integer between/u);
 
   // A query that matches nothing is an empty result with a real receipt.
   const miss = await service.memorySearch({ query: "nothing matches this", scope_id: "proj-1", scope_kind: "project" });
@@ -129,4 +148,19 @@ test("the loop's memory tools dispatch against a real store", async (t) => {
   assert.throws(
     () => service.knowledgeMemoryCandidatePropose({ source_id: "src-1", kind: "working", scope: "project", content: "api_key: sk-live-123" }),
     /must not contain sensitive assignments/u);
+});
+
+test("memory search keeps legacy items without optional excerpt metadata compact", async (t) => {
+  const root = join(tmpdir(), `craft-loop-memory-legacy-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true });
+  const store = await new CraftStore(craftPaths(root)).open();
+  t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });
+  const service = new CraftService(store);
+  Object.assign(service.contextResolution, { resolve: async () => ({
+    items: [{ memory_id: "legacy", memory_version: 1, content: "短记忆", sensitivity: "normal", reason: "keyword_bm25" }],
+    receipt: { id: "legacy-receipt", omitted_count: 0 },
+  }) });
+  const result = await service.memorySearch({ query: "短记忆", scope_kind: "project", scope_id: "legacy-project" });
+  assert.deepEqual(result.memories, [{ memory_id: "legacy", memory_version: 1, content: "短记忆",
+    sensitivity: "normal", reason: "keyword_bm25" }]);
 });

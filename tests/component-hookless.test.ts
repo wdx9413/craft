@@ -11,12 +11,13 @@ import { CodexHookBridge, HookSignalSanitizer } from "../core/codex-hook-bridge.
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { createActionHandlers } from "../core/application/actions/action-handlers.ts";
 import { retrievalTerms } from "../core/retrieval-terms.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-hookless-"));
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
   const service = new CraftService(store);
-  for (const scopeId of ["demo", "recovery", "cas"]) {
+  for (const scopeId of ["demo", "recovery", "cas", "fixture", "a", "b"]) {
     const projectRoot = join(root, "projects", scopeId);
     await mkdir(projectRoot, { recursive: true });
     service.scopeAliasBind({ scope_kind: "project", scope_id: `project:${scopeId}`, alias_kind: "path", alias: projectRoot });
@@ -56,7 +57,8 @@ test("strict MCP: each standalone resolves its own member, scope, gate and aggre
     assert(saved);
     const memories = (await call(f.servers.memory!, "craft_memory_ledger_list", { scope_kind: "session", scope_id: "hookless-session" })).memories as JsonObject[];
     assert.equal(memories.length, 1);
-    f.store.create("knowledge_claim", "rule", { status: "reviewed", source_id: "builtin.evidence-wiki", scope: `${scope.kind}:${scope.id}`, content: "运行测试", evidence_ids: [] });
+    const rule = f.store.create("knowledge_claim", "rule", { status: "candidate", source_id: "builtin.evidence-wiki", scope: `${scope.kind}:${scope.id}`, content: "运行测试", evidence_ids: [] });
+    attachVerifiedPromotionFixture(f.store, rule);
     const isolated = await call(f.servers.memory!, "craft_context_resolution_resolve", { query: "测试", scope_kind: scope.kind, scope_id: scope.id, session_scope_id: "hookless-session", session_id: "hookless-session" });
     assert.equal((isolated.items as unknown[]).length, 1);
     assert.deepEqual(isolated.contributions, []);
@@ -80,7 +82,8 @@ test("Knowledge search fails closed without scope and separates candidate inspec
   try {
     f.service.knowledgeMemoryInstallBuiltins();
     for (const [id, scope, status] of [["a", "a", "reviewed"], ["b", "b", "reviewed"], ["candidate", "a", "candidate"], ["expired", "a", "reviewed"]]) {
-      f.store.create("knowledge_claim", id!, { source_id: "builtin.evidence-wiki", status, scope: `project:${scope}`, content: "单元测试与测试策略", evidence_ids: [], valid_until: id === "expired" ? "2000-01-01" : null });
+      const claim = f.store.create("knowledge_claim", id!, { source_id: "builtin.evidence-wiki", status: "candidate", scope: `project:${scope}`, content: "单元测试与测试策略", evidence_ids: [], valid_until: id === "expired" ? "2000-01-01" : null });
+      if (status === "reviewed" && id !== "expired") attachVerifiedPromotionFixture(f.store, claim);
     }
     const server = f.servers.knowledge!;
     assert.equal((await call(server, "craft_knowledge_search", { query: "怎么运行测试" })).reason, "scope_unavailable");
@@ -263,12 +266,13 @@ test("Knowledge source digest drift invalidates reviewed claims", async () => {
     f.service.knowledgeSourceRegister({ source_id: "source", kind: "project_note", label: "Source", trust: "verified", scope_kind: "project", scope_id: "demo", locator: "README.md", content_digest: "sha256:old" });
     const evidence = f.service.evidenceRecord({ source_type: "observation", confidence: "bounded", claim: "fixture fact" });
     const saved = f.service.knowledgeClaimSave({ claim_id: "fresh", kind: "fact", content: "测试策略", scope: "project:demo", source_id: "source", evidence_ids: [evidence.id] });
-    f.service.knowledgeClaimReview({ claim_id: (saved.claim as JsonObject).id, status: "reviewed", reviewer: "fixture", reason: "supported" });
+    attachVerifiedPromotionFixture(f.store, saved.claim as JsonObject);
     const args = { query: "测试", scope_kind: "project", scope_id: "demo" };
     assert.equal(((await f.service.knowledgeSearchScoped(args)).hits as unknown[]).length, 1);
     const source = f.store.get("knowledge_source", "source"); f.store.save("knowledge_source", "source", { ...source, content_digest: "sha256:new" });
     assert.equal(((await f.service.knowledgeSearchScoped(args)).hits as unknown[]).length, 0);
-    f.store.save("knowledge_claim", "fresh", { ...(saved.claim as JsonObject), status: "reviewed", review: { source_digest: "sha256:new" } });
+    const currentClaim = f.store.get("knowledge_claim", "fresh");
+    f.store.save("knowledge_claim", "fresh", { ...currentClaim, status: "reviewed", review: { source_digest: "sha256:new" } });
     await assert.rejects(async () => await f.service.contextResolutionResolve({ ...args, members: ["knowledge"], source_ids: ["builtin.evidence-wiki"], now: "2026-09-27" }), /unavailable/);
     f.service.knowledgeMemoryInstallBuiltins();
     assert.equal(((await f.service.contextResolutionResolve({ ...args, members: ["knowledge"], source_ids: ["builtin.evidence-wiki"], now: "2026-09-27" })).contributions as JsonObject[])[0]!.items instanceof Array, true);

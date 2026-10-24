@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,16 +10,19 @@ import { KnowledgeBoundLaunchKernel } from "../capability/craft-knowledge/knowle
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 function record(result: JsonObject, key: string): JsonObject { return result[key] as JsonObject; }
 function contextDigest(context: string): string { return `sha256:${createHash("sha256").update(JSON.stringify(context)).digest("hex")}`; }
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-launch-")); const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
+  const projectRoot = join(root, "project"); await mkdir(projectRoot, { recursive: true });
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:brief", alias_kind: "path", alias: projectRoot });
   const task = record(service.taskOpen({ title: "Brief", goal: "Prepare an accurate brief" }), "task");
   const evidence = service.evidenceRecord({ evidence_id: "evidence", source_type: "program", claim: "Program observation.", confidence: "bounded" });
   const claim = record(service.knowledgeClaimSave({ claim_id: "claim", kind: "rule", content: "Use the approved project facts.", scope: "project:brief", valid_until: "2027-01-01T00:00:00.000Z", evidence_ids: [evidence.id] }), "claim");
-  service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "reviewer", reason: "checked" });
+  attachVerifiedPromotionFixture(store, claim);
   const compiled = service.wikiContextCompile({ bundle_id: "bundle", query: "approved facts", scope: "project:brief", max_items: 2, max_chars: 1_000, now: "2026-09-10T00:00:00.000Z" });
   return { root, store, service, task, evidence, claim: service.knowledgeClaimGet({ claim_id: claim.id }).claim as JsonObject, bundle: record(compiled, "bundle") };
 }
@@ -49,8 +52,9 @@ test("Knowledge-bound Work Launch fails closed on Claim, Bundle, Evidence, expir
   try {
     const args = { task_id: f.task.id, host: "codex-cli", workspace: f.root, prompt: "Prepare", bundle_id: f.bundle.id, sandbox: "workspace-write", now: "2026-09-10T00:00:00.000Z" };
     await assert.rejects(f.service.knowledgeContextWorkLaunchPrepare({ ...args, now: "2027-01-01T00:00:00.000Z" }), /expired/);
-    f.store.remove("evidence", String(f.evidence.id)); await assert.rejects(f.service.knowledgeContextWorkLaunchPrepare(args), /Unknown evidence/);
-    f.store.create("evidence", String(f.evidence.id), { source_type: "program", claim: "Restored." });
+    const verifiedEvidence = f.store.find("evidence", String(f.evidence.id));
+    f.store.remove("evidence", String(f.evidence.id)); await assert.rejects(f.service.knowledgeContextWorkLaunchPrepare(args), /verified formal promotion evidence/);
+    f.store.create("evidence", String(f.evidence.id), verifiedEvidence ?? {});
     const prepared = await f.service.knowledgeContextWorkLaunchPrepare({ ...args, launch_id: "changed" }); const launch = record(prepared, "launch");
     f.service.knowledgeClaimReview({ claim_id: f.claim.id, status: "disputed", reviewer: "reviewer", reason: "changed" });
     await assert.rejects(f.service.knowledgeContextWorkLaunchDecide({ launch_id: launch.id, actor: "human", approved: true, prompt: args.prompt, now: args.now }), /version changed/);
@@ -86,22 +90,27 @@ test("Knowledge-bound Work Launch retries only through the revalidating protocol
 test("Knowledge binding validator rejects malformed or no-longer-safe receipts", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-validator-")); const store = await new CraftStore(craftPaths(root)).open(); const kernel = new KnowledgeBoundLaunchKernel(store);
   try {
+    const service = new CraftService(store);
+    service.scopeAliasBind({ scope_kind: "project", scope_id: "project:a", alias_kind: "path", alias: root });
+    service.scopeAliasBind({ scope_kind: "project", scope_id: "project:b", alias_kind: "path", alias: root });
     store.create("evidence", "e", { claim: "Observed." });
     const add = (id: string, claim: JsonObject = {}, bundle: JsonObject = {}) => {
       const content = String(claim.content ?? "Fact."); const evidenceIds = (claim.evidence_ids ?? ["e"]) as string[];
-      store.create("knowledge_claim", id, { status: "reviewed", scope: "project:a", content, evidence_ids: evidenceIds, ...claim });
-      const context = `[Knowledge ${id}]\n${content}\nEvidence: ${evidenceIds.join(", ")}\n`;
-      store.create("wiki_context_bundle", `b-${id}`, { scope: "project:a", max_chars: 500, used_chars: context.length, claim_refs: [{ claim_id: id, claim_version: 1 }], context_digest: contextDigest(context), ...bundle });
+      const saved = store.create("knowledge_claim", id, { status: "candidate", scope: "project:a", content, evidence_ids: evidenceIds, ...claim });
+      const promoted = claim.status === "candidate" || evidenceIds.length === 0 ? saved : attachVerifiedPromotionFixture(store, saved);
+      const currentEvidenceIds = Array.isArray(promoted.evidence_ids) ? promoted.evidence_ids.map(String) : evidenceIds;
+      const context = `[Knowledge ${id}]\n${content}\nEvidence: ${currentEvidenceIds.join(", ")}\n`;
+      store.create("wiki_context_bundle", `b-${id}`, { scope: "project:a", max_chars: 500, used_chars: context.length, claim_refs: [{ claim_id: id, claim_version: promoted.version }], context_digest: contextDigest(context), ...bundle });
       return `b-${id}`;
     };
     const normal = add("normal"); const binding = kernel.bind({ bundle_id: normal }); assert.equal(kernel.revalidate(binding).bundle_id, normal); assert.throws(() => kernel.prompt({ ...binding, context: " " }, "Prompt"), /context/);
     assert.throws(() => kernel.bind({ bundle_id: normal, now: "bad" }), /ISO/); assert.throws(() => kernel.bind({ bundle_id: normal, bundle_version: 0 }), /positive/); assert.throws(() => kernel.bind({ bundle_id: " " }), /empty/);
     const duplicate = add("duplicate", {}, { claim_refs: [{ claim_id: "duplicate", claim_version: 1 }, { claim_id: "duplicate", claim_version: 1 }] }); assert.throws(() => kernel.bind({ bundle_id: duplicate }), /unique/);
-    const candidate = add("candidate", { status: "candidate" }); assert.throws(() => kernel.bind({ bundle_id: candidate }), /reviewed/);
+    const candidate = add("candidate", { status: "candidate" }); assert.throws(() => kernel.bind({ bundle_id: candidate }), /verified formal promotion evidence/);
     const global = add("global", { scope: "global", valid_until: null }); assert.equal(kernel.bind({ bundle_id: global }).scope, "project:a");
     const foreign = add("foreign", { scope: "project:b", valid_until: null }); assert.throws(() => kernel.bind({ bundle_id: foreign }), /scope/);
     const malformedExpiry = add("bad-expiry", { valid_until: "bad" }); assert.throws(() => kernel.bind({ bundle_id: malformedExpiry }), /ISO/);
-    const noEvidence = add("no-evidence", { evidence_ids: [] }); assert.throws(() => kernel.bind({ bundle_id: noEvidence }), /requires Evidence/);
+    const noEvidence = add("no-evidence", { evidence_ids: [] }); assert.throws(() => kernel.bind({ bundle_id: noEvidence }), /verified formal promotion evidence/);
     const tooSmall = add("too-small", {}, { max_chars: 1 }); assert.throws(() => kernel.bind({ bundle_id: tooSmall }), /character budget/);
     const badDigest = add("bad-digest", {}, { context_digest: "sha256:wrong" }); assert.throws(() => kernel.bind({ bundle_id: badDigest }), /digest/);
     assert.throws(() => kernel.revalidate({ ...binding, context: "changed" }), /binding changed/);

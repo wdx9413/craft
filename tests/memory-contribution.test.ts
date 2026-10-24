@@ -9,7 +9,7 @@ import { MemoryContribution } from "../capability/craft-memory/contribution.ts";
 import { memoryCapability } from "../capability/craft-memory/capability.ts";
 import { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
 import { buildCapabilityRegistry, CORE_KERNELS, type ContextRequest } from "../common/craft-common-base/src/capability-protocol.ts";
-import { KeywordRetrievalPort } from "../common/craft-common-base/src/retrieval-port.ts";
+import { Bm25Index } from "../common/craft-common-base/src/bm25.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { payload } from "../core/digest.ts";
 const scope = { kind: "project", id: "p" };
@@ -68,8 +68,114 @@ test("Memory registers a single standalone contribution and supports local or sh
     await assert.rejects(f.reader.contribute({ ...request, memory_ids: ["missing"] }), /Required Memory/);
     await assert.rejects(f.reader.contribute({ ...request, required_refs: [{ ...ref, version: 2 }] }), /Required Context/);
     await assert.rejects(f.reader.contribute({ ...request, max_chars: 1, memory_ids: ["a"] }), /budget/);
-    await assert.rejects(f.reader.contribute({ ...request, candidate_mode: true, max_items: 1 }), /candidate budget/);
-    await assert.rejects(f.reader.contribute({ ...request, candidate_mode: true, max_chars: 1 }), /candidate budget/);
+    const boundedCandidates = await f.reader.contribute({ ...request, candidate_mode: true, max_items: 1 });
+    assert.equal(boundedCandidates.items.length, 1); assert.equal(boundedCandidates.omitted_count, 1);
+    const boundedChars = await f.reader.contribute({ ...request, candidate_mode: true, max_chars: 1 });
+    assert.equal(boundedChars.items.length, 0); assert.equal(boundedChars.omitted_count, 2);
+  } finally { await f.close(); }
+});
+
+test("Memory candidate mode ranks locally and returns only the requested shortlist", async () => {
+  const f = await fixture();
+  try {
+    for (const id of ["a", "b", "c", "d"]) f.remember(id, { content: id === "d" ? "beta only" : `alpha ${id}` });
+    const shortlist = await f.reader.contribute({ ...request, query: "alpha", candidate_mode: true, max_items: 2 });
+    assert.deepEqual(shortlist.items.map(item => item.memory_id), ["a", "b"]);
+    assert.equal(shortlist.omitted_count, 1);
+  } finally { await f.close(); }
+});
+
+test("Memory candidate shortlist carries a query excerpt, while explicitly required Memory keeps its full body", async () => {
+  const f = await fixture();
+  try {
+    const body = `alpha current decision. ${"unrelated detail. ".repeat(80)}`;
+    f.remember("long", { content: body });
+    const selected = await f.reader.contribute({ ...request, query: "alpha", candidate_mode: true });
+    assert.equal(selected.items[0]!.content, "alpha current decision.");
+    assert(Number((selected.items[0]!.content_excerpt as JsonObject).source_chars) > 600);
+    const required = await f.reader.contribute({ ...request, query: "unrelated", candidate_mode: true, memory_ids: ["long"] });
+    assert(String(required.items[0]!.content).length > 600);
+    assert(String(required.items[0]!.content).includes("unrelated detail."));
+  } finally { await f.close(); }
+});
+
+test("Memory reuses a short-lived snapshot index and hydrates only selected bodies on a warm read", async t => {
+  const f = await fixture();
+  try {
+    f.remember("first", { content: "alpha firstunique" });
+    f.remember("second", { content: "alpha secondunique" });
+    f.remember("third", { content: "alpha thirdunique" });
+    const original = f.store.contentStore.readCompatSync;
+    const reads: string[] = [];
+    t.mock.method(f.store.contentStore, "readCompatSync", function(this: typeof f.store.contentStore, ref: Parameters<typeof original>[0]) {
+      reads.push(String((ref as JsonObject).record_id));
+      return original.call(this, ref);
+    });
+    const cold = await f.reader.contribute({ ...request, query: "alpha", max_items: 1, candidate_mode: true });
+    assert.equal(cold.diagnostics?.retrieval_index_cache_hit, false);
+    assert.equal(cold.diagnostics?.retrieval_body_load_count, 3);
+    assert.equal(reads.length, 3);
+    const warm = await f.reader.contribute({ ...request, query: "secondunique", max_items: 1, candidate_mode: true });
+    assert.equal(warm.diagnostics?.retrieval_index_cache_hit, true);
+    assert.equal(warm.diagnostics?.retrieval_body_load_count, 1);
+    assert.deepEqual((warm.items as JsonObject[]).map(item => item.memory_id), ["second"]);
+    assert.equal(reads.length, 4);
+
+    f.remember("fourth", { content: "alpha fourthunique" });
+    const refreshed = await f.reader.contribute({ ...request, query: "fourthunique", max_items: 1, candidate_mode: true });
+    assert.equal(refreshed.diagnostics?.retrieval_index_cache_hit, false);
+    assert.equal(refreshed.diagnostics?.retrieval_body_load_count, 4);
+    assert.deepEqual((refreshed.items as JsonObject[]).map(item => item.memory_id), ["fourth"]);
+  } finally { await f.close(); }
+});
+
+test("Memory snapshot index expires after its short TTL", async t => {
+  const f = await fixture();
+  try {
+    f.remember("expiring", { content: "alpha expiring" });
+    await f.reader.contribute({ ...request, candidate_mode: true });
+    const now = Date.now();
+    t.mock.method(Date, "now", () => now + 120_000);
+    const expired = await f.reader.contribute({ ...request, candidate_mode: true });
+    assert.equal(expired.diagnostics?.retrieval_index_cache_hit, false);
+    assert.equal(expired.diagnostics?.retrieval_body_load_count, 1);
+  } finally { await f.close(); }
+});
+
+test("Memory skips retaining a token index when the source corpus exceeds its memory cap", async () => {
+  const f = await fixture();
+  try {
+    f.remember("large", { content: "context ".repeat(33_000) });
+    const first = await f.reader.contribute({ ...request, query: "context", max_items: 1, candidate_mode: true });
+    const second = await f.reader.contribute({ ...request, query: "context", max_items: 1, candidate_mode: true });
+    assert.equal(first.diagnostics?.retrieval_index_cache_hit, false);
+    assert.equal(second.diagnostics?.retrieval_index_cache_hit, false);
+  } finally { await f.close(); }
+});
+
+test("Memory does not index legacy blank bodies", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("memory_ledger", "legacy-blank", { scope, source_id: "source", source_version: 1, kind: "preference",
+      content: " ", content_digest: "blank-digest", sensitivity: "internal", confidence: "bounded", status: "active" });
+    const result = await f.reader.contribute({ ...request, candidate_mode: true });
+    assert.equal(result.items.length, 0);
+    assert.equal(result.diagnostics?.retrieval_index_candidate_count, 1);
+  } finally { await f.close(); }
+});
+
+test("Memory snapshot index evicts its oldest entry at the bounded cache limit", async () => {
+  const f = await fixture();
+  try {
+    f.remember("base", { content: "alpha base" });
+    await f.reader.contribute({ ...request, candidate_mode: true });
+    for (let index = 0; index < 4; index++) {
+      f.remember(`added-${index}`, { content: `alpha added${index}` });
+      await f.reader.contribute({ ...request, candidate_mode: true });
+    }
+    f.store.database.prepare("DELETE FROM records WHERE kind='memory_ledger' AND id LIKE 'added-%'").run();
+    const baseSnapshot = await f.reader.contribute({ ...request, candidate_mode: true });
+    assert.equal(baseSnapshot.diagnostics?.retrieval_index_cache_hit, false);
   } finally { await f.close(); }
 });
 
@@ -106,12 +212,12 @@ test("Memory owns scope precedence, history, current authorization and exclusion
 });
 
 for (const mutation of ["audience", "source", "delete"] as const) {
-  test(`standalone Memory contribution rechecks ${mutation} during its await`, async t => {
+  test(`standalone Memory contribution rechecks ${mutation} during ranking`, async t => {
     const f = await fixture();
     try {
       f.remember("private", { scope_envelope: { audience: { mode: "private", principal_ids: ["owner"] } } });
-      const original = KeywordRetrievalPort.prototype.search;
-      t.mock.method(KeywordRetrievalPort.prototype, "search", async function(this: KeywordRetrievalPort, ...args: Parameters<typeof original>) {
+      const original = Bm25Index.prototype.score;
+      t.mock.method(Bm25Index.prototype, "score", function(this: Bm25Index, ...args: Parameters<typeof original>) {
         if (mutation === "delete") f.writer.database.prepare("DELETE FROM records WHERE kind='memory_ledger' AND id='private'").run();
         else {
           const kind = mutation === "source" ? "knowledge_source" : "memory_ledger", id = mutation === "source" ? "source" : "private";

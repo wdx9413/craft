@@ -44,7 +44,7 @@ Hook 的 `Stop` 不是后台 Agent，也不接管、续跑或唤醒 Codex。它�
 
 ### Knowledge：可复核、可保鲜的“知道什么”
 
-来源按 `discover → read → normalize → fragment → Evidence → Claim Candidate` 保存不可变 revision；Source 更新不会覆盖旧 revision，而会让受影响 Claim 进入 `stale/revalidation_required`。日常 MCP 同时提供 Evidence 记录、Source 导入、Candidate 查询、语义复核与撤回。`craft_knowledge_semantic_review_packet` 将 Claim、精确 Evidence fragment、scope、风险等级与 rubric 交给当前 Codex/Claude；Host 回传 packet digest 后才算可审计的自动复核。配置独立 Provider 时也可无人值守复核；两者都不可用则明确 `unavailable`，不伪造 reviewed。结构复核和语义复核均通过的低风险只读 Claim 可自动晋升；权限、Capability、外部 effect 与路由 Claim 仍只能进入独立 Eval。检索只产生 Context Receipt，不能扩大工具、文件或外部写入权限。评测首先检查引用覆盖、时效、冲突、越界读取和跨项目隔离；之后才比较带/不带 Receipt 的同一代码 Case。
+来源按 `discover → read → normalize → fragment → Evidence → Claim Candidate` 保存不可变 revision；Source 更新不会覆盖旧 revision，而会让受影响 Claim 进入 `stale/revalidation_required`。日常 MCP 同时提供 Evidence 记录、Source 导入、Candidate 查询、语义复核与撤回。`craft_knowledge_semantic_review_packet` 将 Claim、精确 Evidence fragment、scope、风险等级与 rubric 交给当前 Codex/Claude；Host 回传 packet digest 后才算可审计的自动复核。配置独立 Provider 时也可无人值守复核；两者都不可用则明确 `unavailable`，不伪造 reviewed。Host 语义复核只记录来源支持，不直接晋升 Claim。自动晋升还要求绑定精确 Claim 修订、通过独立真实留出案例的 candidate-shadow 检索精度/召回评测，并由自动评审复核案例及证据当前有效；没有合格评测时 Claim 留在候选态。权限、Capability、外部 effect 与路由 Claim 仍须进入各自独立 Eval。检索只产生 Context Receipt，不能扩大工具、文件或外部写入权限。评测首先检查引用覆盖、时效、冲突、越界读取和跨项目隔离；之后才比较带/不带 Receipt 的同一代码 Case。
 
 ### Memory：受限的“这次应记住什么”
 

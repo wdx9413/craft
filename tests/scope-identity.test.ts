@@ -7,6 +7,7 @@ import test from "node:test";
 import { ScopeIdentityKernel, projectIdentityFromRoot } from "../core/scope-identity.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
+import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
 
 test("project identity normalizes local, named and remote repository forms", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-scope-identity-"));
@@ -56,6 +57,11 @@ test("identity and aliases are idempotent and scope stacks remain explicit", asy
     assert(project.excluded_scopes.some(item => item.reason === "session_scope_requires_task_request"));
     const ownSession = kernel.resolveStack(scope, { session_scope_id: "session", session_id: "session" });
     assert(ownSession.attempted_scopes.some(item => item.kind === "session" && item.id === "session"));
+    const hostSession = kernel.resolveStack(scope, { session_scope_id: "session", session_id: "session", session_host: "codex" });
+    assert(hostSession.attempted_scopes.some(item => item.kind === "session" && item.id === sessionStorageScopeId("codex", "session")));
+    const directHostSession = kernel.resolveStack({ kind: "session", id: "session" }, { session_host: "claude" });
+    assert.equal(directHostSession.canonical_scope.id, sessionStorageScopeId("claude", "session"));
+    assert.throws(() => kernel.resolveStack(scope, { session_scope_id: "session", session_id: "session", session_host: "Invalid Host" }), /host is invalid/u);
     const otherSession = kernel.resolveStack(scope, { session_scope_id: "session", session_id: "other-session" });
     assert(otherSession.excluded_scopes.some(item => item.reason === "session_scope_requires_task_request"));
     const inherited = kernel.resolveStack({ kind: "task", id: "task" }, { project_scope_id: scope.id, session_scope_id: "session" });

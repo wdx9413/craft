@@ -10,14 +10,16 @@ import { McpServer } from "../core/mcp.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { TraceKernel } from "../core/trace-kernel.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-observability-memory-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  store.create("scope_alias", "project-p", { scope: { kind: "project", id: "p" }, alias_kind: "path", alias: root, status: "active" });
   return { root, store, service: new CraftService(store) };
 }
 
-test("MCP component calls produce correlated terminal Traces without storing input", async () => {
+test("MCP read calls skip Trace writes while component mutations keep correlated terminal Traces", async () => {
   const f = await fixture();
   try {
     const server = new McpServer(f.service, "full");
@@ -28,22 +30,28 @@ test("MCP component calls produce correlated terminal Traces without storing inp
     const listed = await server.handle({ id: "source", method: "tools/call", params: { name: "craft_source_list", arguments: { secret_value: "not persisted" } } });
     const listedResult = listed?.result as JsonObject;
     assert.equal(listedResult.isError, false);
-    const correlation = (listedResult.structuredContent as JsonObject).trace_correlation as JsonObject;
+    assert.equal(Object.hasOwn(listedResult.structuredContent as JsonObject, "trace_correlation"), false);
+    assert.equal(f.store.count("trace"), 0);
+
+    const written = await server.handle({ id: "write", method: "tools/call", params: { name: "craft_memory_policy_save", arguments: { mode: "propose", updated_by: "test" } } });
+    const correlation = ((written?.result as JsonObject).structuredContent as JsonObject).trace_correlation as JsonObject;
     assert.equal(correlation.auto_finalized, true);
     const trace = f.service.traceGet({ trace_id: correlation.trace_id });
     assert.equal((trace.trace as JsonObject).status, "completed");
-    assert.deepEqual((trace.events as JsonObject[]).map((event) => event.event_kind), ["component.call.started", "component.call.completed", "trace.finalized"]);
+    const writeEvents = trace.events as JsonObject[];
+    assert.equal(writeEvents.filter(event => event.operation_id === "craft_memory_policy_save").length, 2);
+    assert.equal(writeEvents.at(-1)?.event_kind, "trace.finalized");
     assert.equal(JSON.stringify(trace).includes("not persisted"), false);
 
     f.store.create("task", "parent-task", { title: "parent", goal: "observe" });
     f.service.traceStart({ trace_id: "parent-trace", task_id: "parent-task" });
-    const joined = await server.handle({ id: "joined", method: "tools/call", params: { name: "craft_source_list", arguments: { trace_id: "parent-trace", task_id: "parent-task" } } });
+    const joined = await server.handle({ id: "joined", method: "tools/call", params: { name: "craft_memory_policy_save", arguments: { trace_id: "parent-trace", task_id: "parent-task", mode: "governed", updated_by: "test" } } });
     const joinedCorrelation = ((joined?.result as JsonObject).structuredContent as JsonObject).trace_correlation as JsonObject;
     assert.equal(joinedCorrelation.auto_finalized, false);
     assert.equal((f.service.traceGet({ trace_id: "parent-trace" }).trace as JsonObject).status, "running");
     f.service.traceFinalize({ trace_id: "parent-trace", status: "completed", summary: "parent complete" });
 
-    const correlationAlias = await server.handle({ id: "alias", method: "tools/call", params: { name: "craft_source_list", arguments: { correlation_trace_id: "parent-alias", task_id: "parent-task" } } });
+    const correlationAlias = await server.handle({ id: "alias", method: "tools/call", params: { name: "craft_memory_policy_save", arguments: { correlation_trace_id: "parent-alias", task_id: "parent-task", mode: "governed", updated_by: "test" } } });
     assert.equal(((correlationAlias?.result as JsonObject).structuredContent as JsonObject).trace_correlation &&
       (((correlationAlias?.result as JsonObject).structuredContent as JsonObject).trace_correlation as JsonObject).trace_id, "parent-alias");
 
@@ -122,7 +130,7 @@ test("Maintenance expires existing Knowledge and Memory records", async () => {
     const source = f.service.knowledgeSourceRegister({ source_id: "source", kind: "custom", label: "test", scope_kind: "project", scope_id: "p", locator: "memory://test", content_digest: "sha256:source", trust: "bounded", access: "proposal_only" }).source as JsonObject;
     const evidence = f.service.evidenceRecord({ evidence_id: "ev", source_type: "test", claim: "checked", confidence: "bounded" });
     const claim = f.service.knowledgeClaimSave({ claim_id: "claim", kind: "fact", content: "temporary", evidence_ids: [evidence.id], valid_until: "2020-01-01T00:00:00.000Z" }).claim as JsonObject;
-    f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "test", reason: "checked" });
+    attachVerifiedPromotionFixture(f.store, claim);
     f.service.memoryCandidatePropose({ candidate_id: "memory", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "p", content: "temporary", valid_until: "2020-01-01T00:00:00.000Z" });
     const tick = new MaintenanceKernel(f.service).tick({ now: "2030-01-01T00:00:00.000Z" });
     assert.equal((tick.knowledge_expiry as JsonObject).count, 1);

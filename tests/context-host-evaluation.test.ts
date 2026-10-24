@@ -5,6 +5,7 @@ import { fixture } from "./helpers/procedure-invocation-fixture.ts";
 import { stableDigest } from "../core/digest.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { prepareContextEvaluationRun } from "./helpers/context-host-evaluation-fixture.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 const contractArgs = { host: "codex", host_id: "codex-cli", discovery_mode: "full_mcp", protocol_version: "2025-11-25", tool_schema_digest: "schema", definition_ids: ["open", "discover"], initial_ids: ["open", "discover"], host_fingerprint: "host", model_fingerprint: "model" };
 
@@ -12,9 +13,10 @@ async function setup() {
   const f = await fixture(), module = new ContextHostEvaluation(f.store);
   const contract = module.registerHost(contractArgs);
   const identity = f.service.scopeIdentityResolveProject({ project_root: f.root }).identity as any;
+  f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:fixture", alias_kind: "path", alias: f.root });
   f.store.create("evidence", "context-claim-evidence", { confidence: "confirmed", source_type: "human" });
   const claim = f.service.knowledgeClaimSave({ claim_id: "claim", kind: "fact", content: "fixture context", scope: `project:${identity.canonical_scope.id}`, evidence_ids: ["context-claim-evidence"] }).claim as any;
-  f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "fixture", reason: "verified fixture" });
+  attachVerifiedPromotionFixture(f.store, claim);
   const prepared = await prepareContextEvaluationRun(f.service, f.root, "host-eval-run");
   const args: JsonObject = { ...prepared, contract_id: contract.id, task_run_id: "host-eval-run" };
   assert.equal((prepared.task_run as any).task_id, undefined);
@@ -126,7 +128,7 @@ test("Graph improvements attribute public failures and save only a reviewed draf
     const proposal = f.module.proposeGraphImprovement(args); assert.equal(proposal.promotion_automatic, false); assert.equal(proposal.node_path, "root/review");
     assert.equal(f.module.proposeGraphImprovement({ ...args, graph_id: "product-development" }).id, proposal.id);
     assert.throws(() => f.module.proposeGraphImprovement({ ...args, graph_id: "other" }));
-    f.store.save("experience_procedure", "product-development", { scope: "project:other" }); assert.throws(() => f.module.proposeGraphImprovement(args));
+    assert.throws(() => f.store.save("experience_procedure", "product-development", { scope: "project:other" }), /cannot change storage scope/u);
     f.store.save("experience_procedure", "product-development", { scope: "project:fixture", scope_envelope: { audience: { mode: "private", principal_ids: ["owner"] } } }); assert.throws(() => f.module.proposeGraphImprovement(args));
     f.store.save("experience_procedure", "product-development", { scope: "project:fixture" });
     assert.throws(() => f.module.proposeGraphImprovement({ ...args, scope: "other" }));

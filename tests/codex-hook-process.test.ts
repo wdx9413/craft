@@ -81,13 +81,23 @@ test("concurrent packaged prompts reject ambiguous signals and session boundarie
     await Promise.all(["one", "two"].map(prompt => f.execute({ hook_event_name: "UserPromptSubmit", prompt })));
     const session = f.store.list("context_hook_session", 10)[0]!;
     assert.equal((session.pending_turn_ids as string[]).length, 2);
+    const ambiguousTurns = f.store.list("codex_hook_turn", 10);
+    assert.equal(ambiguousTurns.length, 2);
+    assert(ambiguousTurns.every(turn => typeof turn.context_receipt_id === "string" && (turn.signals as unknown[]).length === 0));
+    const ambiguousIds = new Set(ambiguousTurns.map(turn => String(turn.id)));
     await f.execute({ hook_event_name: "PostToolUse", tool_name: "Edit" });
     await f.execute({ hook_event_name: "Stop" });
-    assert.deepEqual(f.store.list("codex_hook_turn", 10), []);
+    const afterAmbiguousEvents = f.store.list("codex_hook_turn", 10);
+    assert.deepEqual(afterAmbiguousEvents.map(turn => ({ id: turn.id, context_receipt_id: turn.context_receipt_id, signals: turn.signals })),
+      ambiguousTurns.map(turn => ({ id: turn.id, context_receipt_id: turn.context_receipt_id, signals: turn.signals })));
     await f.execute({ hook_event_name: "SessionEnd" });
     assert.deepEqual(f.store.get("context_hook_session", String(session.id)).pending_turn_ids, []);
     await f.execute({ hook_event_name: "UserPromptSubmit", prompt: "fresh" });
     await f.execute({ hook_event_name: "PostToolUse", tool_name: "Edit" });
-    assert.equal(f.store.list("codex_hook_turn", 10).length, 1);
+    const turns = f.store.list("codex_hook_turn", 10);
+    assert.equal(turns.length, 3);
+    const edited = turns.filter(turn => turn.has_edit === true);
+    assert.equal(edited.length, 1);
+    assert(!ambiguousIds.has(String(edited[0]!.id)));
   } finally { await f.close(); }
 });

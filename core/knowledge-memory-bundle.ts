@@ -16,6 +16,7 @@ import { canonicalJson, payload, stableDigest } from "./digest.ts";
 import { optionalScope, text } from "./validation.ts";
 import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition } from "../capability/craft-experience/procedure-definition.ts";
 import { syncGraphVersionManifest } from "../capability/craft-experience/graph-version-manifest.ts";
+import { portableKnowledgeClaimForImport } from "./knowledge-claim-import.ts";
 
 const FORMAT = "craft.knowledge-memory-bundle";
 const SCHEMA = 3;
@@ -273,6 +274,8 @@ export class KnowledgeMemoryBundleKernel {
 
   private importEntry(entry: BundleEntry): JsonObject | undefined {
     const next = { ...entry.payload };
+    // Local Host Trace and held-out evaluation authority does not travel in a bundle.
+    if (entry.kind === "knowledge_claim") Object.assign(next, portableKnowledgeClaimForImport(next));
     const contentKind = CONTENT_KINDS[entry.kind];
     if (contentKind) {
       if (entry.content_body === undefined) throw new Error(`Data Bundle ${entry.kind} requires content_body`);

@@ -13,6 +13,10 @@ import { spec } from "./helpers/procedure-invocation-fixture.ts";
 const scope = { scope_kind: "project", scope_id: "assets" };
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-asset-")), store = await new CraftStore(craftPaths(join(root, "data"))).open(), service = new CraftService(store);
+  const foreignRoot = join(root, "foreign");
+  await mkdir(foreignRoot);
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:assets", alias_kind: "path", alias: root });
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:foreign", alias_kind: "path", alias: foreignRoot });
   service.knowledgeSourceRegister({ source_id: "source", kind: "custom", label: "Fixture", ...scope, locator: root, content_digest: "initial", trust: "verified", access: "read_only" });
   store.create("evidence", "e", { source_type: "human", confidence: "confirmed", metadata: { user_authored: true } });
   function inspect(member: string, id: unknown, args: JsonObject = {}) { return service.componentAssetInspect(member, { ...scope, asset_id: id, ...args }); }

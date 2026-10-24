@@ -7,6 +7,7 @@ import { scopeFromKey } from "../../../common/craft-common-base/src/scope-policy
 import { knowledgeScenarioIsActive, listKnowledgeScenarios, proposeKnowledgeScenarioMigration, retireKnowledgeScenario } from "../../../capability/craft-knowledge/scenario-catalog.ts";
 import { array, finiteInteger, object, text } from "../../validation.ts";
 import { knowledgeDirectoryForScope } from "../../project-knowledge-content.ts";
+import { knowledgeClaimPromotionProofVerified } from "../../knowledge-evaluation-provenance.ts";
 
 /** Owns local diagnostic projections and the loop's governed Memory read path. */
 export class CognitiveSearchCoordinator {
@@ -50,7 +51,8 @@ export class CognitiveSearchCoordinator {
     const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
     const governed = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
       if (claim.sensitivity === "restricted" && args.allow_restricted !== true) return [];
-      if (claim.status !== "reviewed" && (!includeCandidates || claim.status !== "candidate")) return [];
+      if (!includeCandidates && claim.status !== "reviewed") return [];
+      if (claim.status !== "candidate" && claim.status !== "reviewed") return [];
       if (scope !== null && claim.scope !== "global" && claim.scope !== scope) return [];
       if (scenarioKey !== null && (!scenarioActive || claim.scenario_key !== scenarioKey && claim.coarse_scenario_key !== scenarioKey)) return [];
       if (scenarioKey !== null) {
@@ -65,9 +67,13 @@ export class CognitiveSearchCoordinator {
       if (claim.content_ref && !contentReference(claim.content_ref)) throw new Error("Knowledge content reference is invalid");
       const content = contentReference(claim.content_ref) ? this.store.contentStore.readCompatSync(claim.content_ref, typeof claim.scope === "string" ? claim.scope : undefined).body : String(claim.content ?? "");
       const score = terms.reduce((total, term) => total + Number(`${content} ${Array.isArray(claim.tags) ? claim.tags.join(" ") : ""}`.toLowerCase().includes(term)), 0);
-      return score > 0 ? [{ kind: "governed_claim", claim_id: claim.id, claim_version: claim.version, status: claim.status,
+      if (score <= 0) return [];
+      const formallyReviewed = claim.status === "reviewed" && knowledgeClaimPromotionProofVerified(this.store, claim);
+      if (!formallyReviewed && !includeCandidates) return [];
+      return [{ kind: "governed_claim", claim_id: claim.id, claim_version: claim.version,
+        status: formallyReviewed ? "reviewed" : claim.status === "candidate" ? "candidate" : "candidate_diagnostic",
         scope: claim.scope, content, content_digest: claim.content_digest, evidence_ids: claim.evidence_ids,
-        score, relations: this.relationSummary(`claim:${String(claim.id)}`) }] : [];
+        score, relations: this.relationSummary(`claim:${String(claim.id)}`) }];
     });
     const index = this.knowledgeIndex();
     try {
@@ -139,8 +145,8 @@ export class CognitiveSearchCoordinator {
       query: text(args.query, "query"),
       scope_kind: args.scope_kind,
       scope_id: text(args.scope_id, "scope_id"),
-      max_items: args.max_items ?? 8,
-      max_chars: args.max_chars ?? 4000
+      max_items: finiteInteger(args.max_items, "max_items", 3, 1, 8),
+      max_chars: finiteInteger(args.max_chars, "max_chars", 1_200, 1, 4_000)
     });
     const items = (resolution.items as JsonObject[]) ?? [];
     const receipt = resolution.receipt as JsonObject | null;
@@ -151,6 +157,8 @@ export class CognitiveSearchCoordinator {
         memory_id: item.memory_id,
         memory_version: item.memory_version,
         content: item.content,
+        ...(item.content_digest ? { content_digest: item.content_digest } : {}),
+        ...(item.content_excerpt ? { content_excerpt: item.content_excerpt } : {}),
         sensitivity: item.sensitivity,
         reason: item.reason
       })),

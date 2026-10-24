@@ -27,6 +27,15 @@ async function smoke(name: string): Promise<void> {
   const manifest = JSON.parse(await readFile(join(pluginRoot, ".mcp.json"), "utf8"));
   const server = manifest.mcpServers[name];
   const data = await mkdtemp(join(tmpdir(), `${name}-smoke-`));
+  let contextCodebaseSummary: Record<string, unknown> | undefined;
+  const persistedCodebaseSummary = async (workspaceId: string, indexId: string): Promise<Record<string, unknown> | undefined> => {
+    const indexStore = await new CraftStore(craftPaths(data)).open({ skipLegacyPartitionMigration: true });
+    try {
+      const state = indexStore.list("codebase_repository_state", 100, item =>
+        item.workspace_id === workspaceId && item.index_id === indexId)[0];
+      return state?.summary as Record<string, unknown> | undefined;
+    } finally { indexStore.close(); }
+  };
   const repo = join(data, "repo");
   if (name === "craft-codebase" || name === "craft-context") {
     await mkdir(repo);
@@ -44,6 +53,9 @@ async function smoke(name: string): Promise<void> {
   }
   const child = spawn(server.command, server.args, { cwd: pluginRoot, env: { ...process.env, CRAFT_DATA_DIR: data }, stdio: ["pipe", "pipe", "pipe"] });
   try {
+    let childStderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => { childStderr = `${childStderr}${chunk}`.slice(-4_096); });
     let output = "";
     const pending = new Map<number, { resolve: (response: Record<string, any>) => void; reject: (error: Error) => void }>();
     child.stdout.setEncoding("utf8");
@@ -111,7 +123,7 @@ async function smoke(name: string): Promise<void> {
         assert(profile.tools.every(tool => tool.syscall_route?.tool === "craft_run"), "discovered operations must include an executable route");
       }
       const names = (profile: typeof core) => profile.tools.filter((tool) => tool.name.startsWith("craft_codebase_")).map((tool) => tool.name).sort();
-      assert.deepEqual(names(core), ["craft_codebase_callers_find", "craft_codebase_context_slice", "craft_codebase_impact_query",
+      assert.deepEqual(names(core), ["craft_codebase_callers_find", "craft_codebase_callers_query", "craft_codebase_context_slice", "craft_codebase_impact_query",
         "craft_codebase_relations_find", "craft_codebase_symbol_explore", "craft_codebase_symbol_find", "craft_codebase_symbol_read",
         "craft_codebase_symbols_overview"].sort());
       assert.deepEqual(names(analysis), [...names(core), "craft_codebase_control_flow_query", "craft_codebase_data_flow_query",
@@ -142,6 +154,7 @@ async function smoke(name: string): Promise<void> {
       assert.equal(opened.codebase?.status, "ready", JSON.stringify(opened.codebase));
       assert(opened.codebase?.index_id);
       assert(opened.codebase?.checkpoint_id);
+      contextCodebaseSummary = await persistedCodebaseSummary(opened.codebase.workspace_id, opened.codebase.index_id);
       await rm(join(data, "config", "codebase-lsp.json"), { force: true });
       const largeOpen = await request("tools/call", { name: "craft_context_open", arguments: {
         project_root: root, query: "Verify packaged Codebase context on the real multi-language repository", index_depth: "semantic", max_items: 1, max_chars: 1_000,
@@ -150,25 +163,35 @@ async function smoke(name: string): Promise<void> {
       assert.equal(largeOpen.result?.isError, false, `craft-context real-repository open failed: ${JSON.stringify(largeOpen.result)}`);
       const largeCodebase = largeOpen.result.structuredContent.codebase;
       assert.equal(largeCodebase.status, "ready", JSON.stringify(largeCodebase));
-      assert.equal(largeCodebase.summary.analyzer, "multi-language-static");
-      assert(Number(largeCodebase.summary.supported_file_count) >= 700,
-        `packaged Context must index the real repository beyond legacy graph budgets: ${JSON.stringify(largeCodebase.summary)}`);
+      assert.equal(Object.hasOwn(largeCodebase, "summary"), false, "Context must keep the full index summary out of model context");
+      const largeSummary = await persistedCodebaseSummary(largeCodebase.workspace_id, largeCodebase.index_id);
+      assert.equal(largeSummary?.analyzer, "multi-language-static");
+      assert(Number(largeSummary?.supported_file_count) >= 700,
+        `packaged Context must index the real repository beyond legacy graph budgets: ${JSON.stringify(largeSummary)}`);
       assert(largeCodebase.checkpoint_id && largeCodebase.index_id, "large Context index must remain checkpoint-bound");
       assert.equal(Object.hasOwn(largeCodebase, "source"), false, "large Context must not return source bodies");
-      const expectedWorkerCalls = new Set(["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list", "craft_knowledge_source_list"]);
+      // The first background tick reconciles storage; later learning stages are paced independently.
+      const expectedWorkerCalls = new Set(["craft_knowledge_storage_reconcile"]);
       let observed = new Set<string>();
+      let observedAll = new Set<string>();
       for (let attempt = 0; attempt < 100 && observed.size < expectedWorkerCalls.size; attempt++) {
         const store = await new CraftStore(craftPaths(data)).open();
-        try { observed = new Set(store.list("trace_event", 10_000, event => expectedWorkerCalls.has(String(event.operation_id))).map(event => String(event.operation_id))); }
+        try {
+          const events = store.list("trace_event", 10_000);
+          observedAll = new Set(events.map(event => String(event.operation_id)));
+          observed = new Set([...observedAll].filter(operation => expectedWorkerCalls.has(operation)));
+        }
         finally { store.close(); }
         if (observed.size < expectedWorkerCalls.size) await new Promise(resolveDelay => setTimeout(resolveDelay, 50));
       }
-      assert.deepEqual(observed, expectedWorkerCalls, "packaged Context MCP must run and trace both automatic learning polls");
+      assert.deepEqual(observed, expectedWorkerCalls, `packaged Context MCP must start its background learning pass; operations=${JSON.stringify([...observedAll].slice(0, 20))}; stderr=${childStderr}`);
     }
     if (name === "craft-codebase" || name === "craft-context") {
       const body = result.result.structuredContent;
       const codebase = name === "craft-context" ? body.codebase : body;
-      const languages = codebase.summary.diagnostics[0].languages as Array<{ analyzer: string; diagnostics: Record<string, unknown> }>;
+      const summary = name === "craft-context" ? contextCodebaseSummary : codebase.summary;
+      assert(summary);
+      const languages = (summary.diagnostics as Array<{ languages: Array<{ analyzer: string; diagnostics: Record<string, unknown> }> }>)[0]!.languages;
       const go = languages.find(language => language.analyzer === "lsp-go")?.diagnostics;
       assert(go, `${name}: packaged Go relation diagnostics are missing`);
       assert.equal(Number(go.relation_candidate_symbol_count) >= 2, true);

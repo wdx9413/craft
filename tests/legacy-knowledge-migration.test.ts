@@ -6,6 +6,9 @@ import test from "node:test";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+import { knowledgeClaimPromotionProofVerified } from "../core/knowledge-evaluation-provenance.ts";
+import { stableDigest } from "../core/digest.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { LegacyKnowledgeMigrationKernel } from "../core/legacy-knowledge-migration.ts";
 
@@ -16,6 +19,8 @@ test("legacy formal knowledge migration is read-only, candidate-first, deduplica
   const root = await mkdtemp(join(tmpdir(), "craft-legacy-migration-")); const legacy = await mkdtemp(join(tmpdir(), "legacy-knowledge-")); const pages = join(legacy, "data", "pages", "workflows"); await mkdir(pages, { recursive: true }); await writeFile(join(pages, "eligible.md"), eligible); await writeFile(join(pages, "sensitive.md"), sensitive); await writeFile(join(pages, "heading.md"), `---\nstatus: confirmed\ncategory: workflows\nknowledge_type: workflow\nevidence_type: test\nevidence_ref: x\nreuse_reason: heading fallback\n---\n# Heading fallback\n`);
     const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
+    for (const scopeId of ["legacy:project:demo", "legacy:project:shared"]) store.create("scope_alias", `path-${scopeId}`, {
+      scope: { kind: "project", id: `project:${scopeId}` }, alias_kind: "path", alias: root, alias_digest: stableDigest(root), status: "active" });
     await assert.rejects(Promise.resolve().then(() => service.legacyKnowledgeMigrationDiscover({ source_root: legacy })), /offline-only/);
     await assert.rejects(service.legacyKnowledgeMigrationDiscover({ source_root: join(legacy, "missing"), offline: true }), /ENOENT/);
     const discovered = await service.legacyKnowledgeMigrationDiscover({ migration_id: "migration", source_root: legacy, offline: true }); const migration = discovered.migration as JsonObject; const entries = migration.entries as JsonObject[];
@@ -43,7 +48,11 @@ test("legacy formal knowledge migration is read-only, candidate-first, deduplica
     assert.equal(store.get("knowledge_claim", String(candidate.claim_id)).source_id, candidate.source_id);
     assert.equal(store.get("knowledge_claim", String(candidate.claim_id)).status, "candidate");
     assert.equal(((await service.legacyKnowledgeMigrationRebindProvenance({ migration_id: "migration", candidate_ids: [candidate.id], offline: true })).unchanged as JsonObject[])[0]!.reason, "already_bound");
-    await assert.rejects(service.legacyKnowledgeMigrationPublish({ candidate_id: candidate.id, reviewer: "reviewer" }), /reviewed/); store.save("evidence", String(candidate.evidence_id), { ...store.get("evidence", String(candidate.evidence_id)), confidence: "bounded" }); service.knowledgeCandidateReview({ candidate_id: candidate.id, status: "reviewed", reviewer: "reviewer", reason: "evidence checked" });
+    await assert.rejects(service.legacyKnowledgeMigrationPublish({ candidate_id: candidate.id, reviewer: "reviewer" }), /verified managed promotion/u);
+    store.save("evidence", String(candidate.evidence_id), { ...store.get("evidence", String(candidate.evidence_id)), confidence: "bounded" });
+    assert.throws(() => service.knowledgeCandidateReview({ candidate_id: candidate.id, status: "reviewed", reviewer: "reviewer", reason: "evidence checked" }), /requires managed Host review/u);
+    attachVerifiedPromotionFixture(store, store.get("knowledge_claim", String(candidate.claim_id)));
+    assert.equal(knowledgeClaimPromotionProofVerified(store, store.get("knowledge_claim", String(candidate.claim_id))), true);
     await assert.rejects(Promise.resolve().then(() => service.legacyKnowledgeMigrationPublish({ candidate_id: candidate.id, reviewer: "" })), /reviewer/);
     const originalWikiSave = service.wikiPageSave; service.wikiPageSave = (async () => { throw new Error("publish failure"); }) as typeof service.wikiPageSave;
     await assert.rejects(service.legacyKnowledgeMigrationPublish({ candidate_id: candidate.id, reviewer: "reviewer" }), /publish failure/); service.wikiPageSave = originalWikiSave;
@@ -61,11 +70,14 @@ test("legacy formal knowledge migration is read-only, candidate-first, deduplica
   } finally { store.close(); await rm(root, { recursive: true, force: true }); await rm(legacy, { recursive: true, force: true }); }
 });
 
-test("model review restores a full immutable page body but grants only bounded knowledge trust", async () => {
+test("model review restores a full immutable page body but leaves it a candidate pending independent evaluation", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-model-review-")); const source = await mkdtemp(join(tmpdir(), "knowledge-review-source-"));
   const pages = join(source, "data", "pages", "workflows"); await mkdir(pages, { recursive: true }); await writeFile(join(pages, "eligible.md"), eligible);
   const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
+    store.create("scope_alias", "shared-path", { scope: { kind: "project", id: "project:legacy:project:shared" }, alias_kind: "path",
+      alias: root, alias_digest: stableDigest(root), status: "active" });
+    store.create("scope_alias", "demo-path", { scope: { kind: "project", id: "project:demo" }, alias_kind: "path", alias: root, alias_digest: stableDigest(root), status: "active" });
     const discovered = await service.legacyKnowledgeMigrationDiscover({ migration_id: "review-migration", source_root: source, offline: true });
     const entry = ((discovered.migration as JsonObject).entries as JsonObject[])[0]!;
     const imported = await service.legacyKnowledgeMigrationCandidateImport({ migration_id: "review-migration", candidate_ids: [entry.rel_path], offline: true });
@@ -74,7 +86,8 @@ test("model review restores a full immutable page body but grants only bounded k
     assert.equal((deferred.deferred as JsonObject[]).length, 1); assert.equal(store.get("knowledge_claim", String(candidate.claim_id)).status, "candidate");
     const reviewed = await service.knowledgeCandidateModelReview({ migration_id: "review-migration", reviewer: "agent-reviewer", model_ref: "fixture-model:v1", assessments: [{ candidate_id: candidate.id, source_digest: candidate.source_digest, decision: "supported", reason: "coherent historical procedure with an explicit test reference" }] });
     assert.equal((reviewed.reviewed as JsonObject[]).length, 1);
-    const claim = store.get("knowledge_claim", String(candidate.claim_id)); assert.equal(claim.status, "reviewed"); assert.equal((claim.review as JsonObject).confidence, "bounded");
+    const claim = store.get("knowledge_claim", String(candidate.claim_id)); assert.equal(claim.status, "candidate"); assert.equal((claim.review as JsonObject).confidence, "bounded");
+    assert.equal((claim.review as JsonObject).qualification_status, "pending_independent_effectiveness");
     assert.match(String(service.knowledgeClaimGet({ claim_id: claim.id }).claim && (store.contentStore.readCompatSync(claim.content_ref as never).body)), /Raw body is never retained/u);
     const evidence = store.get("evidence", String((reviewed.reviewed as JsonObject[])[0]!.evidence_id)); assert.equal(evidence.confidence, "bounded"); assert.equal(evidence.source_type, "model_source_review");
     const replay = await service.knowledgeCandidateModelReview({ migration_id: "review-migration", reviewer: "agent-reviewer", model_ref: "fixture-model:v1", assessments: [{ candidate_id: candidate.id, source_digest: candidate.source_digest, decision: "supported", reason: "coherent historical procedure with an explicit test reference" }] });
@@ -93,6 +106,8 @@ test("legacy migration compatibility defaults and non-Error failures remain expl
   await writeFile(join(pages, "summary-secret.md"), "---\ntitle: Summary secret\nstatus: confirmed\ncategory: workflows\nknowledge_type: workflow\nevidence_type: test\nevidence_ref: tests/x\nreuse_reason: token=supersecretvalue\n---\n# Summary secret\n");
   const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
+    store.create("scope_alias", "shared-path", { scope: { kind: "project", id: "project:legacy:project:shared" }, alias_kind: "path",
+      alias: root, alias_digest: stableDigest(root), status: "active" });
     const discovered = await service.legacyKnowledgeMigrationDiscover({ migration_id: "compat", source_root: legacy, offline: true });
     const entries = (discovered.migration as JsonObject).entries as JsonObject[];
     assert.equal(entries.find((item) => String(item.rel_path).endsWith("missing-meta.md"))?.reason, "unsupported_metadata");
@@ -102,8 +117,10 @@ test("legacy migration compatibility defaults and non-Error failures remain expl
     assert.equal(((bodySecret.migration as JsonObject).entries as JsonObject[]).find((item) => String(item.rel_path).endsWith("body-secret.md"))?.reason, "sensitive_or_disallowed");
     const imported = await service.legacyKnowledgeMigrationCandidateImport({ migration_id: "compat", candidate_ids: ["data/pages/facts/working.md"], offline: true });
     const candidate = (imported.candidates as JsonObject[])[0]!;
+    await assert.rejects(service.legacyKnowledgeMigrationPublish({ candidate_id: candidate.id, reviewer: "reviewer" }), /verified managed promotion/u);
+    attachVerifiedPromotionFixture(store, store.get("knowledge_claim", String(candidate.claim_id)));
     store.save("evidence", String(candidate.evidence_id), { ...store.get("evidence", String(candidate.evidence_id)), confidence: "bounded" });
-    service.knowledgeCandidateReview({ candidate_id: candidate.id, status: "reviewed", reviewer: "reviewer", reason: "checked" });
+    assert.throws(() => service.knowledgeCandidateReview({ candidate_id: candidate.id, status: "reviewed", reviewer: "reviewer", reason: "checked" }), /requires managed Host review/u);
     await assert.rejects(Promise.resolve().then(() => service.legacyKnowledgeMigrationPublish({ candidate_id: candidate.id })), /reviewer/);
     const originalWikiSave = service.wikiPageSave;
     service.wikiPageSave = (async () => { throw "publish string failure"; }) as typeof service.wikiPageSave;
@@ -170,9 +187,9 @@ test("legacy migration discovery and import cover metadata, drift and failure br
     const candidate = (imported.candidates as JsonObject[])[0]!;
     await assert.rejects(Promise.resolve().then(() => kernel.publishReady({ candidate_id: candidate.id })), /knowledge_claim/);
     store.create("knowledge_claim", String(candidate.claim_id), { status: "candidate", evidence_ids: [candidate.evidence_id] });
-    assert.throws(() => kernel.publishReady({ candidate_id: candidate.id }), /reviewed/);
+    assert.throws(() => kernel.publishReady({ candidate_id: candidate.id }), /verified managed promotion/u);
     store.save("knowledge_claim", String(candidate.claim_id), { ...store.get("knowledge_claim", String(candidate.claim_id)), status: "reviewed" });
-    assert.equal(kernel.publishReady({ candidate_id: candidate.id }).idempotent, false);
+    assert.throws(() => kernel.publishReady({ candidate_id: candidate.id }), /verified managed promotion/u);
     store.save("legacy_knowledge_migration_candidate", String(candidate.id), { ...candidate, status: "published" });
     assert.equal(kernel.publishReady({ candidate_id: candidate.id }).idempotent, true);
     assert.equal(kernel.retractReady({ candidate_id: candidate.id }).idempotent, false);

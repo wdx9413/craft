@@ -1,6 +1,6 @@
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { payload, stableDigest } from "../../common/craft-common-base/src/digest.ts";
-import { repositoryFiles, repositoryRoot } from "./repository-files.ts";
+import { repositoryFiles, repositoryPolicyDigest, repositoryRoot } from "./repository-files.ts";
 import { basicAnalysis } from "./basic-analysis.ts";
 import { analyzeTypeScript, TYPESCRIPT_ANALYZER_VERSION, type TypeScriptFileUnit } from "./typescript-analysis.ts";
 import { planTypeScriptIncremental } from "./typescript-incremental.ts";
@@ -18,7 +18,7 @@ import { lspDocumentSymbolsDigest } from "./lsp-adapter.ts";
 import { CODEBASE_LSP_WORKER_FLAG } from "./lsp-worker.ts";
 import { stageLspSnapshotFiles } from "./lsp-snapshot-files.ts";
 import { ProjectAnalysisCache } from "./project-analysis-cache.ts";
-import { ensureProjectDataGitExcluded } from "./project-data-git-exclude.ts";
+import { projectStorageDirectory } from "../../common/craft-common-store-local/src/paths.ts";
 import type { RepositoryContextFile } from "./repository-files.ts";
 import type { LspStdioRequest } from "./lsp-stdio-client.ts";
 export interface RepositoryOnboardingPort {
@@ -26,6 +26,7 @@ export interface RepositoryOnboardingPort {
   workspace: { freshness(args: JsonObject): JsonObject };
   workspaceOpen(args: JsonObject): JsonObject;
   workspaceCheckpoint(args: JsonObject): JsonObject;
+  workspaceCheckpointFromRepositoryFiles?(args: JsonObject): JsonObject;
   codebaseActivate(args: JsonObject): JsonObject;
   codebaseAnalysisImport(args: JsonObject): JsonObject;
   codebaseIndexBuild(args: JsonObject): JsonObject;
@@ -85,7 +86,7 @@ function runConfiguredLsp(adapter: TrustedLspAdapter, files: readonly LspSourceF
       const entry = process.argv[1];
       if (!entry) throw new Error("worker_unavailable");
       const entryArgs = entry.endsWith(".ts") ? ["--experimental-strip-types", entry, CODEBASE_LSP_WORKER_FLAG] : [entry, CODEBASE_LSP_WORKER_FLAG];
-      const env = configuredLspWorkerEnvironment(adapter.language, join(repositoryRootPath, ".craft_data", "codebase"));
+      const env = configuredLspWorkerEnvironment(adapter.language, join(projectStorageDirectory(service.store.paths, repositoryRootPath), "codebase"));
       const output = execFileSync(process.execPath, entryArgs, { cwd: root, input: JSON.stringify(request), encoding: "utf8", timeout: 120_000,
         maxBuffer: 96 * 1024 * 1024, shell: false, stdio: ["pipe", "pipe", "ignore"], env });
       result = JSON.parse(output) as JsonObject;
@@ -160,16 +161,34 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
   if (!isRepository) return { ...base, status: "skipped", reason: "not_repository" };
   if (args.index_depth !== undefined && !["basic", "semantic"].includes(String(args.index_depth))) throw new Error("index_depth must be basic or semantic");
   if (service.store.find("codebase_activation", `codebase_activation_${workspaceId}`)?.status === "disabled") return { ...base, status: "disabled", reason: "project_opt_out" };
-  ensureProjectDataGitExcluded(root);
-  const analysisCache = new ProjectAnalysisCache(root, workspaceId);
-  const selected = repositoryFiles(root);
   const lspConfig = readTrustedLspConfig(service.store.paths.configDir);
-  const hasGoLspAdapter = lspConfig.adapters.some(adapter => adapter.language === "go");
-  const workspaceContextFiles = args.index_depth === "semantic" && hasGoLspAdapter && selected.files.some(file => file.language === "go")
-    ? selected.context_files : [];
   const depth = args.index_depth ?? "basic";
   const stateId = `${workspaceId}_${depth}`;
   const priorState = service.store.find("codebase_repository_state", stateId);
+  const currentPolicyDigest = repositoryPolicyDigest(root);
+  const warmWorkspace = service.store.find("workspace", workspaceId);
+  const priorIndex = priorState ? service.store.find("codebase_index", String(priorState.index_id)) : undefined;
+  const priorCheckpointId = String(warmWorkspace?.latest_checkpoint_id || priorState?.checkpoint_id || priorIndex?.checkpoint_id || "");
+  const priorCheckpoint = priorCheckpointId ? service.store.find("workspace_checkpoint", priorCheckpointId) : undefined;
+  const expectedSnapshotRoot = join(projectStorageDirectory(service.store.paths, root), "codebase", "snapshots", workspaceId, priorCheckpointId);
+  const checkpointMetadataMatches = priorState?.checkpoint_id === priorCheckpointId
+    || (!priorState?.checkpoint_id && priorIndex?.checkpoint_id === priorCheckpointId);
+  if (priorState?.repository_policy_digest === currentPolicyDigest && priorState.policy_version === REPOSITORY_INDEX_POLICY
+    && priorState.adapter_config_digest === lspConfig.digest && checkpointMetadataMatches && priorIndex?.checkpoint_id === priorCheckpointId
+    && warmWorkspace?.snapshot_storage === "project_codebase" && priorCheckpoint?.snapshot_root === expectedSnapshotRoot
+    && priorIndex?.status === "ready" && repositoryStateReusable(priorState)
+    && service.workspace.freshness({ workspace_id: workspaceId }).status === "current"
+    && repositoryPolicyDigest(root) === currentPolicyDigest) {
+    const summary = priorState.summary as JsonObject;
+    if (!priorState.checkpoint_id) service.store.save("codebase_repository_state", stateId, { ...priorState, checkpoint_id: priorCheckpointId });
+    return { ...base, status: "ready", index_id: priorState.index_id, checkpoint_id: priorCheckpointId, index_depth: depth,
+      reused: true, omitted_files: summary.omitted_files ?? 0, omitted_by_language: summary.omitted_by_language ?? {}, summary };
+  }
+  const analysisCache = new ProjectAnalysisCache(root, workspaceId, service.store.paths);
+  const selected = repositoryFiles(root);
+  const hasGoLspAdapter = lspConfig.adapters.some(adapter => adapter.language === "go");
+  const workspaceContextFiles = args.index_depth === "semantic" && hasGoLspAdapter && selected.files.some(file => file.language === "go")
+    ? selected.context_files : [];
   const typeScriptPathSetDigest = stableDigest(selected.files.filter(file => /^(?:tsx?|mts|cts|jsx?|mjs|cjs)$/u.test(file.language)
     && !(languageIdForFile(file.path) && lspConfig.adapters.some(adapter => adapter.language === languageIdForFile(file.path)))).map(file => file.path).sort());
   const includes = [...selected.files.map(file => file.path), ...workspaceContextFiles.map(file => file.path)].sort();
@@ -177,20 +196,24 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
   // analyzers. This is the common path for repeated Context calls.
   const existingWorkspace = service.store.find("workspace", workspaceId);
   const existingState = service.store.find("codebase_repository_state", `${workspaceId}_${depth}`);
+  const stateCheckpointId = existingState ? existingState.checkpoint_id : undefined;
   const projectCheckpoint = service.store.list("workspace_checkpoint", 1_000, item => item.workspace_id === workspaceId)
-    .find(item => item.snapshot_root === join(root, ".craft_data", "codebase", "snapshots", workspaceId, String(item.id)));
-  const snapshotCheckpointId = String(existingWorkspace?.latest_checkpoint_id || existingState?.checkpoint_id || projectCheckpoint?.id || "");
+    .find(item => item.snapshot_root === join(projectStorageDirectory(service.store.paths, root), "codebase", "snapshots", workspaceId, String(item.id)));
+  const snapshotCheckpointId = String(existingWorkspace?.latest_checkpoint_id || stateCheckpointId || projectCheckpoint?.id || "");
   const existingCheckpoint = snapshotCheckpointId ? service.store.find("workspace_checkpoint", snapshotCheckpointId) : undefined;
-  const expectedExistingSnapshotRoot = join(root, ".craft_data", "codebase", "snapshots", workspaceId, snapshotCheckpointId);
+  const expectedExistingSnapshotRoot = join(projectStorageDirectory(service.store.paths, root), "codebase", "snapshots", workspaceId, snapshotCheckpointId);
   if (existingWorkspace && JSON.stringify(existingWorkspace.include_paths) === JSON.stringify(includes)
     && existingWorkspace.snapshot_storage === "project_codebase" && existingCheckpoint?.snapshot_root === expectedExistingSnapshotRoot
     && service.workspace.freshness({ workspace_id: workspaceId }).status === "current") {
-    const checkpointId = String(existingWorkspace.latest_checkpoint_id ?? existingState?.checkpoint_id ?? "");
+    const checkpointId = String(existingWorkspace.latest_checkpoint_id ?? stateCheckpointId ?? "");
     const prior = service.store.find("codebase_repository_state", `${workspaceId}_${depth}`);
     const cachedIndex = prior ? service.store.find("codebase_index", String(prior.index_id)) : undefined;
     if (prior?.checkpoint_id === checkpointId && prior.policy_version === REPOSITORY_INDEX_POLICY && prior.adapter_config_digest === lspConfig.digest
-      && cachedIndex?.status === "ready" && repositoryStateReusable(prior))
+      && prior.repository_policy_digest === currentPolicyDigest
+      && cachedIndex?.status === "ready" && repositoryStateReusable(prior) && repositoryPolicyDigest(root) === currentPolicyDigest) {
+      service.store.save("codebase_repository_state", stateId, { ...prior, repository_policy_digest: currentPolicyDigest });
       return { ...base, status: "ready", index_id: prior.index_id, checkpoint_id: checkpointId, index_depth: depth, reused: true, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language, summary: prior.summary };
+    }
   }
   // Parsing and per-file cache publication must not retain the checkpoint/index
   // writer transaction. The import below validates every source digest against
@@ -408,6 +431,10 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
   const analysis = selected.state !== "ready" || selected.files.length === 0 ? undefined
     : depth === "basic" ? basicAnalysis(analysisCache, workspaceId, selected.files)
     : combineLanguageAnalyses(semanticAnalyses, degraded);
+  if (repositoryPolicyDigest(root) !== currentPolicyDigest) {
+    if (sourceRetry < 1) return ensureRepositoryAttempt(service, args, sourceRetry + 1);
+    throw new Error("Repository selection policy changed during index analysis");
+  }
   // Serialize cache/checkpoint publication across processes sharing this data space.
   const publish = () => service.store.transaction(() => {
     const activation = service.store.find("codebase_activation", `codebase_activation_${workspaceId}`);
@@ -421,9 +448,12 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     const freshness = service.workspace.freshness({ workspace_id: workspaceId });
     const latestCheckpointId = String(service.store.get("workspace", workspaceId).latest_checkpoint_id ?? "");
     const latestCheckpoint = latestCheckpointId ? service.store.find("workspace_checkpoint", latestCheckpointId) : undefined;
-    const expectedSnapshotRoot = join(root, ".craft_data", "codebase", "snapshots", workspaceId, latestCheckpointId);
-    if (freshness.status !== "current" || latestCheckpoint?.snapshot_root !== expectedSnapshotRoot)
-      service.workspaceCheckpoint({ workspace_id: workspaceId, label: "automatic repository snapshot" });
+    const expectedSnapshotRoot = join(projectStorageDirectory(service.store.paths, root), "codebase", "snapshots", workspaceId, latestCheckpointId);
+    if (freshness.status !== "current" || latestCheckpoint?.snapshot_root !== expectedSnapshotRoot) {
+      const checkpointArgs = { workspace_id: workspaceId, label: "automatic repository snapshot" };
+      if (service.workspaceCheckpointFromRepositoryFiles) service.workspaceCheckpointFromRepositoryFiles({ ...checkpointArgs, repository_files: [...selected.files, ...workspaceContextFiles] });
+      else service.workspaceCheckpoint(checkpointArgs);
+    }
     const workspace = service.store.get("workspace", workspaceId);
     if (!activation) service.codebaseActivate({ workspace_id: workspaceId, actor: "repository-auto" });
     if (!includes.length) return { ...base, status: "empty", checkpoint_id: workspace.latest_checkpoint_id, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language };
@@ -434,10 +464,6 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
       if (workspaceContextFiles.some(file => checkpointDigests.get(file.path) !== file.digest)) throw new Error("Go workspace context changed during snapshot analysis");
     }
     const stateId = `${workspaceId}_${depth}`;
-    const prior = priorState;
-    const cachedIndex = prior ? service.store.find("codebase_index", String(prior.index_id)) : undefined;
-    if (prior?.checkpoint_id === checkpointId && prior.policy_version === REPOSITORY_INDEX_POLICY && prior.adapter_config_digest === lspConfig.digest
-      && cachedIndex?.status === "ready" && repositoryStateReusable(prior)) return { ...base, status: "ready", index_id: prior.index_id, checkpoint_id: checkpointId, index_depth: depth, reused: true, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language, summary: prior.summary };
     // Restoring a checkpoint must not revive the stale index previously attached to it.
     const indexId = `repository_index_${stableDigest({ workspaceId, depth, checkpointId, state_revision: workspace.state_revision,
       policy: REPOSITORY_INDEX_POLICY, adapter_config: lspConfig.digest,
@@ -453,7 +479,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     const summary = { analyzer: details.analyzer, certainty: details.certainty, supported_file_count: details.supported_file_count, unsupported_file_count: details.unsupported_file_count,
       omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language, diagnostic_count: diagnostics.length, diagnostics: diagnostics.slice(0, 10) };
     service.store.save("codebase_repository_state", stateId, { workspace_id: workspaceId, checkpoint_id: checkpointId, policy_version: REPOSITORY_INDEX_POLICY,
-      adapter_config_digest: lspConfig.digest, index_id: index.id, summary,
+      adapter_config_digest: lspConfig.digest, repository_policy_digest: currentPolicyDigest, index_id: index.id, summary,
       ...(semanticAdapterFailed ? { semantic_retry_after: new Date(Date.now() + SEMANTIC_RETRY_DELAY_MS).toISOString() } : {}),
       ...(depth === "semantic" ? { typescript_path_set_digest: typeScriptPathSetDigest } : {}) });
     if (depth === "semantic" && semanticFileUnits.length === semanticFiles.length) {
@@ -516,7 +542,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
   try { return publish(); }
   catch (error) {
     const message = error instanceof Error ? error.message : "";
-    const snapshotChanged = /Analysis source digest mismatch:|Go workspace context changed during snapshot analysis/u.test(message);
+    const snapshotChanged = /Analysis source digest mismatch:|Go workspace context changed during snapshot analysis|repository source changed (?:before|during) snapshot:/u.test(message);
     if (snapshotChanged && sourceRetry < 1) return ensureRepositoryAttempt(service, args, sourceRetry + 1);
     throw error;
   }

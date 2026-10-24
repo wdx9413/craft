@@ -72,7 +72,7 @@ function safeFailureKind(error: unknown): string {
   return /^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(name) ? name : "Error";
 }
 
-/** Create at most one model-labeled, held-out session case; provenance gates still decide eligibility. */
+/** Create at most one model-labeled, held-out candidate-shadow case; provenance gates still decide eligibility. */
 export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEvaluationDependencies): Promise<JsonObject> {
   const path = evaluationStatePath(deps), state = readState(path);
   const batch = await codexSessionTaskBatch("held_out", deps.archive_options, deps.env);
@@ -103,16 +103,19 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
     return { status: "skipped", processed: 1, reason: "verifiable_test_result_unavailable", raw_content_stored: false };
   }
   const listed = await deps.client.call("craft_knowledge_claim_list", { limit: 1_000, scope_kind: "project", scope_id: task.project_scope_id.slice("project:".length) });
-  const reviewed = (Array.isArray(listed.claims) ? listed.claims as JsonObject[] : []).filter(claim => claim.status === "reviewed" && claim.scope === task.project_scope_id).slice(0, 12);
+  const candidates = (Array.isArray(listed.claims) ? listed.claims as JsonObject[] : []).filter(claim => claim.status === "candidate" && claim.scope === task.project_scope_id).slice(0, 12);
   const claims: JsonObject[] = [];
-  for (const item of reviewed) {
+  for (const item of candidates) {
     const packetResult = await deps.client.call("craft_knowledge_semantic_review_packet", { claim_id: item.id });
     if (packetResult.status !== "ready") continue;
-    const packet = object(packetResult.packet, "reviewed Claim packet"), claim = object(packet.claim, "reviewed Claim");
-    if (claim.id !== item.id || packetResult.claim_status !== "reviewed" || typeof claim.content !== "string" || !claim.content.trim()) continue;
-    claims.push({ claim_id: String(claim.id), title: String(claim.title ?? ""), content: String(claim.content), tags: claim.tags ?? [] });
+    const packet = object(packetResult.packet, "candidate Claim packet"), claim = object(packet.claim, "candidate Claim");
+    if (claim.id !== item.id || packetResult.claim_status !== "candidate" || !Number.isSafeInteger(claim.version) || Number(claim.version) < 1
+      || typeof claim.identity_digest !== "string" || typeof claim.content_digest !== "string"
+      || typeof claim.content !== "string" || !claim.content.trim()) continue;
+    claims.push({ claim_id: String(claim.id), claim_version: Number(claim.version), identity_digest: claim.identity_digest,
+      content_digest: claim.content_digest, title: String(claim.title ?? ""), content: String(claim.content), tags: claim.tags ?? [] });
   }
-  if (!claims.length) return { status: "waiting_for_reviewed_claims", processed: 0, reason: "no_reviewed_project_claims", raw_content_stored: false };
+  if (!claims.length) return { status: "waiting_for_candidate_claims", processed: 0, reason: "no_current_project_candidates", raw_content_stored: false };
   const profileResult = await deps.client.call("craft_evaluation_model_profile_ensure_single", { purpose: "knowledge_scenario_classification" });
   if (profileResult.status !== "ready_for_adapter" || !profileResult.profile) return { status: "waiting_for_model", processed: 0,
     reason: String(profileResult.reason ?? profileResult.status ?? "model_profile_unavailable"), raw_content_stored: false };
@@ -124,12 +127,15 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
   const provider = (deps.providers ?? PROVIDER_CATALOG).find(item => item.provider === profile.provider)
     ?? (detail.provider ? defineProvider(object(detail.provider, "Knowledge evaluation provider")) : undefined);
   if (!provider) return { status: "waiting_for_model", processed: 0, reason: "provider_unavailable", raw_content_stored: false };
+  const candidateClaimIds = claims.map(claim => String(claim.claim_id));
+  const candidateClaimRefs = claims.map(claim => ({ claim_id: claim.claim_id, claim_version: claim.claim_version,
+    identity_digest: claim.identity_digest, content_digest: claim.content_digest }));
   const packet = redactKnowledgeModelText({ query: excerpt.task_goal, task_result: excerpt.task_result,
-    reviewed_claims: claims, verification_artifacts: verificationArtifacts,
+    candidate_claims: claims, verification_artifacts: verificationArtifacts,
     sanitized: true, source_content_stored: false }) as JsonObject;
-  const inputDigest = stableDigest({ purpose: "knowledge_held_out_label.v1", task_id: task.task_id, packet });
+  const inputDigest = stableDigest({ purpose: "knowledge_candidate_shadow_label.v1", task_id: task.task_id, packet });
   const fingerprint = stableDigest({ provider: provider.provider, model: profile.model });
-  const system = `为独立留出会话生成待审标签。只从给定的已审核 Claim 中选择直接回答任务目标的 Claim，不得改写 Claim 或臆造标签；没有充分匹配时返回 skip。返回 JSON：decision 为 labeled 或 skip，expected_claim_ids 为所选 Claim ID 数组。该标签是模型候选，不是人工真值；来源证据资格由 Craft 后续独立判断。${generatedTextLanguageInstruction(deps.contentLanguage ?? "zh-CN")}`;
+  const system = `为独立留出会话生成待审标签。只从给定的当前候选 Claim 中选择直接回答任务目标的 Claim，不得改写 Claim 或臆造标签；没有充分匹配时返回 skip。返回 JSON：decision 为 labeled 或 skip，expected_claim_ids 为所选 Claim ID 数组。该标签是模型候选，不是人工真值；来源证据资格由 Craft 后续独立判断。${generatedTextLanguageInstruction(deps.contentLanguage ?? "zh-CN")}`;
   const messages: ChatMessage[] = [{ role: "system", content: system }, { role: "user", content: JSON.stringify(packet) }];
   if (!deps.transport) return { status: "waiting_for_model", processed: 0, reason: "model_transport_unavailable", raw_content_stored: false };
   if (deps.transport.acquireCall && !deps.transport.acquireCall(provider.provider)) return { status: "waiting_for_budget", processed: 0, reason: "model_call_budget_exhausted", raw_content_stored: false };
@@ -142,16 +148,16 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.request", actor: "knowledge-session-evaluation-worker",
       source: "codex-cli-learning-transport", trust: "observed", operation_id: String(task.task_id), input_refs: [inputDigest], model_fingerprint: fingerprint,
       data: { purpose: "knowledge_held_out_label", input_digest: inputDigest, source_ref: task.source_ref, content_stored: false },
-      summary: "已发送脱敏留出任务和已审核 Claim 摘要，生成待审评测标签" });
+      summary: "已发送脱敏留出任务和当前候选摘要，生成待审评测标签" });
     const request = buildChatRequest(provider, { model: String(profile.model), messages, max_tokens: Math.min(Number(profile.max_output_tokens ?? 1_024), 1_024), temperature: 0 });
     if (provider.provider === "codex-cli") request.body.codex_output_schema = OUTPUT_SCHEMA;
     const response = await deps.transport.complete(provider, request);
     const output = parseOutput(response.text);
     if (!Array.isArray(output.expected_claim_ids) || output.expected_claim_ids.length > 8
-      || output.expected_claim_ids.some(id => typeof id !== "string" || !claims.some(claim => claim.claim_id === id))
+      || output.expected_claim_ids.some(id => typeof id !== "string" || !candidateClaimIds.includes(id))
       || output.decision === "labeled" && output.expected_claim_ids.length === 0
       || output.decision === "skip" && output.expected_claim_ids.length !== 0
-      || !["labeled", "skip"].includes(String(output.decision))) throw new Error("Knowledge evaluation labels must be selected from reviewed Claims");
+      || !["labeled", "skip"].includes(String(output.decision))) throw new Error("Knowledge evaluation labels must be selected from current candidate Claims");
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.completed", actor: "knowledge-session-evaluation-worker",
       source: "codex-cli-learning-transport", trust: "observed", operation_id: String(task.task_id), model_fingerprint: fingerprint,
       usage: response.usage, data: { response_digest: stableDigest(response.text) }, summary: "Codex Host 返回了留出评测标签候选" });
@@ -160,13 +166,15 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
       const verificationEvidence = await recordSessionVerificationEvidence(deps.client, task, excerpt);
       if (!verificationEvidence) throw new Error("held-out test Evidence is unavailable");
       caseEvidenceId = String(verificationEvidence.id);
-      const saved = await deps.client.call("craft_knowledge_evaluation_case_save", { case_id: `knowledge_case_${stableDigest(task.task_id).slice(-24)}`,
+      const caseIdDigest = stableDigest({ task_id: task.task_id, candidate_claim_refs: candidateClaimRefs });
+      const saved = await deps.client.call("craft_knowledge_evaluation_case_save", { case_id: `knowledge_case_${caseIdDigest.slice(-24)}`,
         query: String(redactKnowledgeModelText(excerpt.task_goal)), expected_claim_ids: output.expected_claim_ids as string[], scope: task.project_scope_id,
         source_session_id: task.session_id, source_task_id: task.task_id, source_evidence_ids: [...evidenceIds, caseEvidenceId],
-        evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "model_candidate", sanitized: true });
+        evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "model_candidate", sanitized: true,
+        candidate_claim_refs: candidateClaimRefs });
       const evaluationCase = object(saved.case, "saved Knowledge evaluation case"); caseId = String(evaluationCase.id);
-      const run = await deps.client.call("craft_knowledge_evaluation_run", { run_id: `knowledge_run_${stableDigest({ case_id: caseId, now: new Date().toISOString() }).slice(-24)}`,
-        case_ids: [caseId], top_k: 10 });
+      const run = await deps.client.call("craft_knowledge_evaluation_run", { run_id: `knowledge_run_${stableDigest({ case_id: caseId, input_digest: inputDigest }).slice(-24)}`,
+        mode: "candidate_shadow", case_ids: [caseId], candidate_claim_ids: candidateClaimIds, top_k: 10 });
       const runRecord = object(run.run, "Knowledge evaluation run");
       const metrics = runRecord.metrics && typeof runRecord.metrics === "object" ? runRecord.metrics as JsonObject : {};
       evaluationEligible = metrics.provenance_eligible === true;
@@ -178,7 +186,7 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
       actor: "knowledge-session-evaluation-worker", source: "craft-knowledge", trust: "observed", operation_id: String(task.task_id),
       output_refs: [caseId, caseEvidenceId].filter((value): value is string => value !== null), model_fingerprint: fingerprint,
       data: { result_digest: resultDigest, case_id: caseId, evidence_id: caseEvidenceId, label_source: "model_candidate", evaluation_eligible: evaluationEligible },
-      summary: caseId ? "已建立待独立审定的留出评测案例" : "模型未找到充分匹配的已审核 Claim" });
+      summary: caseId ? "已建立待二次审定的留出评测案例" : "模型未找到充分匹配的当前候选" });
     await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "completed", summary: "留出评测标签候选处理完成" });
     state.processed_task_ids.push(String(task.task_id)); state.trace_ids_by_task[String(task.task_id)] = traceId;
     await writeState(path, state);

@@ -87,7 +87,9 @@ export class MemoryGovernanceKernel {
     const effectiveFrom = args.effective_from === undefined && typeof existing?.effective_from === "string"
       ? existing.effective_from
       : (args.effective_from === undefined ? observedAt : new Date(text(args.effective_from, "effective_from")).toISOString());
-    const identity = { source_id: sourceId, kind, scope, scope_envelope: envelope, topic, content_digest: digest(content), sensitivity: String(args.sensitivity ?? "internal"), confidence, evidence_ids: ids, valid_until: validUntil, observed_at: observedAt, effective_from: effectiveFrom };
+    const supportRefs = this.ledger.validatePromotionSupport({ ...args, scope_kind: scopeKind, scope_id: scopeId, kind, content, topic });
+    const identity = { source_id: sourceId, kind, scope, scope_envelope: envelope, topic, content_digest: digest(content), sensitivity: String(args.sensitivity ?? "internal"), confidence, evidence_ids: ids, valid_until: validUntil, observed_at: observedAt, effective_from: effectiveFrom,
+      ...(supportRefs.length ? { promotion_support_refs: supportRefs } : {}) };
     if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Memory candidate idempotency conflict"); return { candidate: existing, idempotent: true }; }
     // Empty subjects are deliberately *not* treated as mutually contradictory.
     // A missing classifier must cause less automation, not turn every preference in
@@ -136,7 +138,8 @@ export class MemoryGovernanceKernel {
         const memory = this.store.get("memory_ledger", String(memoryId));
         return { candidate, memory, superseded: [], idempotent: true };
       }
-      const result = this.ledger.remember({ memory_id: memoryId, source_id: candidate.source_id, kind: candidate.kind, scope_kind: (candidate.scope as JsonObject).kind, scope_id: (candidate.scope as JsonObject).id, scope_envelope: candidate.scope_envelope, content: candidate.content, topic: candidate.topic || undefined, sensitivity: candidate.sensitivity, confidence: candidate.confidence, evidence_ids: candidate.evidence_ids, valid_until: candidate.valid_until, observed_at: candidate.observed_at, effective_from: candidate.effective_from });
+      const result = this.ledger.remember({ memory_id: memoryId, source_id: candidate.source_id, kind: candidate.kind, scope_kind: (candidate.scope as JsonObject).kind, scope_id: (candidate.scope as JsonObject).id, scope_envelope: candidate.scope_envelope, content: candidate.content, topic: candidate.topic || undefined, sensitivity: candidate.sensitivity, confidence: candidate.confidence, evidence_ids: candidate.evidence_ids, valid_until: candidate.valid_until, observed_at: candidate.observed_at, effective_from: candidate.effective_from,
+        proposed_by: candidate.proposed_by, promotion_support_refs: candidate.promotion_support_refs });
       const memory = result.memory as JsonObject;
       const supersededMemoryIds = Array.isArray(candidate.supersedes_memory_ids) ? candidate.supersedes_memory_ids as string[] : [];
       const superseded = supersededMemoryIds.map((memoryId) => {
@@ -152,7 +155,8 @@ export class MemoryGovernanceKernel {
   /** Topic recommendations require confirmation; no inferred topic overwrites durable Memory. */
   topicSuggestions(args: JsonObject): JsonObject {
     const content = text(args.content, "content"), query = retrievalTerms(content), scope = { kind: text(args.scope_kind, "scope_kind"), id: text(args.scope_id, "scope_id") };
-    const eligible = this.store.listScoped("memory_ledger", [scope], 10_001, item => item.status === "active" && (item.sensitivity !== "restricted" || args.allow_restricted === true) && scopeAllows(scopeEnvelope(item.scope_envelope, scope), scopeAccess(args)));
+    const eligible = this.store.listScoped("memory_ledger", [scope], 10_001, item => item.status === "active" && this.ledger.promotionSupported(item)
+      && (item.sensitivity !== "restricted" || args.allow_restricted === true) && scopeAllows(scopeEnvelope(item.scope_envelope, scope), scopeAccess(args)));
     const scored = temporalMemorySelect(eligible, new Date(), false).selected.map(item => {
       const languageHint = /\b(?:python|java|javascript|typescript|rust|golang)\b/iu.test(content) && /\b(?:python|java|javascript|typescript|rust|golang)\b/iu.test(String(item.content));
       return { topic: item.topic || (languageHint ? "programming-language" : null), memory_id: item.id, memory_version: item.version, content_digest: item.content_digest, score: query.filter(term => String(item.content).toLowerCase().includes(term)).length + Number(languageHint), classification: "confirmation_required_hint" };
@@ -223,7 +227,7 @@ export class MemoryGovernanceKernel {
   sessionFinalize(args: JsonObject): JsonObject {
     const sessionId = text(args.session_id, "session_id"); const summary = noSecret(text(args.summary, "summary"), "summary");
     const candidateIds = evidenceIds(args.candidate_ids); const candidates = candidateIds.map((candidateId) => this.store.get("memory_candidate", candidateId));
-    const archive = this.ledger.files.archiveSession(sessionId);
+    const archive = this.ledger.files.archiveSession(sessionId, typeof args.session_host === "string" ? text(args.session_host, "session_host") : undefined);
     return { session_id: sessionId, summary_digest: digest(summary), candidates: candidates.map((candidate) => ({ candidate_id: candidate.id, status: candidate.status })), archive, content_free: true };
   }
   consolidate(args: JsonObject): JsonObject {

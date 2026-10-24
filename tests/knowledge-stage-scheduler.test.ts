@@ -12,6 +12,7 @@ test("Knowledge Host-call stages advance fairly and resume after process restart
     assert.equal(await nextKnowledgeLearningStage(path), "classification");
     assert.equal(await nextKnowledgeLearningStage(path), "session_candidate");
     assert.equal(await nextKnowledgeLearningStage(path), "session_evaluation");
+    assert.equal(await nextKnowledgeLearningStage(path), "session_adjudication");
     assert.equal(await nextKnowledgeLearningStage(path), "classification");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

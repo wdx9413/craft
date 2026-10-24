@@ -10,11 +10,11 @@ import { CraftService } from "../../core/service.ts";
 import { scoreImpactSet, summarizeImpactCases, type ImpactCaseScore } from "./codebase-impact-evaluation.ts";
 import { summarizeRetrievalByLanguage } from "./codebase-retrieval-strata.ts";
 import { readCodebaseEvaluationSymbolNodes } from "./codebase-evaluation-graph.ts";
-import { assertEvaluationStateStable, checkpointManifestDigest, digestEvaluationMaterial, readGitEvaluationState } from "./codebase-evaluation-provenance.ts";
+import { assertEvaluationStateStable, checkpointManifestDigest, readGitEvaluationState } from "./codebase-evaluation-provenance.ts";
 import { sourceContainsSymbolName } from "./codebase-evaluation-source.ts";
 import { isEvaluationNonProductionPath } from "./codebase-evaluation-source-policy.ts";
 import { CODEBASE_LSP_CONFIG } from "../../capability/craft-codebase/lsp-config.ts";
-import { persistCodebaseEvaluation } from "./codebase-evaluation-store.ts";
+import { persistCodebaseEvaluation, persistCodebaseEvaluationInput } from "./codebase-evaluation-store.ts";
 
 type RetrievalCase = { query: string; path: string; name: string; language?: string };
 type CallGraphCase = { target_path: string; target_name: string; callers: Array<{ path: string; name: string }>;
@@ -224,17 +224,21 @@ try {
   const craftRevision = assertEvaluationStateStable("Craft checkout", craftStateBefore, readGitEvaluationState(craftRoot));
   const repositoryRevision = assertEvaluationStateStable("evaluation repository", repositoryStateBefore, readGitEvaluationState(repository));
   const evaluationSuiteMaterial = suiteMaterial ?? JSON.stringify({ cases, callGraphCases, impactCases });
+  const evaluationSuite = persistCodebaseEvaluationInput(repository, "evaluation_suites", evaluationSuiteMaterial);
+  const evaluationConfig = lspConfigMaterial ? persistCodebaseEvaluationInput(repository, "evaluation_configs", lspConfigMaterial) : null;
   const provenance = {
     repository_revision: repositoryRevision,
     craft_revision: craftRevision,
-    evaluation_suite_sha256: digestEvaluationMaterial(evaluationSuiteMaterial),
+    evaluation_suite_sha256: evaluationSuite.sha256,
+    evaluation_suite_path: evaluationSuite.path,
     checkpoint_id: ready.checkpoint_id,
     checkpoint_manifest_digest: checkpointManifestDigest(checkpointRecord.entries as Record<string, unknown>[]),
     graph_manifest_digest: String(indexRecord.graph_manifest_digest ?? ""),
     analyzer: analysisRecord.analyzer ?? null,
     analyzer_version: analysisRecord.analyzer_version ?? null,
     relation_analysis: analysisRecord.relation_analysis ?? null,
-    lsp_config_sha256: lspConfigMaterial ? digestEvaluationMaterial(lspConfigMaterial) : null,
+    lsp_config_sha256: evaluationConfig?.sha256 ?? null,
+    lsp_config_path: evaluationConfig?.path ?? null,
     node_version: process.version,
   };
   const rows = cases.map(item => {

@@ -49,7 +49,7 @@ export function compactContextResponse(value: JsonObject): JsonObject {
   if (Array.isArray(value.host_refs) && value.host_refs.length > 0) result.host_refs = value.host_refs;
   if (value.trace_correlation !== undefined) result.trace_correlation = value.trace_correlation;
   if (value.telemetry_error !== undefined) result.telemetry_error = value.telemetry_error;
-  if (value.knowledge_source_discovery !== undefined) result.knowledge_source_discovery = pick(value.knowledge_source_discovery, ["status", "reason", "sources_registered", "sources_ingested", "candidates_created"]);
+  if (value.knowledge_source_discovery !== undefined) result.knowledge_source_discovery = pick(value.knowledge_source_discovery, ["status", "reason", "failure_code", "sources_registered", "sources_ingested", "partial_ingests", "failed_ingests", "candidates_created"]);
   if (Array.isArray((result.codebase as JsonObject).references)) (result.codebase as JsonObject).references = [...(result.codebase as JsonObject).references as JsonObject[]];
   return result;
 }

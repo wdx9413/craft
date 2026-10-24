@@ -15,6 +15,7 @@ test("standalone Memory MCP captures Host-classified facts into session scope wi
   await mkdir(projectRoot);
   const store = await new CraftStore(craftPaths(dataRoot)).open();
   const service = new CraftService(store), memory = new McpServer(service, productSurfaceOf("memory"));
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project-a", alias_kind: "path", alias: projectRoot });
   try {
     assert.throws(() => service.memoryCaptureObservedFact({ content: "stable", project_scope_id: "project-a" }), /session_id/u);
     assert.throws(() => service.memoryCaptureObservedFact({ content: "stable", session_id: "session-a", project_scope_id: "project-a", scope_kind: "global" }), /session scope/u);

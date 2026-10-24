@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import fs, { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
@@ -10,6 +11,7 @@ import { validateExperienceConfiguration } from "../capability/craft-experience/
 import { stableDigest } from "../core/digest.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { McpServer } from "../core/mcp.ts";
+import { projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
 
 const config = (): JsonObject => ({ title: "互联网产研", procedure_kind: "graph", definition: experienceGraphTemplate("internet-product-engineering") });
 const workflow = (): JsonObject => ({ title: "Review", procedure_kind: "workflow", scenario_id: "review", definition: spec() });
@@ -17,7 +19,7 @@ const workflow = (): JsonObject => ({ title: "Review", procedure_kind: "workflow
 test("readable English scene IDs are exact directory names and old hashed drafts/revisions stay usable", async () => {
   const f = await fixture();
   try {
-    const base = join(realpathSync(f.root), ".craft_data", "experience");
+    const base = join(projectStorageDirectory(f.store.paths, f.root), "experience");
     const id = "product-development", plain = experienceGraphDirectory(f.store.paths, id, false, base), old = experienceGraphDirectory(f.store.paths, id, true, base);
     assert.equal(plain, join(base, "graph", id)); assert.notEqual(old, plain);
     for (const unsafe of ["../outside", "CON", "con", "a/b", "a".repeat(97)]) assert.notEqual(experienceGraphDirectory(f.store.paths, unsafe, false, base), join(base, "graph", unsafe));
@@ -50,7 +52,7 @@ test("a scenario draft is discoverable, editable on disk and submitted as an imm
     assert.match(String(saved.path), /experience\/graph\/engineering\/draft.json$/);
     assert.equal(f.store.count("experience_procedure"), 0);
     assert.equal((inspect({ action: "list", scenario_id: "internet-product-engineering" }).drafts as JsonObject[]).length, 1);
-    assert.equal(inspect({ action: "list" }).data_root, join(realpathSync(f.root), ".craft_data", "experience"));
+    assert.equal(inspect({ action: "list" }).data_root, join(projectStorageDirectory(f.store.paths, f.root), "experience"));
     assert.equal((inspect({ action: "list", scenario_id: "missing" }).drafts as JsonObject[]).length, 0);
     assert.equal((inspect({ action: "list", graph_id: "engineering" }).drafts as JsonObject[]).length, 1);
     assert.equal((inspect({ action: "list", graph_id: "missing" }).drafts as JsonObject[]).length, 0);
@@ -192,17 +194,18 @@ test("legacy revisions copy idempotently and preserve pinned references and dige
     const copied = migrate(); assert.equal(copied.legacy_files_preserved, true); assert.equal(copied.has_more, false);
     assert.equal(stableDigest(definitions.read((copied.migrated_refs as JsonObject[])[0] as never)), stableDigest(value));
     assert.deepEqual(migrate().migrated_refs, copied.migrated_refs); assert.ok(existsSync(legacyPath));
-    assert.equal((f.store.get("experience_procedure", String(p.id)).definition_ref as JsonObject).path, legacyPath);
+    assert.equal((f.store.get("experience_procedure", String(p.id)).definition_ref as JsonObject).path, (copied.migrated_refs as JsonObject[])[0]!.path);
+    assert.equal(f.store.get("experience_procedure", String(p.id)).version, current.version);
     const discovered = f.service.experienceGraphInspect({ action: "list", scope }).graphs as JsonObject[];
     assert.equal(discovered[0]!.scenario_id, null); assert.equal(discovered[0]!.provenance, "learned");
     f.store.create("experience_procedure", "alias", { ...current, scenario_signature: { scenario_id: "aliased" } });
     assert.equal((f.service.experienceGraphInspect({ action: "list", scope, scenario_id: "aliased" }).graphs as JsonObject[])[0]!.scenario_id, "aliased");
-    for (let i = 0; i < 100; i++) f.store.save("experience_procedure", String(p.id), current);
+    for (let i = 0; i < 100; i++) f.store.save("experience_procedure", String(p.id), f.store.get("experience_procedure", String(p.id)));
     const paged = migrate({ expected_version: f.store.get("experience_procedure", String(p.id)).version }); assert.equal(paged.has_more, true); assert.ok(paged.next_before_version);
     assert.equal(migrate({ expected_version: f.store.get("experience_procedure", String(p.id)).version, before_version: paged.next_before_version }).has_more, false);
     assert.throws(() => definitions.read({ ...legacy, path: join(f.root, "outside.v1.json") } as never), /outside/);
     const tampered = { ...value, trigger: "changed" }; writeFileSync(legacyPath, JSON.stringify(tampered));
-    assert.throws(() => migrate({ expected_version: f.store.get("experience_procedure", String(p.id)).version }), /digest drifted/);
+    assert.throws(() => definitions.migrate(legacy as never), /digest drifted/);
   } finally { await f.close(); }
 });
 
@@ -249,7 +252,7 @@ test("draft and immutable paths reject symlink escapes and direct version tamper
     rmSync(String(ref.path)); symlinkSync(join(f.root, "missing.json"), String(ref.path));
     assert.throws(() => definitions.read(ref as never), /symbolic link/);
     rmSync(String(ref.path)); writeFileSync(String(ref.path), JSON.stringify(value));
-    const id = "escape", directory = experienceGraphDirectory(f.store.paths, id, false, join(realpathSync(f.root), ".craft_data", "experience")); symlinkSync(f.root, directory);
+    const id = "escape", directory = experienceGraphDirectory(f.store.paths, id, false, join(projectStorageDirectory(f.store.paths, f.root), "experience")); symlinkSync(f.root, directory);
     assert.throws(() => f.service.experienceGraphEdit({ action: "save", graph_id: id, scope, configuration: config() }), /symbolic link/);
     unlinkSync(directory); symlinkSync(join(f.root, "missing-directory"), directory);
     assert.throws(() => f.service.experienceGraphEdit({ action: "save", graph_id: id, scope, configuration: config() }), /EEXIST|symbolic link/);
@@ -318,5 +321,135 @@ test("a published draft remains recoverable when its discovery index transaction
     f.service.experienceGraphEdit({ action: "save", graph_id: "recover", scope, configuration: config(), expected_draft_digest: draft.draft_digest });
     assert.equal((f.service.experienceGraphInspect({ action: "list", scope }).drafts as JsonObject[]).length, 1);
     assert.equal((f.service.experienceGraphEdit({ action: "submit", graph_id: "recover", scope, expected_draft_digest: draft.draft_digest }).procedure as JsonObject).content_version, 1);
+  } finally { await f.close(); }
+});
+
+
+test("definition migration rejects a competing revision and retries without overwriting evidence", async () => {
+  const f = await fixture();
+  try {
+    const procedure = f.create();
+    const ref = procedure.definition_ref as unknown as import("../capability/craft-experience/procedure-definition.ts").ProcedureDefinitionRef;
+    const definitions = new ProcedureDefinitionStore(f.store);
+    const value = definitions.read(ref);
+    const legacyPath = join(f.store.paths.experienceProcedureDir, "workflows", "migration.v1.json");
+    mkdirSync(dirname(legacyPath), { recursive: true });
+    writeFileSync(legacyPath, JSON.stringify(value));
+    const legacy = { ...ref, path: legacyPath };
+    unlinkSync(ref.path);
+    const link = fs.linkSync;
+    let fault = mock.method(fs, "linkSync", (_from: fs.PathLike, to: fs.PathLike) => {
+      writeFileSync(to, JSON.stringify({ ...value, trigger: "concurrent revision" }));
+      throw Object.assign(new Error("already exists"), { code: "EEXIST" });
+    }); syncBuiltinESMExports();
+    try { assert.throws(() => definitions.migrate(legacy), /digest drifted/); }
+    finally { fault.mock.restore(); syncBuiltinESMExports(); }
+    assert.equal(JSON.parse(readFileSync(ref.path, "utf8")).trigger, "concurrent revision");
+    unlinkSync(ref.path);
+    fault = mock.method(fs, "linkSync", () => { throw Object.assign(new Error("publication I/O failure"), { code: "EIO" }); }); syncBuiltinESMExports();
+    try { assert.throws(() => definitions.migrate(legacy), /publication I\/O failure/); }
+    finally { fault.mock.restore(); syncBuiltinESMExports(); }
+    assert.equal(fs.linkSync, link);
+    assert.equal(fs.readdirSync(dirname(ref.path)).some(name => name.endsWith(".tmp")), false);
+    const migrated = definitions.migrate(legacy);
+    assert.equal(migrated.path, ref.path);
+    assert.deepEqual(definitions.migrate(legacy), migrated);
+    assert.deepEqual(definitions.migrate(migrated), migrated);
+    assert.equal(stableDigest(definitions.read(migrated)), ref.digest);
+    assert.ok(existsSync(legacyPath));
+  } finally { await f.close(); }
+});
+
+
+test("graph migration publishes files without a primary writer lock and rejects a concurrent revision", async () => {
+  const f = await fixture();
+  try {
+    const procedure = f.create();
+    const ref = procedure.definition_ref as unknown as import("../capability/craft-experience/procedure-definition.ts").ProcedureDefinitionRef;
+    const definitions = new ProcedureDefinitionStore(f.store), value = definitions.read(ref);
+    const legacyPath = join(f.store.paths.experienceProcedureDir, "workflows", "lock-probe.v1.json");
+    mkdirSync(dirname(legacyPath), { recursive: true }); writeFileSync(legacyPath, JSON.stringify(value));
+    const current = f.store.save("experience_procedure", String(procedure.id), { ...procedure, definition_ref: { ...ref, path: legacyPath } });
+    unlinkSync(ref.path);
+    const second = new DatabaseSync(f.store.paths.databaseFile);
+    const link = fs.linkSync;
+    const fault = mock.method(fs, "linkSync", (from: fs.PathLike, to: fs.PathLike) => {
+      second.exec("PRAGMA busy_timeout=0; BEGIN IMMEDIATE; ROLLBACK");
+      link(from, to);
+      f.store.save("experience_procedure", String(procedure.id), f.store.get("experience_procedure", String(procedure.id)));
+    }); syncBuiltinESMExports();
+    try {
+      assert.throws(() => f.service.experienceGraphEdit({ action: "migrate", scope, graph_id: procedure.id, expected_version: current.version }), /version conflict/);
+    } finally { fault.mock.restore(); syncBuiltinESMExports(); second.close(); }
+    assert.equal((f.store.get("experience_procedure", String(procedure.id), Number(current.version)).definition_ref as JsonObject).path, legacyPath);
+    const latest = f.store.get("experience_procedure", String(procedure.id));
+    f.service.experienceGraphEdit({ action: "migrate", scope, graph_id: procedure.id, expected_version: latest.version });
+    assert.equal((f.store.get("experience_procedure", String(procedure.id), Number(current.version)).definition_ref as JsonObject).path, ref.path);
+    await f.reopen();
+    assert.equal((f.store.get("experience_procedure", String(procedure.id)).definition_ref as JsonObject).path, ref.path);
+  } finally { await f.close(); }
+});
+
+
+test("background definition maintenance is bounded, restartable and revisits new earlier keys", async () => {
+  const f = await fixture();
+  try {
+    let definitions = new ProcedureDefinitionStore(f.store);
+    assert.equal(definitions.maintain(1).status, "idle");
+    assert.equal(f.store.find("experience_asset_migration", "definition-locations"), null);
+    const procedure = f.create();
+    const ref = procedure.definition_ref as unknown as import("../capability/craft-experience/procedure-definition.ts").ProcedureDefinitionRef;
+    const legacyPath = join(f.store.paths.experienceProcedureDir, "workflows", "background.v1.json");
+    mkdirSync(dirname(legacyPath), { recursive: true }); writeFileSync(legacyPath, JSON.stringify(definitions.read(ref)));
+    f.store.save("experience_procedure", String(procedure.id), { ...procedure, definition_ref: { ...ref, path: legacyPath } });
+    assert.deepEqual(definitions.maintain(1), { processed: 1, migrated: 0, status: "progress" });
+    await f.reopen(); definitions = new ProcedureDefinitionStore(f.store);
+    const original = readFileSync(legacyPath, "utf8"); writeFileSync(legacyPath, "invalid JSON");
+    assert.deepEqual(definitions.maintain(1), { processed: 1, migrated: 0, failed: 1, status: "progress" });
+    const failure = f.store.list("experience_asset_migration_failure", 10)[0]!;
+    assert.equal(failure.scope, scope);
+    assert.equal(failure.status, "retry_pending");
+    assert.equal(JSON.stringify(failure).includes(legacyPath), false);
+    assert.equal(definitions.maintain(1).status, "idle");
+    await f.reopen(); definitions = new ProcedureDefinitionStore(f.store);
+    assert.equal(definitions.maintain(1).migrated, 0);
+    assert.equal(definitions.maintain(1).failed, 1);
+    assert.equal(f.store.get("experience_asset_migration_failure", String(failure.id)).attempts, 2);
+    assert.equal(definitions.maintain(1).status, "idle");
+    writeFileSync(legacyPath, original);
+    assert.equal(definitions.maintain(1).migrated, 0);
+    assert.deepEqual(definitions.maintain(1), { processed: 1, migrated: 1, status: "progress" });
+    assert.equal(f.store.get("experience_asset_migration_failure", String(failure.id)).status, "resolved");
+    assert.equal(definitions.maintain(1).status, "idle");
+    f.store.create("experience_procedure", "a-earlier", { scope, lifecycle: "candidate" });
+    assert.deepEqual(definitions.maintain(1), { processed: 1, migrated: 0, status: "progress" });
+    assert.equal(f.store.get("experience_asset_migration", "definition-locations").after_id, "a-earlier");
+    for (const limit of [0, 101, 1.5]) assert.throws(() => definitions.maintain(limit), /page bounds/);
+    assert.throws(() => f.store.experienceDefinitionMigrationPage("", -1, 1), /page bounds/);
+  } finally { await f.close(); }
+});
+
+test("a malformed definition is isolated while later records migrate in the same batch", async () => {
+  const f = await fixture();
+  try {
+    const bad = f.store.create("experience_procedure", "a-malformed", { scope, definition_ref: { secret: "sensitive diagnostic fixture" } });
+    const procedure = f.create();
+    const definitions = new ProcedureDefinitionStore(f.store);
+    const ref = procedure.definition_ref as unknown as import("../capability/craft-experience/procedure-definition.ts").ProcedureDefinitionRef;
+    const path = join(f.store.paths.experienceProcedureDir, "workflows", "isolation.v1.json");
+    mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(definitions.read(ref)));
+    const current = f.store.save("experience_procedure", String(procedure.id), { ...procedure, definition_ref: { ...ref, path } });
+    assert.deepEqual(definitions.maintain(5), { processed: 3, migrated: 1, failed: 1, status: "progress" });
+    assert.equal((f.store.get("experience_procedure", String(current.id)).definition_ref as JsonObject).path, ref.path);
+    const failure = f.store.list("experience_asset_migration_failure", 10)[0]!;
+    assert.equal(failure.procedure_id, bad.id);
+    assert.equal(failure.procedure_version, bad.version);
+    assert.equal(JSON.stringify(failure).includes("sensitive diagnostic fixture"), false);
+    const header = f.store.database.prepare("SELECT payload_json FROM records WHERE kind='experience_asset_migration_failure' AND id=?").get(String(failure.id)) as { payload_json: string };
+    const pointer = JSON.parse(header.payload_json)._experience_partition;
+    assert.equal(pointer.file, join(projectStorageDirectory(f.store.paths, f.root), "experience", "experience.db"));
+    assert.equal(definitions.maintain().status, "idle");
+    assert.equal(definitions.maintain().failed, 1);
+    assert.equal(f.store.get("experience_asset_migration_failure", String(failure.id)).attempts, 2);
   } finally { await f.close(); }
 });

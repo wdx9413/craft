@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -12,7 +12,9 @@ import { DurableActionLoopKernel } from "../core/durable-action-loop.ts";
 import { ExperienceLedgerKernel } from "../capability/craft-experience/experience-ledger.ts";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-durable-experience-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  const root = await mkdtemp(join(tmpdir(), "craft-durable-experience-")); const projectRoot = join(root, "project"), otherProjectRoot = join(root, "other-project"); await mkdir(projectRoot); await mkdir(otherProjectRoot); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:experience", alias_kind: "path", alias: projectRoot });
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:other", alias_kind: "path", alias: otherProjectRoot });
   store.create("task", "task", { title: "Durable work", goal: "prove progress" });
   store.create("task_control_contract", "contract", { task_id: "task" }); store.create("task_run", "run", { contract_id: "contract", launch_id: "launch" });
   store.create("state_snapshot", "before", { workspace_id: "workspace", snapshot_digest: "sha256:before", workspace_state_revision: 1 });
@@ -73,11 +75,11 @@ test("Experience Ledger keeps execution observations, diagnostic patterns, rejec
     assert.equal(pattern.execution_visible, false); assert.throws(() => f.service.experienceLedgerCompile({ scenario_key: "coding", observation_ids: [first.id, first.id], kind: "failure_pattern", hypothesis: "x", applicability: "x", counterexample: "x" }), /unique/);
     // New observations are scope-bound. Old unscoped records remain diagnostic,
     // while a mixed scope cannot be compiled into a pattern that could leak later.
-    const scopedFirst = f.service.experienceLedgerObserve({ observation_id: "scoped-one", source_ref: { kind: "outcome", id: "outcome", version: 1 }, kind: "success", scenario_key: "coding.scoped", scope_kind: "project", scope_id: "p", finding: "a scoped success", evidence_ids: ["confirmed"] }).observation as JsonObject;
-    const scopedSecond = f.service.experienceLedgerObserve({ observation_id: "scoped-two", source_ref: { kind: "acceptance_gate", id: "gate", version: 1 }, kind: "success", scenario_key: "coding.scoped", scope_kind: "project", scope_id: "p", finding: "another scoped success", evidence_ids: ["confirmed"] }).observation as JsonObject;
+    const scopedFirst = f.service.experienceLedgerObserve({ observation_id: "scoped-one", source_ref: { kind: "outcome", id: "outcome", version: 1 }, kind: "success", scenario_key: "coding.scoped", scope_kind: "project", scope_id: "project:experience", finding: "a scoped success", evidence_ids: ["confirmed"] }).observation as JsonObject;
+    const scopedSecond = f.service.experienceLedgerObserve({ observation_id: "scoped-two", source_ref: { kind: "acceptance_gate", id: "gate", version: 1 }, kind: "success", scenario_key: "coding.scoped", scope_kind: "project", scope_id: "project:experience", finding: "another scoped success", evidence_ids: ["confirmed"] }).observation as JsonObject;
     const scopedPattern = f.service.experienceLedgerCompile({ pattern_id: "scoped-pattern", scenario_key: "coding.scoped", observation_ids: [scopedFirst.id, scopedSecond.id], kind: "success_strategy", hypothesis: "reuse scoped evidence", applicability: "project p", counterexample: "other project" }).pattern as JsonObject;
-    assert.deepEqual(scopedPattern.scope, { kind: "project", id: "p" });
-    const otherScope = f.service.experienceLedgerObserve({ observation_id: "other-scope", source_ref: { kind: "outcome", id: "outcome", version: 1 }, kind: "success", scenario_key: "coding.scoped", scope_kind: "project", scope_id: "other", finding: "wrong project", evidence_ids: ["confirmed"] }).observation as JsonObject;
+    assert.deepEqual(scopedPattern.scope, { kind: "project", id: "project:experience" });
+    const otherScope = f.service.experienceLedgerObserve({ observation_id: "other-scope", source_ref: { kind: "outcome", id: "outcome", version: 1 }, kind: "success", scenario_key: "coding.scoped", scope_kind: "project", scope_id: "project:other", finding: "wrong project", evidence_ids: ["confirmed"] }).observation as JsonObject;
     assert.throws(() => f.service.experienceLedgerCompile({ scenario_key: "coding.scoped", observation_ids: [scopedFirst.id, otherScope.id], kind: "success_strategy", hypothesis: "x", applicability: "x", counterexample: "x" }), /share one scope/);
     const intervention = f.service.experienceLedgerPropose({ intervention_id: "proposal", pattern_ids: [pattern.id], subject_ref: { kind: "workflow", id: "workflow", version: 1 }, design_axes: ["orchestration"], diff_summary: "add verification", hypothesis: "raises outcome quality" }).intervention as JsonObject;
     assert.equal(intervention.publication_allowed, false); const rejected = f.service.experienceLedgerEvaluate({ intervention_id: intervention.id, assessment_id: "rejected", retry_condition: "new held-out failures" }).intervention as JsonObject;

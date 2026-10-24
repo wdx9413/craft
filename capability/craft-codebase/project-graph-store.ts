@@ -1,18 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { ensureProjectStorageDirectory, type CraftPaths } from "../../common/craft-common-store-local/src/paths.ts";
 
 const GRAPH_RECORD_ID = /^codebase_(?:shard|edge_route)_[A-Za-z0-9_-]{1,128}$/u;
 
-function safeDirectory(rootPath: string, workspaceId: string): string {
+function safeDirectory(rootPath: string, workspaceId: string, paths: CraftPaths): string {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(workspaceId)) throw new Error("Invalid Codebase workspace id");
-  const root = resolve(rootPath);
-  const rootStat = lstatSync(root);
-  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error("Codebase project root is unsafe");
-  let current = root;
-  for (const part of [".craft_data", "codebase", "indexes", workspaceId, "graph_records"]) {
+  let current = ensureProjectStorageDirectory(paths, rootPath);
+  for (const part of ["codebase", "indexes", workspaceId, "graph_records"]) {
     current = join(current, part);
     if (!existsSync(current)) mkdirSync(current, { mode: 0o700 });
     const stat = lstatSync(current);
@@ -25,8 +23,8 @@ function safeDirectory(rootPath: string, workspaceId: string): string {
 export class ProjectGraphStore {
   readonly directory: string;
 
-  constructor(projectRoot: string, workspaceId: string) {
-    this.directory = safeDirectory(projectRoot, workspaceId);
+  constructor(projectRoot: string, workspaceId: string, paths: CraftPaths) {
+    this.directory = safeDirectory(projectRoot, workspaceId, paths);
   }
 
   put(id: string, record: JsonObject): void {
@@ -62,6 +60,15 @@ export class ProjectGraphStore {
     const records = [...new Set(ids)].sort().map(id => {
       this.read(id);
       return [id, createHash("sha256").update(readFileSync(this.path(id))).digest("hex")];
+    });
+    return stableDigest(records);
+  }
+
+  recordsFingerprint(ids: readonly string[]): string {
+    const records = [...new Set(ids)].sort().map(id => {
+      const stat = lstatSync(this.path(id));
+      if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Project Codebase graph record is unsafe");
+      return [id, stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs];
     });
     return stableDigest(records);
   }

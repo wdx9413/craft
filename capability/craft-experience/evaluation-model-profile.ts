@@ -93,7 +93,9 @@ export class EvaluationModelProfileKernel {
       const target = ticket.target as JsonObject | undefined;
       if (target?.kind === "knowledge_scenario_classification") {
         if (ticket.purpose !== "knowledge_scenario_classification") return false;
-        const claim = this.store.find("knowledge_claim", String(target.id));
+        let claim: JsonObject | null;
+        try { claim = this.store.find("knowledge_claim", String(target.id)); }
+        catch { return false; } // An unavailable or ambiguous project partition cannot keep a ticket dispatchable.
         if (!claim || typeof claim.scope !== "string" || !KNOWLEDGE_CLASSIFIABLE_STATUSES.has(String(claim.status)) || typeof claim.scenario_key === "string"
           || Number(claim.version) !== Number(target.version) || claim.content_digest !== target.content_digest) return false;
         const scope = scopeFromKey(String(claim.scope));

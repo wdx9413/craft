@@ -96,7 +96,8 @@ export class KnowledgeSourceRegistry {
       { relative_path: "AGENTS.md", kind: "project_note", label: "Project Agent Instructions" },
       { relative_path: ".serena/memories", kind: "serena", label: "Serena Project Memories" },
     ];
-    let registered = 0, ingested = 0, candidateCount = 0, skipped = 0, failedIngests = 0, reactivated = 0;
+    const discoveredSourceIds = candidates.map(candidate => `project_autodiscovered_${stableDigest({ scope, root, path: candidate.relative_path }).slice(-24)}`);
+    let registered = 0, ingested = 0, candidateCount = 0, skipped = 0, partialIngests = 0, failedIngests = 0, reactivated = 0;
     const sourceRefs: string[] = [];
     for (const candidate of candidates) {
       const locator = join(root, candidate.relative_path);
@@ -125,28 +126,32 @@ export class KnowledgeSourceRegistry {
           const output = this.sourceIngest({ source_id: sourceId, max_files: candidate.kind === "serena" ? 50 : 1 });
           if (output.status === "completed" || output.status === "partial") {
             ingested++;
+            if (output.status === "partial") partialIngests++;
             candidateCount += Array.isArray(output.candidates) ? output.candidates.length : 0;
           }
         } catch { failedIngests++; /* One malformed project document must not prevent the other bounded Sources. */ }
       }
     }
-    const transition = this.disableMissingDiscoveredSources(scope, new Set(sourceRefs));
-    return { status: transition.failed > 0 ? "partial" : "ready",
-      ...(transition.failed > 0 ? { reason: "source_transition_incomplete" } : {}),
+    const transition = this.disableMissingDiscoveredSources(scope, discoveredSourceIds, new Set(sourceRefs));
+    const incomplete = transition.failed > 0 || partialIngests > 0 || failedIngests > 0;
+    return { status: incomplete ? "partial" : "ready",
+      ...(transition.failed > 0 ? { reason: "source_transition_incomplete" }
+        : partialIngests > 0 || failedIngests > 0 ? { reason: "source_ingest_incomplete" } : {}),
       sources_registered: registered, sources_ingested: ingested, candidates_created: candidateCount,
-      skipped_sources: skipped, failed_ingests: failedIngests, sources_disabled: transition.disabled,
+      skipped_sources: skipped, partial_ingests: partialIngests, failed_ingests: failedIngests, sources_disabled: transition.disabled,
       sources_transition_failed: transition.failed, source_transition_failure_codes: transition.failure_codes,
       sources_reactivated: reactivated, source_refs: sourceRefs };
   }
 
-  private disableMissingDiscoveredSources(scope: { kind: string; id: string }, currentSourceIds: Set<string>): { disabled: number; failed: number; failure_codes: string[] } {
+  private disableMissingDiscoveredSources(scope: { kind: string; id: string }, discoveredSourceIds: string[], currentSourceIds: Set<string>): { disabled: number; failed: number; failure_codes: string[] } {
     let disabled = 0;
     const failed = new Set<string>();
     const failureCodes = new Set<string>();
-    for (const source of this.store.listScoped("knowledge_source", [scope], 100_000, item => item.status === "active"
-      && String(item.id).startsWith("project_autodiscovered_"))) {
+    for (const sourceId of discoveredSourceIds) {
+      const source = this.store.find("knowledge_source", sourceId);
+      if (!source || source.status !== "active" || (source.scope as JsonObject | undefined)?.kind !== scope.kind
+        || (source.scope as JsonObject | undefined)?.id !== scope.id) continue;
       if (currentSourceIds.has(String(source.id)) || this.discoveredSourcePathIsUsable(source)) continue;
-      const sourceId = String(source.id);
       let sourceDisabled = false;
       try {
         this.sourceTransition({ source_id: sourceId, status: "disabled", reason: "autodiscovered_project_source_path_unavailable" }, "project_source_path_unavailable");
@@ -223,7 +228,10 @@ export class KnowledgeSourceRegistry {
   sourceList(args: JsonObject = {}): JsonObject {
     const scopeKind = args.scope_kind === undefined ? null : text(args.scope_kind, "scope_kind"); const scopeId = args.scope_id === undefined ? null : text(args.scope_id, "scope_id");
     if ((scopeKind === null) !== (scopeId === null)) throw new Error("Knowledge Source scope_kind and scope_id must be supplied together");
-    return { sources: this.store.list("knowledge_source", Number(args.limit ?? 100), (item) => item.status === "active" && (scopeKind === null || (item.scope as JsonObject).kind === scopeKind && (item.scope as JsonObject).id === scopeId)) };
+    return { sources: this.store.list("knowledge_source", Number(args.limit ?? 100), (item) => {
+      const scope = item.scope as JsonObject | undefined;
+      return item.status === "active" && (scopeKind === null || (scope?.kind === scopeKind && scope.id === scopeId));
+    }) };
   }
 
   /**

@@ -96,17 +96,19 @@ test("Context Working Set explains selection and keeps host members fixed", asyn
   try {
     const resolver = new ContextResolutionKernel(f.store);
     const kernel = new ContextWorkingSetKernel(f.store, resolver);
+    const scope = (new CraftService(f.store).scopeIdentityResolveProject({ project_root: f.root }).identity as JsonObject).canonical_scope as JsonObject;
+    const projectId = String(scope.id);
     const hostOnly = await kernel.resolve({ working_set_id: "host-only", query: "current", members: ["history", "state"] });
     assert.equal(hostOnly.skipped, true); assert.deepEqual(hostOnly.selected_refs, []);
     const source = f.store.create("knowledge_source", "source", { status: "active", trust: "trusted" });
-    f.store.create("memory_ledger", "memory", { status: "active", source_id: source.id, scope: { kind: "project", id: "p" }, valid_until: null, sensitivity: "internal", content: "focused tests", content_digest: "sha256:memory" });
-    const selected = await kernel.resolve({ working_set_id: "selected", query: "focused tests", members: ["knowledge", "memory", "history"], scope_kind: "project", scope_id: "p" });
+    f.store.create("memory_ledger", "memory", { status: "active", source_id: source.id, scope: { kind: "project", id: projectId }, valid_until: null, sensitivity: "internal", content: "focused tests", content_digest: "sha256:memory" });
+    const selected = await kernel.resolve({ working_set_id: "selected", query: "focused tests", members: ["knowledge", "memory", "history"], scope_kind: "project", scope_id: projectId });
     assert.equal((selected.selected_refs as string[]).length, 1); assert.equal((selected.selection_reasons as JsonObject[])[0]!.reason, "scoped_retrieval");
     assert.equal(kernel.get({ working_set_id: "selected" }).working_set !== undefined, true);
-    assert.equal((await kernel.resolve({ working_set_id: "selected", query: "focused tests", members: ["knowledge", "memory", "history"], scope_kind: "project", scope_id: "p" })).idempotent, true);
-    const required = await kernel.resolve({ working_set_id: "required", query: "focused", members: ["memory"], scope_kind: "project", scope_id: "p", required_refs: ["source"] });
+    assert.equal((await kernel.resolve({ working_set_id: "selected", query: "focused tests", members: ["knowledge", "memory", "history"], scope_kind: "project", scope_id: projectId })).idempotent, true);
+    const required = await kernel.resolve({ working_set_id: "required", query: "focused", members: ["memory"], scope_kind: "project", scope_id: projectId, required_refs: ["source"] });
     assert.equal((required.selected_refs as string[]).length, 1);
-    await assert.rejects(() => kernel.resolve({ working_set_id: "selected", query: "changed", members: ["memory"], scope_kind: "project", scope_id: "p" }), /idempotency conflict/);
+    await assert.rejects(() => kernel.resolve({ working_set_id: "selected", query: "changed", members: ["memory"], scope_kind: "project", scope_id: projectId }), /idempotency conflict/);
     assert.throws(() => kernel.get({ working_set_id: "missing" }), /context_working_set_receipt/);
     const defaults = await kernel.resolve({ query: "none" });
     assert.ok((defaults.working_set as JsonObject).id);

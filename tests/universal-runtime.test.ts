@@ -14,9 +14,12 @@ import { CraftService, VERSION } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { VerifiedWorkLoopKernel } from "../core/verified-work-loop.ts";
 import { WorkRuntimeModeKernel } from "../core/work-runtime-mode.ts";
+import { stableDigest } from "../core/digest.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-universal-runtime-")); const store = await new CraftStore(craftPaths(root)).open();
+  store.create("scope_alias", "project-root", { status: "active", alias_kind: "path", alias: root,
+    alias_digest: stableDigest(root), scope: { kind: "project", id: "project" } });
   store.create("task", "task", { project_id: "project", title: "Goal", goal: "deliver", status: "active" });
   store.create("evidence", "evidence", { confidence: "confirmed", summary: "verified" });
   return { root, store, sources: new KnowledgeSourceRegistry(store), ledger: new MemoryLedgerKernel(store), context: new ContextResolutionKernel(store), modes: new WorkRuntimeModeKernel(store, ["codex-cli", "internal"]), service: new CraftService(store) };
@@ -48,7 +51,7 @@ test("makes Knowledge Sources, Memory Ledger, receipts and retrieval selection e
     assert.equal(f.ledger.remember({ memory_id: "replacement", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "project", content: "Keep changes minimal" }).idempotent, true);
     assert.equal((f.ledger.transition({ memory_id: working.id, status: "superseded", replacement_id: replacement.id, reason: "new policy" }).memory as JsonObject).status, "superseded");
     assert.throws(() => f.ledger.transition({ memory_id: procedural.id, status: "active", reason: "x" }), /unsupported/);
-    f.store.create("memory_item", "legacy", { scope: "project", content: "legacy", status: "active" });
+    f.store.create("memory_item", "legacy", { scope: { kind: "project", id: "project" }, content: "legacy", status: "active" });
     assert.equal((f.ledger.compatBind({ binding_id: "legacy-bind", legacy_kind: "memory_item", legacy_id: "legacy", source_id: source.id }).binding as JsonObject).migration_performed, false);
     assert.equal((f.ledger.compatBind({ binding_id: "legacy-bind", legacy_kind: "memory_item", legacy_id: "legacy", source_id: source.id }) as JsonObject).idempotent, true);
     assert.throws(() => f.ledger.compatBind({ legacy_kind: "wrong", legacy_id: "legacy", source_id: source.id }), /unsupported/);
@@ -307,7 +310,7 @@ test("Context records unavailable embedding fallbacks and preserves an explicit 
     privateKernel.recordRetrievalHealth(bare, { used: "keyword", unavailable_reason: null }, new Date("2026-01-01T00:00:00.000Z"));
     assert.equal(f.store.get("retrieval_adapter_health", "retrieval_adapter_health_bare-vector").last_error, "embedding_request_failed");
     const original = KeywordRetrievalPort.prototype.search;
-    KeywordRetrievalPort.prototype.search = async () => ({ hits: [{ id: String(memory.id), score: 1, reason: undefined as never }], execution: { requested: "keyword", used: "keyword", provider: "local", model: null, latency_ms: 0, cost_summary: null, unavailable_reason: null } });
+    KeywordRetrievalPort.prototype.search = async (_query, documents) => ({ hits: documents.filter(document => document.body.includes("fallback evidence")).map(document => ({ id: document.id, score: 1, reason: undefined as never })), execution: { requested: "keyword", used: "keyword", provider: "local", model: null, latency_ms: 0, cost_summary: null, unavailable_reason: null } });
     try {
       const resolved = await f.context.resolve({ query: "fallback", scope_kind: "project", scope_id: "project", memory_ids: [memory.id] });
       assert.equal((resolved.items as JsonObject[])[0]!.reason, "required");
@@ -335,14 +338,20 @@ test("resolves named accumulated Context members without widening Memory", async
       member: "experience" as const,
       async contribute() { return { member: "experience" as const, receipt_id: "experience-receipt", items: [{ id: "experience-item", content: "alpha procedure" }], omitted_count: 0 }; },
     };
-    const context = new ContextResolutionKernel(f.store, [contributor]);
-    const memoryOnly = await context.resolve({ receipt_id: "member-memory-only", query: "alpha", scope_kind: "project", scope_id: "project", members: ["memory"] }) as JsonObject;
+    const memoryContributor = { member: "memory" as const, async contribute() {
+      return { member: "memory" as const, receipt_id: "memory-receipt", omitted_count: 0,
+        items: [{ ...memory, memory_id: memory.id, memory_version: memory.version }] };
+    } };
+    const context = new ContextResolutionKernel(f.store, [memoryContributor, contributor]);
+    const memoryOnly = await context.resolve({ receipt_id: "member-memory-only", query: "alpha", scope_kind: "project", scope_id: "project", members: ["memory"], memory_ids: [memory.id] }) as JsonObject;
     assert.equal((memoryOnly.items as JsonObject[])[0]!.memory_id, memory.id);
     assert.deepEqual(memoryOnly.contributions, []);
     assert.deepEqual((memoryOnly.receipt as JsonObject).members, ["memory"]);
     const experienceOnly = await context.resolve({ receipt_id: "member-experience-only", query: "alpha", scope_kind: "project", scope_id: "project", members: ["experience"] }) as JsonObject;
     assert.deepEqual(experienceOnly.items, []);
     assert.equal((experienceOnly.contributions as JsonObject[])[0]!.member, "experience");
+    await assert.rejects(() => context.resolve({ receipt_id: "missing-required-memory", query: "alpha", scope_kind: "project", scope_id: "project", members: ["memory"], memory_ids: ["missing-memory"] }), /Required Memory is unavailable/u);
+    await assert.rejects(() => context.resolve({ receipt_id: "mismatched-required-memory", query: "alpha", scope_kind: "project", scope_id: "project", members: ["memory"], memory_ids: ["different-memory-id"] }), /Required Memory is unavailable/u);
     await assert.rejects(() => context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", members: ["experience"], memory_ids: [memory.id] }), /excluded/);
     await assert.rejects(() => context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", members: [] }), /non-empty/);
     await assert.rejects(() => context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", members: ["history"] }), /accumulated/);

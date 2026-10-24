@@ -7,6 +7,7 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-component-integration-"));
@@ -85,7 +86,7 @@ test("ingests immutable source revisions as Evidence and candidates, never revie
   } finally { await dispose(f); }
 });
 
-test("Knowledge promotes an ingested fact only after two independent verified sources support it", async () => {
+test("Knowledge keeps an ingested fact pending after source support until independent evaluation", async () => {
   const f = await fixture();
   try {
     const body = "# Project rule\nRun focused verification before delivery.\n";
@@ -104,7 +105,7 @@ test("Knowledge promotes an ingested fact only after two independent verified so
       const review = (result.automatic_review as JsonObject).assessments as JsonObject[];
       if (index === 0) {
         assert.equal(review[0]!.promoted, false);
-        assert.deepEqual(review[0]!.reasons, ["independent_support_below_threshold"]);
+        assert.deepEqual(review[0]!.reasons, ["independent_effectiveness_evaluation_required", "independent_support_below_threshold"]);
         assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
         assert.equal(f.store.count("knowledge_claim_support"), 1);
         const duplicate = f.service.evidenceRecord({ evidence_id: "duplicate-source-evidence", source_type: "knowledge_fragment", confidence: "bounded", claim: "Copied text is still one source." });
@@ -113,17 +114,18 @@ test("Knowledge promotes an ingested fact only after two independent verified so
         assert.equal(rechecked[0]!.promoted, false);
         assert.equal(rechecked[0]!.independent_support, 1);
         const revokedSource = f.service.knowledgeSourceRegister({ source_id: "revoked-support-source", kind: "readme", label: "revoked corroboration", scope_kind: "project", scope_id: "p", locator: root, content_digest: "revoked-source", trust: "verified", access: "read_only" }).source as JsonObject;
-        const revokedEvidence = f.service.evidenceRecord({ evidence_id: "revoked-source-evidence", source_type: "knowledge_fragment", confidence: "bounded", claim: "Support from this source will be revoked." });
-        f.store.save("evidence", String(revokedEvidence.id), { ...revokedEvidence, source_id: revokedSource.id });
+        const revokedEvidence = f.service.evidenceRecord({ evidence_id: "revoked-source-evidence", source_type: "knowledge_fragment",
+          source_id: revokedSource.id, confidence: "bounded", claim: "Support from this source will be revoked." });
         f.service.knowledgeClaimSupportRecord({ claim_id: claimId, evidence_id: revokedEvidence.id, observation_key: "knowledge-source:revoked-support-source", scope: "project:p" });
         f.service.knowledgeSourceTransition({ source_id: revokedSource.id, status: "revoked", reason: "fixture trust revoked" });
         const revokedRecheck = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "p", claim_ids: [claimId] }).assessments as JsonObject[];
         assert.equal(revokedRecheck[0]!.promoted, false);
         assert.equal(revokedRecheck[0]!.independent_support, 1);
       } else {
-        assert.equal(review[0]!.promoted, true);
+        assert.equal(review[0]!.promoted, false);
         assert.equal(review[0]!.independent_support, 2);
-        assert.equal(f.store.get("knowledge_claim", claimId).status, "reviewed");
+        assert.deepEqual(review[0]!.reasons, ["independent_effectiveness_evaluation_required"]);
+        assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
       }
     }
     assert.equal(new Set(claims.map(item => item.claim_id)).size, 1);
@@ -132,7 +134,7 @@ test("Knowledge promotes an ingested fact only after two independent verified so
     assert.equal(f.store.count("knowledge_claim_support"), 4);
     assert.equal(f.store.list("knowledge_claim_support", 10, item => item.claim_id === sharedClaimId).length, 4);
     const search = await f.service.knowledgeSearchScoped({ query: "focused verification delivery", scope_kind: "project", scope_id: "p" });
-    assert.equal((search.hits as JsonObject[]).length, 1);
+    assert.equal((search.hits as JsonObject[]).length, 0);
   } finally { await dispose(f); }
 });
 
@@ -166,7 +168,7 @@ test("ingests only bounded readable files and makes stale reviewed claims explic
   } finally { await dispose(f); }
 });
 
-test("automatic Knowledge review promotes only exact support from two active trusted Sources", async () => {
+test("automatic Knowledge review counts exact trusted support but awaits independent evaluation", async () => {
   const f = await fixture();
   try {
     const projectRoot = join(f.root, "project-shared");
@@ -179,7 +181,7 @@ test("automatic Knowledge review promotes only exact support from two active tru
     const claimId = String((first.candidates as JsonObject[])[0]!.claim_id);
     assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
     f.service.knowledgeSourceIngest({ source_id: sources[1]!.id, max_chars_per_fragment: 200 });
-    assert.equal(f.store.get("knowledge_claim", claimId).status, "reviewed");
+    assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
     assert.equal(f.store.list("knowledge_claim_support", 10_000, item => item.claim_id === claimId).length, 2);
     const stale = f.store.list("knowledge_claim", 10_000).filter(item => item.status === "revalidation_required");
     assert.equal(stale.length, 0);
@@ -257,21 +259,24 @@ test("bundle directory transport writes only a verified portable JSON envelope",
 test("eligible vector retrieval persists safe configuration, caches embeddings, and opens a bounded circuit", async () => {
   const f = await fixture(); const originalFetch = globalThis.fetch; const originalKey = process.env.CRAFT_VECTOR_TEST_KEY;
   try {
-    process.env.CRAFT_VECTOR_TEST_KEY = "fixture-key"; let calls = 0;
+    process.env.CRAFT_VECTOR_TEST_KEY = "fixture-key"; let calls = 0; let contextInputs: string[] = [];
     globalThis.fetch = async (_input, init) => {
       calls += 1; const body = JSON.parse(String(init?.body)) as { input: string[] };
+      contextInputs.push(...body.input);
       return new Response(JSON.stringify({ data: body.input.map((value) => ({ embedding: value.includes("alpha") ? [1, 0] : [0, 1] })), usage: { total_tokens: body.input.length } }), { status: 200 });
     };
     f.service.knowledgeMemoryInstallBuiltins();
-    f.service.memoryLedgerRemember({ memory_id: "vector-memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "p", content: "alpha retrieval uses evidence." });
-    const adapter = f.service.retrievalAdapterConfigure({ adapter_id: "vector-success", strategy: "vector", provider_fingerprint: "fixture-v1", configuration: { endpoint: "https://fixture.local/embeddings", model: "fixture-embed", credential_env: "CRAFT_VECTOR_TEST_KEY" } }).adapter as JsonObject;
+    f.service.memoryLedgerRemember({ memory_id: "vector-memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "p", content: `alpha retrieval uses evidence marker-unique. ${"unrelated detail. ".repeat(500)}` });
+    const adapter = f.service.retrievalAdapterConfigure({ adapter_id: "vector-success", strategy: "vector", provider_fingerprint: "fixture-v1", configuration: { endpoint: "https://fixture.local/context-excerpt/embeddings", model: "fixture-embed", model_revision: "fixture-context-excerpt", credential_env: "CRAFT_VECTOR_TEST_KEY" } }).adapter as JsonObject;
     assert.equal(((adapter.configuration as JsonObject).model), "fixture-embed");
     const dataset = { documents: [{ id: "a", body: "alpha", scope: "p" }], cases: [{ query: "alpha", scope: "p", expected_ids: ["a"] }] };
-    await f.service.retrievalAdapterEvaluate({ adapter_id: adapter.id, dataset }); calls = 0;
+    await f.service.retrievalAdapterEvaluate({ adapter_id: adapter.id, dataset }); calls = 0; contextInputs = [];
     const first = await f.service.contextResolutionResolve({ receipt_id: "vector-success-one", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: adapter.id });
     const second = await f.service.contextResolutionResolve({ receipt_id: "vector-success-two", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: adapter.id });
     assert.equal(((first.receipt as JsonObject).retrieval_execution as JsonObject).used, "vector");
     assert.equal(((second.receipt as JsonObject).retrieval_execution as JsonObject).used, "vector"); assert.equal(calls, 1);
+    assert(contextInputs.some(input => input.length <= 600 && input.includes("alpha")), "vector retrieval receives only a query excerpt of a long Memory body");
+    assert(String((first.items as JsonObject[])[0]!.content).length <= 600);
     const hybrid = f.service.retrievalAdapterConfigure({ adapter_id: "hybrid-success", strategy: "hybrid", provider_fingerprint: "fixture-v1", configuration: { endpoint: "https://fixture.local/embeddings", model: "fixture-embed", credential_env: "CRAFT_VECTOR_TEST_KEY" } }).adapter as JsonObject;
     await f.service.retrievalAdapterEvaluate({ adapter_id: hybrid.id, dataset });
     const hybridResult = await f.service.contextResolutionResolve({ receipt_id: "hybrid-success", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: hybrid.id });
@@ -295,7 +300,8 @@ test("semantic review packet is fragment-bound and a routeable Prompt Procedure 
     const packet = f.service.knowledgeSemanticReviewPacket({ claim_id: claim.id }); assert.equal(packet.status, "ready");
     assert.equal((await f.service.knowledgeSemanticProviderReview({ claim_id: claim.id })).status, "unavailable");
     const review = f.service.knowledgeHostReview({ claim_id: claim.id, host_kind: "codex", host_run_key: "turn:packet", source_digest: source.content_digest, packet_digest: packet.packet_digest, decision: "supported" });
-    assert.equal(review.promoted, true); assert.equal((review.review as JsonObject).packet_attested, true);
+    assert.equal(review.promoted, false); assert.equal((review.review as JsonObject).packet_attested, true);
+    assert.deepEqual(review.blocking_reasons, ["independent_effectiveness_evaluation_required"]);
     const evidence = f.service.evidenceRecord({ evidence_id: "procedure-evidence", source_type: "fixture", confidence: "confirmed", claim: "Verification passed.", locator: "fixture://procedure" }) as JsonObject;
     const signature = { schema: "craft.scenario-signature.v1", project: "p", verifier: "test", effect_class: "read" };
     for (const id of ["one", "two"]) f.service.workflowEvolutionObserve({ observation_id: `procedure-${id}`, scenario_key: "delivery.tests", scenario_signature: signature, source_kind: "fixture", source_id: id, source_digest: `sha256:${id}`, scope: "project:p", outcome: "passed", evidence_ids: [evidence.id], sanitized: true, content_stored: false });
@@ -362,7 +368,7 @@ test("global Knowledge is read only when explicitly requested, not as a project 
     const evidence = f.service.evidenceRecord({ evidence_id: "global-evidence", source_type: "fixture", confidence: "bounded", claim: "Global rule fixture", locator: "fixture://global" }) as JsonObject;
     f.service.knowledgeClaimSave({ claim_id: "global-claim", kind: "rule", content: "An explicitly public baseline rule.", scope: "global", source_id: "builtin.evidence-wiki", evidence_ids: [evidence.id],
       scope_envelope: { applicability: { kind: "global", id: "global" }, custody: { kind: "organization", id: "craft" }, audience: { mode: "public", principal_ids: [] }, purpose: "fact", retention: "long_term", tenant_id: null } });
-    f.service.knowledgeClaimReview({ claim_id: "global-claim", status: "reviewed", reviewer: "fixture", reason: "bounded evidence" });
+    attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", "global-claim"));
     const defaultContext = await f.service.contextResolutionResolve({ receipt_id: "global-default", query: "baseline rule", scope_kind: "project", scope_id: "craft", members: ["knowledge"] });
     assert.equal(((defaultContext.contributions as JsonObject[])[0]!.items as JsonObject[]).length, 0);
     const explicitContext = await f.service.contextResolutionResolve({ receipt_id: "global-explicit", query: "baseline rule", scope_kind: "project", scope_id: "craft", include_global: true, members: ["knowledge"] });

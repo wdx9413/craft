@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { codebaseCapability, CODEBASE_KERNELS } from "../capability/craft-codebase/capability.ts";
 import { CodebaseIndexKernel, contentAddressedShardIds, relationAnalysisSummary, controlFlowFallback, dataFlowFallback } from "../capability/craft-codebase/codebase-index.ts";
-import { queryCheckpointDiagnostics } from "../capability/craft-codebase/lsp-diagnostics-query.ts";
+import { queryCheckpointCallers, queryCheckpointDiagnostics } from "../capability/craft-codebase/lsp-diagnostics-query.ts";
 import { CODEBASE_OWNS } from "../capability/craft-codebase/ownership.ts";
 import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
 import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
@@ -20,6 +21,7 @@ import { digestJson, stableDigest } from "../common/craft-common-base/src/digest
 import { analyzePythonCheckpoint } from "../capability/craft-codebase/python-analysis.ts";
 import { analyzeJavaCheckpoint } from "../capability/craft-codebase/java-analysis.ts";
 import { CodeSymbolSearchIndex } from "../capability/craft-codebase/context-search.ts";
+import { ProjectGraphStore } from "../capability/craft-codebase/project-graph-store.ts";
 
 const lspFixturePath = fileURLToPath(new URL("./fixtures/lsp-stdio-fixture.cjs", import.meta.url));
 
@@ -84,11 +86,29 @@ async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); 
 
 function active(f: Awaited<ReturnType<typeof fixture>>) { return f.kernel.activate({ workspace_id: f.workspace.id, actor: "tester" }).activation as JsonObject; }
 function index(f: Awaited<ReturnType<typeof fixture>>) { return f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: f.checkpoint.id }).index as JsonObject; }
+function graphStore(f: Awaited<ReturnType<typeof fixture>>) { return new ProjectGraphStore(f.project, String(f.workspace.id), f.store.paths); }
+function graphRecord(f: Awaited<ReturnType<typeof fixture>>, id: string): JsonObject {
+  const path = join(graphStore(f).directory, `${id}.json`);
+  return JSON.parse(readFileSync(path, "utf8")) as JsonObject;
+}
+function rewriteGraphRecord(f: Awaited<ReturnType<typeof fixture>>, id: string, record: JsonObject): void {
+  writeFileSync(join(graphStore(f).directory, `${id}.json`), `${JSON.stringify(record)}\n`);
+}
+function moveGraphRecordsToLegacyStore(f: Awaited<ReturnType<typeof fixture>>, indexRecord: JsonObject): void {
+  const ids = [...(indexRecord.shard_ids as string[]), ...(indexRecord.edge_route_shards as JsonObject[]).map(route => String(route.id))];
+  for (const id of new Set(ids)) {
+    const path = join(graphStore(f).directory, `${id}.json`), record = JSON.parse(readFileSync(path, "utf8")) as JsonObject;
+    const { id: _id, version: _version, ...payload } = record;
+    const kind = id.startsWith("codebase_edge_route_") ? "codebase_index_edge_route" : "codebase_index_shard";
+    f.store.create(kind, id, payload);
+    unlinkSync(path);
+  }
+}
 function graphNodes(f: Awaited<ReturnType<typeof fixture>>, indexRecord: JsonObject): JsonObject[] {
-  return (indexRecord.shard_ids as string[]).flatMap(id => f.store.get("codebase_index_shard", id).nodes as JsonObject[]);
+  return (indexRecord.shard_ids as string[]).flatMap(id => graphRecord(f, id).nodes as JsonObject[]);
 }
 function graphEdges(f: Awaited<ReturnType<typeof fixture>>, indexRecord: JsonObject): JsonObject[] {
-  return (indexRecord.shard_ids as string[]).flatMap(id => f.store.get("codebase_index_shard", id).edges as JsonObject[]);
+  return (indexRecord.shard_ids as string[]).flatMap(id => graphRecord(f, id).edges as JsonObject[]);
 }
 function symbol(f: Awaited<ReturnType<typeof fixture>>, indexId: string, query = "target") {
   return (f.kernel.findSymbol({ workspace_id: f.workspace.id, index_id: indexId, query }).symbols as JsonObject[])[0];
@@ -98,7 +118,7 @@ test("craft-codebase is an internal non-context Capability with an owned read-on
   const f = await fixture();
   try {
     assert.equal(codebaseCapability.name, "codebase"); assert.equal(codebaseCapability.product, undefined); assert.equal(codebaseCapability.contributes, undefined);
-    for (const name of ["craft_codebase_activate", "craft_codebase_index_build", "craft_codebase_context_slice", "craft_codebase_symbols_overview", "craft_codebase_symbol_explore", "craft_codebase_symbol_read", "craft_codebase_control_flow_query", "craft_codebase_data_flow_query", "craft_codebase_diagnostics_find"]) assert(CODEBASE_OWNS.test(name));
+    for (const name of ["craft_codebase_activate", "craft_codebase_index_build", "craft_codebase_context_slice", "craft_codebase_symbols_overview", "craft_codebase_symbol_explore", "craft_codebase_symbol_read", "craft_codebase_callers_query", "craft_codebase_control_flow_query", "craft_codebase_data_flow_query", "craft_codebase_diagnostics_find"]) assert(CODEBASE_OWNS.test(name));
     assert.equal(CODEBASE_OWNS.test("craft_codebase_asset_inspect"), false);
     assert.equal(CODEBASE_OWNS.test("craft_codebase_asset_restore"), false);
     assert.equal(CODEBASE_OWNS.test("craft_knowledge_search"), false);
@@ -611,6 +631,106 @@ test("diagnostics MCP queries a trusted checkpoint and persists no diagnostic te
   } finally { await close(f); }
 });
 
+test("targeted callers MCP queries an exact symbol from the immutable checkpoint", async () => {
+  const f = await fixture();
+  try {
+    const full = new McpServer(f.service, "full");
+    active(f);
+    const content = "function target() {}\nfunction caller() { target(); }\n";
+    await writeFile(join(f.project, "src", "target.ts"), content);
+    const checkpoint = f.service.workspaceCheckpoint({ workspace_id: f.workspace.id, checkpoint_id: "callers-query-checkpoint", label: "targeted callers" }).checkpoint as JsonObject;
+    const built = f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: checkpoint.id }).index as JsonObject;
+    const target = symbol(f, String(built.id), "target");
+    await mkdir(f.store.paths.configDir, { recursive: true });
+    await writeFile(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1, adapters: [{ language: "typescript",
+      command: process.execPath, args: [lspFixturePath, "relations"], analyzer_version: "fixture-1", relations: ["calls"], max_documents: 100,
+      relation_symbol_limit: 1, request_timeout_ms: 1000 }] }));
+    const tool = full.tools.find(candidate => candidate.name === "craft_codebase_callers_query");
+    assert.equal(tool?.annotations?.readOnlyHint, true);
+    const result = await full.handlers.craft_codebase_callers_query({ workspace_id: f.workspace.id, index_id: built.id, symbol_id: target.id });
+    assert.equal(result.relation_status, "analyzed");
+    assert.equal(result.caller_count, 1);
+    assert.equal((result.callers as JsonObject[])[0]?.name, "caller");
+    assert.equal(result.source_snapshot_only, true);
+    const receipt = result.receipt as JsonObject;
+    const stored = f.store.get("codebase_query_receipt", String(receipt.id));
+    assert.equal(stored.content_free, true);
+    assert.equal(JSON.stringify(stored).includes("function caller"), false);
+    await f.kernel.queryCallers({ workspace_id: f.workspace.id, index_id: built.id, node_id: target.id });
+    const fileNode = graphNodes(f, built).find(node => node.kind === "file")!;
+    await assert.rejects(f.kernel.queryCallers({ workspace_id: f.workspace.id, index_id: built.id, node_id: fileNode.id }), /requires a symbol/u);
+  } finally { await close(f); }
+});
+
+test("targeted callers query rejects stale, unsupported and unsafe checkpoint inputs", async () => {
+  const f = await fixture();
+  try {
+    const targetEntry = (f.checkpoint.entries as JsonObject[]).find(entry => entry.path === "src/target.ts")!;
+    const source = readFileSync(join(String(f.checkpoint.snapshot_root), String(targetEntry.path)), "utf8");
+    const target: JsonObject = { path: targetEntry.path, name: "target", source_digest: targetEntry.digest,
+      span: { start_offset: source.indexOf("target") } };
+    const readSource = (root: string, entry: JsonObject) => ({ path: String(entry.path), digest: String(entry.digest),
+      content: readFileSync(join(root, String(entry.path)), "utf8"), language: "typescript" });
+    const query = (overrides: { checkpoint?: JsonObject; target?: JsonObject; readSource?: typeof readSource } = {}) => queryCheckpointCallers({
+      store: f.store, checkpoint: overrides.checkpoint ?? f.checkpoint, project_root: f.project, target: overrides.target ?? target, limit: 20,
+      readSource: overrides.readSource ?? readSource,
+    });
+    await assert.rejects(query({ target: { ...target, path: 7 } }), /outside the checkpoint/u);
+    await assert.rejects(query({ target: { ...target, path: "../outside.ts" } }), /outside the checkpoint/u);
+    await assert.rejects(query({ checkpoint: { ...f.checkpoint, entries: "malformed" } }), /outside the checkpoint/u);
+    await assert.rejects(query({ target: { ...target, source_digest: "stale" } }), /does not match the checkpoint/u);
+    const readmeEntry = (f.checkpoint.entries as JsonObject[]).find(entry => entry.path === "src/README.md")!;
+    await assert.rejects(query({ target: { ...target, path: "src/README.md", source_digest: readmeEntry.digest } }), /No language-server mapping/u);
+    await assert.rejects(query(), /No explicitly trusted language-server adapter/u);
+    await mkdir(f.store.paths.configDir, { recursive: true });
+    await writeFile(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1, adapters: [{ language: "typescript",
+      command: process.execPath, args: [lspFixturePath, "relations"], analyzer_version: "fixture-1", relations: ["calls"], max_documents: 100,
+      relation_symbol_limit: 1, request_timeout_ms: 1000 }] }));
+    await assert.rejects(query({ target: { ...target, name: "" } }), /caller target is invalid/u);
+    await assert.rejects(query({ target: { ...target, name: 7 } }), /caller target is invalid/u);
+    await assert.rejects(query({ target: { ...target, span: { start_offset: -1 } } }), /caller target is invalid/u);
+    await assert.rejects(query({ readSource: (_root, entry) => ({ path: "..", digest: String(entry.digest), content: "", language: "typescript" }) }), /snapshot path is unsafe/u);
+    await assert.rejects(query({ readSource: (_root, entry) => ({ path: "../outside.ts", digest: String(entry.digest), content: "", language: "typescript" }) }), /snapshot path is unsafe/u);
+    await writeFile(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1, adapters: [{ language: "typescript",
+      command: process.execPath, args: [lspFixturePath, "relations-progress"], analyzer_version: "fixture-1", relations: ["calls"], max_documents: 100,
+      relation_symbol_limit: 1, request_timeout_ms: 1000 }] }));
+    const configRace = query();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await writeFile(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1, adapters: [{ language: "typescript",
+      command: process.execPath, args: [lspFixturePath, "relations-progress"], analyzer_version: "fixture-2", relations: ["calls"], max_documents: 100,
+      relation_symbol_limit: 1, request_timeout_ms: 1000 }] }));
+    await assert.rejects(configRace, /configuration changed/u);
+    await writeFile(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1, adapters: [{ language: "typescript",
+      command: process.execPath, args: [lspFixturePath, "relations"], analyzer_version: "fixture-1", relations: ["calls"], max_documents: 1,
+      relation_symbol_limit: 1, request_timeout_ms: 1000 }] }));
+    const omittedDocuments = await query();
+    assert.equal(omittedDocuments.payload.relation_status, "partial");
+    assert(Number(omittedDocuments.payload.omitted_count) > 0);
+    const missingTarget = await query({ target: { ...target, name: "not-present" } });
+    assert.equal(missingTarget.payload.relation_status, "partial");
+    assert(Number(missingTarget.payload.omitted_count) > 0);
+  } finally { await close(f); }
+});
+
+test("targeted callers query never presents non-callable symbols as empty call graphs", async () => {
+  const f = await fixture();
+  try {
+    active(f);
+    await writeFile(join(f.project, "src", "record.ts"), "class Record {}\n");
+    const checkpoint = f.service.workspaceCheckpoint({ workspace_id: f.workspace.id, checkpoint_id: "non-callable-callers-checkpoint", label: "non-callable callers" }).checkpoint as JsonObject;
+    const built = f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: checkpoint.id }).index as JsonObject;
+    const target = symbol(f, String(built.id), "Record");
+    await mkdir(f.store.paths.configDir, { recursive: true });
+    await writeFile(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1, adapters: [{ language: "typescript",
+      command: process.execPath, args: [lspFixturePath, "relations-semantic"], analyzer_version: "fixture-1", relations: ["calls"], max_documents: 100,
+      relation_symbol_limit: 1, request_timeout_ms: 1000 }] }));
+    const result = await f.kernel.queryCallers({ workspace_id: f.workspace.id, index_id: built.id, symbol_id: target.id });
+    assert.equal(result.relation_status, "unsupported");
+    assert.equal(result.target_callable, false);
+    assert.deepEqual(result.callers, []);
+  } finally { await close(f); }
+});
+
 test("diagnostics helper rejects malformed checkpoint membership and unsafe injected snapshot paths", async () => {
   const f = await fixture();
   try {
@@ -639,8 +759,8 @@ test("symbol-search cache reuses a verified corpus and invalidates on any shard 
     }
     assert.equal((f.kernel.findSymbol({ workspace_id: f.workspace.id, index_id: built.id, query: "target" }).symbols as JsonObject[])[0]!.name, "target");
     const shardId = (built.node_shard_ids as string[])[0]!;
-    const shard = f.store.get("codebase_index_shard", shardId);
-    f.store.replacePayload("codebase_index_shard", shardId, Number(shard.version), { ...shard, nodes: [{ ...(shard.nodes as JsonObject[])[0], name: "tampered" }] });
+    const shard = graphRecord(f, shardId);
+    rewriteGraphRecord(f, shardId, { ...shard, nodes: [{ ...(shard.nodes as JsonObject[])[0], name: "tampered" }] });
     assert.throws(() => f.kernel.findSymbol({ workspace_id: f.workspace.id, index_id: built.id, query: "target" }), /integrity failure/);
   } finally { await close(f); }
 });
@@ -659,8 +779,8 @@ test("impact result cache pins every route and shard digest and is bounded", asy
     assert.deepEqual(f.kernel.impact(query).edges, second.edges);
     const bucket = stableDigest(target.id).slice(-2);
     const descriptor = (built.edge_route_shards as JsonObject[]).find(route => route.bucket === bucket)!;
-    const route = f.store.get("codebase_index_edge_route", String(descriptor.id));
-    f.store.save("codebase_index_edge_route", String(route.id), { ...route, incoming: {}, route_digest: "tampered" });
+    const route = graphRecord(f, String(descriptor.id));
+    rewriteGraphRecord(f, String(route.id), { ...route, incoming: {}, route_digest: "tampered" });
     assert.throws(() => f.kernel.impact(query), /route integrity/);
   } finally { await close(f); }
 });
@@ -671,12 +791,12 @@ test("content-addressed graph records are reused only after their stored payload
     active(f);
     const first = index(f);
     const firstShardId = (first.shard_ids as string[]).find(id =>
-      (f.store.get("codebase_index_shard", id).nodes as JsonObject[]).some(node => node.path === "src/caller.ts"))!;
-    const firstShard = f.store.get("codebase_index_shard", firstShardId);
-    f.store.save("codebase_index_shard", firstShardId, { ...firstShard, nodes: [{ ...(firstShard.nodes as JsonObject[])[0], name: "tampered" }] });
+      (graphRecord(f, id).nodes as JsonObject[]).some(node => node.path === "src/caller.ts"))!;
+    const firstShard = graphRecord(f, firstShardId);
+    rewriteGraphRecord(f, firstShardId, { ...firstShard, nodes: [{ ...(firstShard.nodes as JsonObject[])[0], name: "tampered" }] });
     await writeFile(join(f.project, "src", "target.ts"), "export function target() { return 2; }\n");
     const changed = f.service.workspaceCheckpoint({ workspace_id: f.workspace.id, checkpoint_id: "changed", label: "changed" }).checkpoint as JsonObject;
-    assert.throws(() => f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: changed.id }), /content shard integrity/u);
+    assert.throws(() => f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: changed.id }), /Project Codebase graph record integrity failure/u);
   } finally { await close(f); }
 });
 
@@ -686,11 +806,11 @@ test("content-addressed route records are checked before reuse", async () => {
     active(f);
     const first = index(f);
     const descriptor = (first.edge_route_shards as JsonObject[])[0]!;
-    const route = f.store.get("codebase_index_edge_route", String(descriptor.id));
-    f.store.save("codebase_index_edge_route", String(route.id), { ...route, incoming: {}, route_digest: "tampered" });
+    const route = graphRecord(f, String(descriptor.id));
+    rewriteGraphRecord(f, String(route.id), { ...route, incoming: {}, route_digest: "tampered" });
     await writeFile(join(f.project, "src", "README.md"), "changed non-source snapshot file\n");
     const changed = f.service.workspaceCheckpoint({ workspace_id: f.workspace.id, checkpoint_id: "changed", label: "changed" }).checkpoint as JsonObject;
-    assert.throws(() => f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: changed.id }), /content route integrity/u);
+    assert.throws(() => f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: changed.id }), /Project Codebase graph record integrity failure/u);
   } finally { await close(f); }
 });
 
@@ -1100,29 +1220,30 @@ test("prior sharded indexes without node routes remain readable", async () => {
     active(f); const built = index(f); const record = f.store.get("codebase_index", String(built.id));
     const oldNodes: JsonObject[] = [], oldEdges: JsonObject[] = [];
     for (const shardId of record.shard_ids as string[]) {
-      const shard = f.store.get("codebase_index_shard", shardId);
+      const shard = graphRecord(f, shardId);
       oldNodes.push(...shard.nodes as JsonObject[]); oldEdges.push(...shard.edges as JsonObject[]);
     }
     oldNodes.sort((a, b) => String(a.id).localeCompare(String(b.id)));
     oldEdges.sort((a, b) => String(a.id).localeCompare(String(b.id)));
     const oldDigests = { graph_digest: digestJson({ nodes: oldNodes, edges: oldEdges }), node_digest: digestJson(oldNodes), edge_digest: digestJson(oldEdges) };
     const descriptors: JsonObject[] = (record.edge_route_shards as JsonObject[]).map(descriptor => {
-      const route = f.store.get("codebase_index_edge_route", String(descriptor.id));
+      const route = graphRecord(f, String(descriptor.id));
       const { nodes: _nodes, locations: _locations, route_digest: _routeDigest, ...rest } = route;
       const legacy = { index_id: record.id, bucket: rest.bucket, incoming: rest.incoming, outgoing: rest.outgoing };
       const digest = stableDigest(legacy);
-      f.store.save("codebase_index_edge_route", String(route.id), { ...legacy, route_digest: digest });
+      rewriteGraphRecord(f, String(route.id), { ...legacy, route_digest: digest });
       return { ...descriptor, digest };
     });
     for (const [ordinal, shardId] of (record.shard_ids as string[]).entries()) {
-      const shard = f.store.get("codebase_index_shard", shardId);
-      f.store.save("codebase_index_shard", shardId, { ...shard, index_id: record.id, ordinal });
+      const shard = graphRecord(f, shardId);
+      rewriteGraphRecord(f, shardId, { ...shard, index_id: record.id, ordinal });
     }
     const oldIndex: JsonObject = { ...record, ...oldDigests };
     delete oldIndex.location_route_version;
     const manifest = { shard_ids: record.shard_ids, shard_digests: record.shard_digests, node_shard_ids: record.node_shard_ids, edge_shard_ids: record.edge_shard_ids,
       node_count: record.node_count, edge_count: record.edge_count, graph_digest: oldDigests.graph_digest, node_digest: oldDigests.node_digest, edge_digest: oldDigests.edge_digest, edge_route_shards: descriptors };
     f.store.save("codebase_index", String(record.id), { ...oldIndex, graph_storage: "sharded-v2", edge_route_shards: descriptors, graph_manifest_digest: stableDigest(manifest) });
+    moveGraphRecordsToLegacyStore(f, { ...oldIndex, shard_ids: record.shard_ids, edge_route_shards: descriptors });
     const target = symbol(f, String(record.id));
     const legacyOutline = f.kernel.symbolsOverview({ workspace_id: f.workspace.id, index_id: record.id, path: "src/target.ts" });
     assert((legacyOutline.symbols as JsonObject[]).some(item => item.name === "target"), "legacy sharded indexes must retain file outlines via the verified compatibility path");
@@ -1146,22 +1267,22 @@ test("sharded-v1 canonical digests remain readable after new ordered-digest inde
     const shardIds = current.shard_ids as string[];
     const nodes: JsonObject[] = [], edges: JsonObject[] = [];
     const shardDigests = shardIds.map(id => {
-      const shard = f.store.get("codebase_index_shard", id);
+      const shard = graphRecord(f, id);
       nodes.push(...shard.nodes as JsonObject[]); edges.push(...shard.edges as JsonObject[]);
       const graph_digest = stableDigest({ nodes: shard.nodes, edges: shard.edges });
       const ordinal = shardIds.indexOf(id);
-      f.store.save("codebase_index_shard", id, { ...shard, index_id: current.id, ordinal, graph_digest });
+      rewriteGraphRecord(f, id, { ...shard, index_id: current.id, ordinal, graph_digest });
       return graph_digest;
     });
     nodes.sort((a, b) => String(a.id).localeCompare(String(b.id)));
     edges.sort((a, b) => String(a.id).localeCompare(String(b.id)));
     const edgeRouteShards = (current.edge_route_shards as JsonObject[]).map(descriptor => {
-      const route = f.store.get("codebase_index_edge_route", String(descriptor.id));
+      const route = graphRecord(f, String(descriptor.id));
       const { route_digest: _routeDigest, ...rest } = route;
       const payload = { index_id: current.id, bucket: rest.bucket, ...(rest.nodes === undefined ? {} : { nodes: rest.nodes }), incoming: rest.incoming,
         outgoing: rest.outgoing, ...(rest.locations === undefined ? {} : { locations: rest.locations }) };
       const digest = stableDigest(payload);
-      f.store.save("codebase_index_edge_route", String(route.id), { ...payload, route_digest: digest });
+      rewriteGraphRecord(f, String(route.id), { ...payload, route_digest: digest });
       return { ...descriptor, digest };
     });
     const node_shard_ids = (current.node_shard_ids as string[]).slice();
@@ -1172,22 +1293,23 @@ test("sharded-v1 canonical digests remain readable after new ordered-digest inde
       node_shard_ids, edge_shard_ids, node_count: nodes.length, edge_count: edges.length, graph_digest: legacy.graph_digest,
       node_digest: legacy.node_digest, edge_digest: legacy.edge_digest, edge_route_shards: edgeRouteShards };
     f.store.save("codebase_index", String(current.id), { ...legacy, edge_route_shards: edgeRouteShards, graph_manifest_digest: stableDigest(manifest) });
+    moveGraphRecordsToLegacyStore(f, { ...legacy, edge_route_shards: edgeRouteShards });
     const target = symbol(f, String(current.id));
     assert((f.kernel.findCallers({ workspace_id: f.workspace.id, index_id: current.id, symbol_id: target.id }).callers as unknown[]).length > 0);
     assert((f.kernel.impact({ workspace_id: f.workspace.id, index_id: current.id, node_id: target.id }).edges as unknown[]).length > 0);
   } finally { await close(f); }
 });
 
-test("sharded-v4 commits ordered component shards and keeps sharded-v3 aggregate readers compatible", async () => {
+test("project-sharded-v5 commits ordered component shards and keeps legacy aggregate readers compatible", async () => {
   const f = await fixture();
   try {
     active(f); const built = index(f); const current = f.store.get("codebase_index", String(built.id));
-    assert.equal(current.graph_storage, "sharded-v4");
+    assert.equal(current.graph_storage, "project-sharded-v5");
     const nodes: JsonObject[] = [], edges: JsonObject[] = [];
     const shardDigests = current.shard_digests as string[], shardIds = current.shard_ids as string[];
     const nodeShardIds = new Set(current.node_shard_ids as string[]), edgeShardIds = new Set(current.edge_shard_ids as string[]);
     for (const id of shardIds) {
-      const shard = f.store.get("codebase_index_shard", id);
+      const shard = graphRecord(f, id);
       if (nodeShardIds.has(id)) nodes.push(...shard.nodes as JsonObject[]);
       if (edgeShardIds.has(id)) edges.push(...shard.edges as JsonObject[]);
     }
@@ -1216,7 +1338,78 @@ test("sharded-v4 commits ordered component shards and keeps sharded-v3 aggregate
       node_shard_ids: legacy.node_shard_ids, edge_shard_ids: legacy.edge_shard_ids, node_count: legacy.node_count, edge_count: legacy.edge_count,
       graph_digest: legacy.graph_digest, node_digest: legacy.node_digest, edge_digest: legacy.edge_digest, edge_route_shards: legacy.edge_route_shards };
     f.store.save("codebase_index", String(current.id), { ...legacy, graph_manifest_digest: stableDigest(manifest) });
+    moveGraphRecordsToLegacyStore(f, { ...legacy });
     assert((f.kernel.contextProjection({ workspace_id: f.workspace.id, index_id: current.id, query: "target" }).candidates as JsonObject[]).length > 0);
+  } finally { await close(f); }
+});
+
+test("legacy database-backed graph storage deduplicates verified shards and routes", async () => {
+  const f = await fixture();
+  try {
+    active(f);
+    const workspace = f.store.get("workspace", String(f.workspace.id));
+    f.store.save("workspace", String(workspace.id), { ...workspace, snapshot_storage: "legacy" });
+    const first = f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: f.checkpoint.id, index_id: "legacy-graph-a" }).index as JsonObject;
+    const second = f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: f.checkpoint.id, index_id: "legacy-graph-b" }).index as JsonObject;
+    assert.equal(first.graph_storage, "sharded-v4");
+    assert.equal(second.graph_storage, "sharded-v4");
+    assert((f.kernel.impact({ workspace_id: f.workspace.id, index_id: second.id,
+      node_id: symbol(f, String(second.id)).id }).edges as JsonObject[]).length > 0);
+  } finally { await close(f); }
+});
+
+test("legacy database-backed graph storage rejects corrupted content shards and routes", async () => {
+  for (const kind of ["shard", "route"] as const) {
+    const f = await fixture();
+    try {
+      active(f);
+      const workspace = f.store.get("workspace", String(f.workspace.id));
+      f.store.save("workspace", String(workspace.id), { ...workspace, snapshot_storage: "legacy" });
+      const built = f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: f.checkpoint.id, index_id: `legacy-${kind}-base` }).index as JsonObject;
+      if (kind === "shard") {
+        const id = String((built.node_shard_ids as string[])[0]);
+        const stored = f.store.get("codebase_index_shard", id);
+        f.store.save("codebase_index_shard", id, { ...stored, nodes: [{ ...(stored.nodes as JsonObject[])[0], name: "tampered" }] });
+        assert.throws(() => f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: f.checkpoint.id, index_id: "legacy-shard-reuse" }), /content shard integrity/u);
+      } else {
+        const id = String((built.edge_route_shards as JsonObject[])[0]!.id);
+        const stored = f.store.get("codebase_index_edge_route", id);
+        f.store.save("codebase_index_edge_route", id, { ...stored, incoming: {}, route_digest: "tampered" });
+        assert.throws(() => f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: f.checkpoint.id, index_id: "legacy-route-reuse" }), /content route integrity/u);
+      }
+    } finally { await close(f); }
+  }
+});
+
+test("project graph reads reject workspaces after project storage binding is removed", async () => {
+  const f = await fixture();
+  try {
+    active(f); const built = index(f), workspace = f.store.get("workspace", String(f.workspace.id));
+    f.store.save("workspace", String(workspace.id), { ...workspace, snapshot_storage: "legacy" });
+    const reader = f.kernel as unknown as { projectGraphStore(index: JsonObject): ProjectGraphStore };
+    assert.throws(() => reader.projectGraphStore(built), /storage is not enabled/u);
+  } finally { await close(f); }
+});
+
+test("node routes cannot resolve to a shard outside the node manifest", async () => {
+  const f = await fixture();
+  try {
+    active(f); const built = index(f), target = graphNodes(f, built).find(node => node.kind === "symbol")!;
+    const bucket = stableDigest(String(target.id)).slice(-2);
+    const descriptor = (built.edge_route_shards as JsonObject[]).find(route => route.bucket === bucket)!;
+    const route = graphRecord(f, String(descriptor.id));
+    const nodes = { ...(route.nodes as JsonObject), [String(target.id)]: "unknown-node-shard" };
+    const payload = { bucket: route.bucket, nodes, incoming: route.incoming, outgoing: route.outgoing, locations: route.locations };
+    const routeDigest = stableDigest(payload);
+    rewriteGraphRecord(f, String(route.id), { ...payload, id: route.id, version: route.version, route_digest: routeDigest });
+    const descriptors = (built.edge_route_shards as JsonObject[]).map(item => item.id === descriptor.id ? { ...item, digest: routeDigest } : item);
+    const changed: JsonObject = { ...built, edge_route_shards: descriptors };
+    const manifest = { location_route_version: changed.location_route_version, shard_ids: changed.shard_ids, shard_digests: changed.shard_digests,
+      node_shard_ids: changed.node_shard_ids, edge_shard_ids: changed.edge_shard_ids, node_count: changed.node_count, edge_count: changed.edge_count,
+      graph_digest: changed.graph_digest, node_digest: changed.node_digest, edge_digest: changed.edge_digest, edge_route_shards: descriptors };
+    const saved = f.store.save("codebase_index", String(changed.id), { ...changed, graph_manifest_digest: stableDigest(manifest) });
+    const reader = f.kernel as unknown as { findNode(index: JsonObject, nodeId: string): JsonObject };
+    assert.throws(() => reader.findNode(saved, String(target.id)), /node is not in index/u);
   } finally { await close(f); }
 });
 
@@ -1239,7 +1432,7 @@ test("content addressed shard collisions fail closed and edge-only overflow shar
     const built = f.kernel.importAnalysis({ workspace_id: f.workspace.id, checkpoint_id: checkpoint.id, index_id: "bulk_graph", analysis: {
       format: "craft-static-analysis-v1", analyzer: "coverage-fixture", analyzer_version: "1", nodes, edges,
     } }).index as JsonObject;
-    const shards = (built.shard_ids as string[]).map(id => f.store.get("codebase_index_shard", id));
+    const shards = (built.shard_ids as string[]).map(id => graphRecord(f, id));
     assert(shards.some(shard => Number(shard.node_count) === 0 && Number(shard.edge_count) > 0));
     assert((f.kernel.contextProjection({ workspace_id: f.workspace.id, index_id: built.id, query: "bulkSymbol" }).candidates as JsonObject[]).length > 0);
   } finally { await close(f); }
@@ -1250,8 +1443,8 @@ test("edge route records are digest checked before relation and impact results a
   try {
     active(f); const built = index(f); const record = f.store.get("codebase_index", String(built.id));
     const target = symbol(f, String(record.id)); const descriptor = (record.edge_route_shards as JsonObject[]).find(item => item.bucket === stableDigest(target.id).slice(-2))!;
-    const route = f.store.get("codebase_index_edge_route", String(descriptor.id));
-    f.store.save("codebase_index_edge_route", String(route.id), { ...route, incoming: {}, route_digest: "tampered" });
+    const route = graphRecord(f, String(descriptor.id));
+    rewriteGraphRecord(f, String(route.id), { ...route, incoming: {}, route_digest: "tampered" });
     assert.throws(() => f.kernel.findCallers({ workspace_id: f.workspace.id, index_id: record.id, symbol_id: target.id }), /route integrity/);
   } finally { await close(f); }
 });
@@ -1271,12 +1464,12 @@ test("adjacency route rejects unknown edge shards even when its own digest is up
     active(f); const built = index(f); const current = f.store.get("codebase_index", String(built.id));
     const target = symbol(f, String(current.id)), bucket = stableDigest(target.id).slice(-2);
     const descriptor = (current.edge_route_shards as JsonObject[]).find(item => item.bucket === bucket)!;
-    const route = f.store.get("codebase_index_edge_route", String(descriptor.id));
+    const route = graphRecord(f, String(descriptor.id));
     const targetId = String(target.id), incoming = { ...(route.incoming as JsonObject), [targetId]: ["unknown-edge-shard"] };
     const payload = { ...(route.index_id === undefined ? {} : { index_id: route.index_id }), bucket: route.bucket, ...(route.nodes === undefined ? {} : { nodes: route.nodes }),
       incoming, outgoing: route.outgoing, ...(route.locations === undefined ? {} : { locations: route.locations }) };
     const digest = stableDigest(payload);
-    f.store.save("codebase_index_edge_route", String(route.id), { ...route, incoming, route_digest: digest });
+    rewriteGraphRecord(f, String(route.id), { ...route, incoming, route_digest: digest });
     const descriptors = (current.edge_route_shards as JsonObject[]).map(item => item.id === route.id ? { ...item, digest } : item);
     const changed: JsonObject = { ...current, edge_route_shards: descriptors };
     const manifest = { location_route_version: changed.location_route_version, shard_ids: changed.shard_ids, shard_digests: changed.shard_digests,
@@ -1293,8 +1486,8 @@ test("file symbol outlines verify their path route before reading node shards", 
     active(f); const built = index(f); const record = f.store.get("codebase_index", String(built.id));
     const bucket = stableDigest("source-location:src/target.ts").slice(-2);
     const descriptor = (record.edge_route_shards as JsonObject[]).find(item => item.bucket === bucket)!;
-    const route = f.store.get("codebase_index_edge_route", String(descriptor.id));
-    f.store.save("codebase_index_edge_route", String(route.id), { ...route, locations: {}, route_digest: "tampered" });
+    const route = graphRecord(f, String(descriptor.id));
+    rewriteGraphRecord(f, String(route.id), { ...route, locations: {}, route_digest: "tampered" });
     assert.throws(() => f.kernel.symbolsOverview({ workspace_id: f.workspace.id, index_id: record.id, path: "src/target.ts" }), /source location route integrity/u);
   } finally { await close(f); }
 });
@@ -1307,11 +1500,11 @@ test("file symbol outlines reject malformed and unknown path shard routes", asyn
       const current = f.store.get("codebase_index", String(built.id));
       const bucket = stableDigest(`source-location:${routePath}`).slice(-2);
       const descriptor = (current.edge_route_shards as JsonObject[]).find(item => item.bucket === bucket)!;
-      const route = f.store.get("codebase_index_edge_route", String(descriptor.id));
+      const route = graphRecord(f, String(descriptor.id));
       const payload = { ...(route.index_id === undefined ? {} : { index_id: route.index_id }), bucket: route.bucket, ...(route.nodes === undefined ? {} : { nodes: route.nodes }),
         incoming: route.incoming, outgoing: route.outgoing, locations };
       const digest = stableDigest(payload);
-      f.store.save("codebase_index_edge_route", String(route.id), { ...route, locations, route_digest: digest });
+      rewriteGraphRecord(f, String(route.id), { ...route, locations, route_digest: digest });
       const descriptors = (current.edge_route_shards as JsonObject[]).map(item => item.id === route.id ? { ...item, digest } : item);
       const manifest = { location_route_version: current.location_route_version, shard_ids: current.shard_ids, shard_digests: current.shard_digests,
         node_shard_ids: current.node_shard_ids, edge_shard_ids: current.edge_shard_ids, node_count: current.node_count, edge_count: current.edge_count,
@@ -1337,8 +1530,8 @@ test("file symbol outlines reject malformed and unknown path shard routes", asyn
     assert.throws(() => f.kernel.findDefinition({ workspace_id: f.workspace.id, index_id: built.id, path: callerPath, offset: 0 }), /unknown shard/u);
     const current = f.store.get("codebase_index", String(built.id));
     const descriptor = (current.edge_route_shards as JsonObject[]).find(item => item.bucket === stableDigest(`source-location:${callerPath}`).slice(-2))!;
-    const route = f.store.get("codebase_index_edge_route", String(descriptor.id));
-    f.store.save("codebase_index_edge_route", String(route.id), { ...route, route_digest: "tampered" });
+    const route = graphRecord(f, String(descriptor.id));
+    rewriteGraphRecord(f, String(route.id), { ...route, route_digest: "tampered" });
     assert.throws(() => f.kernel.findDefinition({ workspace_id: f.workspace.id, index_id: built.id, path: callerPath, offset: 0 }), /route integrity/u);
   } finally { await close(f); }
 });
@@ -1449,11 +1642,11 @@ test("sharded graph readers fail closed on malformed manifests and route payload
     assert.throws(() => kernel.loadNodes({ ...duplicatedRoutes, graph_manifest_digest: stableDigest(duplicateManifest) }), /routing is invalid/u);
 
     const edgeRoute = (original.edge_route_shards as JsonObject[]).find(item => {
-      const candidate = f.store.get("codebase_index_edge_route", String(item.id));
+      const candidate = graphRecord(f, String(item.id));
       return graphNodes(f, original).some(node => node.kind === "symbol" && (candidate.nodes as JsonObject)[String(node.id)] !== undefined);
     })!;
-    const route = f.store.get("codebase_index_edge_route", String(edgeRoute.id));
-    f.store.save("codebase_index_edge_route", String(edgeRoute.id), { ...route, outgoing: { tampered: ["unknown"] } });
+    const route = graphRecord(f, String(edgeRoute.id));
+    rewriteGraphRecord(f, String(edgeRoute.id), { ...route, outgoing: { tampered: ["unknown"] } });
     const node = graphNodes(f, original).find(item => item.kind === "symbol" && (route.nodes as JsonObject)[String(item.id)] !== undefined);
     assert(node);
     assert.throws(() => kernel.loadIncidentEdges(original, String(node.id), "incoming"), /route integrity failure/u);
@@ -1471,12 +1664,12 @@ test("content-addressed shard IDs reject internally consistent node and edge rew
     const rewriteShard = (kind: "nodes" | "edges") => {
       const routeIds = (kind === "nodes" ? original.node_shard_ids : original.edge_shard_ids) as string[];
       const id = String(routeIds[0]);
-      const shard = f.store.get("codebase_index_shard", id);
+      const shard = graphRecord(f, id);
       const nodes = [...shard.nodes as JsonObject[]], edges = [...shard.edges as JsonObject[]];
       if (kind === "nodes") nodes[0] = { ...nodes[0], name: "changed-without-new-index-digest" };
     else edges[0] = { ...edges[0], kind: edges[0]!.kind === "calls" ? "references" : "calls" };
       const shardDigest = digestJson({ nodes, edges });
-      f.store.save("codebase_index_shard", id, { ...shard, nodes, edges, graph_digest: shardDigest });
+      rewriteGraphRecord(f, id, { ...shard, nodes, edges, graph_digest: shardDigest });
       const shardDigests = (original.shard_digests as string[]).map((digest, ordinal) => ordinal === (original.shard_ids as string[]).indexOf(id) ? shardDigest : digest);
       const changed: JsonObject = { ...original, shard_digests: shardDigests };
       const manifest = { location_route_version: changed.location_route_version, shard_ids: changed.shard_ids, shard_digests: changed.shard_digests,
@@ -1491,10 +1684,10 @@ test("content-addressed shard IDs reject internally consistent node and edge rew
   const g = await fixture();
   try {
     active(g); const built = index(g); const original = g.store.get("codebase_index", String(built.id));
-    const id = String((original.edge_shard_ids as string[])[0]), shard = g.store.get("codebase_index_shard", id);
+    const id = String((original.edge_shard_ids as string[])[0]), shard = graphRecord(g, id);
     const edges = [...shard.edges as JsonObject[]]; edges[0] = { ...edges[0], kind: edges[0]!.kind === "calls" ? "references" : "calls" };
     const shardDigest = digestJson({ nodes: shard.nodes, edges });
-    g.store.save("codebase_index_shard", id, { ...shard, edges, graph_digest: shardDigest });
+    rewriteGraphRecord(g, id, { ...shard, edges, graph_digest: shardDigest });
     const shardDigests = (original.shard_digests as string[]).map((digest, ordinal) => ordinal === (original.shard_ids as string[]).indexOf(id) ? shardDigest : digest);
     const changed: JsonObject = { ...original, shard_digests: shardDigests };
     const manifest = { location_route_version: changed.location_route_version, shard_ids: changed.shard_ids, shard_digests: changed.shard_digests,

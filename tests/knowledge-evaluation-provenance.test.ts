@@ -3,9 +3,117 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { assessKnowledgeEvaluationProvenance, knowledgeEvaluationEvidence } from "../core/knowledge-evaluation-provenance.ts";
+import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationCaseBindingDigest, knowledgeEvaluationEvidence } from "../core/knowledge-evaluation-provenance.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { payload } from "../core/digest.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+
+test("formal Knowledge eligibility verifies the exact local promotion proof and rejects drift", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-promotion-proof-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    store.create("knowledge_source", "proof-source", { status: "active", trust: "verified", content_digest: "source-v1" });
+    const candidate = store.create("knowledge_claim", "proof-claim", { status: "candidate", source_id: "proof-source", scope: "global",
+      identity_digest: "identity-v1", content_digest: "content-v1", evidence_ids: [] });
+    const promoted = attachVerifiedPromotionFixture(store, candidate);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), true);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, identity_digest: undefined }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, content_digest: undefined }), false);
+    const tagged = store.save("knowledge_claim", String(promoted.id), { ...promoted, scenario_key: "engineering.release", tags: ["release"] });
+    assert.equal(knowledgeClaimPromotionProofVerified(store, tagged), true, "non-content classification updates must retain the historical promotion proof");
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, status: "candidate" }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, version: 1 }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, review: { ...(promoted.review as JsonObject), reviewer: "human" } }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, review: { ...(promoted.review as JsonObject), policy_revision: 2 } }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, review: { ...(promoted.review as JsonObject), promotion_claim_version: 1 } }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, review: { ...(promoted.review as JsonObject), promotion_claim_version: Number(promoted.version) + 1 } }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, source_id: "missing-source" }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, source_id: null }), false);
+    const originalGet = store.get.bind(store);
+    store.get = ((type: string, id: string, version?: number) => {
+      if (type === "knowledge_claim" && id === String(promoted.id) && version === Number((promoted.review as JsonObject).promotion_claim_version)) throw new Error("fixture read failure");
+      return originalGet(type, id, version);
+    }) as typeof store.get;
+    assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), false);
+    store.get = originalGet;
+    const originalGetForRevision = store.get.bind(store);
+    const originalFindForRevision = store.find.bind(store);
+    const verifyWithRevision = (claimPatch: JsonObject, revisionPatch: JsonObject, findPatch: { assessment?: JsonObject; run?: JsonObject; case?: JsonObject } = {}, expected = false) => {
+      const revision = originalGetForRevision("knowledge_claim", String(promoted.id), Number((promoted.review as JsonObject).promotion_claim_version));
+      store.get = ((type: string, id: string, version?: number) => type === "knowledge_claim" && id === String(promoted.id)
+        && version === Number((promoted.review as JsonObject).promotion_claim_version)
+        ? { ...revision, ...revisionPatch } : originalGetForRevision(type, id, version)) as typeof store.get;
+      store.find = ((type: string, id: string, version?: number, hydrate?: boolean) => {
+        const found = originalFindForRevision(type, id, version, hydrate);
+        if (!found) return found;
+        if (type === "knowledge_auto_review" && findPatch.assessment) return { ...found, ...findPatch.assessment };
+        if (type === "knowledge_evaluation_run" && findPatch.run) return { ...found, ...findPatch.run };
+        if (type === "knowledge_evaluation_case" && findPatch.case) return { ...found, ...findPatch.case };
+        return found;
+      }) as typeof store.find;
+      try { assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, ...claimPatch }), expected); }
+      finally { store.get = originalGetForRevision; store.find = originalFindForRevision; }
+    };
+    verifyWithRevision({ source_id: null }, { source_id: null });
+    verifyWithRevision({ review: { ...(promoted.review as JsonObject), effectiveness_run_id: undefined } },
+      { review: { ...(promoted.review as JsonObject), effectiveness_run_id: undefined } });
+    verifyWithRevision({ review: { ...(promoted.review as JsonObject), promotion_review_id: undefined } },
+      { review: { ...(promoted.review as JsonObject), promotion_review_id: undefined } });
+    verifyWithRevision({ review: undefined }, { review: undefined });
+    verifyWithRevision({ review: { ...(promoted.review as JsonObject), policy_id: undefined } },
+      { review: { ...(promoted.review as JsonObject), policy_id: undefined } });
+    verifyWithRevision({}, { review: null });
+    verifyWithRevision({ identity_digest: undefined }, { identity_digest: null }, {
+      assessment: { claim_identity_digest: null },
+      run: { candidate_claim_refs: [{ claim_id: promoted.id, claim_version: Number(promoted.version) - 1, identity_digest: null, content_digest: promoted.content_digest }] },
+    }, true);
+    verifyWithRevision({ identity_digest: undefined, content_digest: undefined }, { identity_digest: null, content_digest: null }, {
+      assessment: { claim_identity_digest: null },
+      run: { candidate_claim_refs: [{ claim_id: promoted.id, claim_version: Number(promoted.version) - 1, identity_digest: null, content_digest: null }] },
+    }, true);
+    verifyWithRevision({}, {}, { case: { dataset_partition: "development" } });
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, review: { ...(promoted.review as JsonObject), source_digest: "source-old" } }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, review: { ...(promoted.review as JsonObject), effectiveness_run_id: "missing-run" } }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, review: { ...(promoted.review as JsonObject), promotion_review_id: "missing-review" } }), false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, { ...tagged, content_digest: "changed-content" }), false);
+    const currentRun = store.get("knowledge_evaluation_run", String((promoted.review as JsonObject).effectiveness_run_id));
+    const tamperRun = (patch: JsonObject) => {
+      const savedRun = store.get("knowledge_evaluation_run", String(currentRun.id));
+      const { version: _savedVersion, ...savedPayload } = savedRun;
+      store.save("knowledge_evaluation_run", String(currentRun.id), { ...savedPayload, ...patch });
+      assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), false);
+      const { version: _originalVersion, ...originalPayload } = currentRun;
+      store.save("knowledge_evaluation_run", String(currentRun.id), originalPayload);
+    };
+    tamperRun({ candidate_claim_refs: [] });
+    tamperRun({ candidate_claim_refs: null });
+    tamperRun({ candidate_claim_refs: [{ claim_id: promoted.id }] });
+    tamperRun({ candidate_claim_refs: [{ claim_id: "different-claim" }] });
+    tamperRun({ case_refs: [] });
+    tamperRun({ case_refs: null });
+    tamperRun({ case_ids: [] });
+    tamperRun({ case_ids: null });
+    tamperRun({ case_refs: [{ case_id: 7 }] });
+    const originalRefs = currentRun.candidate_claim_refs as JsonObject[];
+    for (const field of ["claim_version", "identity_digest", "content_digest"]) {
+      const altered = { ...originalRefs[0]!, [field]: `wrong-${field}` };
+      tamperRun({ candidate_claim_refs: [altered] });
+    }
+    store.create("knowledge_promotion_policy", "knowledge-promotion-default", { automatic: true, revision: 1 });
+    assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), true);
+    store.save("knowledge_evaluation_run", String(currentRun.id), { ...payload(currentRun), mode: "development" });
+    assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), false);
+    const changedRun = store.get("knowledge_evaluation_run", String(currentRun.id));
+    store.save("knowledge_evaluation_run", String(currentRun.id), { ...payload(changedRun), mode: currentRun.mode });
+    const currentCase = store.get("knowledge_evaluation_case", String((currentRun.case_ids as string[])[0]));
+    store.save("knowledge_evaluation_case", String(currentCase.id), { ...payload(currentCase), fixture_mutation: true });
+    assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), false);
+    const changedCase = store.get("knowledge_evaluation_case", String(currentCase.id));
+    store.save("knowledge_evaluation_case", String(currentCase.id), { ...payload(changedCase), dataset_partition: "development" });
+    assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), false);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 test("Knowledge evaluation evidence is resolved without losing missing provenance", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-eval-provenance-"));
@@ -17,7 +125,9 @@ test("Knowledge evaluation evidence is resolved without losing missing provenanc
     store.create("knowledge_claim", "claim-without-evidence", {});
     const resolved = knowledgeEvaluationEvidence(store, { source_evidence_ids: ["source", "missing", "source", 1], expected_claim_ids: ["claim", "missing-claim", "claim", 1] });
     assert.deepEqual(resolved.sourceEvidence.map((item) => item.id), ["source"]);
-    assert.deepEqual(resolved.claimEvidence.map((item) => [item.claim_id, item.evidence.id]), [["claim", "claim-evidence"]]);
+    assert.deepEqual(resolved.claimEvidence.map((item) => [item.claim_id, item.evidence.id]), [["claim", "claim-evidence"], ["claim", undefined], ["claim", undefined]]);
+    assert.equal(assessKnowledgeEvaluationProvenance({ source_session_id: "evaluation", source_task_id: "eval-task", source_evidence_ids: ["source"],
+      evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "operator_asserted", sanitized: true, expected_claim_ids: ["claim"] }, resolved.sourceEvidence, resolved.claimEvidence).status, "unadjudicated_label");
     assert.deepEqual(knowledgeEvaluationEvidence(store, { expected_claim_ids: ["claim-without-evidence"] }).claimEvidence, []);
     assert.deepEqual(knowledgeEvaluationEvidence(store, {}).sourceEvidence, []);
     assert.deepEqual(knowledgeEvaluationEvidence(store, {}).claimEvidence, []);
@@ -27,15 +137,22 @@ test("Knowledge evaluation evidence is resolved without losing missing provenanc
   }
 });
 
+test("Knowledge adjudication case digest supplies explicit null and empty defaults for legacy cases", () => {
+  const digest = knowledgeEvaluationCaseBindingDigest({ id: "legacy", version: 1 });
+  assert.match(digest, /^sha256:[a-f0-9]{64}$/u);
+  assert.equal(digest, knowledgeEvaluationCaseBindingDigest({ id: "legacy", version: 1, identity_digest: null,
+    candidate_claim_refs: [], source_evidence_ids: [] }));
+});
+
 test("Only sanitized independent real-session held-out Knowledge cases are evaluation eligible", () => {
   const sourceEvidence = [{ id: "eval-evidence", confidence: "confirmed", metadata: { source_session_id: "eval-session", task_id: "eval-task" } } as JsonObject];
   const independentClaimEvidence = [{ claim_id: "claim", evidence: { id: "claim-evidence", metadata: { source_session_id: "claim-session", task_id: "claim-task" } } as JsonObject }];
   const base: JsonObject = {
     source_session_id: "eval-session", source_task_id: "eval-task", source_evidence_ids: ["eval-evidence"],
-    evaluation_channel: "real_session", dataset_partition: "held_out", sanitized: true, expected_claim_ids: ["claim"],
+    evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "host_adjudicated", sanitized: true, expected_claim_ids: ["claim"],
   };
   const assess = (item: JsonObject, sources = sourceEvidence, claims = independentClaimEvidence) =>
-    assessKnowledgeEvaluationProvenance(item, sources, claims);
+    assessKnowledgeEvaluationProvenance(item, sources, claims, item.label_source === "host_adjudicated");
 
   assert.equal(assess({}).status, "missing_provenance");
   assert.equal(assess({ source_session_id: "eval-session" }).status, "incomplete_provenance");
@@ -49,6 +166,8 @@ test("Only sanitized independent real-session held-out Knowledge cases are evalu
   assert.equal(assess({ ...base, dataset_partition: "development" }).status, "development_only");
   assert.equal(assess({ ...base, sanitized: false }).status, "unsanitized");
   assert.equal(assess({ ...base, label_source: "model_candidate" }).status, "model_labeled");
+  assert.equal(assess({ ...base, label_source: "operator_asserted" }).status, "unadjudicated_label");
+  assert.equal(assess({ ...base, label_source: undefined }).status, "unadjudicated_label");
   assert.equal(assess({ ...base, label_source: "unsupported" }).status, "unsupported_provenance");
   assert.equal(assess({ ...base, source_evidence_ids: [] }).status, "missing_source_evidence");
   assert.equal(assess({ ...base, source_evidence_ids: [1] }).status, "unverified_source_evidence");
@@ -68,4 +187,48 @@ test("Only sanitized independent real-session held-out Knowledge cases are evalu
   assert.equal(assess(base, sourceEvidence, [{ claim_id: "claim", evidence: { metadata: { source_session_id: "claim-session", task_id: "eval-task" } } }]).status, "session_leak");
   const valid = assess(base);
   assert.deepEqual(valid, { status: "verified_independent", evaluation_eligible: true });
+});
+
+test("Knowledge evaluation separates exact legacy review attestations from task Sources without trusting forged roles", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-review-role-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    store.create("knowledge_source", "source", { scope: "global" });
+    store.create("evidence", "task", { confidence: "confirmed", metadata: { source_session_id: "generation", task_id: "generation-task" } });
+    store.create("evidence", "held-out", { confidence: "confirmed", metadata: { source_session_id: "evaluation", task_id: "evaluation-task" } });
+    const reviewId = "knowledge_host_review_bound";
+    const attestation = { source_type: "host_model_review", confidence: "bounded",
+      metadata: { review_id: reviewId, source_id: "source", source_digest: "sha256:source" } };
+    store.create("evidence", "attestation", attestation);
+    const claimBody = { scope: "global", source_id: "source", identity_digest: "sha256:identity", evidence_ids: ["task", "attestation"],
+      review: { review_id: reviewId, packet_digest: "sha256:packet", source_digest: "sha256:source" } };
+    store.create("knowledge_claim", "claim", claimBody);
+    const reviewBody = { scope: "global", claim_id: "claim", decision: "supported", packet_attested: true, packet_digest: "sha256:packet",
+      source_id: "source", source_digest: "sha256:source", claim_identity_digest: "sha256:identity" };
+    store.create("knowledge_host_review", reviewId, reviewBody);
+    const item = { source_session_id: "evaluation", source_task_id: "evaluation-task", source_evidence_ids: ["held-out"],
+      evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "host_adjudicated", sanitized: true, expected_claim_ids: ["claim"] };
+    const assess = () => { const resolved = knowledgeEvaluationEvidence(store, item); return assessKnowledgeEvaluationProvenance(item, resolved.sourceEvidence, resolved.claimEvidence, true); };
+    assert.equal(assess().status, "verified_independent");
+    assert.deepEqual(knowledgeEvaluationEvidence(store, item).claimEvidence.map(entry => entry.evidence.id), ["task"]);
+    for (const change of [{ claim_id: "different" }, { decision: "rejected" }, { packet_attested: false }, { packet_digest: null },
+      { packet_digest: "sha256:other" }, { source_id: "different" }, { source_digest: "sha256:other" }, { claim_identity_digest: "sha256:other" }]) {
+      store.save("knowledge_host_review", reviewId, { ...reviewBody, ...change });
+      assert.equal(assess().status, "unverified_claim_source");
+    }
+    store.save("knowledge_host_review", reviewId, reviewBody);
+    for (const [index, change] of [{ metadata: undefined }, { metadata: { review_id: "unbound" } }, { metadata: { review_id: reviewId, source_digest: "sha256:other" } }].entries()) {
+      const evidenceId = `malformed-attestation-${index}`;
+      store.create("evidence", evidenceId, { ...attestation, ...change });
+      store.save("knowledge_claim", "claim", { ...claimBody, evidence_ids: ["task", evidenceId] });
+      assert.equal(assess().status, "unverified_claim_source");
+    }
+    store.save("knowledge_claim", "claim", { ...claimBody, review: undefined });
+    assert.equal(assess().status, "unverified_claim_source");
+    store.save("knowledge_claim", "claim", { ...claimBody, identity_digest: undefined });
+    assert.equal(assess().status, "unverified_claim_source");
+    store.save("knowledge_claim", "claim", claimBody);
+    store.remove("knowledge_host_review", reviewId);
+    assert.equal(assess().status, "unverified_claim_source");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

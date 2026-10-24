@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import test from "node:test";
 import { PROVIDER_CATALOG, type ChatRequest, type ChatResult, type ModelProviderSpec, type ModelTransport } from "../core/model-gateway.ts";
-import { dataRoot } from "../core/infrastructure/paths.ts";
+import { craftPaths, dataRoot, ensureProjectStorageDirectory } from "../core/infrastructure/paths.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { runKnowledgeScenarioClassificationOnce, type KnowledgeClassificationClient } from "../deploy/experience-learning/knowledge-classification.ts";
+
+const fs = createRequire(import.meta.url)("node:fs") as typeof import("node:fs");
 
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
   api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
@@ -37,8 +40,9 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
       definition: { summary: "工程主题", applies_when: "属于项目工程实践", excludes: "业务领域事实" } }] };
     if (name === "craft_evaluation_model_ticket_issue") return { ticket: { id: "ticket-1", status: "ready_for_adapter" } };
     if (name === "craft_knowledge_claim_save") return { claim: { id: "claim-1", version: 2 } };
-    if (name === "craft_knowledge_host_review") return { status: args.decision === "supported" ? "reviewed" : args.decision,
-      promoted: args.decision === "supported", claim: { id: claim.id, version: 2 } };
+    if (name === "craft_knowledge_host_review") return { status: args.decision === "supported" ? "awaiting_independent_evaluation" : args.decision,
+      promoted: false, blocking_reasons: args.decision === "supported" ? ["independent_effectiveness_evaluation_required"] : [],
+      claim: { id: claim.id, version: 2, status: "candidate" } };
     if (name === "craft_knowledge_claim_review") return { claim: { id: claim.id, status: args.status } };
     if (name === "craft_evaluation_model_ticket_complete") return { ticket: { id: "ticket-1", status: "completed" } };
     if (name === "craft_trace_start") return { trace: { id: "trace-classification-1" } };
@@ -104,13 +108,14 @@ test("Knowledge model prompt follows the configured output language", async () =
   assert.match(String(messages[0]?.content), /Keep JSON property names and stable keys unchanged/u);
 });
 
-test("candidate Claims receive an Evidence-bound Host review before scenario classification", async () => {
+test("candidate Claims receive source review but remain candidates until independent effectiveness evaluation", async () => {
   const f = fixture('{"review_decision":"supported"}', "candidate");
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
   const outcome = (result.outcomes as JsonObject[])[0]!;
-  assert.equal(outcome.status, "reviewed");
+  assert.equal(outcome.status, "awaiting_independent_evaluation");
   assert.equal(outcome.review_decision, "supported");
-  assert.equal(outcome.promoted, true);
+  assert.equal(outcome.promoted, false);
+  assert.equal(outcome.claim_status, "candidate");
   assert.deepEqual(f.calls.find(call => call.name === "craft_knowledge_host_review")?.args, {
     claim_id: claim.id, host_kind: "codex-cli", host_run_key: "learning:ticket-1", model_ref: "test-model:knowledge-evidence-review",
     source_digest: "sha256:source", packet_digest: "sha256:review-packet", decision: "supported", reason_code: "evidence_supports_claim",
@@ -118,7 +123,7 @@ test("candidate Claims receive an Evidence-bound Host review before scenario cla
   assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_save"), false);
   assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_issue")?.args.output_contract_ref, "craft-knowledge-evidence-review-v1");
   assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_append").map(call => call.args.event_kind),
-    ["model.request", "model.completed", "knowledge.reviewed", "model.result_bound"]);
+    ["model.request", "model.completed", "knowledge.source_reviewed", "model.result_bound"]);
   assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete")?.args.trace_id, "trace-classification-1");
 });
 
@@ -234,6 +239,20 @@ test("candidate review tolerates Host review results without an embedded Claim o
   assert.equal(outcome.claim_status, "candidate");
   assert.equal(outcome.promoted, false);
   assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_review"), false);
+});
+
+test("classification traces an idempotent review separately from a pending effectiveness evaluation", async () => {
+  const f = fixture('{"review_decision":"supported"}', "candidate");
+  const originalCall = f.client.call.bind(f.client);
+  f.client.call = async (name, args = {}) => name === "craft_knowledge_host_review"
+    ? { status: "already_reviewed", promoted: false, claim: { id: claim.id, version: 2, status: "reviewed" } }
+    : originalCall(name, args);
+  const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  const outcome = (result.outcomes as JsonObject[])[0]!;
+  const trace = f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "knowledge.source_reviewed");
+  assert.equal(outcome.status, "already_reviewed");
+  assert.equal(outcome.claim_status, "reviewed");
+  assert.equal(trace?.args.summary, "Knowledge Claim is already reviewed");
 });
 
 test("uncertain and contradictory candidate reviews preserve non-promoted claim states", async () => {
@@ -431,6 +450,98 @@ test("background classification skips temporary project roots before profile or 
   } finally { await rm(temporaryRoot, { recursive: true, force: true }); }
 });
 
+test("background classification resolves the new shared project content directory before temporary-root filtering", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-shared-project-"));
+  const previous = process.env.CRAFT_DATA_DIR;
+  try {
+    const project = join(root, "project"), paths = craftPaths(join(root, "data"));
+    await mkdir(project);
+    await mkdir(paths.root);
+    process.env.CRAFT_DATA_DIR = paths.root;
+    const directory = ensureProjectStorageDirectory(paths, project);
+    const f = fixture(undefined, "candidate", "project:demo", provider,
+      join(directory, "knowledge", "md", "claim.v1.md"));
+    const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+    assert.equal(result.skipped_temporary_count, 1);
+    assert.equal(f.requests.length, 0);
+  } finally {
+    if (previous === undefined) delete process.env.CRAFT_DATA_DIR;
+    else process.env.CRAFT_DATA_DIR = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("background project inference rejects malformed or redirected central project identity manifests", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-project-manifest-"));
+  const previous = process.env.CRAFT_DATA_DIR;
+  const project = join(root, "project"), otherProject = join(root, "other-project"), data = join(root, "data"), paths = craftPaths(data);
+  try {
+    await mkdir(project); await mkdir(otherProject); await mkdir(paths.root);
+    process.env.CRAFT_DATA_DIR = paths.root;
+    const directory = ensureProjectStorageDirectory(paths, project);
+    const mapping = join(directory, "project.json"), contentPath = join(directory, "knowledge", "md", "claim.md");
+    const valid = await readFile(mapping, "utf8");
+    const malformed = [
+      async () => { await rm(mapping, { force: true }); await mkdir(mapping); },
+      async () => { await writeFile(mapping, "{"); },
+      async () => { await writeFile(mapping, "{}"); },
+      async () => { await writeFile(mapping, JSON.stringify({ canonical_root: join(root, "missing-project") })); },
+      async () => { await writeFile(mapping, JSON.stringify({ canonical_root: otherProject })); },
+    ];
+    for (let index = 0; index < malformed.length; index += 1) {
+      await rm(mapping, { recursive: true, force: true });
+      if (index !== 0) await writeFile(mapping, valid);
+      await malformed[index]!();
+      const f = fixture(undefined, "reviewed", "project:demo", provider, contentPath);
+      const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+      assert.equal((result.outcomes as JsonObject[])[0]?.reason, "project_root_unavailable");
+      await rm(mapping, { recursive: true, force: true });
+      await writeFile(mapping, valid);
+    }
+
+    const relocated = `${directory}.relocated`;
+    await rename(directory, relocated);
+    const redirected = join(root, "redirected-project-storage");
+    await mkdir(join(redirected, "knowledge", "md"), { recursive: true });
+    await writeFile(join(redirected, "project.json"), valid);
+    await symlink(redirected, directory);
+    const f = fixture(undefined, "reviewed", "project:demo", provider, contentPath);
+    const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+    assert.equal((result.outcomes as JsonObject[])[0]?.reason, "project_root_unavailable");
+    await rm(directory, { force: true });
+    await rename(relocated, directory);
+  } finally {
+    if (previous === undefined) delete process.env.CRAFT_DATA_DIR;
+    else process.env.CRAFT_DATA_DIR = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("background project inference fails closed if registered storage disappears after manifest read", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-project-storage-race-"));
+  const previous = process.env.CRAFT_DATA_DIR;
+  const project = join(root, "project"), paths = craftPaths(join(root, "data"));
+  try {
+    await mkdir(project); await mkdir(paths.root);
+    process.env.CRAFT_DATA_DIR = paths.root;
+    const directory = ensureProjectStorageDirectory(paths, project);
+    const contentPath = join(directory, "knowledge", "md", "claim.md");
+    const f = fixture(undefined, "reviewed", "project:demo", provider, contentPath);
+    const originalLstat = fs.lstatSync;
+    fs.lstatSync = ((path: Parameters<typeof fs.lstatSync>[0], ...args: Parameters<typeof fs.lstatSync>[1][]) =>
+      String(path) === directory && args[0]?.throwIfNoEntry === false ? undefined : originalLstat(path, ...args)) as typeof fs.lstatSync;
+    syncBuiltinESMExports();
+    try {
+      const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+      assert.equal((result.outcomes as JsonObject[])[0]?.reason, "project_root_unavailable");
+    } finally { fs.lstatSync = originalLstat; syncBuiltinESMExports(); }
+  } finally {
+    if (previous === undefined) delete process.env.CRAFT_DATA_DIR;
+    else process.env.CRAFT_DATA_DIR = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("explicit project roots allow intentional classification inside a temporary worktree", async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "craft-knowledge-classification-explicit-"));
   try {
@@ -439,7 +550,7 @@ test("explicit project roots allow intentional classification inside a temporary
     const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport, project_root: temporaryRoot });
     assert.equal(result.processed, 1);
     assert.equal(result.skipped_temporary_count, 0);
-    assert.equal((result.outcomes as JsonObject[])[0]?.status, "reviewed");
+    assert.equal((result.outcomes as JsonObject[])[0]?.status, "awaiting_independent_evaluation");
     assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_profile_ensure_single"), true);
     assert.equal(f.requests.length, 1);
   } finally { await rm(temporaryRoot, { recursive: true, force: true }); }
@@ -459,7 +570,7 @@ test("worker ignores incomplete or unrelated project Knowledge content paths whe
   const invalidReferences: unknown[] = [undefined, null, [], {}, { path: 7 }, { path: "   " },
     { path: "relative/.craft_data/knowledge/md/claim.md" }, { path: "/outside/claim.md" },
     { path: "/.craft_data/knowledge/md/claim.md" },
-    { path: join(dataRoot(), "knowledge", "md", "legacy-project-claim.md") }];
+    { path: join(dataRoot(), "knowledge", "md", "legacy-project-claim.md") }, { path: "/outside/normal/claim.md" }, { path: "/bad\u0000path" }];
   for (const contentRef of invalidReferences) {
     const f = fixture();
     const projectClaim = { ...claim, ...(contentRef === undefined ? {} : { content_ref: contentRef }) } as JsonObject;

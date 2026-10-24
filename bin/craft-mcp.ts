@@ -2,6 +2,7 @@
 import { serveMcpStdio } from "../core/mcp-stdio.ts";
 import { resolveMcpProductMode } from "../core/interfaces/mcp/product-launch.ts";
 import { startContextLearningWorker } from "../core/interfaces/learning-worker-supervisor.ts";
+import { startExperienceAssetWorker } from "../core/interfaces/experience-asset-worker.ts";
 import { TRACE_RETENTION_WORKER_FLAG, runTraceRetentionMaintenance, startConfiguredTraceRetentionWorker } from "../core/interfaces/trace-retention-worker.ts";
 import { CODEBASE_LSP_WORKER_FLAG, runCodebaseLspWorkerSafely } from "../capability/craft-codebase/lsp-worker.ts";
 
@@ -24,8 +25,11 @@ catch (error) {
 if (mode) serveMcpStdio({ mode, input: process.stdin, write: (line) => process.stdout.write(line), afterStart: async server => {
   const stopLearning = await startContextLearningWorker({ mode, server_entrypoint: process.argv[1], env: process.env,
     on_failure: reason => process.stderr.write(`Craft ${mode} learning worker stopped (${reason}).\n`) });
-  const stopTraceRetention = startConfiguredTraceRetentionWorker(server.service, process.env, () => process.stderr.write(`Craft ${mode} Trace retention maintenance failed.\n`));
-  return async () => { stopTraceRetention(); await stopLearning?.(); };
+  const stopTraceRetention = startConfiguredTraceRetentionWorker(server.service,
+    process.env, () => process.stderr.write(`Craft ${mode} Trace retention maintenance failed.\n`));
+  const stopAssetMigration = await startExperienceAssetWorker(server.service, { enabled: process.env.CRAFT_EXPERIENCE_ASSET_MIGRATION !== "0",
+    on_failure: () => process.stderr.write(`Craft ${mode} Experience asset migration failed.\n`) });
+  return async () => { await stopAssetMigration(); stopTraceRetention(); await stopLearning?.(); };
 } }).catch(() => {
   process.stderr.write("Craft MCP failed to start.\n");
   process.exitCode = 1;

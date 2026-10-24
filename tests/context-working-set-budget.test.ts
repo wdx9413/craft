@@ -7,14 +7,15 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { ContextWorkingSetKernel } from "../core/context-working-set.ts";
-import { ContextBudgetError } from "../common/craft-common-base/src/context-assets.ts";
+import { ContextBudgetError, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from "../common/craft-common-base/src/context-assets.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-working-set-budget-"));
   const store = await new CraftStore(craftPaths(root)).open(), service = new CraftService(store);
+  const scope = (service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject).canonical_scope as JsonObject;
   service.knowledgeMemoryInstallBuiltins();
-  service.memoryLedgerRemember({ memory_id: "m", kind: "preference", scope_kind: "project", scope_id: "p", source_id: "builtin.evidence-wiki", content: "login " + "x".repeat(394) });
-  const args = { query: "login", scope_kind: "project", scope_id: "p", max_items: 3, max_chars: 500 };
+  service.memoryLedgerRemember({ memory_id: "m", kind: "preference", scope_kind: "project", scope_id: scope.id, project_root: root, source_id: "builtin.evidence-wiki", content: "login " + "x".repeat(394) });
+  const args = { query: "login", scope_kind: "project", scope_id: scope.id, max_items: 3, max_chars: 500 };
   const code = { node_id: "code", version: 1, source_digest: "d", path: "code.ts", index_id: "i", checkpoint_id: "c", selection_reason: "lexical_match" };
   return { store, service, args, code, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
 }
@@ -29,6 +30,7 @@ test("Working Set owns Host, recalled and authenticated code projection budgets"
     assert((preferred.asset_refs as JsonObject[]).some(ref => ref.member === "codebase"));
     assert.equal((preferred.selection_reasons as JsonObject[])[0]!.reason, "codebase_projection");
     assert.equal((preferred.working_set as JsonObject).members instanceof Array, true);
+    assert.equal((kernel.get({ working_set_id: (preferred.working_set as JsonObject).id, version: 1 }).working_set as JsonObject).id, (preferred.working_set as JsonObject).id);
     assert(!((preferred.working_set as JsonObject).members as string[]).includes("codebase"));
     const mandatory = await kernel.resolve({ ...f.args, prefer_codebase: true, codebase_candidates: [f.code], memory_ids: ["m"] });
     assert.equal((mandatory.items as JsonObject[])[0]!.memory_id, "m");
@@ -67,7 +69,28 @@ test("required projections fail with typed budget errors and never enter accumul
     const requiredFirst = await kernel.resolve({ ...f.args, query: "unmatched", codebase_candidates: [two, f.code], required_refs: [required], max_items: 1 });
     assert.equal((requiredFirst.codebase_references as JsonObject[])[0]!.node_id, "code");
     assert.equal(requiredFirst.codebase_budget_omitted_count, 1);
+    const rebalancedRequired = await kernel.resolve({ ...f.args, codebase_candidates: [two, f.code], required_refs: [required], memory_ids: ["m"], max_items: 4, max_chars: 600 });
+    assert.equal(rebalancedRequired.codebase_budget_rebalanced, true);
+    assert.deepEqual((rebalancedRequired.codebase_references as JsonObject[]).map(item => item.node_id), ["code"]);
     const failing = new ContextWorkingSetKernel(f.store, { resolve: async () => { throw new Error("upstream failure"); } } as never);
     await assert.rejects(failing.resolve({ ...f.args, prefer_codebase: true, codebase_candidates: [f.code] }), /upstream failure/);
+  } finally { f.close(); }
+});
+
+test("Working Set defaults to a small shared budget while allowing explicit expansion", async () => {
+  const f = await fixture();
+  try {
+    const { max_items: _items, max_chars: _chars, ...withoutBudget } = f.args;
+    const compact = await f.service.contextWorkingSets.resolve(withoutBudget);
+    const compactBudget = (compact.working_set as JsonObject).budget as JsonObject;
+    assert.equal(compactBudget.max_items, DEFAULT_CONTEXT_MAX_ITEMS);
+    assert.equal(compactBudget.max_chars, DEFAULT_CONTEXT_MAX_CHARS);
+    const resolved = await f.service.contextResolution.resolve({ query: "unmatched", scope_kind: "project", scope_id: f.args.scope_id });
+    assert.equal((resolved.receipt as JsonObject).max_items, DEFAULT_CONTEXT_MAX_ITEMS);
+    assert.equal((resolved.receipt as JsonObject).max_chars, DEFAULT_CONTEXT_MAX_CHARS);
+    const expanded = await f.service.contextWorkingSets.resolve({ ...withoutBudget, max_items: 10, max_chars: 9_000 });
+    const expandedBudget = (expanded.working_set as JsonObject).budget as JsonObject;
+    assert.equal(expandedBudget.max_items, 10);
+    assert.equal(expandedBudget.max_chars, 9_000);
   } finally { f.close(); }
 });

@@ -139,18 +139,28 @@ export class ExperienceGraphAssets {
   }
 
   edit(args: JsonObject): JsonObject {
+    if (args.action === "migrate") {
+      const id = text(args.graph_id, "graph_id");
+      const current = this.store.find("experience_procedure", id);
+      if (!current) throw new Error("Unknown Experience graph");
+      this.authorize(current, args);
+      if (args.expected_version !== current.version) throw new Error("Graph migration version conflict");
+      const records = this.store.history("experience_procedure", id, Number(args.before_version ?? Number.MAX_SAFE_INTEGER), 101);
+      const selected = records.slice(0, 100); selected.forEach(record => this.authorize(record, args));
+      const refs = selected.filter(r => procedureDefinitionRef(r.definition_ref)).map(record => {
+        const expected = record.definition_ref as JsonObject;
+        const next = this.definitions.migrate(expected as never);
+        if (this.store.get("experience_procedure", id).version !== current.version) throw new Error("Graph migration version conflict");
+        this.store.relocateExperienceDefinition(id, Number(record.version), expected, { ...next });
+        return next;
+      });
+      return { graph_id: id, migrated_refs: refs, legacy_files_preserved: true, has_more: records.length > 100,
+        next_before_version: records.length > 100 ? selected[99]!.version : null, execution_authorized: false,
+        ...syncGraphVersionManifest(this.store, id, String(args.scope)) };
+    }
     const result = this.store.transaction(() => {
       const action = text(args.action, "action"), id = text(args.graph_id, "graph_id"), scope = text(args.scope, "scope");
       const current = this.store.find("experience_procedure", id); if (current) this.authorize(current, args);
-      if (action === "migrate") {
-        if (!current) throw new Error("Unknown Experience graph");
-        if (args.expected_version !== current.version) throw new Error("Graph migration version conflict");
-        const records = this.store.history("experience_procedure", id, Number(args.before_version ?? Number.MAX_SAFE_INTEGER), 101);
-        const selected = records.slice(0, 100); selected.forEach(record => this.authorize(record, args));
-        const refs = selected.filter(r => procedureDefinitionRef(r.definition_ref)).map(r => this.definitions.migrate(r.definition_ref as never));
-        return { graph_id: id, migrated_refs: refs, legacy_files_preserved: true, has_more: records.length > 100,
-          next_before_version: records.length > 100 ? selected[99]!.version : null, execution_authorized: false };
-      }
       if (action === "submit") {
         const read = this.draft(id, args), draft = read.draft as JsonObject;
         if (args.expected_draft_digest !== read.draft_digest) throw new Error("Graph draft digest conflict; inspect the current draft");

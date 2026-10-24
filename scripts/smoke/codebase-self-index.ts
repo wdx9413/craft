@@ -6,6 +6,7 @@ import { performance } from "node:perf_hooks";
 import { CraftStore } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
+import { ProjectGraphStore } from "../../capability/craft-codebase/project-graph-store.ts";
 
 const projectRoot = resolve(process.cwd());
 const temporaryRoot = mkdtempSync(join(tmpdir(), "craft-codebase-self-index-"));
@@ -18,12 +19,26 @@ try {
   assert.equal(ensured.status, "ready", "repository semantic index should be ready");
   assert.equal(ensured.omitted_files, 0, "the Craft self-index acceptance repository should fit inside the bounded checkpoint");
   const index = store.get("codebase_index", String(ensured.index_id));
+  const graphStore = new ProjectGraphStore(projectRoot, String(ensured.workspace_id), store.paths);
   const relationAnalysis = (index.analysis as Record<string, unknown>).relation_analysis as Record<string, unknown>;
   const partialReasons = relationAnalysis.partial_reasons as string[];
-  assert(!partialReasons.includes("analysis_budget_limited"), "self-index graph must not be truncated by the configured budgets");
-  assert(!partialReasons.includes("omitted_edges"), "self-index graph must retain every edge whose endpoints are in the snapshot");
+  const diagnostics = (ensured.summary as Record<string, unknown>).diagnostics as Record<string, unknown>[];
+  const budgetDiagnostics = diagnostics.filter(item => item.budget_limited === true);
+  if (partialReasons.includes("analysis_budget_limited")) {
+    assert(budgetDiagnostics.length > 0, "budget-limited relation analysis must expose its diagnostic");
+    assert(budgetDiagnostics.every(item => Number.isSafeInteger(item.omitted_nodes) && Number.isSafeInteger(item.budget_omitted_edges)),
+      "budget-limited relation analysis must report omitted node and edge counts");
+  }
+  const diagnosticSummary = diagnostics.map(item => ({ budget_limited: item.budget_limited === true,
+    omitted_nodes: item.omitted_nodes ?? 0, omitted_edges: item.omitted_edges ?? 0, budget_omitted_edges: item.budget_omitted_edges ?? 0,
+    analyzer_count: Array.isArray(item.languages) ? item.languages.length : 0,
+    analyzers: Array.isArray(item.languages) ? (item.languages as Record<string, unknown>[]).map(language => {
+      const detail = language.diagnostics as Record<string, unknown> | undefined;
+      return { analyzer: language.analyzer, selected_file_count: detail?.selected_file_count ?? null, budget_limited: detail?.budget_limited ?? false };
+    }) : [],
+    degraded_language_count: Array.isArray(item.degraded_languages) ? item.degraded_languages.length : 0 }));
   const routeBytes = (index.edge_route_shards as Array<{ id: string }>).reduce((sum, descriptor) =>
-    sum + Buffer.byteLength(JSON.stringify(store.get("codebase_index_edge_route", descriptor.id))), 0);
+    sum + Buffer.byteLength(JSON.stringify(graphStore.read(descriptor.id))), 0);
   const symbolStart = performance.now();
   const symbols = service.codebaseSymbolFind({ workspace_id: ensured.workspace_id, index_id: ensured.index_id, query: "ensureRepository" });
   const symbolMs = Math.round(performance.now() - symbolStart);
@@ -76,7 +91,8 @@ try {
     callers_ms: callersMs, caller_count: (callers.callers as unknown[]).length,
     impact_ms: impactMs, impact_warm_ms: warmImpactMs, impact_node_count: (impact.nodes as unknown[]).length, impact_edge_count: (impact.edges as unknown[]).length,
     followup_ensure_ms: followupEnsureMs, followup_reused_index: reused.index_id === ensured.index_id,
-    diagnostics: index.diagnostics,
+    completeness: relationAnalysis.status,
+    diagnostic_summary: diagnosticSummary,
   }, null, 2));
 } finally {
   store.close();

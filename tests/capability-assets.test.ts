@@ -235,9 +235,9 @@ test("the new capability surfaces are reachable over MCP and stay read-only", as
   };
   try {
     const providers = await call("craft_model_provider_list", {});
-    assert.equal(providers.count, 1);
-    assert.equal((providers.providers as JsonObject[])[0].provider, "demo");
-    assert.equal((providers.providers as JsonObject[])[0].configured, false);
+    assert.equal(providers.count, 2);
+    assert.equal((providers.providers as JsonObject[]).find(item => item.provider === "demo")?.configured, false);
+    assert.equal((providers.providers as JsonObject[]).find(item => item.provider === "codex-cli")?.configured, true);
 
     const described = await call("craft_model_provider_get", { provider: "demo", tier: "frontier" });
     assert.equal((described.selection as JsonObject).model, "demo-std");

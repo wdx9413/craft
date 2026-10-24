@@ -8,8 +8,9 @@ import type { JsonObject } from "../common/craft-common-store-local/src/store.ts
 import { digestJson } from "../common/craft-common-base/src/digest.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
-import { craftPaths } from "../core/infrastructure/paths.ts";
+import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
 import { MemoryCapture } from "../capability/craft-memory/memory-capture.ts";
+import { MemoryContribution } from "../capability/craft-memory/contribution.ts";
 
 test("Memory begins in a session, promotes by repeat counts, and archive removes only temporary content", async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), "craft-memory-tiers-"));
@@ -49,8 +50,8 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     store.create("scope_alias", "missing-dir-alias", { scope: { kind: "project", id: "missing-dir-project" }, alias_kind: "path", alias: join(dataRoot, "not-a-directory"), status: "active" });
     assert.equal(ledgerFiles.pathFor({ kind: "project", id: "missing-dir-project" }), null);
     assert.equal(ledgerFiles.sync({ kind: "project", id: "missing-project" }).status, "unavailable");
-    assert.equal(ledgerFiles.pathFor({ kind: "project", id: "project-1" }, projectRoots[0]), join(realpathSync(projectRoots[0]!), ".craft_data", "memory", "memory.md"));
-    assert.equal(ledgerFiles.pathFor({ kind: "project", id: "project-1" }), join(realpathSync(projectRoots[0]!), ".craft_data", "memory", "memory.md"));
+    assert.equal(ledgerFiles.pathFor({ kind: "project", id: "project-1" }, projectRoots[0]), join(projectStorageDirectory(store.paths, projectRoots[0]!), "memory", "memory.md"));
+    assert.equal(ledgerFiles.pathFor({ kind: "project", id: "project-1" }), join(projectStorageDirectory(store.paths, projectRoots[0]!), "memory", "memory.md"));
     assert.throws(() => ledgerFiles.archiveSession(" "), /must not be empty/u);
     const first = capture("session-a1", "project-1");
     assert.equal((first.promotions as unknown[]).length, 0);
@@ -98,7 +99,7 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     captureAnotherFact("session-nc1", "project-3");
     assert.deepEqual((captureAnotherFact("session-nc2", "project-3").promotions as Array<Record<string, unknown>>).map(item => item.tier), ["project", "global"]);
 
-    const projectFile = join(projectRoots[0]!, ".craft_data", "memory", "memory.md");
+    const projectFile = join(projectStorageDirectory(store.paths, projectRoots[0]!), "memory", "memory.md");
     const globalFile = join(dataRoot, "memory", "memory.md");
     assert.match(readFileSync(projectFile, "utf8"), /Prefer small diffs/u);
     assert.match(readFileSync(globalFile, "utf8"), /Prefer small diffs/u);
@@ -287,8 +288,6 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     store.close();
     rmSync(dataRoot, { recursive: true, force: true });
     projectRoots.forEach(root => rmSync(root, { recursive: true, force: true }));
-    // Guard against surprising path fallback behavior in fixture runs.
-    assert.equal(join("/tmp", ".craft_data", "memory").startsWith("/tmp/"), true);
   }
 });
 
@@ -327,5 +326,279 @@ test("Memory active reads, topic hints and file projections exclude expired, fut
   } finally {
     store.close();
     rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("revoking one project supporter retires global Memory and old observations cannot revive it", async () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), "craft-memory-promotion-exit-"));
+  const projectRoots = [1, 2, 3].map(index => mkdtempSync(join(tmpdir(), `craft-memory-support-${index}-`)));
+  const store = await new CraftStore(craftPaths(dataRoot)).open();
+  const service = new CraftService(store);
+  const sessions: string[] = [];
+  try {
+    service.knowledgeMemoryInstallBuiltins();
+    projectRoots.forEach((root, index) => store.create("scope_alias", `support-${index}`, {
+      scope: { kind: "project", id: `support-${index}` }, alias_kind: "path", alias: root, status: "active",
+    }));
+    const capture = (projectIndex: number) => {
+      const sessionId = `support-session-${randomUUID()}`;
+      sessions.push(sessionId);
+      return service.memoryCaptureObservedFact({ session_id: sessionId, project_scope_id: `support-${projectIndex}`,
+        project_root: projectRoots[projectIndex], kind: "preference", topic: "promotion-exit", content: "Keep the verified dependency" });
+    };
+    const factDigest = digestJson("Keep the verified dependency");
+    store.create("memory_ledger", "unrelated-project-ledger", { scope: { kind: "project", id: "support-0" },
+      content_digest: factDigest, kind: "working", topic: "other-topic", status: "active" });
+    store.create("memory_ledger", "unrelated-global-ledger", { scope: { kind: "global", id: "global" },
+      content_digest: factDigest, kind: "working", topic: "other-topic", status: "active" });
+    for (let projectIndex = 0; projectIndex < 3; projectIndex += 1) { capture(projectIndex); capture(projectIndex); }
+    const promotedFact = (item: JsonObject) => item.kind === "preference" && item.topic === "promotion-exit";
+    const project = store.list("memory_ledger", 100, item => item.status === "active" && promotedFact(item) && (item.scope as JsonObject | undefined)?.id === "support-0")[0]!;
+    const global = store.list("memory_ledger", 100, item => item.status === "active" && promotedFact(item) && (item.scope as JsonObject | undefined)?.kind === "global")[0]!;
+    const unrelatedKind = store.create("memory_observation", "unrelated-support-kind", { scope: { kind: "project", id: "support-0" },
+      project_id: "support-0", session_digest: "unrelated-kind", content_digest: project.content_digest,
+      kind: "working", topic: "promotion-exit", status: "active" });
+    const unrelatedTopic = store.create("memory_observation", "unrelated-support-topic", { scope: { kind: "project", id: "support-0" },
+      project_id: "support-0", session_digest: "unrelated-topic", content_digest: project.content_digest,
+      kind: "preference", topic: "other-topic", status: "active" });
+    assert.equal(global.status, "active");
+    assert.throws(() => service.memoryLedgerTransition({ memory_id: project.id, expected_version: 0, status: "revoked", reason: "incorrect project fact" }), /expected_version|Concurrent update/u);
+    assert.equal(store.get("memory_ledger", String(global.id)).status, "active");
+    service.memoryLedgerTransition({ memory_id: project.id, expected_version: project.version, status: "revoked", reason: "incorrect project fact" });
+    assert.equal(store.get("memory_ledger", String(global.id)).status, "revoked");
+    const retiredGlobal = store.get("memory_ledger", String(global.id));
+    const { id: _retiredId, version: _retiredVersion, created_at: _retiredCreated, updated_at: _retiredUpdated, ...retiredPayload } = retiredGlobal;
+    store.save("memory_ledger", String(global.id), { ...retiredPayload, status: "active" });
+    assert.equal(service.memoryLedgerTransition({ memory_id: project.id, status: "revoked", reason: "incorrect project fact" }).idempotent, true);
+    assert.equal(store.get("memory_ledger", String(global.id)).status, "revoked", "idempotent replay reconciles an older stale global record");
+    assert.throws(() => service.memoryLedgerTransition({ memory_id: project.id, status: "revoked", reason: "different reason" }), /active entry/u);
+    assert.doesNotMatch(readFileSync(join(dataRoot, "memory", "memory.md"), "utf8"), /Keep the verified dependency/u);
+    assert.deepEqual(store.list("memory_observation", 100, item => item.project_id === "support-0" && item.status === "active").map(item => item.id).sort(),
+      [unrelatedKind.id, unrelatedTopic.id].sort());
+    assert.equal((capture(0).promotions as JsonObject[]).length, 0);
+    const renewed = capture(0).promotions as JsonObject[];
+    assert.deepEqual(renewed.map(item => item.tier), ["project", "global"]);
+    assert.equal(store.list("memory_ledger", 100, item => item.status === "active" && promotedFact(item) && (item.scope as JsonObject | undefined)?.kind === "global").length, 1);
+    // A legacy or out-of-band status write must not leave a stale promoted fact readable.
+    const renewedProject = store.list("memory_ledger", 100, item => item.status === "active" && promotedFact(item) && (item.scope as JsonObject | undefined)?.id === "support-0")[0]!;
+    const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...projectPayload } = renewedProject;
+    store.save("memory_ledger", String(renewedProject.id), { ...projectPayload, status: "revoked" });
+    assert.equal(store.list("memory_ledger", 100, item => item.status === "active" && promotedFact(item) && (item.scope as JsonObject | undefined)?.kind === "global").length, 1);
+    assert.equal((service.memoryLedgerList({ scope_kind: "global", scope_id: "global" }).memories as JsonObject[]).length, 0);
+    const contribution = await new MemoryContribution(store).contribute({ query: "verified", scope_kind: "global", scope_id: "global", max_items: 5, max_chars: 5_000 });
+    assert.equal(contribution.items.length, 0);
+    service.memoryGovernance.ledger.files.sync({ kind: "global", id: "global" });
+    assert.doesNotMatch(readFileSync(join(dataRoot, "memory", "memory.md"), "utf8"), /Keep the verified dependency/u);
+  } finally {
+    sessions.forEach(sessionId => service.memorySessionArchive({ session_id: sessionId }));
+    store.close();
+    rmSync(dataRoot, { recursive: true, force: true });
+    projectRoots.forEach(root => rmSync(root, { recursive: true, force: true }));
+  }
+});
+
+test("revoking a session supporter retires its project promotion and preserves the other session", async () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), "craft-memory-session-support-exit-"));
+  const projectRoot = mkdtempSync(join(tmpdir(), "craft-memory-session-support-project-"));
+  const store = await new CraftStore(craftPaths(dataRoot)).open();
+  const service = new CraftService(store);
+  const sessions = [randomUUID(), randomUUID(), randomUUID()];
+  try {
+    service.knowledgeMemoryInstallBuiltins();
+    store.create("scope_alias", "session-support-project", { scope: { kind: "project", id: "session-support" }, alias_kind: "path", alias: projectRoot, status: "active" });
+    const capture = (sessionId: string) => service.memoryCaptureObservedFact({ session_id: sessionId, project_scope_id: "session-support", project_root: projectRoot,
+      kind: "preference", topic: "session-support-topic", content: "Verify a session source before promotion" });
+    capture(sessions[0]!);
+    assert.equal((capture(sessions[1]!).promotions as JsonObject[])[0]?.tier, "project");
+    const project = store.list("memory_ledger", 100, item => item.status === "active" && (item.scope as JsonObject | undefined)?.id === "session-support")[0]!;
+    const sessionMemory = store.listScoped("memory_ledger", [{ kind: "session", id: sessions[0]! }], 10)[0]!;
+    service.memoryLedgerTransition({ memory_id: sessionMemory.id, status: "revoked", reason: "source corrected" });
+    assert.equal(store.get("memory_ledger", String(project.id)).status, "revoked");
+    assert.doesNotMatch(readFileSync(join(projectStorageDirectory(store.paths, projectRoot), "memory", "memory.md"), "utf8"), /Verify a session source/u);
+    assert.equal(store.list("memory_observation", 100, item => item.status === "active" && item.project_id === "session-support").length, 1);
+    assert.equal((capture(sessions[2]!).promotions as JsonObject[])[0]?.tier, "project");
+    const latestSession = store.listScoped("memory_ledger", [{ kind: "session", id: sessions[2]! }], 10)[0]!;
+    const malformed = store.create("memory_observation", "missing-project-observation", { scope: { kind: "project", id: "session-support" },
+      session_digest: digestJson(sessions[2]!), content_digest: latestSession.content_digest,
+      kind: "preference", topic: "session-support-topic", status: "active" });
+    assert.throws(() => service.memoryLedgerTransition({ memory_id: latestSession.id, status: "revoked", reason: "malformed observation" }), /project scope is missing/u);
+    assert.equal(store.get("memory_ledger", String(latestSession.id)).status, "active", "invalid support must roll back the transition");
+    assert.equal(store.get("memory_observation", String(malformed.id)).status, "active");
+  } finally {
+    sessions.forEach(sessionId => service.memorySessionArchive({ session_id: sessionId }));
+    store.close();
+    rmSync(dataRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("automatic Memory promotion verifies current independent support records", async () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), "craft-memory-support-validation-"));
+  const projectRoots = [1, 2, 3].map(index => mkdtempSync(join(tmpdir(), `craft-memory-validation-${index}-`)));
+  const store = await new CraftStore(craftPaths(dataRoot)).open();
+  const service = new CraftService(store);
+  try {
+    service.knowledgeMemoryInstallBuiltins();
+    projectRoots.forEach((root, index) => store.create("scope_alias", `validation-${index}`, {
+      scope: { kind: "project", id: `validation-${index}` }, alias_kind: "path", alias: root, status: "active",
+    }));
+    const content = "Validated support fact", contentDigest = digestJson(content);
+    const observations = ["one", "two"].map(name => store.create("memory_observation", `observation-${name}`, {
+      scope: { kind: "project", id: "validation-0" }, project_id: "validation-0", session_digest: `session-${name}`,
+      content_digest: contentDigest, kind: "preference", topic: "support-validation", status: "active",
+    }));
+    const refs = observations.map(item => ({ kind: "memory_observation", id: String(item.id), version: Number(item.version) }));
+    const ledger = service.memoryGovernance.ledger;
+    const args = { proposed_by: "automatic-memory-promotion", promotion_support_refs: refs, scope_kind: "project", scope_id: "validation-0",
+      content, kind: "preference", topic: "support-validation" };
+    assert.deepEqual(ledger.validatePromotionSupport(args), refs);
+    for (const invalid of [
+      { proposed_by: "manual" }, { promotion_support_refs: undefined }, { scope_kind: "session" },
+      { promotion_support_refs: [null, refs[1]] }, { promotion_support_refs: [[refs[0]], refs[1]] },
+      { promotion_support_refs: [{ ...refs[0], kind: "memory_ledger" }, refs[1]] },
+      { promotion_support_refs: [{ ...refs[0], version: 2 }, refs[1]] },
+      { promotion_support_refs: [refs[0], refs[0]] }, { promotion_support_refs: [refs[0]] },
+      { scope_id: "another-project" }, { content: "different fact" }, { kind: "working" }, { topic: "other-topic" },
+    ]) assert.throws(() => ledger.validatePromotionSupport({ ...args, ...invalid }), /promotion support|promotion scope|support reference|independent|threshold/u);
+    const expired = store.create("memory_observation", "expired-observation", { ...observations[0], id: undefined, version: undefined,
+      session_digest: "expired-session", valid_until: "2000-01-01T00:00:00.000Z" });
+    assert.throws(() => ledger.validatePromotionSupport({ ...args, promotion_support_refs: [refs[0], { kind: "memory_observation", id: expired.id, version: expired.version }] }), /no longer active/u);
+    const malformedDate = store.create("memory_observation", "malformed-date-observation", { scope: { kind: "project", id: "validation-0" },
+      project_id: "validation-0", session_digest: "invalid-date-session", content_digest: contentDigest,
+      kind: "preference", topic: "support-validation", status: "active", valid_until: "not-a-date" });
+    assert.throws(() => ledger.validatePromotionSupport({ ...args, promotion_support_refs: [refs[0], { kind: "memory_observation", id: malformedDate.id, version: malformedDate.version }] }), /no longer active/u);
+    const invalidDateType = store.create("memory_observation", "invalid-date-type", { scope: { kind: "project", id: "validation-0" },
+      project_id: "validation-0", session_digest: "invalid-type-session", content_digest: contentDigest,
+      kind: "preference", topic: "support-validation", status: "active", valid_until: 42 });
+    assert.throws(() => ledger.validatePromotionSupport({ ...args, promotion_support_refs: [refs[0], { kind: "memory_observation", id: invalidDateType.id, version: invalidDateType.version }] }), /no longer active/u);
+    const missingSession = store.create("memory_observation", "missing-session-digest", { scope: { kind: "project", id: "validation-0" },
+      project_id: "validation-0", content_digest: contentDigest, kind: "preference", topic: "support-validation", status: "active" });
+    assert.throws(() => ledger.validatePromotionSupport({ ...args, promotion_support_refs: [refs[0], { kind: "memory_observation", id: missingSession.id, version: missingSession.version }] }), /independent/u);
+    const emptySession = store.create("memory_observation", "empty-session-digest", { scope: { kind: "project", id: "validation-0" },
+      project_id: "validation-0", session_digest: "", content_digest: contentDigest,
+      kind: "preference", topic: "support-validation", status: "active" });
+    assert.equal(ledger.promotionSupported({ scope: { kind: "project", id: "validation-0" }, content_digest: contentDigest,
+      kind: "preference", topic: "support-validation", promotion_support_refs: [refs[0],
+        { kind: "memory_observation", id: emptySession.id, version: emptySession.version }] }), false);
+    const projects = projectRoots.map((_, index) => store.create("memory_ledger", `validation-project-${index}`, {
+      scope: { kind: "project", id: `validation-${index}` }, content_digest: contentDigest, kind: "preference", topic: "support-validation", status: "active",
+    }));
+    const globalRefs = projects.map(item => ({ kind: "memory_ledger", id: String(item.id), version: Number(item.version) }));
+    assert.equal(ledger.validatePromotionSupport({ ...args, scope_kind: "global", scope_id: "global", promotion_support_refs: globalRefs }).length, 3);
+    assert.throws(() => ledger.validatePromotionSupport({ ...args, scope_kind: "global", scope_id: "global", promotion_support_refs: globalRefs.slice(0, 2) }), /threshold/u);
+    const originalFind = store.find.bind(store);
+    (store as unknown as { find: typeof store.find }).find = ((kind: string, id: string, version?: number, hydrateContent?: boolean) => {
+      const found = originalFind(kind, id, version, hydrateContent);
+      return kind === "memory_ledger" && id === projects[0]!.id && found ? { ...found, scope: { kind: "project" } } : found;
+    }) as typeof store.find;
+    try {
+      assert.throws(() => ledger.validatePromotionSupport({ ...args, scope_kind: "global", scope_id: "global", promotion_support_refs: globalRefs }), /independent/u);
+      assert.equal(ledger.promotionSupported({ scope: { kind: "global", id: "global" }, content_digest: contentDigest,
+        kind: "preference", topic: "support-validation", promotion_support_refs: globalRefs }), false);
+    } finally { store.find = originalFind; }
+    const legacyProject = store.create("memory_ledger", "legacy-promoted-project", { scope: { kind: "project", id: "validation-0" },
+      source_id: "builtin.evidence-wiki", content_digest: contentDigest, kind: "preference", topic: "support-validation", status: "active" });
+    const legacyProjectCandidateId = `memory_candidate_project_${digestJson({ contentDigest, projectId: "validation-0", kind: "preference", topic: "support-validation" }).slice(-32)}`;
+    store.create("memory_candidate", legacyProjectCandidateId, { scope: { kind: "project", id: "validation-0" },
+      proposed_by: "automatic-memory-promotion", ledger_memory_id: legacyProject.id, status: "approved" });
+    assert.equal(ledger.promotionSupported(legacyProject), true, "an unrelated malformed observation must not invalidate two legitimate legacy supporters");
+    assert.equal(ledger.promotionSupported({ ...legacyProject, promotion_support_refs: [refs[0],
+      { kind: "memory_observation", id: missingSession.id, version: missingSession.version }] }), false,
+    "an explicitly referenced observation without session identity must fail closed");
+    const { id: _missingId, version: _missingVersion, created_at: _missingCreated, updated_at: _missingUpdated, ...missingPayload } = missingSession;
+    store.save("memory_observation", String(missingSession.id), { ...missingPayload, status: "revoked" });
+    assert.equal(ledger.promotionSupported(legacyProject), true, "expired and malformed extra observations do not disqualify two current sessions");
+    store.create("memory_observation", "other-kind-observation", { scope: { kind: "project", id: "validation-0" },
+      project_id: "validation-0", session_digest: "other-kind-session", content_digest: contentDigest,
+      kind: "working", topic: "support-validation", status: "active" });
+    store.create("memory_observation", "other-topic-observation", { scope: { kind: "project", id: "validation-0" },
+      project_id: "validation-0", session_digest: "other-topic-session", content_digest: contentDigest,
+      kind: "preference", topic: "another-topic", status: "active" });
+    assert.equal(ledger.promotionSupported(legacyProject), true);
+    const wrongScopeObservation = store.create("memory_observation", "wrong-scope-observation", { scope: { kind: "project", id: "validation-1" },
+      project_id: "validation-1", session_digest: "wrong-scope-session", content_digest: contentDigest,
+      kind: "preference", topic: "support-validation", status: "active" });
+    assert.equal(ledger.promotionSupported({ ...legacyProject, promotion_support_refs: [refs[0], { kind: "memory_observation", id: wrongScopeObservation.id, version: wrongScopeObservation.version }] }), false);
+    const spoofedScopeObservation = store.create("memory_observation", "spoofed-scope-observation", { scope: { kind: "global", id: "global" },
+      project_id: "validation-0", session_digest: "spoofed-scope-session", content_digest: contentDigest,
+      kind: "preference", topic: "support-validation", status: "active" });
+    const spoofedRef = { kind: "memory_observation", id: String(spoofedScopeObservation.id), version: Number(spoofedScopeObservation.version) };
+    assert.throws(() => ledger.validatePromotionSupport({ ...args, promotion_support_refs: [refs[0], spoofedRef] }), /independent/u);
+    assert.equal(ledger.promotionSupported({ ...legacyProject, promotion_support_refs: [refs[0], spoofedRef] }), false);
+    const spoofedDigest = digestJson("Scoped observation fact");
+    store.create("memory_observation", "spoofed-capture-observation", { scope: { kind: "global", id: "global" },
+      project_id: "validation-0", session_digest: "spoofed-capture-session", content_digest: spoofedDigest,
+      kind: "preference", topic: "scope-spoof", status: "active" });
+    const scopedSessionId = `scoped-observation-${randomUUID()}`;
+    const scopedCapture = service.memoryCaptureObservedFact({ session_id: scopedSessionId, project_scope_id: "validation-0",
+      project_root: projectRoots[0], content: "Scoped observation fact", kind: "preference", topic: "scope-spoof" });
+    assert.equal((scopedCapture.promotions as JsonObject[]).length, 0);
+    service.memorySessionArchive({ session_id: scopedSessionId });
+    const legacyGlobal = store.create("memory_ledger", "legacy-promoted-global", { scope: { kind: "global", id: "global" },
+      source_id: "builtin.evidence-wiki", content_digest: contentDigest, kind: "preference", topic: "support-validation", status: "active" });
+    const legacyGlobalCandidateId = `memory_candidate_global_${digestJson({ contentDigest, kind: "preference", topic: "support-validation" }).slice(-32)}`;
+    store.create("memory_candidate", legacyGlobalCandidateId, { scope: { kind: "global", id: "global" },
+      proposed_by: "automatic-memory-promotion", ledger_memory_id: legacyGlobal.id, status: "approved" });
+    assert.equal(ledger.promotionSupported(legacyGlobal), true);
+    const globalAsSupport = store.create("memory_ledger", "invalid-global-support", { scope: { kind: "global", id: "global" },
+      content_digest: contentDigest, kind: "preference", topic: "support-validation", status: "active" });
+    assert.equal(ledger.promotionSupported({ ...legacyGlobal, promotion_support_refs: [globalRefs[0], globalRefs[1],
+      { kind: "memory_ledger", id: globalAsSupport.id, version: globalAsSupport.version }] }), false);
+    for (const bad of [
+      { ...legacyGlobal, promotion_support_refs: [null] },
+      { ...legacyGlobal, promotion_support_refs: [{ ...globalRefs[0], version: 99 }] },
+      { ...legacyGlobal, promotion_support_refs: [{ ...globalRefs[0], kind: "memory_observation" }] },
+      { ...legacyGlobal, promotion_support_refs: [{ ...globalRefs[0], id: "absent" }] },
+      { ...legacyGlobal, kind: "working", promotion_support_refs: globalRefs },
+      { ...legacyGlobal, topic: "other", promotion_support_refs: globalRefs },
+      { ...legacyGlobal, scope: { kind: "session", id: "invalid" }, promotion_support_refs: globalRefs },
+    ]) assert.equal(ledger.promotionSupported(bad), false);
+    const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...projectPayload } = projects[0]!;
+    store.save("memory_ledger", String(projects[0]!.id), { ...projectPayload, status: "revoked" });
+    const { id: _legacyId, version: _legacyVersion, created_at: _legacyCreated, updated_at: _legacyUpdated, ...legacyPayload } = legacyProject;
+    store.save("memory_ledger", String(legacyProject.id), { ...legacyPayload, status: "revoked" });
+    assert.equal(ledger.promotionSupported(legacyGlobal), false);
+    assert.throws(() => ledger.get({ memory_id: legacyGlobal.id, scope_kind: "global", scope_id: "global" }), /promotion support/u);
+    const noTopicContent = "Fact without a topic", noTopicDigest = digestJson(noTopicContent);
+    for (const name of ["a", "b"]) store.create("memory_observation", `no-topic-${name}`, { scope: { kind: "project", id: "validation-0" },
+      project_id: "validation-0", session_digest: `no-topic-session-${name}`, content_digest: noTopicDigest, kind: "preference", status: "active" });
+    const noTopicProject = store.create("memory_ledger", "no-topic-project", { scope: { kind: "project", id: "validation-0" },
+      source_id: "builtin.evidence-wiki", content_digest: noTopicDigest, kind: "preference", status: "active" });
+    const noTopicCandidateId = `memory_candidate_project_${digestJson({ contentDigest: noTopicDigest, projectId: "validation-0", kind: "preference", topic: "" }).slice(-32)}`;
+    store.create("memory_candidate", noTopicCandidateId, { scope: { kind: "project", id: "validation-0" },
+      proposed_by: "automatic-memory-promotion", ledger_memory_id: noTopicProject.id, status: "approved" });
+    assert.equal(ledger.promotionSupported(noTopicProject), true);
+    service.memoryLedgerTransition({ memory_id: noTopicProject.id, status: "revoked", reason: "no-topic correction" });
+    assert.equal(store.list("memory_observation", 100, item => item.content_digest === noTopicDigest && item.status === "active").length, 0);
+    const nestedDigest = digestJson("Nested support fact");
+    const nestedProjects = [0, 1, 2].map(index => {
+      const supporters = [0, 1].map(session => store.create("memory_observation", `nested-observation-${index}-${session}`, {
+        scope: { kind: "project", id: `validation-${index}` }, project_id: `validation-${index}`,
+        session_digest: `nested-session-${index}-${session}`, content_digest: nestedDigest,
+        kind: "preference", topic: "nested-support", status: "active",
+      }));
+      const project = store.create("memory_ledger", `nested-project-${index}`, {
+        scope: { kind: "project", id: `validation-${index}` }, content_digest: nestedDigest,
+        kind: "preference", topic: "nested-support", status: "active",
+        promotion_support_refs: supporters.map(item => ({ kind: "memory_observation", id: item.id, version: item.version })),
+      });
+      return { project, supporters };
+    });
+    const nestedRefs = nestedProjects.map(({ project }) => ({ kind: "memory_ledger", id: String(project.id), version: Number(project.version) }));
+    const nestedGlobal = { scope: { kind: "global", id: "global" }, content_digest: nestedDigest,
+      kind: "preference", topic: "nested-support", status: "active", promotion_support_refs: nestedRefs };
+    assert.equal(ledger.promotionSupported(nestedGlobal), true);
+    const brokenObservation = nestedProjects[0]!.supporters[0]!;
+    const { id: _nestedId, version: _nestedVersion, created_at: _nestedCreated, updated_at: _nestedUpdated, ...nestedPayload } = brokenObservation;
+    store.save("memory_observation", String(brokenObservation.id), { ...nestedPayload, status: "revoked" });
+    assert.equal(store.get("memory_ledger", String(nestedProjects[0]!.project.id)).status, "active");
+    assert.equal(ledger.promotionSupported(nestedProjects[0]!.project), false);
+    assert.equal(ledger.promotionSupported(nestedGlobal), false, "a global promotion cannot rely on an unsupported active project promotion");
+    assert.throws(() => ledger.validatePromotionSupport({ ...args, scope_kind: "global", scope_id: "global", content: "Nested support fact",
+      topic: "nested-support", promotion_support_refs: nestedRefs }), /no longer active/u);
+  } finally {
+    store.close();
+    rmSync(dataRoot, { recursive: true, force: true });
+    projectRoots.forEach(root => rmSync(root, { recursive: true, force: true }));
   }
 });

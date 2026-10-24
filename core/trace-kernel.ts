@@ -52,9 +52,9 @@ export class TraceKernel {
   constructor(store: CraftStore, archives: TraceArchiveStore = new LocalTraceArchiveStore(store.paths.logsDir)) { this.store = store; this.archives = archives; }
 
   start(args: JsonObject): JsonObject {
-    return this.store.transaction(() => {
+    const traceId = String(args.trace_id ?? `trace_${randomUUID().replaceAll("-", "")}`);
+    return this.store.traceTransaction(traceId, () => {
       const taskId = text(args.task_id, "task_id");
-      const traceId = String(args.trace_id ?? `trace_${randomUUID().replaceAll("-", "")}`);
       const identity = { task_id: taskId, launch_id: optional(args.launch_id), run_id: optional(args.run_id), trial_id: optional(args.trial_id), attempt_id: optional(args.attempt_id), operation_id: optional(args.operation_id), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), capability_fingerprint: optional(args.capability_fingerprint), policy_fingerprint: optional(args.policy_fingerprint) };
       const identityDigest = stableDigest(identity);
       const existing = this.store.find("trace", traceId);
@@ -67,8 +67,8 @@ export class TraceKernel {
   }
 
   append(args: JsonObject): JsonObject {
-    return this.store.transaction(() => {
-      const traceId = text(args.trace_id, "trace_id");
+    const traceId = text(args.trace_id, "trace_id");
+    return this.store.traceTransaction(traceId, () => {
       const trace = this.store.get("trace", traceId);
       if (TERMINAL.has(String(trace.status) as TraceStatus)) throw new Error("Cannot append to a terminal Trace");
       const eventKind = text(args.event_kind ?? args.event_type, "event_kind");
@@ -113,8 +113,9 @@ export class TraceKernel {
   }
 
   finalize(args: JsonObject): JsonObject {
-    return this.store.transaction(() => {
-      const traceId = text(args.trace_id, "trace_id"); const trace = this.store.get("trace", traceId); const status = text(args.status, "status") as TraceStatus;
+    const traceId = text(args.trace_id, "trace_id");
+    return this.store.traceTransaction(traceId, () => {
+      const trace = this.store.get("trace", traceId); const status = text(args.status, "status") as TraceStatus;
       if (!TERMINAL.has(status)) throw new Error("Trace final status is unsupported");
       if (TERMINAL.has(String(trace.status) as TraceStatus)) return { trace, idempotent: true };
       const event = this.append({ trace_id: traceId, event_kind: "trace.finalized", actor: "craft", source: "craft", trust: "verified", summary: text(args.summary, "summary"), status, data: {}, evidence_ids: strings(args.evidence_ids, "evidence_ids") });
@@ -228,7 +229,7 @@ export class TraceKernel {
         const current = this.store.listTraceChildren(kind, traceId);
         return versions(current) === versions(snapshot);
       };
-      const removed = this.store.transaction(() => {
+      const removed = this.store.traceTransaction(traceId, () => {
         const currentTrace = this.store.find("trace", traceId);
         if (!currentTrace || Number(currentTrace.version) !== Number(trace.version)
           || !unchanged("trace_event", events) || !unchanged("trace_feedback", feedback) || !unchanged("telemetry_event", telemetry)) return false;

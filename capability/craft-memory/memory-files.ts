@@ -2,16 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { ensureProjectStorageDirectory, isLegacySafeSessionId, parseSessionStorageScopeId, projectStorageDirectory, sessionStorageScopeId } from "../../common/craft-common-store-local/src/paths.ts";
 import { canonicalJson } from "../../common/craft-common-base/src/digest.ts";
 import { temporalMemorySelect } from "../../common/craft-common-base/src/memory-temporal-policy.ts";
 
-function sessionDirectory(sessionId: string): string {
-  if (typeof sessionId !== "string" || !sessionId || sessionId.trim() !== sessionId || Buffer.byteLength(sessionId, "utf8") > 255
-    || sessionId === "." || sessionId === ".." || /[/\\\x00-\x1f\x7f]/u.test(sessionId)) {
-    throw new Error("session_id must be one bounded, safe directory name");
-  }
-  return join("/tmp", ".craft_data", "memory", sessionId);
-}
+function legacyDirectSessionDirectory(sessionId: string): string { return join("/tmp", ".craft_data", "memory", sessionId); }
 
 function legacySessionDirectory(sessionId: string): string {
   const suffix = createHash("sha256").update(sessionId).digest("hex").slice(0, 32);
@@ -19,8 +14,8 @@ function legacySessionDirectory(sessionId: string): string {
 }
 
 /** A legacy hash can also be another session's direct id; check the owner before cleanup. */
-function sessionProjectionState(directory: string, sessionId: string): "missing" | "owned" | "foreign" {
-  for (const path of [join("/tmp", ".craft_data"), join("/tmp", ".craft_data", "memory"), directory]) {
+function sessionProjectionState(directory: string, sessionId: string, dataRoot: string): "missing" | "owned" | "foreign" {
+  for (const path of [dataRoot, dirname(dirname(directory)), dirname(directory), directory]) {
     try {
       const stat = lstatSync(path);
       if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Session Memory path must use regular directories");
@@ -48,41 +43,54 @@ function sessionArchiveId(sessionId: string): string {
 /** Human-readable scope projection for the Memory ledger. Scope metadata remains in memory.db. */
 export class MemoryFileStore {
   readonly store: CraftStore;
-  constructor(store: CraftStore) { this.store = store; }
+  readonly eligible: (memory: JsonObject) => boolean;
+  constructor(store: CraftStore, eligible: (memory: JsonObject) => boolean = () => true) { this.store = store; this.eligible = eligible; }
 
-  isSessionArchived(sessionId: string): boolean {
+  isSessionArchived(sessionId: string, host?: string): boolean {
     if (typeof sessionId !== "string" || !sessionId.trim()) throw new Error("session_id must not be empty");
-    return this.store.find("memory_session_archive", sessionArchiveId(sessionId.trim())) !== null;
+    const scopeId = host ? sessionStorageScopeId(host, sessionId) : this.store.resolveSessionStorageScopeId(sessionId);
+    return this.store.find("memory_session_archive", sessionArchiveId(scopeId)) !== null;
   }
 
   pathFor(scope: { kind: string; id: string }, projectRoot?: string): string | null {
     if (scope.kind === "global" || scope.kind === "user") return join(this.store.paths.memoryDir, "memory.md");
-    if (scope.kind === "session") return join(sessionDirectory(scope.id), "memory.md");
+    if (scope.kind === "session") return join(this.store.sessionStorageRoot(this.store.resolveSessionStorageScopeId(scope.id)), "memory", "memory.md");
     if (scope.kind !== "project") return null;
     const aliases = this.store.list("scope_alias", 10_000, item => item.status === "active" && item.alias_kind === "path"
       && (item.scope as JsonObject | undefined)?.kind === "project" && (item.scope as JsonObject | undefined)?.id === scope.id, false);
-    const roots = aliases.map(item => String(item.alias)).filter(value => isAbsolute(value) && existsDirectory(value));
-    const preferredRoot = projectRoot && isAbsolute(projectRoot) && existsDirectory(projectRoot)
-      ? roots.find(value => realpathSync(value) === realpathSync(projectRoot)) : undefined;
-    const root = preferredRoot ?? roots[0];
-    return root ? join(realpathSync(root), ".craft_data", "memory", "memory.md") : null;
+    const roots = [...new Set(aliases.map(item => String(item.alias)).filter(value => isAbsolute(value) && existsDirectory(value)).map(value => realpathSync(value)))];
+    if (roots.length > 1) throw new Error("Project Memory storage root is ambiguous");
+    const root = roots[0];
+    if (!root) return null;
+    if (projectRoot && (!isAbsolute(projectRoot) || !existsDirectory(projectRoot) || realpathSync(projectRoot) !== root))
+      throw new Error("Project Memory storage root does not match the registered project");
+    return join(projectStorageDirectory(this.store.paths, root), "memory", "memory.md");
   }
 
   sync(scope: { kind: string; id: string }, projectRoot?: string): JsonObject {
+    if (scope.kind === "session") scope = { ...scope, id: this.store.resolveSessionStorageScopeId(scope.id) };
     const path = this.pathFor(scope, projectRoot);
     if (!path) return { status: "unavailable", reason: "scope_path_unavailable", count: 0 };
+    if (scope.kind === "project") {
+      const roots = this.store.list("scope_alias", 10_000, item => item.status === "active" && item.alias_kind === "path"
+        && (item.scope as JsonObject | undefined)?.kind === "project" && (item.scope as JsonObject | undefined)?.id === scope.id, false)
+        .map(item => String(item.alias)).filter(value => isAbsolute(value) && existsDirectory(value)).map(value => realpathSync(value));
+      if (new Set(roots).size !== 1) throw new Error("Project Memory storage root is unavailable or ambiguous");
+      ensureProjectStorageDirectory(this.store.paths, roots[0]!);
+    }
     let legacyDirectory: string | null = null;
     if (scope.kind === "session") {
       if (this.isSessionArchived(scope.id)) return { status: "archived", path, count: 0 };
-      if (sessionProjectionState(dirname(path), scope.id) === "foreign") throw new Error("Session Memory directory belongs to another session");
+      this.store.sessionStorageRoot(scope.id, true);
+      if (sessionProjectionState(dirname(path), scope.id, this.store.paths.root) === "foreign") throw new Error("Session Memory directory belongs to another session");
       const legacy = legacySessionDirectory(scope.id);
-      if (legacy !== dirname(path) && sessionProjectionState(legacy, scope.id) === "owned") legacyDirectory = legacy;
+      if (sessionProjectionState(legacy, scope.id, join("/tmp", ".craft_data")) === "owned") legacyDirectory = legacy;
     }
     const scopes = scope.kind === "global" || scope.kind === "user"
       ? [{ kind: "global", id: "global" }, ...this.store.list("memory_ledger", 10_000, item => (item.scope as JsonObject | undefined)?.kind === "user", false)
         .map(item => item.scope as { kind: string; id: string })]
       : [scope];
-    const records = this.store.listScoped("memory_ledger", scopes, 10_000, item => item.status === "active");
+    const records = this.store.listScoped("memory_ledger", scopes, 10_000, item => item.status === "active" && this.eligible(item));
     const byScope = new Map<string, JsonObject[]>();
     for (const record of records) {
       const key = canonicalJson(record.scope);
@@ -108,17 +116,20 @@ export class MemoryFileStore {
     return { status: "written", path, count: unique.length, digest: `sha256:${createHash("sha256").update(body).digest("hex")}` };
   }
 
-  archiveSession(sessionId: string): JsonObject {
+  archiveSession(sessionId: string, host?: string): JsonObject {
     if (typeof sessionId !== "string" || !sessionId.trim()) throw new Error("session_id must not be empty");
-    const directory = sessionDirectory(sessionId);
-    const scope = { kind: "session", id: sessionId };
+    const scopeId = host ? sessionStorageScopeId(host, sessionId) : this.store.resolveSessionStorageScopeId(sessionId);
+    const parsed = parseSessionStorageScopeId(scopeId);
+    const legacySessionId = host ? sessionId : scopeId;
+    const directory = this.store.sessionStorageRoot(scopeId);
+    const scope = { kind: "session", id: scopeId };
     const sessionDigest = createHash("sha256").update(scope.id).digest("hex");
     const archiveId = sessionArchiveId(scope.id);
     const prior = this.store.find("memory_session_archive", archiveId);
     if (prior) return { ...prior, idempotent: true };
-    if (sessionProjectionState(directory, scope.id) === "foreign") throw new Error("Session Memory directory belongs to another session");
-    const legacyDirectory = legacySessionDirectory(scope.id);
-    const legacyOwned = legacyDirectory !== directory && sessionProjectionState(legacyDirectory, scope.id) === "owned";
+    if (sessionProjectionState(join(directory, "memory"), scope.id, this.store.paths.root) === "foreign") throw new Error("Session Memory directory belongs to another session");
+    const legacyDirectory = legacySessionDirectory(legacySessionId);
+    const legacyOwned = sessionProjectionState(legacyDirectory, legacySessionId, join("/tmp", ".craft_data")) === "owned";
     const memories = this.store.listScoped("memory_ledger", [scope], 10_000);
     const candidates = this.store.listScoped("memory_candidate", [scope], 10_000);
     const confirmations = this.store.listScoped("memory_confirmation", [scope], 10_000);
@@ -135,8 +146,12 @@ export class MemoryFileStore {
     for (const candidate of candidates) this.store.remove("memory_candidate", String(candidate.id));
     for (const confirmation of confirmations) this.store.remove("memory_confirmation", String(confirmation.id));
     this.store.closeMemoryScope(scope);
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(join(directory, "memory"), { recursive: true, force: true });
     if (legacyOwned) rmSync(legacyDirectory, { recursive: true, force: true });
+    if (!parsed && isLegacySafeSessionId(scope.id)) {
+      const legacyDirect = legacyDirectSessionDirectory(scope.id);
+      if (sessionProjectionState(legacyDirect, scope.id, join("/tmp", ".craft_data")) === "owned") rmSync(legacyDirect, { recursive: true, force: true });
+    }
     const archived = this.store.create("memory_session_archive", archiveId, { status: "archived", session_digest: sessionDigest,
       memory_count: memories.length, candidate_count: candidates.length, confirmation_count: confirmations.length, content_deleted: true, archived_at: new Date().toISOString() });
     this.store.appendEvent("memory-session", "memory.session_archived", { session_digest: sessionDigest, memory_count: memories.length, candidate_count: candidates.length, content_deleted: true });

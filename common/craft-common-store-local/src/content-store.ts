@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
-import type { CraftPaths } from "./paths.ts";
+import { canonicalCandidatePath, ensureSessionStorageDirectory, isLegacySafeSessionId, sessionStorageDirectory, type CraftPaths } from "./paths.ts";
 
 export type ContentKind = "knowledge" | "memory" | "experience";
 /** Experience keeps human-readable procedures by format without splitting its fact ledger. */
@@ -149,6 +149,7 @@ export class MarkdownContentStore {
   #projectKnowledgeDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
   #projectMemoryDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
   #projectExperienceDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
+  #sessionMemoryDirectory: ((sessionId: string, writing: boolean) => string) | undefined;
   constructor(paths: CraftPaths) { this.paths = paths; }
 
   setProjectKnowledgeDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
@@ -157,6 +158,10 @@ export class MarkdownContentStore {
 
   setProjectMemoryDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
     this.#projectMemoryDirectory = resolver;
+  }
+
+  setSessionMemoryDirectoryResolver(resolver: (sessionId: string, writing: boolean) => string): void {
+    this.#sessionMemoryDirectory = resolver;
   }
 
   setProjectExperienceDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
@@ -182,7 +187,9 @@ export class MarkdownContentStore {
   }
 
   isCanonicalRef(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "scope">): boolean {
-    const directory = resolve(this.directory(ref.kind, undefined, ref.scope, undefined, ref.path));
+    // Read compatibility may resolve a legacy project or session directory.
+    // Canonicality must always be judged against the current data-root target.
+    const directory = resolve(this.directory(ref.kind, undefined, ref.scope));
     const target = resolve(ref.path);
     const inDirectory = ref.kind === "experience"
       ? target.startsWith(`${directory}${sep}`)
@@ -235,6 +242,31 @@ export class MarkdownContentStore {
     return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title, input.scope);
   }
 
+  /** Relocate verified immutable content without rewriting its metadata or overwriting a competing version. */
+  relocateSync(ref: ContentRef, scope: string): ContentRef {
+    const source = this.readCompatSync(ref, scope);
+    if (source.manifest.scope !== scope) throw new Error("Content migration scope drifted");
+    const target = this.namedPathFor(ref.kind, ref.record_id, ref.version, source.manifest.title ?? ref.record_id,
+      this.folderOf(ref.kind, ref.path), scope);
+    if (resolve(target) === resolve(ref.path)) return ref;
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    if (!lstatSync(dirname(target)).isDirectory()) throw new Error("Content migration destination directory must be regular");
+    const raw = readFileSync(ref.path);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, raw, { mode: 0o600, flag: "wx" });
+    try {
+      try { linkSync(temporary, target); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        if (!lstatSync(target).isFile()) throw new Error("Content migration destination must be a regular file");
+        if (!readFileSync(target).equals(raw)) throw new Error("Content migration destination conflicts");
+      }
+    } finally { unlinkSync(temporary); }
+    const result = { ...ref, path: target, scope };
+    this.readSync(result);
+    return result;
+  }
+
   /** Replace the body of an existing canonical document without changing its
    * identity or version. This is reserved for source-aware migrations: normal
    * domain writes remain append-only and must create a new record version. */
@@ -281,13 +313,22 @@ export class MarkdownContentStore {
   readCompatSync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">, expectedScope?: string): ContentReadResult {
     const scopedRef = ref.scope === undefined && expectedScope ? { ...ref, scope: expectedScope } : ref;
     if (this.isCanonicalRef(scopedRef)) return this.readSync(scopedRef);
-    const globalDirectory = resolve(this.directory(ref.kind));
-    const target = resolve(scopedRef.path);
+    const globalDirectory = canonicalCandidatePath(this.directory(ref.kind));
+    const target = canonicalCandidatePath(scopedRef.path);
     const isLegacySharedProjectRef = (scopedRef.kind === "knowledge" || scopedRef.kind === "memory" || scopedRef.kind === "experience") && scopedRef.scope?.startsWith("project:")
       && (target === globalDirectory || target.startsWith(`${globalDirectory}${sep}`));
-    if (!isLegacySharedProjectRef && target !== resolve(this.legacyPathFor(scopedRef.kind, scopedRef.record_id, scopedRef.version))) {
+    const compatibilityDirectory = canonicalCandidatePath(this.directory(scopedRef.kind, undefined, scopedRef.scope, undefined, scopedRef.path, false));
+    const canonicalDirectory = canonicalCandidatePath(this.directory(scopedRef.kind, undefined, scopedRef.scope));
+    const withinScopedLegacyDirectory = scopedRef.kind === "experience"
+      ? target.startsWith(`${compatibilityDirectory}${sep}`)
+      : dirname(target) === compatibilityDirectory;
+    const isScopedLegacyRef = scopedRef.scope?.startsWith("project:") || scopedRef.kind === "memory" && scopedRef.scope?.startsWith("session:")
+      ? compatibilityDirectory !== canonicalDirectory && withinScopedLegacyDirectory
+      : false;
+    if (!isLegacySharedProjectRef && !isScopedLegacyRef && target !== canonicalCandidatePath(this.legacyPathFor(scopedRef.kind, scopedRef.record_id, scopedRef.version))) {
       throw new Error("Content reference path is outside the canonical directory");
     }
+    if (!lstatSync(scopedRef.path).isFile()) throw new Error("Legacy content path must use regular files and directories");
     const result = parseDocument(readFileSync(scopedRef.path, "utf8"));
     if (result.manifest.record_id !== scopedRef.record_id || result.manifest.record_kind !== scopedRef.kind || result.manifest.record_version !== scopedRef.version
       || scopedRef.scope !== undefined && result.manifest.scope !== scopedRef.scope) throw new Error("Content reference metadata drifted");
@@ -380,9 +421,18 @@ export class MarkdownContentStore {
       }
       if (kind === "memory" && scope?.startsWith("session:")) {
         const sessionId = scope.slice("session:".length);
-        if (!sessionId || sessionId.trim() !== sessionId || sessionId === "." || sessionId === ".." || /[/\\\x00-\x1f\x7f]/u.test(sessionId)
-          || Buffer.byteLength(sessionId, "utf8") > 255) throw new Error("session_id must be one bounded, safe directory name");
-        return join("/tmp", ".craft_data", "memory", sessionId, "md");
+        if (!sessionId || Buffer.byteLength(sessionId, "utf8") > 65_536) throw new Error("session_id must be a non-empty identifier under 65536 UTF-8 bytes");
+        if (referencePath && !writing && isLegacySafeSessionId(sessionId)) {
+          const target = resolve(referencePath), legacyRoot = join("/tmp", ".craft_data", "memory");
+          const legacyDirectories = [sessionId, createHash("sha256").update(sessionId).digest("hex").slice(0, 32)]
+            .map(id => join(legacyRoot, id, "md"));
+          const legacy = legacyDirectories.find(directory => dirname(target) === directory);
+          if (legacy) return legacy;
+        }
+        const root = this.#sessionMemoryDirectory?.(sessionId, writing)
+          ?? join(writing ? ensureSessionStorageDirectory(this.paths, "craft-mcp", sessionId)
+            : sessionStorageDirectory(this.paths, "craft-mcp", sessionId), "memory", "md");
+        return root;
       }
       if (kind === "knowledge" && scope?.startsWith("project:")) {
         const projectDirectory = this.#projectKnowledgeDirectory?.(scope, {

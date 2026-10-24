@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
-import { extname, isAbsolute, join } from "node:path";
+import { extname, isAbsolute, join, resolve } from "node:path";
+import { homedir } from "node:os";
 
-export type RepositoryFile = { path: string; digest: string; content: string; language: string };
-export type RepositoryContextFile = { path: string; digest: string; content: string };
+export type RepositoryFile = { path: string; digest: string; content: string; language: string; file_version?: string };
+export type RepositoryContextFile = { path: string; digest: string; content: string; file_version?: string };
 export type RepositoryFiles = { root: string; state: "ready" | "disabled" | "not_repository"; files: RepositoryFile[]; context_files: RepositoryContextFile[]; context_files_omitted: number; omitted: number; omitted_by_language: Record<string, number> };
 const LANGUAGE_EXTENSIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   "typescript-javascript": [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
@@ -28,6 +29,35 @@ const GO_CONTEXT_FILES = new Set(["go.mod", "go.sum", "go.work", "go.work.sum"])
 const MAX_CONTEXT_FILE_BYTES = 512 * 1024;
 const MAX_CONTEXT_TOTAL_BYTES = 1024 * 1024;
 const git = (root: string, args: string[], input?: string) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", input, timeout: 5000, maxBuffer: 8 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"] });
+const fileVersion = (stat: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }): string =>
+  [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
+
+/** Digest only repository selection policy, without reading source bodies. */
+export function repositoryPolicyDigest(root: string): string {
+  root = realpathSync(root);
+  const configPath = join(root, ".craft-codebase.json");
+  let config = "missing";
+  if (existsSync(configPath)) {
+    const stat = lstatSync(configPath);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Repository config must be a regular file");
+    config = createHash("sha256").update(readFileSync(configPath)).digest("hex");
+  }
+  const paths = [...new Set(git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean))].sort();
+  const policyFiles = paths.filter(path => path === ".gitignore" || path.endsWith("/.gitignore"));
+  const infoExclude = resolve(root, git(root, ["rev-parse", "--git-path", "info/exclude"]).trim());
+  const configured = (() => {
+    try { return git(root, ["config", "--path", "--get-all", "core.excludesfile"]).split(/\r?\n/u).filter(Boolean); }
+    catch (error) { if ((error as { status?: number }).status === 1) return []; throw error; }
+  })();
+  const defaultExclude = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "git", "ignore");
+  const fileDigest = (path: string): string => {
+    try { return createHash("sha256").update(readFileSync(path)).digest("hex"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing"; throw error; }
+  };
+  const ignores = [...new Set([...policyFiles.map(path => join(root, path)), infoExclude, ...configured.map(path => resolve(root, path)), defaultExclude])]
+    .sort().map(path => [path, fileDigest(path)]);
+  return createHash("sha256").update(JSON.stringify({ config, ignores, auto_index: process.env.CRAFT_CODEBASE_AUTO_INDEX ?? null })).digest("hex");
+}
 
 function hasSymlinkPath(root: string, path: string): boolean {
   let current = root;
@@ -84,11 +114,11 @@ export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
     const content = readFileSync(absolute, "utf8");
     if (content.includes("\0")) { context_files_omitted++; continue; }
     contextFilesBytes += stat.size;
-    context_files.push({ path, content, digest: createHash("sha256").update(content).digest("hex") });
+    context_files.push({ path, content, digest: createHash("sha256").update(content).digest("hex"), file_version: fileVersion(stat) });
   }
   // A task query changes a Context view, never the repository fact snapshot.
   // Keep the bounded source set stable across Hosts and repeated queries.
-  const candidates = new Map<string, Array<{ path: string; absolute: string; size: number; extension: string }>>();
+  const candidates = new Map<string, Array<{ path: string; absolute: string; size: number; extension: string; file_version: string }>>();
   const omitted_by_language: Record<string, number> = {};
   const omit = (extension: string): void => {
     const group = LANGUAGE_GROUPS[extension]!;
@@ -105,7 +135,7 @@ export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
     if (stat.size > MAX_FILE_BYTES) { omit(extension); continue; }
     const group = LANGUAGE_GROUPS[extension]!;
     const queue = candidates.get(group) ?? [];
-    queue.push({ path, absolute, size: stat.size, extension });
+    queue.push({ path, absolute, size: stat.size, extension, file_version: fileVersion(stat) });
     candidates.set(group, queue);
   }
   // Rotate across language families before applying the shared file/byte limits.
@@ -130,7 +160,7 @@ export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
       const content = readFileSync(candidate.absolute, "utf8");
       if (content.includes("\0")) { omit(candidate.extension); continue; }
       bytes += candidate.size;
-      files.push({ path: candidate.path, content, digest: createHash("sha256").update(content).digest("hex"), language: candidate.extension.slice(1) });
+      files.push({ path: candidate.path, content, digest: createHash("sha256").update(content).digest("hex"), language: candidate.extension.slice(1), file_version: candidate.file_version });
     }
   }
   for (const [group, queue] of candidates) {

@@ -18,6 +18,7 @@ import { activeProcedure, preserveProcedureRelease, selectedProcedure, updatePro
 import { fixture as invocationFixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
 import { KnowledgeClaimGovernance } from "../capability/craft-knowledge/claim-governance.ts";
 import { stableDigest, payload } from "../core/digest.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-context-fixes-")), repo = join(root, "repo"); mkdirSync(repo); execFileSync("git", ["-C", repo, "init", "-q"]);
@@ -85,7 +86,9 @@ test("feedback attributes selected code and schedules correction without alterin
   const f = await fixture();
   try {
     const pack = await f.service.contextOpen({ project_root: f.repo, query: "登录代码" }); const id = (pack.pack_receipt as JsonObject).id;
-    const feedback = f.service.contextResolutionFeedback({ receipt_id: id, outcome: "stale", usage_stage: "used", asset_refs: pack.asset_refs }); assert.equal((feedback.corrections as unknown[]).length, 2);
+    const feedback = f.service.contextResolutionFeedback({ receipt_id: id, outcome: "stale", usage_stage: "used", asset_refs: pack.asset_refs });
+    const selectedCodeRefs = (pack.asset_refs as JsonObject[]).filter(ref => ref.member === "codebase");
+    assert(selectedCodeRefs.length > 0); assert.equal((feedback.corrections as unknown[]).length, selectedCodeRefs.length);
     assert.equal(f.service.contextResolutionFeedback({ receipt_id: id, outcome: "stale", usage_stage: "used", asset_refs: pack.asset_refs }).idempotent, true);
     assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", asset_refs: [{ member: "codebase", id: "other" }] }), /not selected/);
     assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", usage_stage: "verified" }), /Evidence/);
@@ -162,7 +165,7 @@ test("discovery and Chinese code matching are bounded hints", () => {
     assert(memoryTools.some(item => item.name === tool), `Memory discovery must include ${tool}`);
   const codeTools = discoverContextTools({ intent: "code" }).tools as JsonObject[];
   const codebaseNames = codeTools.filter(tool => String(tool.name).startsWith("craft_codebase_")).map(tool => tool.name).sort();
-  assert.deepEqual(codebaseNames, ["craft_codebase_callers_find", "craft_codebase_context_slice", "craft_codebase_impact_query",
+  assert.deepEqual(codebaseNames, ["craft_codebase_callers_find", "craft_codebase_callers_query", "craft_codebase_context_slice", "craft_codebase_impact_query",
     "craft_codebase_relations_find", "craft_codebase_symbol_explore", "craft_codebase_symbol_find", "craft_codebase_symbol_read",
     "craft_codebase_symbols_overview"].sort());
   assert(codebaseNames.every(name => codeTools.find(tool => tool.name === name)?.annotations
@@ -253,7 +256,7 @@ test("required Knowledge and Memory refs do not depend on lexical relevance", as
     f.store.create("evidence", "proof", { confidence: "confirmed" });
     const sdk = new KnowledgeClaimGovernance(f.store);
     sdk.knowledgeClaimSave({ claim_id: "claim", kind: "fact", content: "Mandatory unrelated detail", scope: `${f.scope.kind}:${f.scope.id}`, project_root: f.repo, evidence_ids: ["proof"] });
-    const claim = sdk.knowledgeClaimReview({ claim_id: "claim", status: "reviewed", reviewer: "human", reason: "verified" }).claim as JsonObject;
+    const claim = attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", "claim"));
     const requested = { member: "knowledge", id: claim.id, version: claim.version };
     const result = await f.service.contextOpen({ project_root: f.repo, query: "unmatched", include_codebase: false, required_refs: [requested] });
     assert.equal(((result.contributions as JsonObject[])[0]!.items as JsonObject[])[0]!.claim_id, claim.id);
@@ -302,20 +305,23 @@ test("standalone Claim SDK preserves validation, legacy replay and current/histo
     assert((sdk.knowledgeClaimList({}).claims as unknown[]).length > 0); assert.equal((sdk.knowledgeClaimList({ query: "retained fact", limit: 1 }).claims as unknown[]).length, 1);
     for (const status of ["candidate", "unknown"]) assert.throws(() => sdk.knowledgeClaimReview({ claim_id: original.id, status, reviewer: "human", reason: "review" }), /unsupported/);
     sdk.knowledgeClaimSave({ claim_id: "weak", kind: "fact", content: "weak", evidence_ids: ["weak"] });
-    assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "weak", status: "reviewed", reviewer: "human", reason: "review" }), /Evidence/);
+    assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "weak", status: "reviewed", reviewer: "human", reason: "review" }), /managed Host review and independent effectiveness evaluation/);
     f.store.create("knowledge_claim", "no-evidence", { status: "candidate" });
-    assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "no-evidence", status: "reviewed", reviewer: "human", reason: "review" }), /Evidence/);
+    assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "no-evidence", status: "reviewed", reviewer: "human", reason: "review" }), /managed Host review and independent effectiveness evaluation/);
     f.store.create("knowledge_claim", "no-source", { evidence_ids: ["proof"], status: "candidate" });
-    assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "no-source", status: "reviewed", reviewer: "human", reason: "review" }), /Source/);
-    f.store.create("knowledge_claim", "missing-source", { evidence_ids: ["proof"], status: "candidate", source_id: "absent" });
-    assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "missing-source", status: "reviewed", reviewer: "human", reason: "review" }), /Source/);
-    const reviewed = sdk.knowledgeClaimReview({ claim_id: original.id, status: "reviewed", reviewer: "human", reason: "review" }).claim as JsonObject;
-    f.store.save("knowledge_claim", String(original.id), { ...payload(reviewed), scope: "project:other", scope_envelope: undefined });
-    assert.throws(() => sdk.knowledgeClaimGet({ claim_id: original.id, version: 1 }), /historical/);
+    assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "no-source", status: "reviewed", reviewer: "human", reason: "review" }), /managed Host review and independent effectiveness evaluation/);
+    f.service.knowledgeSourceRegister({ source_id: "source-to-delete", kind: "custom", label: "Temporary source",
+      scope_kind: "project", scope_id: "p", locator: join(f.root, "temporary.md"), content_digest: "temporary-source-digest", trust: "bounded", access: "read_only" });
+    f.store.create("knowledge_claim", "missing-source", { scope, evidence_ids: ["proof"], status: "candidate", source_id: "source-to-delete" });
+    f.store.remove("knowledge_source", "source-to-delete");
+    assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "missing-source", status: "reviewed", reviewer: "human", reason: "review" }), /managed Host review and independent effectiveness evaluation/);
+    const reviewed = attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", String(original.id)));
+    assert.throws(() => f.store.save("knowledge_claim", String(original.id), { ...payload(reviewed), scope: "project:other", scope_envelope: undefined }), /cannot change storage scope/);
+    assert.equal((sdk.knowledgeClaimGet({ claim_id: original.id, version: 1 }).claim as JsonObject).version, 1);
     assert(sdk.knowledgeClaimReview({ claim_id: "weak", status: "disputed", reviewer: "human", reason: "contradicted" }).claim);
     f.store.save("evidence", "weak", { confidence: "bounded" });
     f.store.database.prepare("DELETE FROM records WHERE kind='knowledge_source' AND id='builtin.evidence-wiki'").run();
-    assert(sdk.knowledgeClaimReview({ claim_id: "weak", status: "reviewed", reviewer: "human", reason: "now bounded" }));
+    assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "weak", status: "reviewed", reviewer: "human", reason: "now bounded" }), /managed Host review and independent effectiveness evaluation/);
   } finally { f.close(); }
 });
 
@@ -422,7 +428,7 @@ test("legacy receipts, direct required validation and code query truncation rema
     assert.equal((await f.service.contextOpen({ project_root: f.repo, query: "fix login code", memory_ids: ["required"], max_items: 1 })).items instanceof Array, true);
     await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "login", max_tokens: 0 }), /max_tokens/);
     for (let i = 0; i < 20; i++) writeFileSync(join(f.repo, `login${i}.ts`), Array.from({ length: 16 }, (_, j) => `export function login${i}_${j}() {}`).join("\n"));
-    const truncated = await f.service.contextOpen({ project_root: f.repo, query: "login", max_items: 3 }); assert(((truncated.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_query_truncated"));
+    const truncated = await f.service.contextOpen({ project_root: f.repo, query: "login", max_items: 3, include_codebase: true }); assert(((truncated.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_query_truncated"));
     for (let i = 0; i < 20; i++) rmSync(join(f.repo, `login${i}.ts`)); writeFileSync(join(f.repo, "login.ts"), "// file only");
     const single = await f.service.contextOpen({ project_root: f.repo, query: "login", task_kind: "code", max_items: 1 }); assert.equal(single.receipt, null);
   } finally { f.close(); }
@@ -445,6 +451,22 @@ test("Hook emissions reuse matching turn material, upgrade code and invalidate a
     f.service.contextWorkingSets.recordEmission({ ...identity, turn_id: undefined }, set);
     f.service.contextWorkingSets.recordEmission({ ...identity, turn_id: "empty" }, { asset_refs: [], receipt: null });
     assert.equal(f.service.contextWorkingSets.emittedRefs({ ...identity, session_id: undefined }, set.asset_refs as JsonObject[]).length, 0);
+
+    const claimArgs = { query: "claim", scope_kind: f.scope.kind, scope_id: f.scope.id, session_id: "claim-session", turn_id: "claim-turn" };
+    assert.deepEqual(f.service.contextWorkingSets.claimEmission(claimArgs, { asset_refs: "malformed" }), []);
+    const firstRef = contextAssetRef("memory", { memory_id: "claim-memory-1", memory_version: 1 }, f.scope);
+    const secondRef = contextAssetRef("knowledge", { claim_id: "claim-knowledge-1", claim_version: 1 }, f.scope);
+    const thirdRef = contextAssetRef("experience", { procedure_id: "claim-procedure-1", procedure_version: 1 }, f.scope);
+    assert.deepEqual(f.service.contextWorkingSets.claimEmission(claimArgs, { asset_refs: [firstRef], receipt: null }), [firstRef]);
+    assert.deepEqual(f.service.contextWorkingSets.claimEmission(claimArgs, { asset_refs: [secondRef], receipt: {} }), [secondRef]);
+    const firstEmission = f.store.list("context_emission", 20).find(item => item.session_id === "claim-session" && item.turn_id === "claim-turn");
+    assert(firstEmission);
+    assert.equal(firstEmission.source_receipt_id, null);
+    const otherArgs = { ...claimArgs, turn_id: "prior-receipt" };
+    f.service.contextWorkingSets.claimEmission(otherArgs, { asset_refs: [firstRef], receipt: { id: "pinned-receipt" } });
+    f.service.contextWorkingSets.claimEmission(otherArgs, { asset_refs: [thirdRef], receipt: null });
+    const reused = f.store.list("context_emission", 20).find(item => item.session_id === "claim-session" && item.turn_id === "prior-receipt");
+    assert.equal(reused?.source_receipt_id, "pinned-receipt");
   } finally { f.close(); }
 });
 
@@ -520,7 +542,7 @@ test("scoped Knowledge/Memory corrections and active Experience releases appear 
     f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", memory_id: "m", kind: "preference", scope_kind: f.scope.kind, scope_id: f.scope.id, content: "login preference" });
     f.store.create("evidence", "proof", { source_type: "human", confidence: "confirmed" });
     f.service.knowledgeClaimSave({ claim_id: "k", kind: "fact", scope: `${f.scope.kind}:${f.scope.id}`, content: "login fact", evidence_ids: ["proof"] });
-    f.service.knowledgeClaimReview({ claim_id: "k", status: "reviewed", reviewer: "human", reason: "supported" });
+    attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", "k"));
     const pack = await f.service.contextOpen({ project_root: f.repo, query: "login", include_codebase: false }); f.service.contextResolutionFeedback({ receipt_id: (pack.pack_receipt as JsonObject).id, outcome: "incorrect", asset_refs: pack.asset_refs });
     for (const [member, id] of [["memory", "m"], ["knowledge", "k"]]) assert.equal((f.service.componentAssetInspect(member!, { action: "explain", asset_id: id, scope_kind: f.scope.kind, scope_id: f.scope.id }).corrections as unknown[]).length, 1);
   } finally { f.close(); }
@@ -553,8 +575,9 @@ test("optional code yields character budget to mandatory Context and Host refs c
     const base = await f.service.contextOpen({ project_root: f.repo, query: "login code" }); const code = (base.asset_refs as JsonObject[]).find(ref => ref.member === "codebase")!;
     await assert.rejects(f.service.contextOpen({ ...args, required_refs: [code] }), { name: "ContextBudgetError" });
     const codeSize = ((base.codebase as JsonObject).references as JsonObject[]).reduce((sum, ref) => sum + JSON.stringify(ref).length, 0);
-    const mixed = await f.service.contextOpen({ project_root: f.repo, query: "login code", required_refs: [code], memory_ids: ["required"], max_items: 6, max_chars: codeSize + 399 });
-    assert.equal((mixed.codebase as JsonObject).budget_rebalanced, true); assert.equal(((mixed.codebase as JsonObject).references as unknown[]).length, 1);
+    const mixed = await f.service.contextOpen({ project_root: f.repo, query: "login code", required_refs: [code], memory_ids: ["required"], max_items: 3, max_chars: 1_200 });
+    assert.equal((mixed.items as JsonObject[]).some(item => item.memory_id === "required"), true);
+    assert.equal(((mixed.codebase as JsonObject).references as JsonObject[]).some(reference => reference.node_id === code.id), true);
   } finally { f.close(); }
 });
 

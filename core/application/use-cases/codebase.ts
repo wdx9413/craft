@@ -27,6 +27,7 @@ declare module "../craft-service.ts" {
     codebaseSymbolRead(args: JsonObject): JsonObject;
     codebaseSymbolsOverview(args: JsonObject): JsonObject;
     codebaseCallersFind(args: JsonObject): JsonObject;
+    codebaseCallersQuery(args: JsonObject): Promise<JsonObject>;
     codebaseRelationsFind(args: JsonObject): JsonObject;
     codebaseDefinitionFind(args: JsonObject): JsonObject;
     codebaseControlFlowQuery(args: JsonObject): JsonObject;
@@ -67,6 +68,7 @@ export function installCodebaseMethods(serviceClass: typeof CraftService): void 
   serviceClass.prototype.codebaseSymbolRead = function (args) { return this.codebase.symbolRead(args); };
   serviceClass.prototype.codebaseSymbolsOverview = function (args) { return this.codebase.symbolsOverview(args); };
   serviceClass.prototype.codebaseCallersFind = function (args) { return this.codebase.findCallers(args); };
+  serviceClass.prototype.codebaseCallersQuery = function (args) { return this.codebase.queryCallers(args); };
   serviceClass.prototype.codebaseRelationsFind = function (args) { return this.codebase.findRelations(args); };
   serviceClass.prototype.codebaseDefinitionFind = function (args) { return this.codebase.findDefinition(args); };
   serviceClass.prototype.codebaseControlFlowQuery = function (args) { return this.codebase.controlFlow(args); };

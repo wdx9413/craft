@@ -12,13 +12,100 @@
   },
   "groups": [
     {
+      "name": "codex-task-evidence-verification",
+      "include": [
+        "core/codex-session-verification.ts",
+        "core/codex-task-prose.ts",
+        "capability/craft-knowledge/session-evidence.ts"
+      ],
+      "tests": [
+        "tests/codex-session-verification.test.ts",
+        "tests/codex-task-prose.test.ts",
+        "tests/knowledge-session-evidence.test.ts",
+        "tests/knowledge-managed-adjudication.test.ts",
+        "tests/codex-session-archive.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "capability-storage-migration",
+      "include": [
+        "core/codebase-storage-migration.ts",
+        "core/codebase-storage-preflight.ts",
+        "core/storage-migration-preflight.ts"
+      ],
+      "tests": [
+        "tests/codebase-storage-migration.test.ts",
+        "tests/codebase-storage-preflight.test.ts",
+        "tests/storage-migration-preflight.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "legacy-session-memory-preflight",
+      "include": [
+        "core/legacy-session-memory-preflight.ts"
+      ],
+      "tests": [
+        "tests/legacy-session-memory-preflight.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "codex-session-provenance",
       "include": [
-        "core/codex-session-archive.ts"
+        "core/codex-session-archive.ts",
+        "deploy/experience-learning/session-knowledge-candidates.ts",
+        "deploy/experience-learning/session-knowledge-evaluation.ts"
       ],
       "tests": [
         "tests/codex-session-archive.test.ts",
         "tests/session-knowledge-candidates.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-session-adjudication",
+      "include": [
+        "deploy/experience-learning/session-knowledge-adjudication.ts"
+      ],
+      "tests": [
+        "tests/session-knowledge-adjudication.test.ts",
+        "tests/knowledge-managed-adjudication.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-session-adjudication-state",
+      "include": [
+        "deploy/experience-learning/session-knowledge-adjudication-state.ts"
+      ],
+      "tests": [
+        "tests/session-knowledge-adjudication-state.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-evaluation-provenance",
+      "include": [
+        "core/knowledge-evaluation-provenance.ts"
+      ],
+      "tests": [
+        "tests/knowledge-evaluation-provenance.test.ts",
+        "tests/knowledge-evaluation.test.ts",
+        "tests/knowledge-promotion-policy.test.ts",
+        "tests/wiki-candidate-evaluation-bridge.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "wiki-candidate-publication-proof",
+      "include": [
+        "capability/craft-knowledge/wiki-candidate-governance.ts"
+      ],
+      "tests": [
+        "tests/capability-knowledge-package.test.ts",
+        "tests/wiki-candidate-evaluation-bridge.test.ts"
       ],
       "branches": true
     },
@@ -75,6 +162,7 @@
         "tests/context-remediation.test.ts",
         "tests/codebase-context-search.test.ts",
         "tests/repository-context.test.ts",
+        "tests/context-working-set-budget.test.ts",
         "tests/codebase-project-graph-store.test.ts",
         "tests/multi-language-analysis.test.ts",
         "tests/typescript-incremental.test.ts",
@@ -83,6 +171,7 @@
         "tests/java-analysis.test.ts",
         "tests/java-incremental.test.ts",
         "tests/knowledge-memory-operability.test.ts",
+        "tests/knowledge-session-evidence.test.ts",
         "tests/knowledge-scenario-catalog.test.ts",
         "tests/knowledge-promotion-policy.test.ts",
         "tests/procedure-projection.test.ts",
@@ -154,6 +243,7 @@
         "tests/digest-canonical.test.ts",
         "tests/validation.test.ts",
         "tests/retrieval-port.test.ts",
+        "tests/retrieval-excerpt.test.ts",
         "tests/component-hookless.test.ts",
         "tests/workflow.test.ts",
         "tests/industry-gaps.test.ts",
@@ -175,11 +265,22 @@
       ],
       "tests": [
         "tests/store.test.ts",
+        "tests/codebase-shard-store.test.ts",
+        "tests/trace-shard-store.test.ts",
         "tests/memory-partition-store.test.ts",
+        "tests/knowledge-partition-store.test.ts",
+        "tests/store-partition-atomicity.test.ts",
+        "tests/experience-graph-assets.test.ts",
         "tests/content-store.test.ts",
         "tests/store-migrations.test.ts",
         "tests/private-json.test.ts",
         "tests/config.test.ts",
+        "tests/project-storage-paths.test.ts",
+        "tests/project-experience-directory.test.ts",
+      "tests/storage-migration-preflight.test.ts",
+        "tests/legacy-session-memory-preflight.test.ts",
+        "tests/project-knowledge-content.test.ts",
+        "tests/memory-session-storage.test.ts",
         "tests/platform-settings.test.ts",
         "tests/coverage-fill.test.ts",
         "tests/remaining-branch-cases.test.ts",
@@ -189,7 +290,8 @@
         "tests/context-candidate-scope.test.ts",
         "tests/context-aggregation-policy.test.ts",
         "tests/context-read-snapshot.test.ts",
-        "tests/memory-contribution.test.ts"
+        "tests/memory-contribution.test.ts",
+        "tests/component-observability.test.ts"
       ],
       "branches": true
     },
@@ -330,9 +432,27 @@
         "tests/coverage-fill.test.ts",
         "tests/remaining-branch-cases.test.ts",
         "tests/store-migrations.test.ts",
+        "tests/project-storage-paths.test.ts",
+        "tests/content-store.test.ts",
+        "tests/memory-session-storage.test.ts",
+        "tests/memory-tiers.test.ts",
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/storage-migration-preflight.test.ts",
+        "tests/legacy-session-memory-preflight.test.ts",
+        "tests/legacy-knowledge-migration.test.ts",
+        "tests/legacy-knowledge-migration-coverage.test.ts",
+        "tests/project-brain-work-session.test.ts",
+        "tests/trace-archive-store.test.ts",
+        "tests/trace-retention-worker.test.ts",
+        "tests/codebase-shard-store.test.ts",
+        "tests/trace-shard-store.test.ts",
         "tests/context-remediation.test.ts",
         "tests/context-read-snapshot.test.ts",
-        "tests/memory-partition-store.test.ts"
+        "tests/memory-partition-store.test.ts",
+        "tests/knowledge-partition-store.test.ts",
+        "tests/store-partition-atomicity.test.ts",
+        "tests/experience-graph-assets.test.ts",
+        "tests/component-observability.test.ts"
       ],
       "branches": true
     },
@@ -708,6 +828,7 @@
         "tests/component-integration.test.ts",
         "tests/turn-cognitive-runtime.test.ts",
         "tests/component-hookless.test.ts",
+        "tests/knowledge-contribution.test.ts",
         "tests/industry-gaps.test.ts",
         "tests/repository-context.test.ts",
         "tests/context-source-access.test.ts",
@@ -718,7 +839,9 @@
         "tests/context-optimization.test.ts",
         "tests/context-read-snapshot.test.ts",
         "tests/memory-contribution.test.ts",
-        "tests/memory-session-storage.test.ts"
+      "tests/memory-session-storage.test.ts",
+      "tests/memory-tiers.test.ts",
+      "tests/memory-commit-optimization.test.ts"
       ],
       "branches": true
     },
@@ -1156,6 +1279,7 @@
         "tests/memory-session-storage.test.ts",
         "tests/context-remediation.test.ts",
         "tests/memory-commit-optimization.test.ts",
+      "tests/memory-tiers.test.ts",
         "tests/cognitive-write.test.ts"
       ],
       "branches": true
@@ -1166,6 +1290,7 @@
         "core/knowledge-auto-review.ts"
       ],
       "tests": [
+        "tests/knowledge-promotion-authority.test.ts",
         "tests/knowledge-memory-operability.test.ts",
         "tests/knowledge-promotion-policy.test.ts",
         "tests/component-hookless.test.ts"
@@ -1375,7 +1500,8 @@
       "tests": [
         "tests/private-json.test.ts",
         "tests/config.test.ts",
-        "tests/platform-settings.test.ts"
+        "tests/platform-settings.test.ts",
+        "tests/project-storage-paths.test.ts"
       ],
       "branches": true
     },
@@ -1424,6 +1550,17 @@
         "tests/procedure-projection.test.ts",
         "tests/component-asset-revisions.test.ts",
         "tests/context-remediation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-claim-import-authority",
+      "include": [
+        "core/knowledge-claim-import.ts"
+      ],
+      "tests": [
+        "tests/knowledge-bundle-promotion-import.test.ts",
+        "tests/knowledge-claim-import-authority.test.ts"
       ],
       "branches": true
     },
@@ -1647,6 +1784,7 @@
     {
       "name": "knowledge-classification-worker",
       "include": [
+        "core/knowledge-model-redaction.ts",
         "deploy/experience-learning/knowledge-classification.ts",
         "deploy/experience-learning/knowledge-classification-state.ts"
       ],
@@ -1669,7 +1807,7 @@
     {
       "name": "codex-cli-learning-transport",
       "include": [
-        "deploy/experience-learning/codex-cli-transport.ts"
+        "core/codex-cli-model-transport.ts"
       ],
       "tests": [
         "tests/codex-cli-learning-transport.test.ts"
@@ -1679,7 +1817,8 @@
     {
       "name": "learning-worker-supervisor",
       "include": [
-        "core/interfaces/learning-worker-supervisor.ts"
+        "core/interfaces/learning-worker-supervisor.ts",
+        "core/infrastructure/learning-worker-lock.ts"
       ],
       "tests": [
         "tests/learning-worker-supervisor.test.ts"
@@ -1823,12 +1962,32 @@
       "branches": true
     },
     {
+      "name": "experience-asset-worker",
+      "include": [
+        "core/interfaces/experience-asset-worker.ts"
+      ],
+      "tests": [
+        "tests/experience-asset-worker.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "context-response-projection",
       "include": [
         "core/context-response-projection.ts"
       ],
       "tests": [
         "tests/context-response-projection.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "retrieval-excerpt",
+      "include": [
+        "common/craft-common-base/src/retrieval-excerpt.ts"
+      ],
+      "tests": [
+        "tests/retrieval-excerpt.test.ts"
       ],
       "branches": true
     }

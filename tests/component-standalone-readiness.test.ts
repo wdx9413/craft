@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -86,20 +86,27 @@ test("public standalone component products expose small daily paths while advanc
   const f = await fixture();
   try {
     const expected: Record<string, readonly string[]> = {
-      knowledge: ["craft_component_readiness_get", "craft_knowledge_source_register", "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_claim_review", "craft_knowledge_host_review", "craft_knowledge_support_record", "craft_knowledge_promotion_policy_get", "craft_knowledge_auto_review", "craft_knowledge_scenario_migration_propose", "craft_context_resolution_resolve"],
+      knowledge: ["craft_component_readiness_get", "craft_knowledge_source_register", "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_host_review", "craft_knowledge_support_record", "craft_knowledge_promotion_policy_get", "craft_knowledge_auto_review", "craft_knowledge_scenario_migration_propose", "craft_context_resolution_resolve"],
       memory: ["craft_component_readiness_get", "craft_memory_candidate_propose", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_maintenance_run"],
       experience: ["craft_component_readiness_get", "craft_experience_scenario_list", "craft_experience_scenario_migration_propose", "craft_learning_cycle_finalize", "craft_experience_learning_request_get", "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_result", "craft_experience_observe", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get", "craft_procedure_get", "craft_procedure_list", "craft_procedure_gate", "craft_procedure_export_skill"],
     };
     for (const [product, required] of Object.entries(expected)) {
       const daily = new McpServer(f.service, productSurfaceOf(product));
       const names = daily.tools.map((tool) => tool.name);
-      assert(names.length <= (product === "experience" ? 32 : product === "knowledge" ? 30 : 24), `${product} daily surface must stay within the tool budget`);
+      assert(names.length <= (product === "experience" ? 32 : product === "knowledge" ? 30 : 24), `${product} daily surface has ${names.length} tools: ${names.join(", ")}`);
       for (const name of required) assert(names.includes(name), `${product} daily surface must expose ${name}`);
       assert(!names.includes("craft_verified_work_loop_prepare"));
     }
     assert(new McpServer(f.service, "component-knowledge").tools.length > new McpServer(f.service, productSurfaceOf("knowledge")).tools.length);
     assert(new McpServer(f.service, "component-memory").tools.length > new McpServer(f.service, productSurfaceOf("memory")).tools.length);
     assert(new McpServer(f.service, "component-experience").tools.length > new McpServer(f.service, productSurfaceOf("experience")).tools.length);
+    const dailyKnowledge = new Set(new McpServer(f.service, productSurfaceOf("knowledge")).tools.map((tool) => tool.name));
+    const advancedKnowledge = new Set(new McpServer(f.service, "component-knowledge").tools.map((tool) => tool.name));
+    for (const name of ["craft_knowledge_claim_review", "craft_knowledge_semantic_review_packet", "craft_knowledge_storage_reconcile",
+      "craft_knowledge_evaluation_case_save", "craft_knowledge_evaluation_run"]) {
+      assert(!dailyKnowledge.has(name), `${name} is an explicit advanced Knowledge operation`);
+      assert(advancedKnowledge.has(name), `${name} remains on the advanced Knowledge surface`);
+    }
     const dailyExperience = new McpServer(f.service, productSurfaceOf("experience")).tools.map((tool) => tool.name);
     assert(!dailyExperience.includes("craft_evaluation_model_profile_get"));
     assert(!dailyExperience.includes("craft_evaluation_model_ticket_list"));
@@ -125,6 +132,7 @@ test("public standalone component products expose small daily paths while advanc
 test("daily Experience aliases preserve the bounded legacy evolution behavior", async () => {
   const f = await fixture();
   try {
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: f.root });
     const experience = new McpServer(f.service, productSurfaceOf("experience"));
     const evidence = f.store.create("evidence", "experience-alias-evidence", { confidence: "bounded" });
     const inputs = [
@@ -132,7 +140,7 @@ test("daily Experience aliases preserve the bounded legacy evolution behavior", 
       { source_id: "two", source_digest: "sha256:two", outcome: "passed" },
     ];
     for (const [index, input] of inputs.entries()) {
-      await experience.handlers.craft_experience_observe({ observation_id: `experience-alias-${index}`, scenario_key: "coding.retry", source_kind: "outcome", evidence_ids: [evidence.id], sanitized: true, ...input });
+      await experience.handlers.craft_experience_observe({ observation_id: `experience-alias-${index}`, scope: "project:demo", scenario_key: "coding.retry", source_kind: "outcome", evidence_ids: [evidence.id], sanitized: true, ...input });
     }
     const patterns = await experience.handlers.craft_experience_patterns_list({ scenario_key: "coding.retry" }) as JsonObject;
     const observations = patterns.observations as JsonObject[];
@@ -149,6 +157,8 @@ test("daily Experience aliases preserve the bounded legacy evolution behavior", 
 test("standalone readiness reflects automatic memory commitment and the coding experience threshold without reading bodies", async () => {
   const f = await fixture();
   try {
+    const codingRoot = join(f.root, "coding"); await mkdir(codingRoot);
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:coding", alias_kind: "path", alias: codingRoot });
     const knowledge = new McpServer(f.service, productSurfaceOf("knowledge"));
     const memory = new McpServer(f.service, productSurfaceOf("memory"));
     const experience = new McpServer(f.service, productSurfaceOf("experience"));
@@ -203,7 +213,8 @@ test("standalone readiness reflects automatic memory commitment and the coding e
     assert.equal(experienceReady.model_effect_proven, false);
     f.store.create("knowledge_claim", "reviewed", { status: "reviewed" });
     f.store.create("memory_ledger", "active", { status: "active" });
-    f.store.create("workflow_evolution_proposal", "draft", { status: "draft" });
+    f.store.create("workflow_evolution_request", "readiness-draft-request", { scope: { kind: "project", id: "coding" }, scenario_key: "readiness", lifecycle: "awaiting_model" });
+    f.store.create("workflow_evolution_proposal", "draft", { request_id: "readiness-draft-request", status: "draft" });
     assert.equal((await knowledge.handlers.craft_component_readiness_get({ component: "knowledge" })).state, "ready");
     assert.equal((await memory.handlers.craft_component_readiness_get({ component: "memory" })).state, "ready");
     assert.equal((await experience.handlers.craft_component_readiness_get({ component: "experience" })).state, "evaluation_required");
@@ -247,6 +258,8 @@ test("standalone Knowledge exposes Host-managed review without a separate model 
 test("memory maintenance evaluates the governed ledger first and keeps expiry as a review finding", async () => {
   const f = await fixture();
   try {
+    const codingRoot = join(f.root, "coding"); await mkdir(codingRoot);
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:coding", alias_kind: "path", alias: codingRoot });
     f.service.knowledgeMemoryInstallBuiltins();
     const first = f.service.memoryLedgerRemember({ memory_id: "active-expired", source_id: "builtin.evidence-wiki", kind: "working", scope_kind: "project", scope_id: "coding", content: "Temporary setup", valid_until: "2020-01-01T00:00:00.000Z" }).memory as JsonObject;
     f.store.create("memory_ledger", "incomplete-ledger", { status: "active" });

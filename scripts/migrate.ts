@@ -14,8 +14,7 @@
  *   - `--backup` is a separate step the operator triggers explicitly; we never
  *     silently copy files.
  */
-import { resolve } from "node:path";
-import { craftPaths, ensureLayout } from "../core/infrastructure/paths.ts";
+import { craftPaths, dataRoot, ensureLayout } from "../core/infrastructure/paths.ts";
 import { CraftStore, SCHEMA_VERSION } from "../core/infrastructure/store.ts";
 import { applyMigrations, backupDatabase, MIGRATIONS } from "../core/infrastructure/store-migrations.ts";
 
@@ -30,7 +29,7 @@ if (!Number.isInteger(target) || target < 0 || target > SCHEMA_VERSION) {
   throw new Error(`--target must be an integer between 0 and ${SCHEMA_VERSION}`);
 }
 
-const paths = craftPaths(resolve(import.meta.dirname, "..", ".craft_data"));
+const paths = craftPaths(dataRoot());
 await ensureLayout(paths);
 
 console.log(`[migrate] target=v${target} dryRun=${dryRun} backup=${backup} rollback=${rollback}`);

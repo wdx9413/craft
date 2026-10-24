@@ -60,7 +60,7 @@ const READ_VERBS = /(?:^|_)(?:get|list|search|describe|info|read|resolve|preview
 
 const GOVERNED_VERBS = /(?:^|_)(?:save|publish|promote|decide|signoff|accept|approve|authorize|rollback|suspend|retire|delete|remove|revoke|commit|finalize|bind|certify|materialize|deploy|release|enforce|grant|apply|transition|refresh|issue|consume|execute|run|cancel|start|stop|tick|recover|advance|claim|settle|close|open|dispatch|ingest|import|install|lock|unlock|emergency|intervene|override)(?:_|$)/;
 
-const CANDIDATE_VERBS = /(?:^|_)(?:propose|submit|observe|remember|record|append|write|create|register|update|draft|stage|prepare|capture|note|checkpoint|relate|refine|learn|consolidate|attest|reassess|probe|preflight|simulate|shadow|canary|evaluate_candidate)(?:_|$)/;
+const CANDIDATE_VERBS = /(?:^|_)(?:propose|submit|observe|remember|record|append|write|create|register|update|draft|stage|prepare|capture|note|checkpoint|relate|refine|learn|consolidate|attest|adjudicate|reassess|probe|preflight|simulate|shadow|canary|evaluate_candidate)(?:_|$)/;
 
 function lastSegment(toolName: string): string {
   const stripped = toolName.replace(/^craft_/u, "");

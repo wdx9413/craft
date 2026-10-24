@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { dataSpaceId } from "../core/data-space.ts";
 import { MCP_PRODUCT_NAMES, productSurfaceOf, resolveMcpProductMode } from "../core/interfaces/mcp/product-launch.ts";
 import { RELEASE_PRODUCTS } from "../core/release-catalog.ts";
+import { TOOLS } from "../core/mcp/tool-catalog.ts";
 
 const components = RELEASE_PRODUCTS.map((product) => product.name);
 const internalComponentSurfaces = ["component-context", "component-quality", "component-knowledge", "component-memory", "component-capability", "component-skill-quality", "component-experience", "component-codebase"] as const;
@@ -50,12 +52,26 @@ test("the internal Context worker retains the complete component surfaces", () =
   assert(!surfaceToolNames("component-context-agent").includes("craft_learning_cycle_task_evidence_list"), "the internal evidence query must stay off the user-facing Context Agent surface");
 });
 
-test("standalone Knowledge daily surface exposes the model review packet needed for automatic claim promotion", () => {
+test("standalone Knowledge daily surface keeps routine source work bounded and reserves adjudication for the managed surface", () => {
   const knowledge = new Set(surfaceToolNames(productSurfaceOf("knowledge")));
-  for (const name of ["craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_claim_review", "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review"])
+  for (const name of ["craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_host_review", "craft_evidence_get"])
     assert(knowledge.has(name), `Knowledge daily surface must expose ${name}`);
+  for (const name of ["craft_knowledge_claim_review", "craft_knowledge_semantic_review_packet", "craft_knowledge_evaluation_case_save",
+    "craft_knowledge_evaluation_case_list", "craft_knowledge_evaluation_case_adjudicate", "craft_knowledge_evaluation_run", "craft_knowledge_evaluation_run_list"])
+    assert(!knowledge.has(name), `Knowledge daily surface must not expose advanced adjudication tool ${name}`);
+  const advanced = new Set(surfaceToolNames("component-knowledge"));
+  for (const name of ["craft_knowledge_claim_review", "craft_knowledge_semantic_review_packet", "craft_knowledge_evaluation_case_save",
+    "craft_knowledge_evaluation_case_list", "craft_knowledge_evaluation_case_adjudicate", "craft_knowledge_evaluation_run", "craft_knowledge_evaluation_run_list"])
+    assert(advanced.has(name), `Managed Knowledge surface must retain ${name}`);
   for (const name of ["craft_trace_start", "craft_trace_append", "craft_trace_finalize"])
     assert(knowledge.has(name), `Knowledge daily surface must expose ${name} for auditable classification calls`);
+  const adjudicate = TOOLS.find(item => item.name === "craft_knowledge_evaluation_case_adjudicate");
+  const properties = (adjudicate?.inputSchema as JsonObject | undefined)?.properties as JsonObject | undefined;
+  assert.deepEqual(Object.keys(properties ?? {}).sort(), ["case_id", "expected_version"],
+    "Knowledge adjudication accepts only a case identity; the server owns Host input and decision");
+  const caseList = TOOLS.find(item => item.name === "craft_knowledge_evaluation_case_list");
+  const caseListProperties = (caseList?.inputSchema as JsonObject | undefined)?.properties as JsonObject | undefined;
+  assert(caseListProperties && Object.hasOwn(caseListProperties, "after_id"), "Knowledge case list must expose stable ID pagination");
 });
 
 test("internal component surfaces remain bounded independently from the complete context composition", () => {
@@ -212,9 +228,11 @@ test("the complete context plugin declares one command-only lifecycle Hook for C
       hooks: Record<string, Array<{ hooks: Array<{ type?: string; command?: string; additionalContextLimit?: unknown }> }>>;
     };
     const claudeConfig = JSON.parse(await readFile(`plugins/${name}/hooks/hooks.json`, "utf8")) as typeof codexConfig;
+    assert.equal(codexConfig.hooks.UserPromptSubmit?.[0]?.hooks[0]?.additionalContextLimit, 400);
+    assert.equal(claudeConfig.hooks.UserPromptSubmit?.[0]?.hooks[0]?.additionalContextLimit, undefined);
     for (const [config, root] of [[codexConfig, "PLUGIN_ROOT"], [claudeConfig, "CLAUDE_PLUGIN_ROOT"]] as const) {
       assert.deepEqual(Object.keys(config.hooks), contract.events);
-      assert.doesNotMatch(JSON.stringify(config), /mcp_tool|additionalContextLimit/u);
+      assert.doesNotMatch(JSON.stringify(config), /mcp_tool/u);
       for (const group of Object.values(config.hooks).flat()) {
         for (const handler of group.hooks) {
         assert.equal(handler.type, "command");
@@ -223,6 +241,20 @@ test("the complete context plugin declares one command-only lifecycle Hook for C
       }
     }
   }
+});
+
+test("Codex automatic Context and component Hook budgets stay within a shared 850-token envelope", async () => {
+  const limits = new Map([["craft-context", 400], ["craft-knowledge", 150], ["craft-memory", 150], ["craft-experience", 150]]);
+  let total = 0;
+  for (const [name, expected] of limits) {
+    const config = JSON.parse(await readFile(`plugins/${name}/hooks/codex-hooks.json`, "utf8")) as {
+      hooks: { UserPromptSubmit?: Array<{ hooks: Array<{ additionalContextLimit?: number }> }> };
+    };
+    const actual = config.hooks.UserPromptSubmit?.[0]?.hooks[0]?.additionalContextLimit;
+    assert.equal(actual, expected, `${name} UserPromptSubmit Hook budget`);
+    total += actual ?? 0;
+  }
+  assert.equal(total, 850);
 });
 
 test("the knowledge and memory products can bootstrap provenance, persist bounded memory, and resolve one scoped receipt", async () => {
@@ -289,7 +321,7 @@ test("component McpServer cannot call tools outside its mounted boundary", async
 });
 
 test("portable Agent Plugins manifests contain only standard Skill and MCP contracts", async () => {
-  for (const product of RELEASE_PRODUCTS.filter(item => item.name !== "craft")) {
+  for (const product of RELEASE_PRODUCTS.filter(item => item.name !== "craft" && item.name !== "craft-context")) {
     const root = join(import.meta.dirname, "..", "plugins", product.name);
     const manifest = JSON.parse(await readFile(join(root, "plugin.json"), "utf8"));
     assert.equal(manifest.$schema, "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
@@ -297,8 +329,9 @@ test("portable Agent Plugins manifests contain only standard Skill and MCP contr
     assert.deepEqual(Object.keys(manifest).sort(), ["$schema", "description", "license", "name", "version"]);
     const mcp = JSON.parse(await readFile(join(root, "mcp.json"), "utf8"));
     assert.equal(mcp.$schema, "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
-    assert.deepEqual(mcp.mcpServers[product.name], { type: "stdio", command: "node", args: ["${PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", product.name.replace("craft-", "")],
-      ...(product.name === "craft-context" ? { env: { CRAFT_LEARNING_MODEL_HOST: "codex-cli" } } : {}) });
+    assert.deepEqual(mcp.mcpServers[product.name], { type: "stdio", command: "node", args: ["${PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", product.name.replace("craft-", "")] });
     assert.equal(await readFile(join(root, "skills", product.name, "SKILL.md"), "utf8"), await readFile(join(import.meta.dirname, "..", "skills", product.name, "SKILL.md"), "utf8"));
   }
+  assert.equal(existsSync(join(import.meta.dirname, "..", "plugins", "craft-context", "plugin.json")), false,
+    "Craft Context must use the Codex compatibility manifest until portable Agent Plugin hosts load hook extensions");
 });

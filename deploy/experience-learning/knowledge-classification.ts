@@ -1,10 +1,12 @@
-import { isAbsolute, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createFetchTransport, buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
 import { stableDigest } from "../../core/digest.ts";
-import { dataRoot } from "../../core/infrastructure/paths.ts";
+import { canonicalCandidatePath, craftPaths, dataRoot, existingProjectStorageDirectory, projectStorageIdentity } from "../../core/infrastructure/paths.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { generatedTextLanguageInstruction } from "../../core/config.ts";
+import { redactKnowledgeModelText } from "../../core/knowledge-model-redaction.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import { recordKnowledgeClassificationFailure, shouldSuppressKnowledgeClassification, readKnowledgeClassificationCursor, recordKnowledgeClassificationCursor } from "./knowledge-classification-state.ts";
 
@@ -80,42 +82,46 @@ function safeFailureCode(error: unknown): string {
   return "operation_failed";
 }
 
-const SENSITIVE_MODEL_TEXT_PATTERNS = [
-  /-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)? PRIVATE KEY-----/giu,
-  /\b(?:authorization|proxy-authorization)\s*:\s*(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+/giu,
-  /\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret|password|passwd|secret|token)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu,
-  /\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{16,}|AKIA[A-Z0-9]{16})\b/giu,
-  /\bhttps?:\/\/[^\s<>"']+/giu,
-  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu,
-  /\b(?:\d{1,3}\.){3}\d{1,3}\b/gu,
-  /\b(?:[A-F0-9]{1,4}:){2,7}[A-F0-9]{1,4}\b|\b(?:[A-F0-9]{1,4}:){1,7}:|\B:(?::[A-F0-9]{1,4}){1,7}\b/giu,
-  /(?:\/Users\/|\/home\/)[A-Za-z0-9._-]+(?:\/[^\s<>"']*)?/gu,
-  /\b[A-Z]:\\Users\\[^\\/\s<>"']+(?:\\[^\s<>"']*)?/giu,
-];
-
-/** Redact credentials and common personal identifiers throughout the bounded model packet before dispatch. */
-export function redactKnowledgeModelText(value: unknown): unknown {
-  if (typeof value === "string") return SENSITIVE_MODEL_TEXT_PATTERNS.reduce((text, pattern) => text.replace(pattern, "[REDACTED]"), value);
-  if (Array.isArray(value)) return value.map(redactKnowledgeModelText);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactKnowledgeModelText(item)]));
-  return value;
-}
+export { redactKnowledgeModelText } from "../../core/knowledge-model-redaction.ts";
 
 function projectRootFromClaim(claim: JsonObject): string | undefined {
   const contentRef = claim.content_ref;
   if (!contentRef || typeof contentRef !== "object" || Array.isArray(contentRef)) return undefined;
   const contentPath = (contentRef as JsonObject).path;
   if (typeof contentPath !== "string" || !contentPath.trim() || !isAbsolute(contentPath)) return undefined;
+  let normalizedPath: string;
+  try { normalizedPath = canonicalCandidatePath(contentPath); }
+  catch { return undefined; }
+  const paths = craftPaths(dataRoot());
+  const globalKnowledgeDirectory = canonicalCandidatePath(join(paths.knowledgeDir, "md"));
+  if (normalizedPath.startsWith(`${globalKnowledgeDirectory}${sep}`)) return undefined;
+  const projectRelative = relative(canonicalCandidatePath(join(paths.root, "projects")), normalizedPath);
+  const parts = projectRelative.split(sep);
+  if (parts.length >= 4 && parts[1] === "knowledge" && parts[2] === "md") {
+    try {
+      const directory = join(paths.root, "projects", parts[0]!);
+      const mapping = join(directory, "project.json");
+      const stat = lstatSync(mapping);
+      if (stat.isSymbolicLink() || !stat.isFile()) return undefined;
+      const stored = JSON.parse(readFileSync(mapping, "utf8")) as { canonical_root?: string };
+      if (typeof stored.canonical_root !== "string") return undefined;
+      const root = realpathSync(stored.canonical_root);
+      if (projectStorageIdentity(root).directory_name !== parts[0]) return undefined;
+      // `parts[0]` was checked against the root's canonical storage identity,
+      // so the resolver validates this same directory. Comparing two paths
+      // constructed from that identity only adds an unreachable branch.
+      if (!existingProjectStorageDirectory(paths, root)) return undefined;
+      return root;
+    } catch { return undefined; }
+  }
   const marker = `${sep}.craft_data${sep}knowledge${sep}md${sep}`;
-  const normalizedPath = resolve(contentPath);
-  if (normalizedPath.startsWith(`${resolve(dataRoot(), "knowledge", "md")}${sep}`)) return undefined;
   const markerIndex = normalizedPath.lastIndexOf(marker);
   return markerIndex > 0 ? normalizedPath.slice(0, markerIndex) : undefined;
 }
 
 function isTemporaryProjectRoot(projectRoot: string): boolean {
-  const candidate = resolve(projectRoot);
-  const temporaryRoots = new Set([resolve(tmpdir()), resolve("/tmp"), resolve("/private/tmp")]);
+  const candidate = canonicalCandidatePath(projectRoot);
+  const temporaryRoots = new Set([tmpdir(), "/tmp", "/private/tmp"].map(canonicalCandidatePath));
   return [...temporaryRoots].some(root => candidate === root || candidate.startsWith(`${root}${sep}`));
 }
 
@@ -301,10 +307,12 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
         const reviewDigest = stableDigest({ claim_id: claim.id, claim_version: claim.version, packet_digest: reviewPacketDigest,
           source_digest: source.content_digest, decision: reviewDecision, status: review.status, claim_status: claimStatus, promoted: review.promoted === true });
         processingStage = "result_trace";
-        await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "knowledge.reviewed", actor: "knowledge-classification-worker",
+        await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "knowledge.source_reviewed", actor: "knowledge-classification-worker",
           source: "craft-knowledge", trust: "verified", operation_id: ticketId, output_refs: [claim.id],
           data: { review_digest: reviewDigest, decision: reviewDecision, status: review.status, claim_status: claimStatus, promoted: review.promoted === true },
-          summary: "Evidence-backed Knowledge Host review recorded" });
+          summary: review.promoted === true || alreadyReviewed
+            ? "Knowledge Claim is already reviewed"
+            : "Host verified source support; independent effectiveness evaluation is still required" });
         processingStage = "ticket_bind";
         await bindKnowledgeTicketResult(deps.client, traceId, ticketId, String(claim.id), reviewDigest);
         processingStage = "ticket_complete";

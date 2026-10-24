@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, unlink } from "node:fs/promises";
-import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { CraftService } from "../core/service.ts";
-import { craftPaths } from "../core/infrastructure/paths.ts";
+import { stableDigest } from "../core/digest.ts";
+import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { adjudicateKnowledgeCase } from "./helpers/knowledge-evaluation-adjudication.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-promotion-"));
@@ -19,9 +20,25 @@ async function fixture() {
 async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 
 function candidate(service: CraftService, id = "claim") {
-  const first = service.evidenceRecord({ evidence_id: `${id}-e1`, source_type: "observation", confidence: "confirmed", claim: "first observed fact" });
+  const first = service.evidenceRecord({ evidence_id: `${id}-e1`, source_type: "observation", confidence: "confirmed", claim: "first observed fact",
+    metadata: { source_session_id: `${id}-source-session`, task_id: `${id}-source-task` } });
   const claim = service.knowledgeClaimSave({ claim_id: id, kind: "fact", content: "Run the focused test first.", scope: "project:demo", source_id: "source", evidence_ids: [first.id] }).claim as JsonObject;
   return { claim, first };
+}
+
+function evaluateCandidate(f: Awaited<ReturnType<typeof fixture>>, claim: JsonObject, caseId = `held-out-${claim.id}`) {
+  const sessionId = `${caseId}-session`, taskId = `${caseId}-task`;
+  const claimContent = typeof claim.content === "string" ? claim.content
+    : f.store.contentStore.readCompatSync(claim.content_ref as never, String(claim.scope)).body;
+  const evidence = f.service.evidenceRecord({ evidence_id: `${caseId}-evidence`, source_type: "program", confidence: "confirmed",
+    claim: "Independent held-out task label.", metadata: { source_session_id: sessionId, task_id: taskId } });
+  const caseRecord = f.service.knowledgeEvaluationCaseSave({ case_id: caseId, query: claimContent, scope: String(claim.scope),
+    expected_claim_ids: [String(claim.id)], source_session_id: sessionId, source_task_id: taskId, source_evidence_ids: [evidence.id],
+    evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "model_candidate", sanitized: true,
+    candidate_claim_refs: [{ claim_id: claim.id, claim_version: claim.version, identity_digest: claim.identity_digest, content_digest: claim.content_digest }] }).case as JsonObject;
+  const adjudicated = adjudicateKnowledgeCase(f.service, caseRecord).case as JsonObject;
+  return f.service.knowledgeEvaluationRun({ run_id: `shadow-${claim.id}`, mode: "candidate_shadow", case_ids: [adjudicated.id],
+    candidate_claim_ids: [String(claim.id)], top_k: 5 }).run as JsonObject;
 }
 
 test("automatic promotion requires independent evidence by default and records the exact policy", async () => {
@@ -33,14 +50,81 @@ test("automatic promotion requires independent evidence by default and records t
     const insufficient = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[];
     assert.equal(insufficient[0]!.verdict, "revalidation_required");
     assert.equal(insufficient[0]!.promoted, false);
-    const second = f.service.evidenceRecord({ evidence_id: "claim-e2", source_type: "receipt", confidence: "confirmed", claim: "second observed fact" });
+    const second = f.service.evidenceRecord({ evidence_id: "claim-e2", source_type: "receipt", confidence: "confirmed", claim: "second observed fact",
+      metadata: { source_session_id: "claim-session-two", task_id: "claim-task-two" } });
     f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "run:two" });
+    const heldBeforeEvaluation = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], auto_promote: false }).assessments as JsonObject[])[0]!;
+    assert((heldBeforeEvaluation.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
+    const shadow = evaluateCandidate(f, claim);
+    assert.equal(shadow.status, "eligible");
+    f.store.create("knowledge_evaluation_run", "older-unrelated-eligible-run", { mode: "candidate_shadow", status: "eligible",
+      candidate_claim_refs: [{ claim_id: "unrelated-claim" }], created_at: "2026-09-19T00:00:00.000Z" });
+    const list = f.store.list.bind(f.store);
+    (f.store as unknown as { list: CraftStore["list"] }).list = ((kind: string, limit?: number, predicate?: (record: JsonObject) => boolean) => {
+      const records = list(kind, limit, predicate);
+      if (kind !== "knowledge_evaluation_run") return records;
+      return records.map(record => { const { created_at: _createdAt, ...withoutTimestamp } = record; return withoutTimestamp; });
+    }) as CraftStore["list"];
     const automatic = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[];
+    (f.store as unknown as { list: CraftStore["list"] }).list = list;
     assert.equal(automatic[0]!.verdict, "eligible");
     assert.equal(automatic[0]!.promoted, true);
     assert.equal((f.store.get("knowledge_claim", String(claim.id)).review as JsonObject).reviewer, "automated-promotion-policy");
     assert.equal(((f.store.get("knowledge_claim", String(claim.id)).review as JsonObject).policy_revision), 1);
     assert.equal((f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!.verdict, "already_reviewed");
+  } finally { await close(f); }
+});
+
+test("candidate effectiveness evaluation cannot promote a changed Claim revision", async () => {
+  const f = await fixture();
+  try {
+    const { claim, first } = candidate(f.service, "stale-shadow");
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: first.id, observation_key: "support-one" });
+    const second = f.service.evidenceRecord({ evidence_id: "stale-shadow-second", source_type: "receipt", confidence: "confirmed", claim: "Independent support.",
+      metadata: { source_session_id: "stale-shadow-session-two", task_id: "stale-shadow-task-two" } });
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "support-two" });
+    assert.equal(evaluateCandidate(f, claim).status, "eligible");
+    const current = f.store.get("knowledge_claim", String(claim.id));
+    f.store.save("knowledge_claim", String(claim.id), { ...current, valid_until: "2027-01-01T00:00:00.000Z" });
+    const assessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], auto_promote: false }).assessments as JsonObject[])[0]!;
+    assert.equal(assessment.promoted, false);
+    assert((assessment.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
+  } finally { await close(f); }
+});
+
+test("automatic review ignores malformed, stale, or model-labeled candidate shadow runs", async () => {
+  const f = await fixture();
+  try {
+    const { claim, first } = candidate(f.service, "untrusted-shadow");
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: first.id, observation_key: "support-one" });
+    const second = f.service.evidenceRecord({ evidence_id: "untrusted-shadow-second", source_type: "receipt", confidence: "confirmed", claim: "Independent support.",
+      metadata: { source_session_id: "untrusted-shadow-session-two", task_id: "untrusted-shadow-task-two" } });
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "support-two" });
+    const run = evaluateCandidate(f, claim) as JsonObject;
+    const invalidRuns: Array<(value: JsonObject) => JsonObject> = [
+      (value) => ({ ...value, candidate_claim_refs: null }),
+      (value) => ({ ...value, case_refs: null }),
+      (value) => ({ ...value, case_ids: null }),
+      (value) => ({ ...value, metrics: { ...(value.metrics as JsonObject), provenance_eligible: false } }),
+      (value) => ({ ...value, case_refs: [{ case_id: "case-not-listed" }] }),
+      (value) => ({ ...value, case_ids: ["missing-case"], case_refs: [{ case_id: "missing-case", case_version: 1, identity_digest: null }] }),
+      (value) => ({ ...value, case_refs: [{ ...(value.case_refs as JsonObject[])[0], case_version: -1 }] }),
+    ];
+    for (const [index, mutate] of invalidRuns.entries()) {
+      const currentRun = f.store.get("knowledge_evaluation_run", String(run.id));
+      f.store.save("knowledge_evaluation_run", String(run.id), mutate({ ...run, version: currentRun.version, scope: { kind: "project", id: "demo" } }));
+      const assessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], auto_promote: false }).assessments as JsonObject[])[0]!;
+      assert((assessment.reasons as string[]).includes("independent_effectiveness_evaluation_required"), `invalid run ${index} must not satisfy the gate`);
+    }
+
+    const caseRef = (run.case_refs as JsonObject[])[0]!;
+    const currentCase = f.store.get("knowledge_evaluation_case", String(caseRef.case_id));
+    const modelCase = f.store.save("knowledge_evaluation_case", String(currentCase.id), { ...currentCase, label_source: "model_candidate" });
+    const latestRun = f.store.get("knowledge_evaluation_run", String(run.id));
+    f.store.save("knowledge_evaluation_run", String(run.id), { ...run, version: latestRun.version, scope: { kind: "project", id: "demo" },
+      case_refs: [{ case_id: modelCase.id, case_version: modelCase.version, identity_digest: modelCase.identity_digest }] });
+    const modelAssessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], auto_promote: false }).assessments as JsonObject[])[0]!;
+    assert((modelAssessment.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
   } finally { await close(f); }
 });
 
@@ -68,7 +152,7 @@ test("project Host review packets read both Claim and Evidence from project Know
     const claim = f.service.knowledgeClaimSave({ claim_id: "project-host-claim", kind: "fact", scope: "project:demo", source_id: "source",
       content: "Project fact from the source.", evidence_ids: [evidence.id] }).claim as JsonObject;
     const claimRef = claim.content_ref as JsonObject;
-    assert.ok(String(claimRef.path).startsWith(join(realpathSync(f.root), ".craft_data", "knowledge", "md")));
+    assert.ok(String(claimRef.path).startsWith(join(projectStorageDirectory(f.store.paths, f.root), "knowledge", "md")));
     const packet = f.service.knowledgeSemanticReviewPacket({ claim_id: claim.id });
     assert.equal(packet.status, "ready");
     const packetContent = packet.packet as JsonObject;
@@ -83,15 +167,18 @@ test("project Host review packets read both Claim and Evidence from project Know
 test("automatic Claim promotion also advances its project scenario evidence reference", async () => {
   const f = await fixture();
   try {
-    const first = f.service.evidenceRecord({ evidence_id: "scene-first", source_type: "observation", confidence: "confirmed", claim: "first support" });
+    const first = f.service.evidenceRecord({ evidence_id: "scene-first", source_type: "observation", confidence: "confirmed", claim: "first support",
+      metadata: { source_session_id: "scene-source-session", task_id: "scene-source-task" } });
     const claim = f.service.knowledgeClaimSave({ claim_id: "scene-auto", kind: "fact", content: "Use the focused validation.", scope: "project:demo",
       source_id: "source", scenario_key: "engineering.validation.focused", coarse_scenario_key: "engineering.validation", evidence_ids: [first.id] }).claim as JsonObject;
     f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: first.id, observation_key: "scene:one" });
-    const second = f.service.evidenceRecord({ evidence_id: "scene-second", source_type: "receipt", confidence: "confirmed", claim: "second support" });
+    const second = f.service.evidenceRecord({ evidence_id: "scene-second", source_type: "receipt", confidence: "confirmed", claim: "second support",
+      metadata: { source_session_id: "scene-session-two", task_id: "scene-task-two" } });
     f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "scene:two" });
+    assert.equal(evaluateCandidate(f, claim).status, "eligible");
     const assessment = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[];
     assert.equal(assessment[0]!.promoted, true);
-    const catalog = JSON.parse(await readFile(join(f.root, ".craft_data", "knowledge", "projects", "demo", "knowledge-scenarios.json"), "utf8")) as JsonObject;
+    const catalog = JSON.parse(await readFile(join(projectStorageDirectory(f.store.paths, f.root), "knowledge", "projects", "demo", "knowledge-scenarios.json"), "utf8")) as JsonObject;
     const scene = (catalog.scenarios as JsonObject[]).find(item => item.scenario_key === "engineering.validation.focused")!;
     assert.equal(scene.lifecycle, "candidate");
     assert.equal((scene.claim_refs as JsonObject[])[0]!.status, "reviewed");
@@ -101,16 +188,46 @@ test("automatic Claim promotion also advances its project scenario evidence refe
 test("automatic review keeps inline project Claims scoped when promoting without a Markdown reference", async () => {
   const f = await fixture();
   try {
+    const origin = f.service.evidenceRecord({ evidence_id: "inline-origin", source_type: "observation", confidence: "confirmed", claim: "Origin task evidence.",
+      metadata: { source_session_id: "inline-origin-session", task_id: "inline-origin-task" } });
     const candidate = f.store.create("knowledge_claim", "inline-project-claim", { status: "candidate", kind: "fact", scope: "project:demo",
-      source_id: "source", content: "A supported inline project fact.", evidence_ids: ["inline-support-0"] });
+      source_id: "source", content: "A supported inline project fact.", evidence_ids: [origin.id] });
     for (const [index, claim] of ["First support", "Second support"].entries()) {
-      const evidence = f.service.evidenceRecord({ evidence_id: `inline-support-${index}`, source_type: "observation", confidence: "confirmed", claim });
+      const evidence = f.service.evidenceRecord({ evidence_id: `inline-support-${index}`, source_type: "observation", confidence: "confirmed", claim,
+        metadata: { source_session_id: `inline-support-session-${index}`, task_id: `inline-support-task-${index}` } });
       f.service.knowledgeClaimSupportRecord({ claim_id: candidate.id, evidence_id: evidence.id, observation_key: `inline-observation-${index}` });
     }
+    assert.equal(evaluateCandidate(f, candidate).status, "eligible");
     const result = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [candidate.id], now: "2026-09-20T00:00:00.000Z" });
     assert.equal(((result.assessments as JsonObject[])[0]!.verdict), "eligible");
     assert.equal(((result.assessments as JsonObject[])[0]!.promoted), true);
     assert.equal(((result.assessments as JsonObject[])[0]!.claim as JsonObject).status, "reviewed");
+  } finally { await close(f); }
+});
+
+test("independent support counts each source session once and ignores caller-invented observation keys", async () => {
+  const f = await fixture();
+  try {
+    const { claim } = candidate(f.service, "same-session-support");
+    const codexSourceId = `knowledge_source_codex_session_${stableDigest("project:demo").slice(-24)}`;
+    f.service.knowledgeSourceRegister({ source_id: codexSourceId, kind: "custom", label: "Codex session evidence", trust: "verified",
+      scope_kind: "project", scope_id: "demo", locator: "craft://session-evidence", content_digest: "craft:codex-session-verification:v1" });
+    const sessionEvidence = (evidenceId: string, sessionId: string, taskId: string) => f.store.create("evidence", evidenceId, {
+      source_type: "program", source_id: codexSourceId, confidence: "confirmed", claim: "Verified session evidence.",
+      metadata: { provenance: "codex_session_program_verification", scope: "project:demo", source_session_id: sessionId, task_id: taskId },
+    });
+    const firstSessionEvidence = sessionEvidence("verified-session-one", "session-one", "task-one");
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: firstSessionEvidence.id, observation_key: "caller-key-one" });
+    const duplicateSession = sessionEvidence("verified-session-one-second-task", "session-one", "task-one-b");
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: duplicateSession.id, observation_key: "caller-key-two" });
+    const independentSession = sessionEvidence("verified-session-two", "session-two", "task-two");
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: independentSession.id, observation_key: "caller-key-three" });
+    const unproven = f.service.evidenceRecord({ evidence_id: "same-session-unproven-evidence", source_type: "receipt", confidence: "confirmed", claim: "No source session." });
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: unproven.id, observation_key: "caller-key-four" });
+    const assessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], auto_promote: false }).assessments as JsonObject[])[0]!;
+    assert.equal(assessment.independent_support, 2);
+    assert.equal((assessment.reasons as string[]).includes("independent_support_below_threshold"), false);
+    assert.equal(assessment.promoted, false);
   } finally { await close(f); }
 });
 
@@ -127,7 +244,7 @@ test("support is idempotent but cannot be duplicated by observation or evidence"
     assert.throws(() => f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "session:b", scope: "project:other" }), /scope must match/u);
     const weak = f.service.evidenceRecord({ evidence_id: "weak", source_type: "model", confidence: "unverified", claim: "guess" });
     assert.throws(() => f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: weak.id, observation_key: "session:weak" }), /requires bounded or confirmed/u);
-    f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "optional-human", reason: "exception" });
+    f.service.knowledgeClaimReview({ claim_id: claim.id, status: "disputed", reviewer: "user", reason: "来源存在争议" });
     assert.throws(() => f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "session:c" }), /only be recorded for a candidate/u);
   } finally { await close(f); }
 });
@@ -142,6 +259,7 @@ test("local policy can lower a threshold without turning off deterministic safet
     assert.equal(f.service.knowledgePromotionPolicySave({ minimum_independent_support: 1, minimum_confidence: "confirmed", actor: "another" }).idempotent, true);
     assert.throws(() => f.service.knowledgePromotionPolicySave({ minimum_independent_support: 0 }), /between 1 and 10/u);
     assert.throws(() => f.service.knowledgePromotionPolicySave({ minimum_confidence: "maybe" }), /bounded or confirmed/u);
+    assert.equal(evaluateCandidate(f, claim).status, "eligible");
     assert.equal((f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!.promoted, true);
 
     const conflicted = candidate(f.service, "conflicted");
@@ -269,13 +387,25 @@ test("promotion policy rejects malformed inputs and reports every non-promotable
     const raw = (id: string, extra: JsonObject = {}) => f.store.create("knowledge_claim", id, {
       status: "candidate", scope: "project:demo", source_id: "source", evidence_ids: [first.id], content: "body", ...extra,
     });
+    const legacyReviewed = raw("legacy-reviewed", { status: "reviewed", review: { reviewer: "legacy-user" } });
+    const legacyReviewedWithoutReview = raw("legacy-reviewed-without-review", { status: "reviewed", review: null });
+    const legacyReviewedId = String(legacyReviewed.id);
+    const quarantined = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [legacyReviewedId], auto_promote: false }).assessments as JsonObject[])[0]!;
+    assert.equal(f.store.get("knowledge_claim", legacyReviewedId).status, "candidate");
+    assert.equal(((f.store.get("knowledge_claim", legacyReviewedId).review as JsonObject).qualification_status), "legacy_promotion_quarantined");
+    assert.equal(quarantined.claim_id, legacyReviewedId);
+    assert.equal((f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [String(legacyReviewedWithoutReview.id)], auto_promote: false }).assessments as JsonObject[])[0]!.claim_id,
+      legacyReviewedWithoutReview.id);
     raw("missing-source", { source_id: "missing-source" });
     f.service.knowledgeSourceRegister({ source_id: "paused", kind: "project_note", label: "Paused", trust: "verified", scope_kind: "project", scope_id: "demo", locator: "paused.md", content_digest: `sha256:${"c".repeat(64)}` });
     f.service.knowledgeSourceTransition({ source_id: "paused", status: "revoked", reason: "fixture" });
     raw("untrusted-source", { source_id: "paused" });
     raw("no-evidence-array", { evidence_ids: null });
     raw("no-scope", { scope: null });
-    raw("invalid-scope", { scope: "not-a-scope" });
+    assert.throws(() => raw("invalid-scope", { scope: "not-a-scope" }), /storage scope is malformed/u);
+    // Historical malformed data can still exist; new writes must reject it.
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('knowledge_claim','invalid-scope',1,?,?,?)")
+      .run(JSON.stringify({ status: "candidate", scope: "not-a-scope", source_id: "source", content: "body" }), "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
     raw("missing-body", { content: null, content_ref: null });
     raw("drifted-body", { content: null, content_ref: { kind: "knowledge", record_id: "absent", version: 1, path: "/absent.md", digest: "sha256:absent", format: "markdown" } });
     raw("expired", { valid_until: "2020-01-01T00:00:00.000Z" });
@@ -308,7 +438,9 @@ test("promotion policy rejects malformed inputs and reports every non-promotable
     f.store.create("knowledge_claim_support", "support-review-duplicate", { claim_id: supportReview.id, evidence_id: "support-confirmed", observation_key: "same-run" });
     f.store.create("knowledge_claim_support", "support-review-untrusted", { claim_id: supportReview.id, evidence_id: "support-untrusted-evidence", observation_key: "untrusted-run" });
     f.store.create("knowledge_claim_support", "support-review-no-source", { claim_id: supportReview.id, evidence_id: "support-no-source" });
-    assert.equal((f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [supportReview.id], auto_promote: false }).assessments as JsonObject[])[0]!.verdict, "eligible");
+    const supportAssessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [supportReview.id], auto_promote: false }).assessments as JsonObject[])[0]!;
+    assert.equal(supportAssessment.verdict, "revalidation_required");
+    assert((supportAssessment.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
   } finally { await close(f); }
 });
 
@@ -331,11 +463,17 @@ test("semantic review packets and provider responses stay evidence-bound across 
     const hostPacket = f.service.knowledgeSemanticReviewPacket({ claim_id: hostClaim.id });
     const hostArgs = { claim_id: hostClaim.id, host_run_key: "host:packet", source_digest: `sha256:${"b".repeat(64)}`, packet_digest: hostPacket.packet_digest, decision: "supported" };
     const promoted = f.service.knowledgeHostReview(hostArgs);
-    assert.equal(promoted.promoted, true);
+    assert.equal(promoted.promoted, false);
+    assert.equal(promoted.status, "awaiting_independent_evaluation");
+    assert.deepEqual(promoted.blocking_reasons, ["independent_effectiveness_evaluation_required"]);
+    assert.equal((promoted.claim as JsonObject).status, "candidate");
+    const context = f.service.wikiContextCompile({ query: "focused tests", scope: "project:demo" });
+    assert.equal((context.included as JsonObject[]).some(item => item.claim_id === hostClaim.id), false);
+    assert((context.excluded as JsonObject[]).some(item => item.claim_id === hostClaim.id && item.reason === "not_reviewed"));
     assert.equal(f.service.knowledgeHostReview(hostArgs).idempotent, true);
-    const taxonomy = JSON.parse(await readFile(join(f.root, ".craft_data", "knowledge", "projects", "demo", "knowledge-scenarios.json"), "utf8")) as JsonObject;
+    const taxonomy = JSON.parse(await readFile(join(projectStorageDirectory(f.store.paths, f.root), "knowledge", "projects", "demo", "knowledge-scenarios.json"), "utf8")) as JsonObject;
     const scene = (taxonomy.scenarios as JsonObject[]).find(item => item.scenario_key === "knowledge.semantic-review")!;
-    assert.equal((scene.claim_refs as JsonObject[])[0]!.status, "reviewed");
+    assert.equal((scene.claim_refs as JsonObject[])[0]!.status, "candidate");
     const live = f.store.get("knowledge_claim", String(hostClaim.id));
     f.store.save("knowledge_claim", String(hostClaim.id), { ...live, valid_until: "2000-01-01T00:00:00Z" });
     const expiredReplay = f.service.knowledgeHostReview(hostArgs);

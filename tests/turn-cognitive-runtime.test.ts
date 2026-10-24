@@ -13,6 +13,7 @@ import { TurnCognitiveRuntime } from "../core/turn-cognitive-runtime.ts";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-turn-cognitive-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  new CraftService(store).scopeAliasBind({ scope_kind: "project", scope_id: "project", alias_kind: "path", alias: root });
   const sources = new KnowledgeSourceRegistry(store); const memory = new MemoryLedgerKernel(store); const runtime = new TurnCognitiveRuntime(store, memory);
   const source = sources.sourceRegister({ source_id: "source", kind: "project_note", label: "project notes", scope_kind: "project", scope_id: "project", locator: "notes.md", content_digest: "sha256:notes", trust: "verified", access: "proposal_only" }).source as JsonObject;
   return { root, store, sources, memory, runtime, source };

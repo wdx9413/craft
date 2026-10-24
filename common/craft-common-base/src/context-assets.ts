@@ -4,6 +4,8 @@ import { scopeFromKey } from "./scope-policy.ts";
 import { text } from "./validation.ts";
 
 export const CONTEXT_ASSET_MEMBERS = ["knowledge", "memory", "experience", "codebase", "history", "state"] as const;
+export const DEFAULT_CONTEXT_MAX_ITEMS = 3;
+export const DEFAULT_CONTEXT_MAX_CHARS = 1_200;
 
 /** Asset identity never falls back to its Source or a guessed latest revision. */
 export function contextAssetRef(member: string, item: JsonObject, scope: JsonObject): JsonObject {

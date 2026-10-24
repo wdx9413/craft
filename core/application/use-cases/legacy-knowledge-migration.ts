@@ -29,8 +29,9 @@ export function installLegacyKnowledgeMigrationMethods(serviceClass: typeof Craf
     return this.legacyKnowledgeMigration.reviewCandidates(args);
   };
   serviceClass.prototype.legacyKnowledgeMigrationPublish = async function (args: JsonObject) {
+    const reviewer = String(args.reviewer ?? "").trim(); if (!reviewer) throw new Error("reviewer must not be empty");
     const prepared = this.legacyKnowledgeMigration.publishReady(args); if (prepared.idempotent) return prepared;
-    const candidate = prepared.candidate as JsonObject; const reviewer = String(args.reviewer ?? "").trim(); if (!reviewer) throw new Error("reviewer must not be empty");
+    const candidate = prepared.candidate as JsonObject;
     const pageId = `legacy_knowledge_wiki_${String(candidate.id).slice(-24)}`; const memoryId = `legacy_knowledge_memory_${String(candidate.id).slice(-24)}`;
     try {
       await this.wikiPageSave({ page_id: pageId, title: String(candidate.title), body: `# ${String(candidate.title)}\n\n${String(candidate.summary)}\n\n来源：${String(candidate.source_locator)}\n来源摘要 digest：${String(candidate.source_digest)}`, claim_ids: [String(candidate.claim_id)], scope: candidateScope(candidate), author: reviewer });

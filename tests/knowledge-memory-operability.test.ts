@@ -10,6 +10,8 @@ import { productSurfaceOf } from "../core/interfaces/mcp/product-launch.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "../core/digest.ts";
+import { projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-memory-operability-"));
@@ -35,7 +37,8 @@ async function close(f: Awaited<ReturnType<typeof fixture>>) {
 function sourceAndEvidence(service: CraftService): JsonObject {
   service.knowledgeSourceRegister({ source_id: "notes", kind: "project_note", label: "Notes", trust: "verified",
     scope_kind: "project", scope_id: "p", locator: "notes.md", content_digest: "sha256:" + "a".repeat(64) });
-  return service.evidenceRecord({ claim: "Observed in fixture", source_type: "observation", confidence: "confirmed" });
+  return service.evidenceRecord({ claim: "Observed in fixture", source_type: "observation", confidence: "confirmed",
+    metadata: { source_session_id: "knowledge-operability-session-one", task_id: "knowledge-operability-task-one" } });
 }
 
 test("reviewed knowledge contributes to a scoped Context receipt while candidates remain diagnostic only", async () => {
@@ -44,7 +47,7 @@ test("reviewed knowledge contributes to a scoped Context receipt while candidate
     const evidence = sourceAndEvidence(f.service);
     const reviewed = f.service.knowledgeClaimSave({ claim_id: "reviewed-routing", kind: "fact", content: "Use focused tests before a full suite.",
       scope: "project:p", source_id: "notes", evidence_ids: [evidence.id] }).claim as JsonObject;
-    f.service.knowledgeClaimReview({ claim_id: reviewed.id, status: "reviewed", reviewer: "human", reason: "checked" });
+    attachVerifiedPromotionFixture(f.store, reviewed);
     const classified = f.service.knowledgeClaimSave({ claim_id: "reviewed-routing", kind: "fact", content: "Use focused tests before a full suite.",
       scope: "project:p", source_id: "notes", evidence_ids: [evidence.id], scenario_key: "testing.focused-suite" }).claim as JsonObject;
     assert.equal(classified.status, "reviewed", "adding scenario metadata must preserve the independent review decision");
@@ -84,13 +87,13 @@ test("reviewed Knowledge classification accepts canonical project identity and w
     const scope = "project:project:canonical";
     const initial = f.service.knowledgeClaimSave({ claim_id: "canonical-reviewed", kind: "fact", content: "The project uses pnpm.",
       scope, source_id: "canonical-notes", evidence_ids: [evidence.id] }).claim as JsonObject;
-    f.service.knowledgeClaimReview({ claim_id: initial.id, status: "reviewed", reviewer: "host-model", reason: "source verified" });
+    attachVerifiedPromotionFixture(f.store, initial);
     const classified = f.service.knowledgeClaimSave({ claim_id: initial.id, kind: "fact", content: "The project uses pnpm.",
       scope, source_id: "canonical-notes", evidence_ids: [evidence.id], scenario_key: "project.build.tooling" }).claim as JsonObject;
     assert.equal(classified.status, "reviewed");
     assert.equal(classified.scenario_key, "project.build.tooling");
     assert.equal(f.service.knowledgeScenarioList({ scope }).catalog_version, 1);
-    const catalog = JSON.parse(await readFile(join(projectRoot, ".craft_data", "knowledge", "projects", "canonical", "knowledge-scenarios.json"), "utf8")) as JsonObject;
+    const catalog = JSON.parse(await readFile(join(projectStorageDirectory(f.store.paths, projectRoot), "knowledge", "projects", "canonical", "knowledge-scenarios.json"), "utf8")) as JsonObject;
     assert.equal((catalog.scenarios as JsonObject[])[0]?.scenario_key, "project.build.tooling");
   } finally { await close(f); }
 });
@@ -118,7 +121,7 @@ test("scenario metadata can be added to a reviewed source-ingested Claim without
     });
     f.store.create("knowledge_claim", "ingested-reviewed", { ...identity, identity_digest: stableDigest(identity), status: "candidate", review: null,
       content_ref: contentRef, ingest_generated: true, publication_allowed: false });
-    f.service.knowledgeClaimReview({ claim_id: "ingested-reviewed", status: "reviewed", reviewer: "host-model", reason: "source verified" });
+    attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", "ingested-reviewed"));
     const classified = f.service.knowledgeClaimSave({ claim_id: "ingested-reviewed", kind: "fact", content, scope, scope_envelope: scopeEnvelope,
       source_id: "ingested-notes", evidence_ids: [String(evidence.id)], scenario_key: "project.scripts.package-manager" }).claim as JsonObject;
     assert.equal(classified.status, "reviewed");
@@ -176,7 +179,7 @@ test("model classified project Knowledge advances with trusted Source reviews an
       source_id: "notes", evidence_ids: [evidenceA.id] }).claim as JsonObject;
     assert.equal(corrected.version, Number(initialA.version) + 1);
     assert.equal(corrected.scenario_key, classification.scenario_key);
-    const taxonomyPath = join(f.root, "projects", "p", ".craft_data", "knowledge", "projects", "p", "knowledge-scenarios.json");
+    const taxonomyPath = join(projectStorageDirectory(f.store.paths, join(f.root, "projects", "p")), "knowledge", "projects", "p", "knowledge-scenarios.json");
     const correctedCatalog = JSON.parse(await readFile(taxonomyPath, "utf8")) as JsonObject;
     const retiredName = (correctedCatalog.scenarios as JsonObject[]).find(item => item.scenario_key === "engineering.release.draft")!;
     assert.equal((retiredName.claim_refs as JsonObject[])[0]!.status, "inactive");
@@ -187,9 +190,9 @@ test("model classified project Knowledge advances with trusted Source reviews an
     assert.equal((candidate.scenario_catalog as JsonObject).status, "candidate");
     assert.equal((f.service.knowledgeClaimList({ scope_kind: "global" }).claims as JsonObject[]).length, 0);
 
-    const firstReview = f.service.knowledgeClaimReview({ claim_id: claimA.id, status: "reviewed", reviewer: "host-model", reason: "source verified" });
+    const firstReview = attachVerifiedPromotionFixture(f.store, claimA);
     assert.equal((firstReview.scenario_catalog as JsonObject).reviewed_source_count, 1);
-    const secondReview = f.service.knowledgeClaimReview({ claim_id: "scenario-claim-b", status: "reviewed", reviewer: "host-model", reason: "independent source verified" });
+    const secondReview = attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", "scenario-claim-b"));
     assert.equal((secondReview.scenario_catalog as JsonObject).status, "active");
     const scopedScene = f.service.knowledgeSearch({ query: "release verification", scope: "project:p", scenario_key: "engineering.release.checks" });
     assert.deepEqual((scopedScene.hits as JsonObject[]).map(item => item.claim_id).sort(), ["scenario-claim-a", "scenario-claim-b"]);
@@ -234,7 +237,7 @@ test("model classified project Knowledge advances with trusted Source reviews an
       const evidence = f.service.evidenceRecord({ claim: `Independent release document ${suffix}`, source_type: "observation", confidence: "confirmed" });
       const claim = f.service.knowledgeClaimSave({ claim_id: `scenario-claim-${suffix}`, kind: "rule", content: "Use the release verification set for documentation.",
         scope: "project:p", source_id: `notes-${suffix}`, evidence_ids: [evidence.id], scenario_key: "engineering.release.documents", coarse_scenario_key: "engineering.release" }).claim as JsonObject;
-      f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "host-model", reason: "independent source verified" });
+      attachVerifiedPromotionFixture(f.store, claim);
     }
     const activeCoarse = f.service.knowledgeSearch({ query: "release verification", scope: "project:p", scenario_key: "engineering.release" });
     assert.equal((activeCoarse.hits as JsonObject[]).length, 4);
@@ -308,7 +311,7 @@ test("global Knowledge classification and scenario search stay isolated from pro
       const claim = f.service.knowledgeClaimSave({ claim_id: id, kind: "rule", content: text, scope, source_id: sourceId,
         evidence_ids: [evidence.id], scenario_key: "engineering.testing", scenario_definition: {
           summary: "测试工程规则", applies_when: "适用于测试流程", excludes: "不涉及构建规则" } }).claim as JsonObject;
-      return f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "host-model", reason: "source verified" });
+      return attachVerifiedPromotionFixture(f.store, claim);
     };
     createSource("global-notes-a", "global", "global");
     createSource("global-notes-b", "global", "global");
@@ -323,7 +326,7 @@ test("global Knowledge classification and scenario search stay isolated from pro
     assert.equal((projectSecond.scenario_catalog as JsonObject).status, "active");
 
     const globalPath = join(f.root, "knowledge", "global", "knowledge-scenarios.json");
-    const projectPath = join(f.root, "projects", "p", ".craft_data", "knowledge", "projects", "p", "knowledge-scenarios.json");
+    const projectPath = join(projectStorageDirectory(f.store.paths, join(f.root, "projects", "p")), "knowledge", "projects", "p", "knowledge-scenarios.json");
     assert.equal(JSON.parse(await readFile(globalPath, "utf8")).catalog_version, 4);
     assert.equal(JSON.parse(await readFile(projectPath, "utf8")).catalog_version, 4);
     assert.deepEqual((f.service.knowledgeScenarioList({ scope: "global" }).scenarios as JsonObject[]).map(item => item.scenario_key), ["engineering.testing"]);
@@ -353,7 +356,7 @@ test("memory without a scope is an explicit safe skip rather than a malformed gl
   } finally { await close(f); }
 });
 
-test("automated knowledge review records why legacy imports require live revalidation and promotes only current evidence", async () => {
+test("automated Knowledge review rejects legacy imports and blocks current Claims without independent effectiveness evidence", async () => {
   const f = await fixture();
   try {
     const legacyEvidence = f.service.evidenceRecord({ evidence_id: "legacy-evidence", claim: "Old importer assertion", source_type: "import", confidence: "unverified" });
@@ -363,7 +366,8 @@ test("automated knowledge review records why legacy imports require live revalid
     // database. The reviewer must not recover their trust from Markdown text.
     f.store.save("knowledge_claim", String(legacy.id), { ...legacy, source_id: null, scope: "legacy:project" });
     const currentEvidence = sourceAndEvidence(f.service);
-    const secondCurrentEvidence = f.service.evidenceRecord({ evidence_id: "current-evidence-2", claim: "A second independent fixture observation", source_type: "observation", confidence: "confirmed" });
+    const secondCurrentEvidence = f.service.evidenceRecord({ evidence_id: "current-evidence-2", claim: "A second independent fixture observation", source_type: "observation", confidence: "confirmed",
+      metadata: { source_session_id: "knowledge-operability-session-two", task_id: "knowledge-operability-task-two" } });
     f.service.knowledgeClaimSave({ claim_id: "current-claim", kind: "fact", content: "A current evidenced repository observation.",
       scope: "project:p", source_id: "notes", evidence_ids: [currentEvidence.id] });
     f.service.knowledgeClaimSupportRecord({ claim_id: "current-claim", evidence_id: currentEvidence.id, observation_key: "session:fixture:one" });
@@ -372,14 +376,15 @@ test("automated knowledge review records why legacy imports require live revalid
     const legacyAssessment = (f.service.knowledgeAutoReview({ scope_kind: "legacy", scope_id: "project", claim_ids: ["legacy-claim"], auto_promote: true, now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!;
     const currentAssessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "p", claim_ids: ["current-claim"], auto_promote: true, now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!;
     assert.equal(legacyAssessment.verdict, "revalidation_required");
-    assert.deepEqual(legacyAssessment.reasons, ["legacy_scope_requires_live_revalidation", "source_missing", "credible_evidence_missing", "independent_support_below_threshold"]);
+    assert.deepEqual(legacyAssessment.reasons, ["legacy_scope_requires_live_revalidation", "source_missing", "credible_evidence_missing", "independent_effectiveness_evaluation_required", "independent_support_below_threshold"]);
     assert.equal(legacyAssessment.promoted, false);
     assert.equal(f.store.get("knowledge_claim", "legacy-claim").status, "candidate");
-    assert.equal(currentAssessment.verdict, "eligible");
-    assert.equal(currentAssessment.promoted, true);
-    assert.equal(f.store.get("knowledge_claim", "current-claim").status, "reviewed");
+    assert.equal(currentAssessment.verdict, "revalidation_required");
+    assert((currentAssessment.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
+    assert.equal(currentAssessment.promoted, false);
+    assert.equal(f.store.get("knowledge_claim", "current-claim").status, "candidate");
     assert.equal((f.service.knowledgeAutoReview({ scope_kind: "legacy", scope_id: "project", claim_ids: ["legacy-claim"], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!.idempotent, true);
-    assert.throws(() => f.service.knowledgeClaimReview({ claim_id: "legacy-claim", status: "reviewed", reviewer: "human", reason: "trust old import" }), /bounded or confirmed Evidence/u);
+    assert.throws(() => f.service.knowledgeClaimReview({ claim_id: "legacy-claim", status: "reviewed", reviewer: "human", reason: "trust old import" }), /managed Host review and independent effectiveness evaluation/u);
   } finally { await close(f); }
 });
 
@@ -420,7 +425,7 @@ test("portable Knowledge/Memory bundles preserve content but merge only addition
     const evidence = sourceAndEvidence(source.service);
     const claim = source.service.knowledgeClaimSave({ claim_id: "claim-a", kind: "fact", content: "Run unit tests before publishing.",
       scope: "project:p", source_id: "notes", evidence_ids: [evidence.id] }).claim as JsonObject;
-    source.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "human", reason: "checked" });
+    attachVerifiedPromotionFixture(source.store, claim);
     source.service.memoryLedgerRemember({ memory_id: "memory-a", source_id: "notes", kind: "procedural", scope_kind: "project", scope_id: "p",
       content: "Use the smallest relevant test command first.", confidence: "confirmed", evidence_ids: [evidence.id] });
 
@@ -428,21 +433,22 @@ test("portable Knowledge/Memory bundles preserve content but merge only addition
     const bundle = exported.bundle as JsonObject;
     assert.equal(source.service.knowledgeMemoryBundleVerify({ bundle }).valid, true);
     const plan = target.service.knowledgeMemoryBundleImportPlan({ bundle });
-    assert.equal(plan.additions, 4); // source, evidence, claim, memory
+    assert.equal(plan.additions, 4); // source, Evidence, Claim and Memory
     assert.equal(plan.conflicts, 0);
     assert.throws(() => target.service.knowledgeMemoryBundleImportApply({ bundle, approved: false }), /requires approved/u);
     const applied = target.service.knowledgeMemoryBundleImportApply({ bundle, approved: true, import_id: "import-a" });
     assert.equal((applied.import as JsonObject).conflict_free, true);
     assert.match(String(target.store.get("knowledge_claim", "claim-a").content), /unit tests/u);
+    assert.equal(target.store.get("knowledge_claim", "claim-a").status, "candidate", "imported reviewed labels require local independent revalidation");
     assert.match(String(target.store.get("memory_ledger", "memory-a").content), /smallest relevant/u);
 
     const replay = target.service.knowledgeMemoryBundleImportApply({ bundle, approved: true, import_id: "import-a" });
     assert.equal(replay.idempotent, true);
     const duplicatePlan = target.service.knowledgeMemoryBundleImportPlan({ bundle });
-    // The plan is the public merge explanation; source/evidence records are expected to be
-    // duplicates too, not silently treated as a conflict just because they crossed machines.
-    assert.deepEqual((duplicatePlan.decisions as JsonObject[]).map((item) => `${item.kind}:${item.action}`).sort(), ["evidence:duplicate", "knowledge_claim:duplicate", "knowledge_source:duplicate", "memory_ledger:duplicate"]);
-    assert.equal(duplicatePlan.duplicates, 4);
+    // The Claim's reviewed label loses source-machine promotion authority on import, so its
+    // candidate projection is a conflict with the original reviewed bundle record.
+    assert.deepEqual((duplicatePlan.decisions as JsonObject[]).map((item) => `${item.kind}:${item.action}`).sort(), ["evidence:duplicate", "knowledge_claim:conflict", "knowledge_source:duplicate", "memory_ledger:duplicate"]);
+    assert.equal(duplicatePlan.duplicates, 3);
 
     target.store.save("knowledge_claim", "claim-a", { ...target.store.get("knowledge_claim", "claim-a"), status: "revoked" });
     const conflictPlan = target.service.knowledgeMemoryBundleImportPlan({ bundle });
@@ -502,7 +508,7 @@ test("diagnostic knowledge search applies restricted and invalid-expiry filters 
     assert.deepEqual(f.service.knowledgeSearch({ query: "alpha", scope: "project:p" }).hits, []);
     mocked.mock.restore();
     assert.equal((f.service.knowledgeSearch({ query: "alpha", scope: "project:p", allow_restricted: true }).hits as JsonObject[])[0]!.claim_id, claim.id);
-    f.store.save("knowledge_claim", String(claim.id), { ...claim, valid_until: "invalid", sensitivity: "internal" });
+    f.store.save("knowledge_claim", String(claim.id), { ...f.store.get("knowledge_claim", String(claim.id)), valid_until: "invalid", sensitivity: "internal" });
     t.mock.method(f.store.contentStore, "readCompatSync", () => { throw new Error("Invalid-expiry body must not be loaded"); });
     assert.deepEqual(f.service.knowledgeSearch({ query: "alpha", scope: "project:p" }).hits, []);
   } finally { await close(f); }

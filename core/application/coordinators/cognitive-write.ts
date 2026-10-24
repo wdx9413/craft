@@ -39,6 +39,7 @@ export class CognitiveWriteCoordinator {
     if (decision === "reviewed") {
       const ids = Array.isArray(claim.evidence_ids) ? claim.evidence_ids as unknown[] : [];
       if (!ids.some((e) => ["bounded", "confirmed"].includes(String(this.store.get("evidence", String(e)).confidence)))) throw new Error("Conflict resolution requires bounded or confirmed Evidence");
+      throw new Error("Formal Knowledge promotion requires managed Host review and independent effectiveness evaluation");
     }
     return this.reviewClaim({ claim_id: claim.id, status: decision, reviewer: args.reviewer, reason: args.reason });
   }

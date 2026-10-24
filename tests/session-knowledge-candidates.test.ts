@@ -88,9 +88,10 @@ function modelTransport(text: string, seen: string[] = []): ModelTransport {
   } };
 }
 
-function reviewedClaimClient(scope: unknown, extra?: Record<string, (args: JsonObject) => JsonObject>) {
-  return workerClient({ craft_knowledge_claim_list: () => ({ claims: [{ id: "reviewed-claim", status: "reviewed", scope }] }),
-    craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", title: "依赖升级验证", content: "依赖升级后运行单测。", tags: [] } } }),
+function candidateClaimClient(scope: unknown, extra?: Record<string, (args: JsonObject) => JsonObject>) {
+  return workerClient({ craft_knowledge_claim_list: () => ({ claims: [{ id: "candidate-claim", status: "candidate", scope }] }),
+    craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", version: 1,
+      identity_digest: "candidate-identity", content_digest: "candidate-content", title: "依赖升级验证", content: "依赖升级后运行单测。", tags: [] } } }),
     ...extra });
 }
 
@@ -110,14 +111,14 @@ test("archived verified generation and held-out tasks remain usable once without
       const archiveOptions = { sessions_root: f.sessions, archived_sessions_root: archive, state_file: f.state };
       const collection = await runCodexSessionCollectionOnce(archiveOptions);
       assert.equal(collection.tasks_verified, 1);
-      const fixture = reviewedClaimClient(f.task.project_scope_id, {
+      const fixture = candidateClaimClient(f.task.project_scope_id, {
         craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id, evaluation_eligible: false } }),
         craft_knowledge_evaluation_run: () => ({ run: { id: "run", metrics: { provenance_eligible: false } } }),
       });
       const seen: string[] = [];
       const transport = modelTransport(JSON.stringify(partition === "candidate_generation"
         ? { decision: "candidate", kind: "rule", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: ["验证"] }
-        : { decision: "labeled", expected_claim_ids: ["reviewed-claim"] }), seen);
+        : { decision: "labeled", expected_claim_ids: ["candidate-claim"] }), seen);
       const deps = { client: fixture.client, providers: [provider], transport, state_file: f.workerState, archive_options: archiveOptions };
       const run = partition === "candidate_generation" ? runSessionKnowledgeCandidateOnce : runSessionKnowledgeEvaluationOnce;
       const result = await run(deps);
@@ -261,18 +262,24 @@ test("held-out task creates a separately labeled evaluation case and preserves i
   const f = await setup("held_out");
   try {
     const fixture = workerClient({
-      craft_knowledge_claim_list: () => ({ claims: [{ id: "reviewed-claim", status: "reviewed", scope: f.task.project_scope_id }] }),
-      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: ["依赖"] } } }),
+      craft_knowledge_claim_list: () => ({ claims: [{ id: "candidate-claim", status: "candidate", scope: f.task.project_scope_id }] }),
+      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", version: 1,
+        identity_digest: "candidate-identity", content_digest: "candidate-content", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: ["依赖"] } } }),
       craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id, evaluation_eligible: false, status: "unverified_source_evidence" } }),
       craft_knowledge_evaluation_run: () => ({ run: { id: "run", metrics: { provenance_eligible: false } } }),
     });
     const result = await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
-      transport: modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["reviewed-claim"] })),
+      transport: modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] })),
       state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
     assert.equal(result.status, "case_candidate_created"); assert.equal(result.evaluation_eligible, false);
     assert.equal(result.independent_adjudication_required, true); assert.equal(result.label_source, "model_candidate");
     const saved = fixture.calls.find(call => call.name === "craft_knowledge_evaluation_case_save")!;
-    assert.deepEqual(saved.args.expected_claim_ids, ["reviewed-claim"]);
+    assert.deepEqual(saved.args.expected_claim_ids, ["candidate-claim"]);
+    assert.deepEqual(saved.args.candidate_claim_refs, [{ claim_id: "candidate-claim", claim_version: 1,
+      identity_digest: "candidate-identity", content_digest: "candidate-content" }]);
+    const shadowRun = fixture.calls.find(call => call.name === "craft_knowledge_evaluation_run")!;
+    assert.equal(shadowRun.args.mode, "candidate_shadow");
+    assert.deepEqual(shadowRun.args.candidate_claim_ids, ["candidate-claim"]);
     assert.equal((saved.args.source_evidence_ids as string[]).length, 2);
     assert((saved.args.source_evidence_ids as string[]).includes("evidence-session-task"));
     assert.equal(saved.args.dataset_partition, "held_out"); assert.equal(saved.args.sanitized, true);
@@ -289,12 +296,12 @@ test("held-out task creates a separately labeled evaluation case and preserves i
 test("held-out transcript evidence creates a separate evaluation case without mixing generation evidence", async () => {
   const f = await setup("held_out", false, false, true);
   try {
-    const fixture = reviewedClaimClient(f.task.project_scope_id, {
+    const fixture = candidateClaimClient(f.task.project_scope_id, {
       craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id, evaluation_eligible: false } }),
       craft_knowledge_evaluation_run: () => ({ run: { id: "run-session-test", metrics: { provenance_eligible: false } } }),
     });
     const result = await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
-      transport: modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["reviewed-claim"] })),
+      transport: modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] })),
       state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
     assert.equal(result.status, "case_candidate_created");
     assert.equal(result.label_source, "model_candidate");
@@ -322,19 +329,20 @@ test("held-out task without successful test evidence does not call the model or 
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("held-out evaluation waits for reviewed Claims and rejects model labels outside the reviewed set", async () => {
+test("held-out evaluation waits for current candidate Claims and rejects model labels outside the current candidate set", async () => {
   const f = await setup("held_out");
   try {
     const noClaims = workerClient({ craft_knowledge_claim_list: () => ({ claims: [] }) });
     assert.equal((await runSessionKnowledgeEvaluationOnce({ client: noClaims.client, providers: [provider], transport: modelTransport("{}"),
-      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "waiting_for_reviewed_claims");
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "waiting_for_candidate_claims");
     const fixture = workerClient({
-      craft_knowledge_claim_list: () => ({ claims: [{ id: "reviewed-claim", status: "reviewed", scope: f.task.project_scope_id }] }),
-      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", content: "稳定验证规则。" } } }),
+      craft_knowledge_claim_list: () => ({ claims: [{ id: "candidate-claim", status: "candidate", scope: f.task.project_scope_id }] }),
+      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", version: 1,
+        identity_digest: "candidate-identity", content_digest: "candidate-content", content: "稳定验证规则。" } } }),
     });
     await assert.rejects(runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider], transport: modelTransport(
-      JSON.stringify({ decision: "labeled", expected_claim_ids: ["not-reviewed"] })), state_file: f.workerState,
-      archive_options: { sessions_root: f.sessions, state_file: f.state } }), /selected from reviewed Claims/u);
+      JSON.stringify({ decision: "labeled", expected_claim_ids: ["not-candidate"] })), state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } }), /selected from current candidate Claims/u);
     assert(fixture.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"));
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
@@ -357,12 +365,13 @@ test("held-out evaluation records only terminal Trace references and leaves fail
   {
     const f = await setup("held_out");
     try {
-      const fixture = workerClient({ craft_knowledge_claim_list: () => ({ claims: [{ id: "reviewed-claim", status: "reviewed", scope: f.task.project_scope_id }] }),
-        craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", content: "稳定规则" } } }) });
+      const fixture = workerClient({ craft_knowledge_claim_list: () => ({ claims: [{ id: "candidate-claim", status: "candidate", scope: f.task.project_scope_id }] }),
+        craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", version: 1,
+          identity_digest: "candidate-identity", content_digest: "candidate-content", content: "稳定规则" } } }) });
       const excerpt = await readCodexSessionTaskExcerpt(String(f.task.task_id), { sessions_root: f.sessions, state_file: f.state, expected_partition: "held_out" });
       const { task_goal: _taskGoal, ...missingGoal } = excerpt;
       await assert.rejects(runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
-        transport: { async complete() { return { text: JSON.stringify({ decision: "labeled", expected_claim_ids: ["reviewed-claim"] }), model: "test-model", usage: null }; } }, state_file: f.workerState,
+        transport: { async complete() { return { text: JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] }), model: "test-model", usage: null }; } }, state_file: f.workerState,
         archive_options: { sessions_root: f.sessions, state_file: f.state }, read_excerpt: async () => missingGoal }), /held-out test Evidence is unavailable/u);
       const state = JSON.parse(await readFile(f.workerState, "utf8"));
       assert.deepEqual(state.processed_task_ids, []);
@@ -416,11 +425,11 @@ test("held-out evaluation is incremental across exact archive, readiness and sou
   }
 });
 
-test("held-out evaluation waits safely for reviewed Claims, a ready profile, provider and Host budget", async () => {
+test("held-out evaluation waits safely for current candidate Claims, a ready profile, provider and Host budget", async () => {
   const defaultF = await setup("held_out");
   try {
     const defaultStateRoot = join(defaultF.root, "default-state-root");
-    const defaultState = reviewedClaimClient(defaultF.task.project_scope_id, { craft_knowledge_claim_list: () => ({ claims: [] }) });
+    const defaultState = candidateClaimClient(defaultF.task.project_scope_id, { craft_knowledge_claim_list: () => ({ claims: [] }) });
     await mutateIndexedTask(defaultF, { project_scope_id: null });
     assert.equal((await evaluate(defaultF, defaultState.client, undefined, { state_file: undefined,
       env: { ...process.env, CRAFT_DATA_DIR: defaultStateRoot } })).reason, "held_out_provenance_incomplete");
@@ -429,29 +438,28 @@ test("held-out evaluation waits safely for reviewed Claims, a ready profile, pro
   const f = await setup("held_out");
   try {
     const filtered = workerClient({ craft_knowledge_claim_list: () => ({ claims: [
-      { id: "candidate", status: "candidate", scope: f.task.project_scope_id },
-      { id: "other-project", status: "reviewed", scope: "project:other" },
+      { id: "other-project", status: "candidate", scope: "project:other" },
     ] }) });
-    assert.equal((await evaluate(f, filtered.client, modelTransport("{}"))).status, "waiting_for_reviewed_claims");
+    assert.equal((await evaluate(f, filtered.client, modelTransport("{}"))).status, "waiting_for_candidate_claims");
     const malformedList = workerClient({ craft_knowledge_claim_list: () => ({ claims: "bad" }) });
-    assert.equal((await evaluate(f, malformedList.client, modelTransport("{}"))).status, "waiting_for_reviewed_claims");
-    const notReady = reviewedClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_ensure_single: () => ({ status: "needs_enablement" }) });
+    assert.equal((await evaluate(f, malformedList.client, modelTransport("{}"))).status, "waiting_for_candidate_claims");
+    const notReady = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_ensure_single: () => ({ status: "needs_enablement" }) });
     assert.equal((await evaluate(f, notReady.client, modelTransport("{}"))).status, "waiting_for_model");
-    const missingProfile = reviewedClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_ensure_single: () => ({ status: "ready_for_adapter" }) });
+    const missingProfile = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_ensure_single: () => ({ status: "ready_for_adapter" }) });
     assert.equal((await evaluate(f, missingProfile.client, modelTransport("{}"))).reason, "ready_for_adapter");
-    const notReadyDetail = reviewedClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_get: () => ({ readiness: {} }) });
+    const notReadyDetail = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_get: () => ({ readiness: {} }) });
     assert.equal((await evaluate(f, notReadyDetail.client, modelTransport("{}"))).reason, "model_profile_not_ready");
-    const providerUnavailable = reviewedClaimClient(f.task.project_scope_id);
+    const providerUnavailable = candidateClaimClient(f.task.project_scope_id);
     assert.equal((await evaluate(f, providerUnavailable.client, modelTransport("{}"), { providers: [] })).reason, "provider_unavailable");
-    const builtinProviderUnavailable = reviewedClaimClient(f.task.project_scope_id);
+    const builtinProviderUnavailable = candidateClaimClient(f.task.project_scope_id);
     assert.equal((await evaluate(f, builtinProviderUnavailable.client, modelTransport("{}"), { providers: undefined })).reason, "provider_unavailable");
-    const providerFallback = reviewedClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_get: () => ({ readiness: { status: "ready_for_adapter" }, provider }) });
+    const providerFallback = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_get: () => ({ readiness: { status: "ready_for_adapter" }, provider }) });
     assert.equal((await evaluate(f, providerFallback.client, modelTransport(JSON.stringify({ decision: "skip", expected_claim_ids: [] })), { providers: [] })).reason, undefined,
       "a ready provider returned with its Host Profile is usable when the static catalog omits it");
     await rm(f.workerState, { force: true });
-    const noTransport = reviewedClaimClient(f.task.project_scope_id);
+    const noTransport = candidateClaimClient(f.task.project_scope_id);
     assert.equal((await evaluate(f, noTransport.client)).reason, "model_transport_unavailable");
-    const noBudget = reviewedClaimClient(f.task.project_scope_id);
+    const noBudget = candidateClaimClient(f.task.project_scope_id);
     const budgetTransport: ModelTransport = { acquireCall: () => false, async complete() { throw new Error("unreachable"); } };
     assert.equal((await evaluate(f, noBudget.client, budgetTransport)).reason, "model_call_budget_exhausted");
   } finally { await rm(f.root, { recursive: true, force: true }); }
@@ -461,7 +469,7 @@ test("held-out evaluation covers Codex output schema and safe retry diagnostics"
   for (const failure of ["private failure", Object.assign(new Error("private failure"), { name: "../../unsafe" })]) {
     const f = await setup("held_out");
     try {
-      const claims = reviewedClaimClient(f.task.project_scope_id, {
+      const claims = candidateClaimClient(f.task.project_scope_id, {
         craft_evaluation_model_profile_ensure_single: () => ({ status: "ready_for_adapter", profile: { id: "profile", version: 1, provider: "codex-cli", model: "gpt-6-luna" } }),
         craft_evaluation_model_profile_get: () => ({ readiness: { status: "ready_for_adapter" }, provider: { ...provider, provider: "codex-cli", host_managed_auth: true } as unknown as JsonObject }),
       });
@@ -479,11 +487,11 @@ test("held-out evaluation covers Codex output schema and safe retry diagnostics"
   for (const metrics of [undefined, { provenance_eligible: true }]) {
     const f = await setup("held_out");
     try {
-      const claims = reviewedClaimClient(f.task.project_scope_id, {
+      const claims = candidateClaimClient(f.task.project_scope_id, {
         craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id } }),
         craft_knowledge_evaluation_run: () => ({ run: { id: "run", metrics } }),
       });
-      const result = await evaluate(f, claims.client, modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["reviewed-claim"] })));
+      const result = await evaluate(f, claims.client, modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] })));
       assert.equal(result.status, "case_candidate_created");
       assert.equal(result.evaluation_eligible, metrics?.provenance_eligible === true);
       assert.equal(result.independent_adjudication_required, true);
@@ -491,7 +499,7 @@ test("held-out evaluation covers Codex output schema and safe retry diagnostics"
   }
 });
 
-test("held-out evaluator isolates exact Excerpt and reviewed Claim identities", async () => {
+test("held-out evaluator isolates exact Excerpt and candidate Claim identities", async () => {
   const f = await setup("held_out");
   const baseExcerpt = { status: "ready", session_id: f.task.session_id, turn_id: f.task.turn_id, project_scope_id: f.task.project_scope_id,
     evidence_ids: f.task.verification_evidence_ids } as JsonObject;
@@ -503,35 +511,36 @@ test("held-out evaluator isolates exact Excerpt and reviewed Claim identities", 
     }
     const packetResults = [
       { status: "unavailable" },
-      { status: "ready", packet: { claim: { id: "reviewed-claim", content: "缺少当前状态。" } } },
-      { status: "ready", claim_status: "revoked", packet: { claim: { id: "reviewed-claim", status: "reviewed", content: "旧状态不能覆盖撤销。" } } },
-      { status: "ready", claim_status: "reviewed", packet: { claim: { id: "other", content: "内容。" } } },
-      { status: "ready", claim_status: "candidate", packet: { claim: { id: "reviewed-claim", content: "内容。" } } },
-      { status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", content: " " } } },
+      { status: "ready", packet: { claim: { id: "candidate-claim", content: "缺少当前状态。" } } },
+      { status: "ready", claim_status: "revoked", packet: { claim: { id: "candidate-claim", status: "candidate", content: "旧状态不能覆盖撤销。" } } },
+      { status: "ready", claim_status: "candidate", packet: { claim: { id: "other", content: "内容。" } } },
+      { status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", content: "内容。" } } },
+      { status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", content: " " } } },
     ];
     for (const packetResult of packetResults) {
-      const claims = reviewedClaimClient(f.task.project_scope_id, { craft_knowledge_semantic_review_packet: () => packetResult });
-      assert.equal((await evaluate(f, claims.client, modelTransport("{}"))).status, "waiting_for_reviewed_claims");
+      const claims = candidateClaimClient(f.task.project_scope_id, { craft_knowledge_semantic_review_packet: () => packetResult });
+      assert.equal((await evaluate(f, claims.client, modelTransport("{}"))).status, "waiting_for_candidate_claims");
       await rm(f.workerState, { force: true });
     }
-    const malformedPacket = reviewedClaimClient(f.task.project_scope_id, { craft_knowledge_semantic_review_packet: () => ({ status: "ready", packet: [] }) });
-    await assert.rejects(evaluate(f, malformedPacket.client, modelTransport("{}")), /reviewed Claim packet must be an object/u);
+    const malformedPacket = candidateClaimClient(f.task.project_scope_id, { craft_knowledge_semantic_review_packet: () => ({ status: "ready", packet: [] }) });
+    await assert.rejects(evaluate(f, malformedPacket.client, modelTransport("{}")), /candidate Claim packet must be an object/u);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
 test("held-out evaluator records safe Trace failure for malformed profile and Trace receipts", async () => {
   const f = await setup("held_out");
   try {
-    const noStatus = reviewedClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_ensure_single: () => ({}) });
+    const noStatus = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_ensure_single: () => ({}) });
     assert.equal((await evaluate(f, noStatus.client, modelTransport("{}"))).reason, "model_profile_unavailable");
-    const missingAction = reviewedClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_get: () => ({ readiness: { status: "needs_enablement" } }) });
+    const missingAction = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_get: () => ({ readiness: { status: "needs_enablement" } }) });
     assert.equal((await evaluate(f, missingAction.client, modelTransport("{}"))).reason, "model_profile_not_ready");
-    const missingTraceId = reviewedClaimClient(f.task.project_scope_id, { craft_trace_start: () => ({ trace: {} }) });
+    const missingTraceId = candidateClaimClient(f.task.project_scope_id, { craft_trace_start: () => ({ trace: {} }) });
     await assert.rejects(evaluate(f, missingTraceId.client, modelTransport("{}")), /Trace has no id/u);
     let firstAppend = true;
     const appendClient = workerClient({
-      craft_knowledge_claim_list: () => ({ claims: [{ id: "reviewed-claim", status: "reviewed", scope: f.task.project_scope_id }] }),
-      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", content: "有效内容" } } }),
+      craft_knowledge_claim_list: () => ({ claims: [{ id: "candidate-claim", status: "candidate", scope: f.task.project_scope_id }] }),
+      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", version: 1,
+        identity_digest: "candidate-identity", content_digest: "candidate-content", content: "有效内容" } } }),
       craft_trace_append: args => { if (firstAppend) { firstAppend = false; throw new Error("trace append unavailable"); } return {}; },
     });
     await assert.rejects(evaluate(f, appendClient.client, modelTransport("{}")), /trace append unavailable/u);
@@ -542,13 +551,13 @@ test("held-out evaluator records safe Trace failure for malformed profile and Tr
 test("held-out evaluation handles valid skip labels and retries malformed model responses", async () => {
   const f = await setup("held_out");
   try {
-    const claims = reviewedClaimClient(f.task.project_scope_id);
+    const claims = candidateClaimClient(f.task.project_scope_id);
     const skipped = await evaluate(f, claims.client, modelTransport(JSON.stringify({ decision: "skip", expected_claim_ids: [] })));
     assert.equal(skipped.status, "case_skipped"); assert.equal(skipped.case_id, null); assert.equal(skipped.evaluation_eligible, null);
   } finally { await rm(f.root, { recursive: true, force: true }); }
   const f2 = await setup("held_out");
   try {
-    const invalid = reviewedClaimClient(f2.task.project_scope_id);
+    const invalid = candidateClaimClient(f2.task.project_scope_id);
     await assert.rejects(evaluate(f2, invalid.client, modelTransport("not-json")), /one JSON object/u);
     assert(invalid.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"));
   } finally { await rm(f2.root, { recursive: true, force: true }); }
@@ -823,17 +832,17 @@ test("held-out tasks rotate past waiting projects without discarding pending wor
     assert.equal(tasks.length, 2);
     const noClaims = workerClient({ craft_knowledge_claim_list: () => ({ claims: [] }) });
     const waiting = await evaluate(f, noClaims.client);
-    assert.equal(waiting.status, "waiting_for_reviewed_claims", JSON.stringify(waiting));
+    assert.equal(waiting.status, "waiting_for_candidate_claims", JSON.stringify(waiting));
     let state = JSON.parse(await readFile(f.workerState, "utf8"));
     assert.equal(state.last_attempted_task_id, tasks[0]!.task_id);
     assert.deepEqual(state.processed_task_ids, []);
-    const ready = reviewedClaimClient(f.task.project_scope_id);
+    const ready = candidateClaimClient(f.task.project_scope_id);
     const result = await evaluate(f, ready.client, modelTransport('{"decision":"skip","expected_claim_ids":[]}'));
     assert.equal(result.task_id, tasks[1]!.task_id);
     assert.equal(result.status, "case_skipped");
     state = JSON.parse(await readFile(f.workerState, "utf8"));
     assert.deepEqual(state.processed_task_ids, [tasks[1]!.task_id]);
-    assert.equal((await evaluate(f, noClaims.client)).status, "waiting_for_reviewed_claims");
+    assert.equal((await evaluate(f, noClaims.client)).status, "waiting_for_candidate_claims");
     assert.equal(JSON.parse(await readFile(f.workerState, "utf8")).last_attempted_task_id, tasks[0]!.task_id);
     assert.equal(ready.calls.filter(call => call.name === "craft_trace_start").length, 1);
     assert.equal(noClaims.calls.some(call => call.name === "craft_evaluation_model_profile_ensure_single"), false);

@@ -46,6 +46,8 @@ test("common operation instrumentation classifies outcomes, nests spans, and pre
     [new Error("service unavailable"), "UNAVAILABLE"], [new Error("invalid input"), "INVALID_INPUT"], ["opaque", "OPERATION_FAILED"]] as const) {
     assert.equal(operationErrorCode(error), code);
   }
+  assert.equal(operationErrorCode(Object.assign(new Error("SQLite failure"), { code: "ERR_SQLITE_ERROR", errcode: 5 })), "STORAGE_BUSY");
+  assert.equal(operationErrorCode(new Error("database is locked")), "STORAGE_BUSY");
   assert.deepEqual([
     operationResultStatus({ denied: true }), operationResultStatus({ isError: true }), operationResultStatus({ valid: false }),
     operationResultStatus({ status: "failed" }), operationResultStatus({ partial: true }), operationResultStatus({ receipt: { partial: true } }),
@@ -163,6 +165,72 @@ test("shared telemetry separates sink failure from successful business work and 
   assert.deepEqual(capturedEvents, ["observed", "succeeded", "observed", "failed"]);
   assert.equal(operationEventId("trace", "request", "completed"), operationEventId("trace", "request", "completed"));
   assert.throws(() => operationEventId("", "request", "completed"), /trace_id/);
+});
+
+test("read-only operation context suppresses nested telemetry persistence", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "craft-readonly-operation-"));
+  const store = await new CraftStore(craftPaths(dir)).open();
+  try {
+    const observed: OperationEvent[] = [];
+    const result = await withoutOperationPersistence(store, async () => {
+      await Promise.resolve();
+      return observeOperation(store, "knowledge", "search", { query: "bounded" }, () => ({ matches: [] }));
+    }, event => observed.push(event));
+    assert.deepEqual(result, { matches: [] });
+    assert.equal(store.count("telemetry_event"), 0);
+    assert.equal(store.count("trace"), 0);
+    assert.deepEqual(observed.map(item => item.phase), ["started", "completed"]);
+    assert.equal(observed[0]!.event.attributes.input_digest !== undefined, true);
+    assert.equal(observed[1]!.event.attributes.result_digest !== undefined, true);
+    observeOperation(store, "fixture", "outer-read", {}, () => withoutOperationPersistence(store, () =>
+      observeOperation(store, "fixture", "nested-read", {}, () => "ok")), { onError: () => undefined });
+    assert.equal(store.count("telemetry_event"), 2, "only the explicitly observed outer operation is persisted");
+    assert.equal(store.count("trace"), 0);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("JSONL telemetry journal serializes concurrent appends into private per-capability files", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "craft-telemetry-journal-"));
+  try {
+    const first = new JsonlTelemetryJournal(dir), second = new JsonlTelemetryJournal(dir);
+    const event = (eventId: string, capability: string) => telemetryEvent({ event_id: eventId, signal: "trace", capability_id: capability,
+      operation: "search", trace_id: "read-trace", span_id: `span-${eventId}`, parent_span_id: null, outcome: "succeeded",
+      attributes: { stage: "completed", result_digest: "sha256:digest" } });
+    await Promise.all([first.append(event("evt-one", "knowledge")), second.append(event("evt-two", "knowledge")),
+      first.append(event("evt-three", "memory"))]);
+    await Promise.all([first.flush(), second.flush()]);
+    const partitions = await readdir(join(dir, "operation-journal"));
+    assert.equal(partitions.length, 2);
+    const records = await Promise.all(partitions.map(async partition => {
+      const files = await readdir(join(dir, "operation-journal", partition));
+      assert.deepEqual(files, [`${process.pid}.jsonl`]);
+      const content = await readFile(join(dir, "operation-journal", partition, files[0]!), "utf8");
+      assert.equal(content.endsWith("\n"), true);
+      return content.trim().split("\n").map(line => JSON.parse(line) as JsonObject);
+    }));
+    assert.deepEqual(records.flat().map(item => item.event_id).sort(), ["evt-one", "evt-three", "evt-two"]);
+    assert.equal(JSON.stringify(records).includes("private prompt"), false);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("JSONL telemetry journal reports filesystem failures without changing the operation result", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "craft-telemetry-journal-failure-"));
+  const blocker = join(dir, "not-a-directory");
+  await writeFile(blocker, "file");
+  let failures = 0;
+  try {
+    assert.throws(() => new JsonlTelemetryJournal(" "), /runtimeDir/u);
+    const event = telemetryEvent({ event_id: "evt-failure", signal: "trace", capability_id: "knowledge", operation: "search",
+      trace_id: "read-trace", span_id: "span", parent_span_id: null, outcome: "succeeded" });
+    const defaultJournal = new JsonlTelemetryJournal(blocker);
+    await assert.rejects(defaultJournal.append(event));
+    const journal = new JsonlTelemetryJournal(blocker, () => { failures += 1; throw new Error("reporting failed"); });
+    const append = journal.append(event);
+    const flushing = journal.flush();
+    await assert.rejects(append);
+    await flushing;
+    assert.equal(failures, 1);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test("local telemetry sink is idempotent and queryable by trace", async () => {
@@ -331,8 +399,8 @@ test("each capability package loads and registers outside the harness checkout",
     await symlink(realpathSync(join(root, "node_modules", "typescript")), join(nodeModules, "typescript"), "dir");
     const source = `
       import { CraftStore, craftPaths } from 'craft-common-store-local';
-      import { CraftTelemetry, JsonlTelemetryJournal, StoreTelemetrySink } from 'craft-common-log';
-      import { buildCapabilityRegistry, CORE_KERNELS } from 'craft-common-base';
+      import { CraftTelemetry, StoreTelemetrySink } from 'craft-common-log';
+      import { buildCapabilityRegistry, CORE_KERNELS, stableDigest } from 'craft-common-base';
       import { knowledgeCapability } from '@craft/capability-knowledge';
       import { memoryCapability } from '@craft/capability-memory';
       import { experienceCapability } from '@craft/capability-experience';
@@ -340,6 +408,7 @@ test("each capability package loads and registers outside the harness checkout",
       import { codebaseCapability } from '@craft/capability-codebase';
       const store = await new CraftStore(craftPaths(process.env.CRAFT_TEST_DATA_DIR)).open();
       try {
+        store.create('scope_alias', 'sdk-project', { scope: { kind: 'project', id: 'project:sdk' }, alias_kind: 'path', alias: process.cwd(), alias_digest: stableDigest(process.cwd()), status: 'active' });
         store.create('external', 'record', { value: 1 });
         for (const capability of [knowledgeCapability, memoryCapability, experienceCapability, codebaseCapability]) {
           buildCapabilityRegistry([capability], { [CORE_KERNELS.store]: store, [CORE_KERNELS.modelProviders]: [], [CORE_KERNELS.telemetry]: new CraftTelemetry(new StoreTelemetrySink(store)) });
@@ -383,7 +452,7 @@ test("published tarball contents typecheck and run outside the monorepo", async 
     const source = `
       import { CraftStore, craftPaths } from 'craft-common-store-local';
       import { CraftTelemetry } from 'craft-common-log';
-      import { buildCapabilityRegistry, CORE_KERNELS } from 'craft-common-base';
+      import { buildCapabilityRegistry, CORE_KERNELS, stableDigest } from 'craft-common-base';
       import { KeywordRetrievalPort } from 'craft-common-base/keyword-retrieval';
       import { temporalMemorySelect } from 'craft-common-base/memory-temporal-policy';
       import { OpenAiCompatibleEmbeddingRetrievalPort } from 'craft-common-base/embedding-retrieval';
@@ -394,6 +463,7 @@ test("published tarball contents typecheck and run outside the monorepo", async 
       import { codebaseCapability } from '@craft/capability-codebase';
       const store = await new CraftStore(craftPaths('./data')).open();
       try {
+        store.create('scope_alias', 'sdk-project', { scope: { kind: 'project', id: 'project:sdk' }, alias_kind: 'path', alias: process.cwd(), alias_digest: stableDigest(process.cwd()), status: 'active' });
         const keyword = await new KeywordRetrievalPort().search('alpha', [{ id: 'a', body: 'alpha' }]);
         if (keyword.hits[0]?.id !== 'a') throw new Error('focused keyword export failed');
         if (temporalMemorySelect([], new Date(), false).selected.length) throw new Error('focused temporal export failed');
@@ -419,71 +489,5 @@ test("published tarball contents typecheck and run outside the monorepo", async 
     const runtime = spawnSync(process.execPath, ["consumer.mjs"], { cwd: dir, encoding: "utf8" });
     assert.equal(runtime.status, 0, runtime.stderr);
     assert.match(runtime.stdout, /tarball-consumer-ok/);
-  } finally { await rm(dir, { recursive: true, force: true }); }
-});
-
-test("read-only operation context suppresses nested telemetry persistence", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "craft-readonly-operation-"));
-  const store = await new CraftStore(craftPaths(dir)).open();
-  try {
-    const observed: OperationEvent[] = [];
-    const result = await withoutOperationPersistence(store, async () => {
-      await Promise.resolve();
-      return observeOperation(store, "knowledge", "search", { query: "bounded" }, () => ({ matches: [] }));
-    }, event => observed.push(event));
-    assert.deepEqual(result, { matches: [] });
-    assert.equal(store.count("telemetry_event"), 0);
-    assert.equal(store.count("trace"), 0);
-    assert.deepEqual(observed.map(item => item.phase), ["started", "completed"]);
-    assert.equal(observed[0]!.event.attributes.input_digest !== undefined, true);
-    assert.equal(observed[1]!.event.attributes.result_digest !== undefined, true);
-    observeOperation(store, "fixture", "outer-read", {}, () => withoutOperationPersistence(store, () =>
-      observeOperation(store, "fixture", "nested-read", {}, () => "ok")), { onError: () => undefined });
-    assert.equal(store.count("telemetry_event"), 2, "only the explicitly observed outer operation is persisted");
-    assert.equal(store.count("trace"), 0);
-  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
-});
-
-test("JSONL telemetry journal serializes concurrent appends into private per-capability files", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "craft-telemetry-journal-"));
-  try {
-    const first = new JsonlTelemetryJournal(dir), second = new JsonlTelemetryJournal(dir);
-    const event = (eventId: string, capability: string) => telemetryEvent({ event_id: eventId, signal: "trace", capability_id: capability,
-      operation: "search", trace_id: "read-trace", span_id: `span-${eventId}`, parent_span_id: null, outcome: "succeeded",
-      attributes: { stage: "completed", result_digest: "sha256:digest" } });
-    await Promise.all([first.append(event("evt-one", "knowledge")), second.append(event("evt-two", "knowledge")),
-      first.append(event("evt-three", "memory"))]);
-    await Promise.all([first.flush(), second.flush()]);
-    const partitions = await readdir(join(dir, "operation-journal"));
-    assert.equal(partitions.length, 2);
-    const records = await Promise.all(partitions.map(async partition => {
-      const files = await readdir(join(dir, "operation-journal", partition));
-      assert.deepEqual(files, [`${process.pid}.jsonl`]);
-      const content = await readFile(join(dir, "operation-journal", partition, files[0]!), "utf8");
-      assert.equal(content.endsWith("\n"), true);
-      return content.trim().split("\n").map(line => JSON.parse(line) as JsonObject);
-    }));
-    assert.deepEqual(records.flat().map(item => item.event_id).sort(), ["evt-one", "evt-three", "evt-two"]);
-    assert.equal(JSON.stringify(records).includes("private prompt"), false);
-  } finally { await rm(dir, { recursive: true, force: true }); }
-});
-
-test("JSONL telemetry journal reports filesystem failures without changing the operation result", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "craft-telemetry-journal-failure-"));
-  const blocker = join(dir, "not-a-directory");
-  await writeFile(blocker, "file");
-  let failures = 0;
-  try {
-    assert.throws(() => new JsonlTelemetryJournal(" "), /runtimeDir/u);
-    const event = telemetryEvent({ event_id: "evt-failure", signal: "trace", capability_id: "knowledge", operation: "search",
-      trace_id: "read-trace", span_id: "span", parent_span_id: null, outcome: "succeeded" });
-    const defaultJournal = new JsonlTelemetryJournal(blocker);
-    await assert.rejects(defaultJournal.append(event));
-    const journal = new JsonlTelemetryJournal(blocker, () => { failures += 1; throw new Error("reporting failed"); });
-    const append = journal.append(event);
-    const flushing = journal.flush();
-    await assert.rejects(append);
-    await flushing;
-    assert.equal(failures, 1);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

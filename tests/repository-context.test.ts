@@ -5,12 +5,13 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSy
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
-import { craftPaths } from "../core/infrastructure/paths.ts";
+import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
-import { repositoryRoot, repositoryFiles } from "../capability/craft-codebase/repository-files.ts";
+import { repositoryRoot, repositoryFiles, repositoryPolicyDigest } from "../capability/craft-codebase/repository-files.ts";
 import { basicAnalysis } from "../capability/craft-codebase/basic-analysis.ts";
 import { CodebaseIndexKernel } from "../capability/craft-codebase/codebase-index.ts";
+import { ensureRepository } from "../capability/craft-codebase/repository-onboarding.ts";
 import { payload, stableDigest } from "../common/craft-common-base/src/digest.ts";
 import { analyzeTypeScript } from "../capability/craft-codebase/typescript-analysis.ts";
 import { analyzePythonCheckpoint } from "../capability/craft-codebase/python-analysis.ts";
@@ -19,6 +20,7 @@ import { analyzeJavaCheckpoint } from "../capability/craft-codebase/java-analysi
 import { cacheLspDocumentSymbols, lspDocumentSymbolsDigest } from "../capability/craft-codebase/lsp-adapter.ts";
 import { ProjectGraphStore } from "../capability/craft-codebase/project-graph-store.ts";
 import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
+import { estimateTokens } from "../core/token-budget.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-repository-context-"));
@@ -32,10 +34,10 @@ async function fixture() {
 }
 function projectGraph(f: Awaited<ReturnType<typeof fixture>>, workspaceId: string): ProjectGraphStore {
   const workspace = f.store.get("workspace", workspaceId);
-  return new ProjectGraphStore(String(workspace.root_path), workspaceId);
+  return new ProjectGraphStore(String(workspace.root_path), workspaceId, f.store.paths);
 }
 function projectAnalysis(f: Awaited<ReturnType<typeof fixture>>, workspaceId: string, kind: string, limit = 100): JsonObject[] {
-  return new ProjectAnalysisCache(f.repo, workspaceId).list(kind, limit);
+  return new ProjectAnalysisCache(f.repo, workspaceId, f.store.paths).list(kind, limit);
 }
 const result = async (server: McpServer, name: string, args: JsonObject) => {
   const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) as any;
@@ -52,7 +54,11 @@ test("repository auto onboarding reuses across clients, incrementally parses, de
     assert.equal(first.status, "ready"); assert.equal(first.reused, false);
     assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_file_analysis").length, 2);
     assert.equal(f.store.list("codebase_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 0);
+    const stateId = `${String(first.workspace_id)}_basic`, state = f.store.get("codebase_repository_state", stateId);
+    const summary = { ...(state.summary as JsonObject) }; delete summary.omitted_files; delete summary.omitted_by_language;
+    f.store.save("codebase_repository_state", stateId, { ...payload(state), summary });
     const again = f.service.codebaseRepositoryEnsure({ project_root: f.repo }); assert.equal(again.index_id, first.index_id); assert.equal(again.reused, true);
+    assert.equal(again.omitted_files, 0); assert.deepEqual(again.omitted_by_language, {});
     const anotherHost = new CraftService(f.store);
     assert.equal(anotherHost.codebaseRepositoryEnsure({ project_root: f.repo }).index_id, first.index_id);
     f.write("a.ts", "export function gamma() { return 3; }");
@@ -74,6 +80,38 @@ test("repository auto onboarding reuses across clients, incrementally parses, de
     rmSync(join(f.repo, "a.ts")); rmSync(join(f.repo, "b.py"));
     assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo }).status, "empty");
     assert.throws(() => f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "wrong" }), /index_depth/);
+  } finally { f.close(); }
+});
+
+test("repository indexing retries once when policy changes during analysis then fails closed on a second change", async () => {
+  const f = await fixture();
+  try {
+    f.write("a.ts", "export function alpha() { return 1; }\n");
+    let analyses = 0;
+    const port = Object.create(f.service) as CraftService & { analyzeTypeScript: typeof analyzeTypeScript };
+    port.analyzeTypeScript = (files, options) => {
+      analyses += 1;
+      f.write(".gitignore", `policy-change-${analyses}\n`);
+      return analyzeTypeScript(files, options);
+    };
+    assert.throws(() => ensureRepository(port, { project_root: f.repo, index_depth: "semantic" }), /policy changed during index analysis/u);
+    assert(analyses >= 2, "a changed policy gets one retry before rejection");
+  } finally { f.close(); }
+});
+
+test("repository indexing uses the legacy checkpoint API when repository-file snapshots are unavailable", async () => {
+  const f = await fixture();
+  try {
+    f.write("a.ts", "export function alpha() { return 1; }\n");
+    const legacyPort = new Proxy(f.service, {
+      get(target, property, receiver) {
+        if (property === "workspaceCheckpointFromRepositoryFiles") return undefined;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const result = ensureRepository(legacyPort, { project_root: f.repo, index_depth: "basic" });
+    assert.equal(result.status, "ready");
+    assert.equal(typeof result.checkpoint_id, "string");
   } finally { f.close(); }
 });
 
@@ -153,7 +191,7 @@ test("repository ensure migrates legacy global checkpoints into the project Code
 
     assert.equal(migrated.status, "ready");
     assert.notEqual(migrated.checkpoint_id, checkpointId);
-    assert.equal(migratedCheckpoint.snapshot_root, join(realpathSync(f.repo), ".craft_data", "codebase", "snapshots", workspaceId, String(migrated.checkpoint_id)));
+    assert.equal(migratedCheckpoint.snapshot_root, join(projectStorageDirectory(f.store.paths, f.repo), "codebase", "snapshots", workspaceId, String(migrated.checkpoint_id)));
     assert.equal(f.store.get("workspace", workspaceId).snapshot_storage, "project_codebase");
     assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
   } finally { f.close(); }
@@ -413,7 +451,7 @@ test("Go LSP worker receives persistent cache directories under the project Code
     const combined = ((indexed.summary as JsonObject).diagnostics as JsonObject[])[0]!;
     const go = (combined.languages as JsonObject[]).find(item => item.analyzer === "lsp-go") as JsonObject;
     assert(go, JSON.stringify(indexed.summary));
-    const projectCodebaseRoot = join(realpathSync(f.repo), ".craft_data", "codebase");
+    const projectCodebaseRoot = join(projectStorageDirectory(f.store.paths, f.repo), "codebase");
     assert.equal((go.diagnostics as JsonObject).gopls_cache, join(projectCodebaseRoot, "gopls-cache"));
     assert.equal((go.diagnostics as JsonObject).go_build_cache, join(projectCodebaseRoot, "go-build-cache"));
     assert.equal((go.diagnostics as JsonObject).worker_cwd, (go.diagnostics as JsonObject).request_cwd);
@@ -692,7 +730,7 @@ test("configured LSP reuses valid symbols, rejects corrupted caches and rebuilds
 
     const targetCache = projectAnalysis(f, String(second.workspace_id), "codebase_lsp_file_analysis", 10)
       .find(item => item.path === "src/target.cpp")!;
-    new ProjectAnalysisCache(f.repo, String(second.workspace_id)).save("codebase_lsp_file_analysis", String(targetCache.id),
+    new ProjectAnalysisCache(f.repo, String(second.workspace_id), f.store.paths).save("codebase_lsp_file_analysis", String(targetCache.id),
       { ...payload(targetCache), cached_symbols_digest: "tampered" });
     f.write("src/main.cpp", "int caller() { return target() + 3; }\n");
     const third = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
@@ -791,7 +829,7 @@ test("semantic onboarding persists a full graph in immutable bounded shards", as
     assert.equal(index.graph_storage, "project-sharded-v5");
     assert(Number(index.node_count) > 10_000);
     assert((index.shard_ids as string[]).length > 1);
-    const graphDirectory = join(f.repo, ".craft_data", "codebase", "indexes", String(result.workspace_id), "graph_records");
+    const graphDirectory = join(projectStorageDirectory(f.store.paths, f.repo), "codebase", "indexes", String(result.workspace_id), "graph_records");
     const shardIds = index.shard_ids as string[];
     assert.equal(f.store.find("codebase_index_shard", shardIds[0]!), null);
     const shards = shardIds.map(id => JSON.parse(readFileSync(join(graphDirectory, `${id}.json`), "utf8")) as JsonObject);
@@ -1049,6 +1087,77 @@ test("repository onboarding treats stale policy and incomplete workspace metadat
       const concurrentRepair = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
       assert.equal(concurrentRepair.reused, true);
     } finally { f.store.find = originalFind; }
+  } finally { f.close(); }
+});
+
+test("repository onboarding never reuses an index after its stored repository policy digest becomes stale", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export function source() { return 1; }\n");
+    f.write("other.ts", "export function retained() { return 2; }\n");
+    const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const stateId = `${first.workspace_id}_semantic`;
+    const state = f.store.get("codebase_repository_state", stateId);
+    f.store.save("codebase_repository_state", stateId, { ...state, repository_policy_digest: "stale-policy-digest" });
+    f.write(".craft-codebase.json", JSON.stringify({ exclude_paths: ["main.ts"] }));
+
+    const rebuilt = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+
+    assert.equal(rebuilt.status, "ready");
+    assert.equal(rebuilt.reused, false);
+    assert.notEqual(rebuilt.index_id, first.index_id);
+    assert.equal((f.store.get("codebase_repository_state", stateId)).repository_policy_digest, repositoryPolicyDigest(f.repo));
+  } finally { f.close(); }
+});
+
+test("repository onboarding recovers a missing workspace pointer from the matching project snapshot", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export function source() { return 1; }\n");
+    const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const workspaceId = String(first.workspace_id), stateId = `${workspaceId}_semantic`;
+    const originalFind = f.store.find.bind(f.store);
+    let workspaceReads = 0;
+    f.store.find = ((kind: string, id: string) => {
+      if (kind === "workspace" && id === workspaceId) {
+        workspaceReads++;
+        const value = originalFind(kind, id);
+        if (workspaceReads === 2 && value) return { ...value, latest_checkpoint_id: undefined };
+      }
+      if (kind === "codebase_repository_state" && id === stateId) return undefined;
+      return originalFind(kind, id);
+    }) as typeof f.store.find;
+    try {
+      const recovered = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+      assert.equal(recovered.status, "ready");
+      assert.equal(recovered.reused, false);
+      assert.equal(typeof recovered.checkpoint_id, "string");
+    } finally { f.store.find = originalFind; }
+  } finally { f.close(); }
+});
+
+test("Go workspace metadata drift before checkpoint publication is rejected", async () => {
+  const f = await fixture();
+  try {
+    f.write("go.mod", "module example.test/workspace-drift\n\ngo 1.22\n");
+    f.write("main.go", "package main\nfunc main() {}\n");
+    writeFileSync(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1,
+      adapters: [{ language: "go", command: process.execPath, analyzer_version: "test-go-1" }] }));
+    (f.service as unknown as { analyzeLsp: (request: JsonObject) => JsonObject }).analyzeLsp = request => {
+      const document = (request.documents as JsonObject[])[0]!;
+      return { format: "craft-static-analysis-v1", analyzer: "lsp-go", analyzer_version: "test-go-1",
+        nodes: [{ id: "go_main", kind: "symbol", path: "main.go", language: "go", name: "main", source_digest: document.source_digest,
+          span: { start_offset: 17, end_offset: 21 } }], edges: [] };
+    };
+    const checkpoint = f.service.workspaceCheckpointFromRepositoryFiles.bind(f.service);
+    f.service.workspaceCheckpointFromRepositoryFiles = args => {
+      const published = checkpoint(args);
+      const row = published.checkpoint as JsonObject;
+      const entries = (row.entries as JsonObject[]).map(entry => entry.path === "go.mod" ? { ...entry, digest: "0".repeat(64) } : entry);
+      f.store.save("workspace_checkpoint", String(row.id), { ...row, entries });
+      return published;
+    };
+    assert.throws(() => f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }), /workspace context changed during snapshot analysis/u);
   } finally { f.close(); }
 });
 
@@ -1535,6 +1644,62 @@ test("repository source discovery never indexes project Craft data even when Git
   } finally { f.close(); }
 });
 
+test("repository policy digest detects same-path ignore and Codebase config edits", async () => {
+  const f = await fixture();
+  const oldXdg = process.env.XDG_CONFIG_HOME, oldGlobalConfig = process.env.GIT_CONFIG_GLOBAL, oldNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
+  try {
+    process.env.XDG_CONFIG_HOME = join(f.root, "empty-xdg");
+    process.env.GIT_CONFIG_GLOBAL = join(f.root, "empty-git-config");
+    process.env.GIT_CONFIG_NOSYSTEM = "1";
+    writeFileSync(process.env.GIT_CONFIG_GLOBAL, "");
+    const initial = repositoryPolicyDigest(f.repo);
+    f.write(".gitignore", "first.ts\n");
+    const firstIgnore = repositoryPolicyDigest(f.repo);
+    assert.notEqual(firstIgnore, initial);
+    f.write(".gitignore", "second.ts\n");
+    assert.notEqual(repositoryPolicyDigest(f.repo), firstIgnore);
+    f.write(".craft-codebase.json", JSON.stringify({ exclude_paths: ["generated"] }));
+    const firstConfig = repositoryPolicyDigest(f.repo);
+    f.write(".craft-codebase.json", JSON.stringify({ exclude_paths: ["fixtures"] }));
+    assert.notEqual(repositoryPolicyDigest(f.repo), firstConfig);
+    unlinkSync(join(f.repo, ".craft-codebase.json"));
+    writeFileSync(join(f.root, "outside-config.json"), "{}");
+    symlinkSync(join(f.root, "outside-config.json"), join(f.repo, ".craft-codebase.json"));
+    assert.throws(() => repositoryPolicyDigest(f.repo), /regular file/u);
+    unlinkSync(join(f.repo, ".craft-codebase.json"));
+    mkdirSync(join(f.repo, ".craft-codebase.json"));
+    assert.throws(() => repositoryPolicyDigest(f.repo), /regular file/u);
+    rmSync(join(f.repo, ".craft-codebase.json"), { recursive: true });
+    f.write(".git/info/exclude", "local-ignore.ts\n");
+    const localExclude = repositoryPolicyDigest(f.repo);
+    f.write(".git/info/exclude", "other-local-ignore.ts\n");
+    assert.notEqual(repositoryPolicyDigest(f.repo), localExclude);
+    const globalIgnore = join(f.root, "global-ignore");
+    writeFileSync(globalIgnore, "first-global-ignore.ts\n");
+    f.git("config", "core.excludesfile", globalIgnore);
+    const firstGlobal = repositoryPolicyDigest(f.repo);
+    writeFileSync(globalIgnore, "second-global-ignore.ts\n");
+    assert.notEqual(repositoryPolicyDigest(f.repo), firstGlobal);
+    mkdirSync(join(f.root, "empty-xdg", "git"), { recursive: true });
+    mkdirSync(join(f.root, "empty-xdg", "git", "ignore"));
+    assert.throws(() => repositoryPolicyDigest(f.repo));
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const wrapperDir = join(f.root, "git-wrapper"), wrapper = join(wrapperDir, "git");
+    mkdirSync(wrapperDir);
+    writeFileSync(wrapper, `#!/bin/sh\nif [ "$3" = "config" ]; then exit 2; fi\nexec "${realGit}" "$@"\n`);
+    chmodSync(wrapper, 0o755);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${wrapperDir}:${oldPath ?? ""}`;
+    try { assert.throws(() => repositoryPolicyDigest(f.repo)); }
+    finally { if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath; }
+  } finally {
+    if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = oldXdg;
+    if (oldGlobalConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = oldGlobalConfig;
+    if (oldNoSystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM; else process.env.GIT_CONFIG_NOSYSTEM = oldNoSystem;
+    f.close();
+  }
+});
+
 test("repository source selection recognizes supported source and configuration extensions", async () => {
   const f = await fixture();
   try {
@@ -1669,18 +1834,45 @@ test("aggregate MCP resolves bounded scope and code references while standalone 
   try {
     f.write("a.ts", "export function alpha() { return 1; }");
     const server = new McpServer(f.service, "component-context-daily");
-    const pack = await result(server, "craft_context_open", { project_root: f.repo, query: "alpha" });
+    const contextTool = server.tools.find(tool => tool.name === "craft_context_open") as JsonObject;
+    assert.deepEqual((((contextTool.inputSchema as JsonObject).properties as JsonObject).response_detail as JsonObject).enum, ["compact", "full"]);
+    const pack = await result(server, "craft_context_open", { project_root: f.repo, query: "alpha", include_codebase: true });
     assert.equal(pack.host_execution_authority, false); assert.equal((pack.codebase as JsonObject).status, "ready");
     assert.equal(((pack.codebase as JsonObject).references as unknown[]).length, 1);
+    assert.equal((pack.pack_receipt as JsonObject).max_items, 3);
+    assert.equal((pack.pack_receipt as JsonObject).max_chars, 1_200);
     assert.deepEqual((pack.receipt as JsonObject).members, ["experience", "knowledge", "memory"]);
-    const tiny = await result(server, "craft_context_open", { project_root: f.repo, query: "alpha", max_chars: 1 });
+    const raw = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_context_open", arguments: { project_root: f.repo, query: "alpha", include_codebase: true } } }) as JsonObject;
+    const rawResult = raw.result as JsonObject;
+    const content = rawResult.content as JsonObject[];
+    const contentText = String(content[0]?.text ?? "");
+    const compact = rawResult.structuredContent as JsonObject;
+    assert.deepEqual(JSON.parse(contentText), compact);
+    assert(contentText.length < 4_000);
+    assert(Number((compact.injection_measurement as JsonObject).response_estimated_tokens) <= 2_000);
+    assert.equal((compact.receipt as JsonObject).id, (pack.receipt as JsonObject).id);
+    const fullWithoutBudget = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_context_open", arguments: { project_root: f.repo, query: "alpha", include_codebase: true, response_detail: "full" } } }) as JsonObject;
+    assert.equal((fullWithoutBudget.error as JsonObject).code, -32602);
+    const invalidDetail = await server.handle({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "craft_context_open", arguments: { project_root: f.repo, query: "alpha", include_codebase: true, response_detail: "everything" } } }) as JsonObject;
+    assert.equal((invalidDetail.error as JsonObject).code, -32602);
+    const full = await server.handle({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "craft_context_open", arguments: { project_root: f.repo, query: "alpha", include_codebase: true, response_detail: "full", max_tokens: 5_000 } } }) as JsonObject;
+    const fullResult = (full.result as JsonObject).structuredContent as JsonObject;
+    assert(Array.isArray((fullResult.receipt as JsonObject).deduplicated_refs));
+    assert(estimateTokens(JSON.stringify(fullResult)) <= 5_000);
+    assert.equal(String(((full.result as JsonObject).content as JsonObject[])[0]?.text), JSON.stringify(fullResult));
+    const reduced = await result(server, "craft_context_open", { project_root: f.repo, query: "alpha", include_codebase: true, max_items: 1, max_chars: 400 });
+    assert.equal((reduced.pack_receipt as JsonObject).max_items, 1);
+    assert.equal((reduced.pack_receipt as JsonObject).max_chars, 400);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", max_items: 8 }), /configured maximum/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", max_chars: 8_000 }), /configured maximum/);
+    const tiny = await result(server, "craft_context_open", { project_root: f.repo, query: "alpha", include_codebase: true, max_chars: 1 });
     assert.equal((tiny.pack_receipt as JsonObject).total_used_chars, 0);
     const standalone = new McpServer(f.service, "component-codebase");
     assert.equal((await result(standalone, "craft_codebase_repository_ensure", { project_root: f.repo })).reused, true);
     assert(!standalone.tools.some(tool => tool.name === "craft_context_open"));
     assert(!new McpServer(f.service, "component-memory-daily").tools.some(tool => tool.name === "craft_codebase_repository_ensure"));
     f.write(".craft-codebase.json", "invalid");
-    const degraded = await f.service.contextOpen({ project_root: f.repo, query: "alpha" }); assert.equal((degraded.codebase as JsonObject).status, "unavailable"); assert(degraded.receipt);
+    const degraded = await f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: true }); assert.equal((degraded.codebase as JsonObject).status, "unavailable"); assert(degraded.receipt);
     await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "" }), /query/);
     await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "a", index_depth: "invalid" }), /index_depth/);
     await f.service.contextOpen({ project_root: f.repo, query: "a", index_depth: "basic" });
@@ -1710,13 +1902,17 @@ test("context automatically ingests bounded project Knowledge into project data 
     assert.equal(sources.length, 3);
     assert(sources.every(source => source.trust === "bounded" && source.access === "read_only" && String(source.id).startsWith("project_autodiscovered_")));
     assert.equal(f.store.list("knowledge_fragment").length > 0, true);
-    const contentRoot = join(realpathSync(f.repo), ".craft_data", "knowledge", "md");
+    const contentRoot = join(projectStorageDirectory(f.store.paths, f.repo), "knowledge", "md");
     assert(sources.every(source => String(source.locator).startsWith(realpathSync(f.repo))));
     assert(f.store.list("knowledge_fragment").every(fragment => String((fragment.content_ref as JsonObject).path).startsWith(contentRoot)));
     assert.equal(f.store.find("knowledge_source", "project_autodiscovered_invalid"), null);
+    const otherRepo = join(f.root, "other-project"); mkdirSync(otherRepo); execFileSync("git", ["-C", otherRepo, "init", "-q"]);
+    const otherScope = ((f.service.scopeIdentityResolveProject({ project_root: otherRepo }).identity as JsonObject).canonical_scope as JsonObject);
+    f.store.create("knowledge_source", "project_autodiscovered_other_project", { scope: otherScope, kind: "readme", status: "active", locator: "", trust: "bounded", access: "read_only" });
     const again = await result(server, "craft_context_open", { project_root: f.repo, query: "project verification workflow", include_codebase: false });
     assert.equal((again.knowledge_source_discovery as JsonObject).sources_registered, 0);
     assert.equal(f.store.list("knowledge_source", 20, row => (row.scope as JsonObject).kind === scope.kind && (row.scope as JsonObject).id === scope.id).length, 3);
+    assert.equal(f.store.get("knowledge_source", "project_autodiscovered_other_project").status, "active");
     assert.equal(f.store.list("telemetry_event", 100, row => row.operation === "project_source_discovery").length >= 2, true);
   } finally { f.close(); }
 });
@@ -1730,13 +1926,11 @@ test("project Knowledge discovery disables missing auto sources and reactivates 
     const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
     f.service.knowledgeSourceRegister({ source_id: "manual-source", kind: "custom", label: "Manual source", scope_kind: "project", scope_id: scope.id,
       locator: join(f.root, "manual-source.md"), content_digest: "manual-source-digest", trust: "bounded", access: "read_only" });
-    f.store.create("knowledge_source", "project_autodiscovered_missing_locator", { scope, kind: "readme", status: "active", locator: "", trust: "bounded", access: "read_only" });
     const first = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
     assert.equal(first.sources_registered, 2);
     const sourceIds = first.source_refs as string[];
     const readmeSourceId = sourceIds.find(id => f.store.get("knowledge_source", id).kind === "readme")!;
     const serenaSourceId = sourceIds.find(id => f.store.get("knowledge_source", id).kind === "serena")!;
-    assert.equal(f.store.get("knowledge_source", "project_autodiscovered_missing_locator").status, "disabled");
     rmSync(join(f.repo, "README.md"));
     rmSync(join(f.repo, ".serena", "memories"), { recursive: true, force: true });
 
@@ -1776,11 +1970,18 @@ test("project Knowledge source cleanup does not enumerate the global Source list
   const f = await fixture();
   try {
     const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
+    const otherRepo = join(f.root, "other-project"); mkdirSync(otherRepo); execFileSync("git", ["-C", otherRepo, "init", "-q"]);
+    const otherScope = ((f.service.scopeIdentityResolveProject({ project_root: otherRepo }).identity as JsonObject).canonical_scope as JsonObject);
+    const sourceId = (sourceScope: JsonObject, root: string, path: string) => `project_autodiscovered_${stableDigest({ scope: sourceScope, root: realpathSync(root), path }).slice(-24)}`;
+    const missingHere = sourceId(scope, f.repo, "README.md"), missingElsewhere = sourceId(otherScope, otherRepo, "README.md");
+    const wrongScopeKind = sourceId(scope, f.repo, "AGENTS.md"), wrongScopeId = sourceId(scope, f.repo, ".serena/memories");
     const missing = (id: string, projectId: string) => f.store.create("knowledge_source", id, {
       scope: { kind: "project", id: projectId }, kind: "readme", status: "active", locator: "", trust: "bounded", access: "read_only",
     });
-    missing("project_autodiscovered_missing_here", String(scope.id));
-    missing("project_autodiscovered_missing_elsewhere", "other-project");
+    missing(missingHere, String(scope.id));
+    missing(missingElsewhere, String(otherScope.id));
+    f.store.create("knowledge_source", wrongScopeKind, { scope: { kind: "global", id: "global" }, kind: "readme", status: "active", locator: "", trust: "bounded", access: "read_only" });
+    f.store.create("knowledge_source", wrongScopeId, { scope: otherScope, kind: "readme", status: "active", locator: "", trust: "bounded", access: "read_only" });
     const originalList = f.store.list;
     f.store.list = ((kind: string, ...args: unknown[]) => {
       if (kind === "knowledge_source") throw new Error("global Knowledge Source enumeration");
@@ -1790,8 +1991,10 @@ test("project Knowledge source cleanup does not enumerate the global Source list
     const result = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
 
     assert.equal(result.sources_disabled, 1);
-    assert.equal(f.store.get("knowledge_source", "project_autodiscovered_missing_here").status, "disabled");
-    assert.equal(f.store.get("knowledge_source", "project_autodiscovered_missing_elsewhere").status, "active");
+    assert.equal(f.store.get("knowledge_source", missingHere).status, "disabled");
+    assert.equal(f.store.get("knowledge_source", missingElsewhere).status, "active");
+    assert.equal(f.store.get("knowledge_source", wrongScopeKind).status, "active");
+    assert.equal(f.store.get("knowledge_source", wrongScopeId).status, "active");
   } finally { f.close(); }
 });
 
@@ -1799,23 +2002,23 @@ test("project Knowledge discovery isolates automatic source transition failures"
   const f = await fixture();
   try {
     const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
-    const sourceIds = ["project_autodiscovered_transition_failure", "project_autodiscovered_transition_followup",
-      "project_autodiscovered_transition_recovered", "project_autodiscovered_transition_unwritable"];
+    const sourceIds = ["README.md", "AGENTS.md", ".serena/memories"]
+      .map(path => `project_autodiscovered_${stableDigest({ scope, root: realpathSync(f.repo), path }).slice(-24)}`);
     for (const source_id of sourceIds) f.store.create("knowledge_source", source_id, {
       scope, kind: "readme", status: "active", locator: join(f.root, `${source_id}.md`), trust: "bounded", access: "read_only",
     });
     f.store.create("knowledge_claim", "claim_for_broken_catalog", { source_id: sourceIds[0], scenario_key: "stale-scene",
       scope: `project:${scope.id}`, evidence_ids: [], status: "candidate" });
     const projectId = String(scope.id).replace(/^project:/u, "");
-    mkdirSync(join(f.repo, ".craft_data", "knowledge", "projects", projectId, "knowledge-scenarios.json"), { recursive: true });
+    mkdirSync(join(projectStorageDirectory(f.store.paths, f.repo), "knowledge", "projects", projectId, "knowledge-scenarios.json"), { recursive: true });
     const save = f.store.save.bind(f.store);
     Object.assign(f.store, { save(kind: string, id: string, data: JsonObject) {
-      if (kind === "knowledge_source" && id === sourceIds[3]) throw new Error("private persistence failure");
+      if (kind === "knowledge_source" && id === sourceIds[2]) throw new Error("private persistence failure");
       return save(kind, id, data);
     } });
     const transition = f.service.knowledgeSources.sourceTransition.bind(f.service.knowledgeSources);
     Object.assign(f.service.knowledgeSources, { sourceTransition(args: JsonObject, automaticTransition?: string) {
-      if (args.source_id === sourceIds[2] || args.source_id === sourceIds[3]) throw new Error("private transition failure");
+      if (args.source_id === sourceIds[1] || args.source_id === sourceIds[2]) throw new Error("private transition failure");
       return transition(args, automaticTransition);
     } });
 
@@ -1824,13 +2027,13 @@ test("project Knowledge discovery isolates automatic source transition failures"
     assert.equal(result.reason, "source_transition_incomplete");
     assert.equal(result.sources_transition_failed, 3);
     assert.deepEqual(result.source_transition_failure_codes, ["OPERATION_FAILED"]);
-    assert.equal(result.sources_disabled, 3);
-    for (const sourceId of sourceIds.slice(0, 3)) {
+    assert.equal(result.sources_disabled, 2);
+    for (const sourceId of sourceIds.slice(0, 2)) {
       const source = f.store.get("knowledge_source", sourceId);
       assert.equal(source.status, "disabled");
       assert.equal(source.automatic_transition, "project_source_path_unavailable");
     }
-    assert.equal(f.store.get("knowledge_source", sourceIds[3]).status, "active");
+    assert.equal(f.store.get("knowledge_source", sourceIds[2]).status, "active");
     assert.equal(JSON.stringify(result).includes("non-regular"), false);
   } finally { f.close(); }
 });
@@ -1856,19 +2059,45 @@ test("project Knowledge discovery fails closed on unsafe roots and isolates indi
     assert.equal(result.sources_registered, 1);
     assert.equal(result.skipped_sources, 2);
     assert.equal(result.failed_ingests, 1);
+    assert.equal(result.status, "partial");
+    assert.equal(result.reason, "source_ingest_incomplete");
     assert.equal(f.store.list("knowledge_source", 20).length, 1);
+  } finally { f.close(); }
+});
+
+test("project Knowledge discovery checks only its three deterministic source records", async () => {
+  const f = await fixture();
+  try {
+    f.write("README.md", "# Stable source\n");
+    const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
+    f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    const originalListScoped = f.store.listScoped.bind(f.store);
+    let wideKnowledgeSourceScans = 0;
+    f.store.listScoped = ((kind, scopes, limit, predicate, temporal, options) => {
+      if (kind === "knowledge_source" && limit === 100_000) wideKnowledgeSourceScans++;
+      return originalListScoped(kind, scopes, limit, predicate, temporal, options);
+    }) as typeof f.store.listScoped;
+
+    const repeated = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+
+    assert.equal(repeated.sources_registered, 0);
+    assert.equal(wideKnowledgeSourceScans, 0);
   } finally { f.close(); }
 });
 
 test("Context returns its receipt when automatic Knowledge source discovery is unavailable", async () => {
   const f = await fixture();
   try {
-    Object.assign(f.service.knowledgeSources, { discoverProjectSources() { throw new Error("private source location"); } });
+    Object.assign(f.service.knowledgeSources, { discoverProjectSources() { throw Object.assign(new Error("database is locked"), { code: "ERR_SQLITE_ERROR", errcode: 5 }); } });
     const result = await f.service.contextOpen({ project_root: f.repo, query: "bounded context", include_codebase: false });
     assert.equal((result.knowledge_source_discovery as JsonObject).status, "unavailable");
     assert.equal((result.knowledge_source_discovery as JsonObject).reason, "project_source_discovery_failed");
+    assert.equal((result.knowledge_source_discovery as JsonObject).failure_code, "STORAGE_BUSY");
     assert.equal(typeof (result.receipt as JsonObject).id, "string");
-    assert.equal(JSON.stringify(result).includes("private source location"), false);
+    assert.equal(result.pack_status, "partial");
+    assert.equal(result.partial, true);
+    assert(((result.pack_receipt as JsonObject).partial_reasons as string[]).includes("knowledge_source_discovery_unavailable"));
+    assert.equal(JSON.stringify(result).includes("database is locked"), false);
     assert.equal(f.store.list("telemetry_event", 100, row => row.operation === "project_source_discovery" && row.outcome === "failed").length, 1);
   } finally { f.close(); }
 });
@@ -1882,10 +2111,28 @@ test("project Knowledge discovery records bounded partial ingestion and skips ma
     f.write(".serena", "not a directory");
     Object.assign(f.service.knowledgeSources, { sourceIngest() { return { status: "partial" }; } });
     const result = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    assert.equal(result.status, "partial");
+    assert.equal(result.reason, "source_ingest_incomplete");
+    assert.equal(result.partial_ingests, 1);
     assert.equal(result.sources_registered, 1);
     assert.equal(result.sources_ingested, 1);
     assert.equal(result.candidates_created, 0);
     assert.equal(result.skipped_sources, 2);
+  } finally { f.close(); }
+});
+
+test("Context marks the pack partial when automatic Knowledge ingestion is incomplete", async () => {
+  const f = await fixture();
+  try {
+    f.write("README.md", "# Bounded source\nA source that cannot be fully ingested.\n");
+    Object.assign(f.service.knowledgeSources, { sourceIngest() { return { status: "partial" }; } });
+    const result = await f.service.contextOpen({ project_root: f.repo, query: "bounded source", include_codebase: false });
+    const discovery = result.knowledge_source_discovery as JsonObject;
+    assert.equal(discovery.status, "partial");
+    assert.equal(discovery.partial_ingests, 1);
+    assert.equal(result.pack_status, "partial");
+    assert.equal(result.partial, true);
+    assert(((result.pack_receipt as JsonObject).partial_reasons as string[]).includes("knowledge_source_discovery_incomplete"));
   } finally { f.close(); }
 });
 
@@ -1975,7 +2222,9 @@ test("aggregate deduplicates repeated facts and keeps contributor failures expli
     await f.service.contextOpen({ project_root: f.repo, query: "代码审查" });
     f.service.knowledgeMemoryInstallBuiltins();
     const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
-    f.store.create("knowledge_claim", "fact", { status: "reviewed", source_id: "builtin.evidence-wiki", scope: `${scope.kind}:${scope.id}`, content: "alpha", evidence_ids: [] });
+    const fact = f.store.create("knowledge_claim", "fact", { status: "candidate", source_id: "builtin.evidence-wiki", scope: `${scope.kind}:${scope.id}`, content: "alpha", evidence_ids: [] });
+    const { attachVerifiedPromotionFixture } = await import("./helpers/knowledge-promotion-proof.ts");
+    attachVerifiedPromotionFixture(f.store, fact);
     const onlyFact = await f.service.contextOpen({ project_root: f.repo, query: "alpha", max_items: 1 });
     assert.equal((onlyFact.pack_receipt as JsonObject).total_items, 1); assert.equal(((onlyFact.codebase as JsonObject).references as unknown[]).length, 0);
   } finally { f.close(); }

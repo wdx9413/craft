@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { text } from "../../common/craft-common-base/src/validation.ts";
 import { digestJson } from "../../common/craft-common-base/src/digest.ts";
+import { knowledgeClaimPromotionProofVerified } from "../../core/knowledge-evaluation-provenance.ts";
 
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 
@@ -30,6 +31,7 @@ export class WikiCandidateGovernanceKernel {
       const claim = this.store.get("knowledge_claim", text(ref.claim_id, "claim_ref.claim_id"));
       if ([Number(claim.version) !== integer(ref.claim_version, "claim_ref.claim_version"), claim.status !== "reviewed"].some(Boolean)) throw new Error("Wiki candidate Claim drifted or is no longer reviewed");
       for (const evidenceId of uniqueTextArray(claim.evidence_ids, "claim.evidence_ids")) this.store.get("evidence", evidenceId);
+      if (!knowledgeClaimPromotionProofVerified(this.store, claim)) throw new Error("Wiki candidate Claim no longer has verified formal promotion evidence");
     }
   }
 

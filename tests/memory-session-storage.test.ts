@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { MemoryFileStore } from "../capability/craft-memory/memory-files.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
-import { craftPaths } from "../core/infrastructure/paths.ts";
+import { craftPaths, projectStorageDirectory, sessionStorageDirectory, sessionStorageScopeId } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 
@@ -39,12 +39,12 @@ async function fixture() {
   return { root, id, store, files, directories, createSession, writeProjection, cleanup };
 }
 
-test("session Memory uses the exact Host id and retires the old projection only after rebuilding", async () => {
+test("session Memory uses Host-scoped storage and retires the old projection after rebuilding", async () => {
   const f = await fixture();
   try {
     f.createSession();
     const oldDirectory = join(sessionBase, legacyId(f.id));
-    const path = join(sessionBase, f.id, "memory.md");
+    const path = join(f.store.sessionStorageRoot(f.id), "memory", "memory.md");
     f.writeProjection(oldDirectory);
     const project = join(f.root, "project"); mkdirSync(project);
     f.store.create("scope_alias", "project-root", { scope: { kind: "project", id: "project" }, alias_kind: "path", alias: project, status: "active" });
@@ -52,7 +52,7 @@ test("session Memory uses the exact Host id and retires the old projection only 
       f.store.create("memory_ledger", `retained-${scope.kind}`, { scope, status: "active", topic: "retained", content: "已晋升的记忆", confidence: "bounded" });
       f.files.sync(scope);
     }
-    const retainedFiles = [join(project, ".craft_data", "memory", "memory.md"), join(f.store.paths.memoryDir, "memory.md")];
+    const retainedFiles = [join(projectStorageDirectory(f.store.paths, project), "memory", "memory.md"), join(f.store.paths.memoryDir, "memory.md")];
     const retained = retainedFiles.map(path => readFileSync(path, "utf8"));
     assert.equal(f.files.pathFor({ kind: "session", id: f.id }), path);
     assert.equal(existsSync(path), false, "path discovery has no migration side effects");
@@ -62,8 +62,11 @@ test("session Memory uses the exact Host id and retires the old projection only 
     assert.match(readFileSync(path, "utf8"), /已核验的当前记忆/);
     assert.doesNotMatch(readFileSync(path, "utf8"), /旧版本投影/);
     assert.equal(existsSync(oldDirectory), false);
+    const sibling = join(f.store.sessionStorageRoot(f.id), "context", "receipt.json");
+    mkdirSync(join(f.store.sessionStorageRoot(f.id), "context")); writeFileSync(sibling, "{}");
     assert.equal(f.files.archiveSession(f.id).content_deleted, true);
     assert.equal(existsSync(path), false);
+    assert.equal(existsSync(sibling), true, "session archive only deletes temporary Memory");
     assert.deepEqual(retainedFiles.map(path => readFileSync(path, "utf8")), retained);
     assert.equal(f.store.count("memory_ledger"), 2);
     assert.equal(f.files.sync({ kind: "session", id: f.id }).status, "archived");
@@ -108,6 +111,36 @@ test("archive removes both owned session locations and candidates without requir
   } finally { f.cleanup(); }
 });
 
+test("archive deletes the session Memory body from its canonical content directory", async () => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const ref = f.store.contentStore.writeSync({ kind: "memory", record_id: "archive-session-body", version: 1,
+      scope: `session:${f.id}`, status: "active", sensitivity: "internal", source_id: "session", body: "temporary body" });
+    f.store.create("memory_ledger", "archive-session-body", { scope: { kind: "session", id: f.id }, status: "active",
+      topic: "temporary", content: "temporary body", content_ref: ref });
+    assert.equal(existsSync(ref.path), true);
+    f.files.archiveSession(f.id);
+    assert.equal(existsSync(ref.path), false);
+  } finally { f.cleanup(); }
+});
+
+test("archive tolerates a missing body but propagates other body deletion failures", async () => {
+  const f = await fixture();
+  try {
+    const missingId = "archive-missing-body";
+    f.store.bindSessionStorageHost(missingId, "codex");
+    const missingScope = sessionStorageScopeId("codex", missingId);
+    const missingRef = f.store.contentStore.writeSync({ kind: "memory", record_id: "archive-missing-body", version: 1,
+      scope: `session:${missingScope}`, status: "active", sensitivity: "internal", source_id: "session", body: "already absent" });
+    unlinkSync(missingRef.path);
+    f.store.create("memory_ledger", "archive-missing-body", { scope: { kind: "session", id: missingScope }, status: "active",
+      topic: "missing", content: "already absent", content_ref: missingRef });
+    assert.equal(f.files.archiveSession(missingId, "codex").memory_count, 1);
+
+  } finally { f.cleanup(); }
+});
+
 test("a legacy hash matching another direct session id never deletes that session", async () => {
   const f = await fixture();
   try {
@@ -123,7 +156,7 @@ test("a legacy hash matching another direct session id never deletes that sessio
   } finally { f.cleanup(); }
 });
 
-test("a direct id colliding with someone else's legacy directory fails before overwrite or deletion", async () => {
+test("a new Host-scoped session does not touch a foreign legacy directory with the same id", async () => {
   const f = await fixture();
   try {
     const collidingId = legacyId(f.id);
@@ -131,24 +164,90 @@ test("a direct id colliding with someone else's legacy directory fails before ov
     const directory = join(sessionBase, collidingId);
     f.writeProjection(directory);
     const original = readFileSync(join(directory, "memory.md"), "utf8");
-    assert.throws(() => f.files.sync({ kind: "session", id: collidingId }), /another session/);
-    assert.throws(() => f.files.archiveSession(collidingId), /another session/);
-    assert.equal(f.store.find("memory_ledger", `memory-${collidingId}`)?.status, "active");
-    assert.equal(f.files.isSessionArchived(collidingId), false);
+    assert.equal(f.files.sync({ kind: "session", id: collidingId }).status, "written");
+    assert.equal(f.files.archiveSession(collidingId).content_deleted, true);
     assert.equal(readFileSync(join(directory, "memory.md"), "utf8"), original);
   } finally { f.cleanup(); }
 });
 
-test("session paths reject traversal, separators, controls and oversized names before filesystem access", async () => {
+test("session archive identity preserves the exact session ID without trimming", async () => {
   const f = await fixture();
   try {
-    for (const id of [null, "", " ", ".", "..", "../outside", "a/b", "a\\b", "a\nb", " a", "a ", "x".repeat(256), "😀".repeat(64)]) {
+    const sessionId = " session ";
+    const otherSessionId = "  session  ";
+    const sessionPath = f.files.pathFor({ kind: "session", id: sessionId })!;
+    assert.equal(f.files.isSessionArchived(sessionId), false);
+    f.store.create("memory_ledger", "whitespace-session-memory", { scope: { kind: "session", id: sessionId },
+      status: "active", topic: "exact", content: "会话 ID 保留原样" });
+    assert.equal(f.files.archiveSession(sessionId).memory_count, 1);
+    assert.equal(f.files.isSessionArchived(sessionId), true);
+    assert.equal(f.files.isSessionArchived(otherSessionId), false);
+    assert.equal(existsSync(sessionPath), false);
+  } finally { f.cleanup(); }
+});
+
+test("same raw session ID stays isolated across Hosts through Memory storage and archive", async () => {
+  const f = await fixture();
+  try {
+    const sessionId = "shared-host-session";
+    const codexScope = sessionStorageScopeId("codex", sessionId);
+    const claudeScope = sessionStorageScopeId("claude", sessionId);
+    f.store.bindSessionStorageHost(sessionId, "codex");
+    f.store.bindSessionStorageHost(sessionId, "claude");
+    f.store.create("memory_ledger", "codex-memory", { scope: { kind: "session", id: codexScope }, status: "active",
+      topic: "host", content: "Codex-only memory" });
+    f.store.create("memory_ledger", "claude-memory", { scope: { kind: "session", id: claudeScope }, status: "active",
+      topic: "host", content: "Claude-only memory" });
+    const codexPath = f.files.pathFor({ kind: "session", id: codexScope })!;
+    const claudePath = f.files.pathFor({ kind: "session", id: claudeScope })!;
+    assert.notEqual(codexPath, claudePath);
+    assert.match(codexPath, /\/sessions\/codex--[a-f0-9]{64}\/memory\/memory\.md$/u);
+    assert.match(claudePath, /\/sessions\/claude--[a-f0-9]{64}\/memory\/memory\.md$/u);
+    f.files.sync({ kind: "session", id: codexScope });
+    f.files.sync({ kind: "session", id: claudeScope });
+    assert.match(readFileSync(codexPath, "utf8"), /Codex-only memory/u);
+    assert.doesNotMatch(readFileSync(codexPath, "utf8"), /Claude-only memory/u);
+    assert.match(readFileSync(claudePath, "utf8"), /Claude-only memory/u);
+    f.files.archiveSession(sessionId, "codex");
+    assert.equal(existsSync(codexPath), false);
+    assert.equal(existsSync(claudePath), true);
+    assert.equal(f.files.isSessionArchived(sessionId, "codex"), true);
+    assert.equal(f.files.isSessionArchived(sessionId, "claude"), false);
+    assert.equal(f.store.find("memory_ledger", "claude-memory")?.status, "active");
+  } finally { f.cleanup(); }
+});
+
+test("session paths hash traversal, separators, controls and oversized IDs before filesystem access", async () => {
+  const f = await fixture();
+  try {
+    for (const id of [null, "", " "]) {
       assert.throws(() => f.files.pathFor({ kind: "session", id: id as string }), /session_id/);
       assert.throws(() => f.files.archiveSession(id as string), /session_id/);
     }
     assert.equal(f.store.count("memory_session_archive"), 0);
+    for (const id of [".", "..", "../outside", "a/b", "a\\b", "a\nb", " a", "a ", "x".repeat(256), "😀".repeat(64)]) {
+      const path = f.files.pathFor({ kind: "session", id });
+      assert.equal(path, join(sessionStorageDirectory(f.store.paths, "craft-mcp", id), "memory", "memory.md"));
+      assert.notEqual(basename(dirname(dirname(path))), id, `raw identifier escaped into path: ${JSON.stringify(id)}`);
+    }
     const unicodeId = `会话-${f.id}`;
-    assert.equal(f.files.pathFor({ kind: "session", id: unicodeId }), join(sessionBase, unicodeId, "memory.md"));
+    assert.equal(f.files.pathFor({ kind: "session", id: unicodeId }), join(sessionStorageDirectory(f.store.paths, "craft-mcp", unicodeId), "memory", "memory.md"));
+  } finally { f.cleanup(); }
+});
+
+test("unsafe and long session IDs use stable hashed Craft data paths", async () => {
+  const f = await fixture();
+  try {
+    for (const [index, id] of ["../outside", "a/b", "line\nbreak", "x".repeat(256)] .entries()) {
+      const row = f.store.create("memory_ledger", `hashed-session-${index}`, { scope: { kind: "session", id },
+        status: "active", topic: "stable", kind: "preference", content: "只保留在安全会话目录" });
+      const database = join(sessionStorageDirectory(f.store.paths, "craft-mcp", id), "memory", "memory.db");
+      assert.equal((row.scope as Record<string, unknown>).id, id);
+      assert.equal(database.includes(id), false);
+      assert.equal(readFileSync(database, "utf8").startsWith("SQLite format 3"), true);
+      assert.equal(f.store.contentStore.pathFor("memory", `hashed-session-${index}`, 1, undefined, `session:${id}`)
+        .startsWith(join(sessionStorageDirectory(f.store.paths, "craft-mcp", id), "memory", "md")), true);
+    }
   } finally { f.cleanup(); }
 });
 
@@ -157,10 +256,11 @@ test("session directory and projection symlinks or non-file replacements fail be
     const f = await fixture();
     try {
       if (!new Set(["directory-link", "directory-file"]).has(shape)) f.createSession();
-      const directory = join(sessionBase, f.id), legacy = join(sessionBase, legacyId(f.id));
+      const directory = join(f.store.sessionStorageRoot(f.id), "memory"), legacy = join(sessionBase, legacyId(f.id));
       const external = join(f.root, "external"); mkdirSync(external);
       const sentinel = join(external, "sentinel"); writeFileSync(sentinel, "must survive");
       mkdirSync(sessionBase, { recursive: true });
+      mkdirSync(f.store.sessionStorageRoot(f.id), { recursive: true });
       if (shape === "directory-link") symlinkSync(external, directory);
       if (shape === "directory-file") writeFileSync(directory, "not a directory");
       if (shape === "legacy-link") symlinkSync(external, legacy);
@@ -184,7 +284,38 @@ test("session directory and projection symlinks or non-file replacements fail be
   }
 });
 
-test("MCP session writes and proposals cannot recreate archived Memory or persist unsafe ids", async () => {
+test("foreign session projection cannot be overwritten or archived", async () => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const path = f.files.pathFor({ kind: "session", id: f.id })!;
+    writeFileSync(path, "# Memory\n\n<!-- scope: session:another; generated by Craft -->\n");
+    assert.throws(() => f.files.sync({ kind: "session", id: f.id }), /another session/);
+    assert.throws(() => f.files.archiveSession(f.id), /another session/);
+    assert.equal(f.store.find("memory_ledger", `memory-${f.id}`)?.status, "active");
+  } finally { f.cleanup(); }
+});
+
+test("project Memory projection aborts when its registered roots change between lookup and write", async () => {
+  const f = await fixture();
+  try {
+    const project = join(f.root, "project"), other = join(f.root, "other");
+    mkdirSync(project); mkdirSync(other);
+    f.store.create("scope_alias", "project", { status: "active", alias_kind: "path", alias: project, scope: { kind: "project", id: "project" } });
+    f.store.create("memory_ledger", "project-memory", { scope: { kind: "project", id: "project" }, status: "active", content: "stable" });
+    const original = f.files.pathFor.bind(f.files);
+    assert.throws(() => original({ kind: "project", id: "project" }, other), /does not match/u);
+    f.files.pathFor = ((scope, root) => {
+      const path = original(scope, root);
+      f.store.create("scope_alias", "other", { status: "active", alias_kind: "path", alias: other, scope: { kind: "project", id: "project" } });
+      return path;
+    }) as typeof f.files.pathFor;
+    assert.throws(() => f.files.sync({ kind: "project", id: "project" }), /ambiguous/u);
+    assert.throws(() => original({ kind: "project", id: "project" }), /ambiguous/u);
+  } finally { f.cleanup(); }
+});
+
+test("MCP session writes cannot recreate archived Memory and unsafe IDs stay hash-scoped", async () => {
   const f = await fixture();
   try {
     const service = new CraftService(f.store);
@@ -194,17 +325,22 @@ test("MCP session writes and proposals cannot recreate archived Memory or persis
       content: "经验证的会话事实", confidence: "bounded", evidence_ids: [] };
     await server.handlers.craft_memory_ledger_remember({ ...args, memory_id: "session-memory" });
     await server.handlers.craft_memory_candidate_propose({ ...args, candidate_id: "session-candidate" });
-    assert.equal(existsSync(join(sessionBase, f.id, "memory.md")), true);
+    assert.equal(existsSync(join(f.store.sessionStorageRoot(f.id), "memory", "memory.md")), true);
     assert.equal(f.files.archiveSession(f.id).content_deleted, true);
-    const previousMemoryRecords = f.store.rawRecords().filter(row => ["memory_ledger", "memory_candidate"].includes(row.kind));
     const previousFiles = readdirSync(f.store.paths.memoryContentDir);
-    for (const scopeId of [f.id, "../outside"]) {
+    for (const scopeId of [f.id]) {
       await assert.rejects(async () => server.handlers.craft_memory_ledger_remember({ ...args, scope_id: scopeId, memory_id: "late-memory" }), /Archived session|session_id/);
       await assert.rejects(async () => server.handlers.craft_memory_candidate_propose({ ...args, scope_id: scopeId, candidate_id: "late-candidate" }), /Archived session|session_id/);
     }
-    assert.deepEqual(f.store.rawRecords().filter(row => ["memory_ledger", "memory_candidate"].includes(row.kind)), previousMemoryRecords);
+    const unsafeScopeId = "../outside";
+    await server.handlers.craft_memory_ledger_remember({ ...args, scope_id: unsafeScopeId, memory_id: "hashed-scope-memory" });
+    const hashedMemory = f.store.find("memory_ledger", "hashed-scope-memory")!;
+    assert.deepEqual(hashedMemory.scope, { kind: "session", id: unsafeScopeId });
+    const hashedMemoryPath = join(sessionStorageDirectory(f.store.paths, "craft-mcp", unsafeScopeId), "memory", "memory.db");
+    assert.equal(existsSync(hashedMemoryPath), true);
+    assert.equal(hashedMemoryPath.includes(unsafeScopeId), false);
     assert.deepEqual(readdirSync(f.store.paths.memoryContentDir), previousFiles);
-    assert.equal(existsSync(join(sessionBase, f.id)), false);
+    assert.equal(existsSync(join(f.store.sessionStorageRoot(f.id), "memory")), false);
     assert.equal(existsSync(join(sessionBase, legacyId(f.id))), false);
   } finally { f.cleanup(); }
 });

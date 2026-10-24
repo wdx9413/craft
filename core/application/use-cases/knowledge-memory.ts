@@ -1,5 +1,6 @@
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
+import { hostSessionMemoryArgs } from "./session-memory-scope.ts";
 
 declare module "../craft-service.ts" {
   interface CraftService { contextResolutionFeedback(args: JsonObject): JsonObject; knowledgeSearchScoped(args: JsonObject): Promise<JsonObject>; }
@@ -35,9 +36,9 @@ export function installKnowledgeMemoryMethods(serviceClass: typeof CraftService)
       : { assessments: [], summary: {}, auto_promote: false, skipped: claimIds.length > 0 ? "source_scope_unavailable" : undefined };
     return { ...result, automatic_review: automaticReview };
   };
-  serviceClass.prototype.memoryLedgerRemember = function (args) { return this.memoryLedger.remember(args); };
-  serviceClass.prototype.memoryLedgerGet = function (args) { return this.memoryLedger.get(args); };
-  serviceClass.prototype.memoryLedgerList = function (args) { return this.memoryLedger.list(args); };
+  serviceClass.prototype.memoryLedgerRemember = function (args) { return this.memoryLedger.remember(hostSessionMemoryArgs(args, this.store)); };
+  serviceClass.prototype.memoryLedgerGet = function (args) { return this.memoryLedger.get(hostSessionMemoryArgs(args, this.store)); };
+  serviceClass.prototype.memoryLedgerList = function (args) { return this.memoryLedger.list(hostSessionMemoryArgs(args, this.store)); };
   serviceClass.prototype.memoryLedgerTransition = function (args) { return this.memoryLedger.transition(args); };
   serviceClass.prototype.memoryLedgerCompatBind = function (args) { return this.memoryLedger.compatBind(args); };
   serviceClass.prototype.contextResolutionResolve = function (args) { return this.contextResolution.resolve(args); };

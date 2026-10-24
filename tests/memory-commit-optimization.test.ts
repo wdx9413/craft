@@ -19,7 +19,7 @@ async function fixture() {
   store.create("knowledge_source", "s", { status: "active", trust: "verified" });
   store.create("evidence", "e", { source_type: "human", confidence: "confirmed" });
   function candidate(id = "c", extra: JsonObject = {}) { return store.create("memory_candidate", id, { status: "approved", source_id: "s", kind: "preference", scope: { kind: "project", id: "p" }, content: "Use Python", sensitivity: "internal", confidence: "confirmed", evidence_ids: ["e"], observed_at: "2020-01-01T00:00:00.000Z", effective_from: "2020-01-01T00:00:00.000Z", ...extra }); }
-  return { root, store, ledger, governance, candidate, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
+  return { root, projectRoot, store, ledger, governance, candidate, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
 }
 
 test("approved candidate commits once; replay does not resurrect revoked memory", async () => {
@@ -101,6 +101,48 @@ test("confirmations affect exact revision only, are time bounded, and never exte
   } finally { f.close(); }
 });
 
+test("session finalization archives using either the bound session identity or the explicit Host", async () => {
+  const f = await fixture(); try {
+    const local = f.governance.sessionFinalize({ session_id: "finalize-local", summary: "Session finished", candidate_ids: [] });
+    assert.equal(local.content_free, true);
+    assert.equal((local.archive as JsonObject).status, "archived");
+    const hosted = f.governance.sessionFinalize({ session_id: "finalize-hosted", session_host: "codex", summary: "Session finished", candidate_ids: [] });
+    assert.equal(hosted.content_free, true);
+    assert.equal((hosted.archive as JsonObject).status, "archived");
+  } finally { f.close(); }
+});
+
+test("Memory content writes preserve the verified project root supplied by the Host", async () => {
+  const f = await fixture(); try {
+    const memory = f.ledger.remember({ memory_id: "root-pinned", source_id: "s", kind: "preference", scope_kind: "project", scope_id: "p",
+      content: "Use the registered project root", project_root: f.projectRoot }).memory as JsonObject;
+    assert.deepEqual(memory.scope, { kind: "project", id: "p" });
+    assert.match(String((memory.content_ref as JsonObject).path), /projects/u);
+  } finally { f.close(); }
+});
+
+test("Memory maintenance excludes private entries outside the requesting audience", async () => {
+  const f = await fixture(); try {
+    f.store.create("memory_ledger", "private-maintenance", { scope: { kind: "project", id: "p" },
+      scope_envelope: { applicability: { kind: "project", id: "p" }, custody: { kind: "project", id: "p" },
+        audience: { mode: "private", principal_ids: ["owner"] }, purpose: "preference", retention: "long_term", tenant_id: null },
+      status: "active", source_id: "s", kind: "preference", content_digest: "private-digest" });
+    f.store.create("memory_ledger", "shared-maintenance", { scope: { kind: "project", id: "p" },
+      scope_envelope: { applicability: { kind: "project", id: "p" }, custody: { kind: "project", id: "p" },
+        audience: { mode: "scoped", principal_ids: [] }, purpose: "preference", retention: "long_term", tenant_id: null },
+      status: "active", source_id: "s", kind: "preference", content_digest: "shared-digest" });
+    f.store.create("memory_ledger", "other-scope-maintenance", { scope: { kind: "global", id: "global" },
+      status: "active", source_id: "s", kind: "preference", content_digest: "other-scope-digest" });
+    const result = new MemoryMaintenanceKernel(f.store).run({ maintenance_id: "private-maintenance-run", scope_kind: "project", scope_id: "p", principal_id: "other" });
+    assert.equal((result.run as JsonObject).finding_count, 1);
+    assert.equal((result.findings as JsonObject[]).some(item => item.memory_id === "private-maintenance"), false);
+    assert.equal((result.findings as JsonObject[]).some(item => item.memory_id === "shared-maintenance"), true,
+      "a matching scoped Audience remains visible while a private Audience is excluded");
+    assert.equal((result.findings as JsonObject[]).some(item => item.memory_id === "other-scope-maintenance"), false,
+      "maintenance does not inspect a Memory from another project scope");
+  } finally { f.close(); }
+});
+
 test("maintenance retains legacy fallback and proposes duplicate review with confirmation metadata", async () => {
   const f = await fixture(); try {
     const maintenance = new MemoryMaintenanceKernel(f.store);
@@ -108,10 +150,26 @@ test("maintenance retains legacy fallback and proposes duplicate review with con
     assert.equal((maintenance.run({ maintenance_id: "legacy-run" }).confirmations as JsonObject[]).length, 0);
     for (const id of ["a", "b"]) f.store.create("memory_ledger", id, { status: "active", source_id: "s", scope: { kind: "project", id: "p" }, content_digest: "same", content_ref: {}, valid_until: "2021-01-01T00:00:00.000Z" });
     f.store.create("memory_ledger", "restricted", { status: "active", source_id: "s", scope: { kind: "project", id: "p" }, content_digest: "private", sensitivity: "restricted", content_ref: {} });
+    const hidden = maintenance.run({ maintenance_id: "restricted-hidden", stage: "deep", scope_kind: "project", scope_id: "p" });
+    assert.equal((hidden.findings as JsonObject[]).some(item => item.memory_id === "restricted"), false);
     maintenance.run({ maintenance_id: "restricted-visible", scope_kind: "project", scope_id: "p", allow_restricted: true });
     const run = maintenance.run({ maintenance_id: "duplicate-run", stage: "deep", scope_kind: "project", scope_id: "p" });
+    assert((run.findings as JsonObject[]).some(item => item.kind === "duplicate"), "duplicate detection must be visible in the maintenance report");
     const actions = (run.candidate as JsonObject).actions as JsonObject[];
     assert(actions.some(item => item.action === "review_duplicate" && item.requires_review === true));
+  } finally { f.close(); }
+});
+
+test("Memory maintenance handles unscoped legacy ledger identities without merging scopes", async () => {
+  const f = await fixture(); try {
+    const now = new Date().toISOString();
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("memory_ledger", "legacy-unscoped", 1, JSON.stringify({ id: "legacy-unscoped", version: 1, status: "active", content_digest: "shared-content" }), now, now);
+    f.store.create("memory_ledger", "global-scoped", { status: "active", scope: { kind: "global", id: "global" }, content_digest: "shared-content" });
+    const result = new MemoryMaintenanceKernel(f.store).run({ maintenance_id: "unscoped-legacy", stage: "deep" });
+    assert.equal((result.findings as JsonObject[]).some(item => item.kind === "duplicate"), false,
+      "identical content in distinct legacy/global storage scopes is not a duplicate");
+    assert.equal((result.findings as JsonObject[]).some(item => item.kind === "missing_content_ref" && item.memory_id === "legacy-unscoped"), true);
   } finally { f.close(); }
 });
 

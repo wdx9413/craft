@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { CraftService } from "../core/service.ts";
+import { KnowledgeClaimGovernance } from "../capability/craft-knowledge/claim-governance.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
 
 const sha = (digit: string) => `sha256:${digit.repeat(64)}`;
 const input = (): JsonObject => ({ scope: "project:demo", task_id: "task-1", source_session_id: "session-1", turn_id: "turn-1",
@@ -33,7 +35,7 @@ test("stores sanitized verification evidence as a project Knowledge fragment rea
     assert.equal(saved.sanitized_content_stored, true);
     assert.equal(saved.raw_content_stored, false);
     const fragment = f.store.get("knowledge_fragment", String(saved.fragment_id));
-    assert.match(String((fragment.content_ref as JsonObject).path), /\.craft_data\/knowledge\/md/u);
+    assert.equal(String((fragment.content_ref as JsonObject).path).startsWith(join(projectStorageDirectory(f.store.paths, f.root), "knowledge", "md") + "/"), true);
     assert.equal((fragment.content_ref as JsonObject).scope, "project:demo");
     const claim = f.service.knowledgeClaimSave({ claim_id: "session-claim", kind: "fact", title: "已验证的修复",
       content: "定向验证通过。", scope: "project:demo", source_id: saved.source_id, evidence_ids: [evidence.id] }).claim as JsonObject;
@@ -47,6 +49,17 @@ test("stores sanitized verification evidence as a project Knowledge fragment rea
     assert.match(String(fragments[0]!.content), /修复 Knowledge 证据链/u);
     assert.match(String(fragments[0]!.content), /定向验证通过/u);
     assert.doesNotMatch(String(fragments[0]!.content), /pnpm test/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Knowledge claim governance exposes the session Evidence writer", async () => {
+  const f = await fixture();
+  try {
+    const result = new KnowledgeClaimGovernance(f.store).knowledgeSessionEvidenceRecord(input());
+    const evidence = result.evidence as JsonObject;
+    assert.equal(evidence.source_type, "program");
+    assert.equal(evidence.confidence, "confirmed");
+    assert.equal(result.raw_content_stored, false);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -108,7 +121,8 @@ test("fails closed when the deterministic project source is disabled or an evide
     const source = f.store.get("knowledge_source", sourceId);
     f.store.save("knowledge_source", sourceId, { ...source, status: "disabled" });
     assert.throws(() => f.service.knowledgeSessionEvidenceRecord({ ...input(), task_id: "task-2" }), /not active/u);
-    f.store.save("knowledge_source", sourceId, { ...source, status: "active" });
+    const disabledSource = f.store.get("knowledge_source", sourceId);
+    f.store.save("knowledge_source", sourceId, { ...disabledSource, status: "active" });
     const evidenceId = String((first.evidence as JsonObject).id);
     const evidence = f.store.get("evidence", evidenceId);
     f.store.save("evidence", evidenceId, { ...evidence, identity_digest: "corrupt" });

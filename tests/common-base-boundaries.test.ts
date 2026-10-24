@@ -10,6 +10,8 @@ test("local capability model compatibility selects a usable tier without leaking
   const spec: ModelProviderSpec = { provider: "demo", label: "Demo", protocol: "openai-compatible", base_url: "https://example.test", api_key_env: "TEST_KEY", chat_path: "/chat", models: { standard: "demo-model" }, cost_hint: 1, supports_tools: true };
   assert.deepEqual(credentialStatus(spec, { TEST_KEY: "secret" }), { provider: "demo", configured: true, api_key_env: "TEST_KEY" });
   assert.equal(credentialStatus(spec, {}).configured, false);
+  assert.deepEqual(credentialStatus({ ...spec, host_managed_auth: true }, {}),
+    { provider: "demo", configured: true, api_key_env: "host-managed-auth-store" });
   assert.deepEqual(selectModel(spec, "frontier"), { tier: "standard", model: "demo-model", downgraded: true });
   assert.deepEqual(selectModel(spec, "standard"), { tier: "standard", model: "demo-model", downgraded: false });
   assert.throws(() => selectModel(spec, "huge" as never), /Unsupported model tier/);
@@ -56,6 +58,7 @@ test("capability hook outcomes name an owner only when one was registered", asyn
   assert.equal((await runPhase("turn_end", { input_digest: "sha256:input" }, [hook])).outcomes[0]?.capability, undefined);
   assert.equal((await runPhase("turn_end", { input_digest: "sha256:input" }, [{ ...hook, owned: "external" }])).outcomes[0]?.capability, "external");
 });
+
 
 test("host-attested scope access rejects malformed identities and parses legacy keys", () => {
   assert.deepEqual(scopeAccess({}), { principal_id: undefined, principal_ids: [], tenant_id: undefined, purpose: undefined });

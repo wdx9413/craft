@@ -74,7 +74,7 @@ test("legacy memory consolidation covers default scope, source, confidence and s
   try {
     const memory = new (await import("../core/memory-consolidation.ts")).MemoryConsolidationKernel(f.store);
     const first = memory.remember({ memory_id: "legacy-memory", content: "A bounded observation" });
-    assert.equal((first.memory as Record<string, unknown>).scope, "task");
+    assert.equal(((first.memory as Record<string, unknown>).scope as Record<string, unknown>).kind, "task");
     assert.equal((first.memory as Record<string, unknown>).source, "work");
     const second = memory.remember({ memory_id: "legacy-memory-2", scope: "task", content: "A second observation", source: "test", confidence: 0.9 });
     const consolidated = memory.consolidate({ memory_ids: ["legacy-memory", "legacy-memory-2"], semantic_id: "legacy-semantic" });

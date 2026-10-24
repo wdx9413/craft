@@ -1,6 +1,7 @@
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { digestJson } from "../../common/craft-common-base/src/digest.ts";
 import { text } from "../../common/craft-common-base/src/validation.ts";
+import { sessionStorageScopeId } from "../../common/craft-common-store-local/src/paths.ts";
 import type { MemoryGovernanceKernel } from "./memory-governance.ts";
 
 /** The host supplies Evidence/source ports; this package never imports a harness. */
@@ -27,7 +28,13 @@ export class MemoryCapture {
     const kind = String(args.kind ?? "preference");
     if (!new Set(["working", "episodic", "preference", "procedural"]).has(kind)) throw new Error("Memory capture kind is unsupported");
     const scopeKind = text(args.scope_kind ?? (args.session_id ? "session" : "user"), "scope_kind");
-    const scopeId = text(args.scope_id ?? (scopeKind === "session" ? args.session_id : scopeKind === "global" ? "global" : "local"), "scope_id");
+    const rawScopeId = text(args.scope_id ?? (scopeKind === "session" ? args.session_id : scopeKind === "global" ? "global" : "local"), "scope_id");
+    const sessionHost = scopeKind === "session" && args.session_host !== undefined ? text(args.session_host, "session_host") : undefined;
+    if (sessionHost) {
+      const sessionId = text(args.session_id, "session_id");
+      this.memory.store.bindSessionStorageHost(sessionId, sessionHost);
+    }
+    const scopeId = sessionHost ? sessionStorageScopeId(sessionHost, rawScopeId) : rawScopeId;
     if (scopeKind === "session" && this.memory.ledger.files.isSessionArchived(scopeId)) {
       return { candidate: null, conflicts: [], auto_committed: false, status: "archived", next_action: "session_archive_is_terminal" };
     }
@@ -79,7 +86,9 @@ export class MemoryCapture {
     });
     const observations = this.memory.store.list("memory_observation", 10_000, row => row.status === "active"
       && (!row.valid_until || Date.parse(String(row.valid_until)) >= Date.now())
-      && row.content_digest === contentDigest && row.project_id === projectId && row.kind === candidate.kind && row.topic === (candidate.topic ?? ""));
+      && row.content_digest === contentDigest && row.project_id === projectId
+      && (row.scope as JsonObject | undefined)?.kind === "project" && (row.scope as JsonObject | undefined)?.id === projectId
+      && row.kind === candidate.kind && row.topic === (candidate.topic ?? ""));
     const sessions = new Set(observations.map(row => String(row.session_digest)));
     if (sessions.size < 2) return [];
 
@@ -90,12 +99,17 @@ export class MemoryCapture {
       .filter((value): value is string => value !== null).sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
     const now = Date.now();
     const projectExisting = this.memory.store.list("memory_ledger", 10_000, row => row.status === "active" && (!row.valid_until || Date.parse(String(row.valid_until)) >= now) && row.content_digest === contentDigest
-      && (row.scope as JsonObject | undefined)?.kind === "project" && (row.scope as JsonObject | undefined)?.id === projectId);
+      && row.kind === candidate.kind && (row.topic ?? "") === (candidate.topic ?? "")
+      && (row.scope as JsonObject | undefined)?.kind === "project" && (row.scope as JsonObject | undefined)?.id === projectId
+      && this.memory.ledger.promotionSupported(row));
     if (!projectExisting.length) {
-      const projectCandidateId = `memory_candidate_project_${digestJson({ contentDigest, projectId, kind: candidate.kind, topic: candidate.topic ?? "" }).slice(-32)}`;
+      const supportRefs = observations.map(row => ({ kind: "memory_observation", id: String(row.id), version: Number(row.version) }))
+        .sort((left, right) => left.id.localeCompare(right.id));
+      const projectCandidateId = `memory_candidate_project_${digestJson({ contentDigest, projectId, kind: candidate.kind, topic: candidate.topic ?? "", supportRefs }).slice(-32)}`;
       const promoted = this.memory.propose({ candidate_id: projectCandidateId, source_id: candidate.source_id, kind: candidate.kind,
         scope_kind: "project", scope_id: projectId, content: candidate.content, topic: candidate.topic || undefined,
-        sensitivity: candidate.sensitivity, confidence: "bounded", evidence_ids: evidenceIds, proposed_by: "automatic-memory-promotion", valid_until: validUntil });
+        sensitivity: candidate.sensitivity, confidence: "bounded", evidence_ids: evidenceIds, proposed_by: "automatic-memory-promotion", valid_until: validUntil,
+        promotion_support_refs: supportRefs });
       const governedPromotion = this.resolveRepeatedConflict(promoted, evidenceIds);
       results.push({ tier: "project", repetition_count: sessions.size, ...governedPromotion,
         ...(governedPromotion.auto_committed === true ? { memory_file: this.memory.ledger.files.sync({ kind: "project", id: projectId }, input.projectRoot) } : {}) });
@@ -103,19 +117,24 @@ export class MemoryCapture {
 
     const projectMemories = this.memory.store.list("memory_ledger", 10_000, row => row.status === "active" && row.content_digest === contentDigest
       && (!row.valid_until || Date.parse(String(row.valid_until)) >= now)
-      && (row.scope as JsonObject | undefined)?.kind === "project" && row.kind === candidate.kind && (row.topic ?? "") === (candidate.topic ?? ""));
+      && (row.scope as JsonObject | undefined)?.kind === "project" && row.kind === candidate.kind && (row.topic ?? "") === (candidate.topic ?? "")
+      && this.memory.ledger.promotionSupported(row));
     const projects = new Set(projectMemories.map(row => String((row.scope as JsonObject).id)));
     if (projects.size >= 3) {
       const globalExisting = this.memory.store.list("memory_ledger", 10_000, row => row.status === "active" && row.content_digest === contentDigest
-        && (row.scope as JsonObject | undefined)?.kind === "global");
+        && row.kind === candidate.kind && (row.topic ?? "") === (candidate.topic ?? "")
+        && (row.scope as JsonObject | undefined)?.kind === "global" && this.memory.ledger.promotionSupported(row));
       if (!globalExisting.length) {
         const globalEvidenceIds = [...new Set(projectMemories.flatMap(row => Array.isArray(row.evidence_ids) ? row.evidence_ids.map(String) : []))];
-        const globalCandidateId = `memory_candidate_global_${digestJson({ contentDigest, kind: candidate.kind, topic: candidate.topic ?? "" }).slice(-32)}`;
+        const supportRefs = projectMemories.map(row => ({ kind: "memory_ledger", id: String(row.id), version: Number(row.version) }))
+          .sort((left, right) => left.id.localeCompare(right.id));
+        const globalCandidateId = `memory_candidate_global_${digestJson({ contentDigest, kind: candidate.kind, topic: candidate.topic ?? "", supportRefs }).slice(-32)}`;
         const globalValidUntil = projectMemories.map(row => typeof row.valid_until === "string" ? row.valid_until : null)
           .filter((value): value is string => value !== null).sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
         const promoted = this.memory.propose({ candidate_id: globalCandidateId, source_id: candidate.source_id, kind: candidate.kind,
           scope_kind: "global", scope_id: "global", content: candidate.content, topic: candidate.topic || undefined,
-          sensitivity: candidate.sensitivity, confidence: "bounded", evidence_ids: globalEvidenceIds, proposed_by: "automatic-memory-promotion", valid_until: globalValidUntil });
+          sensitivity: candidate.sensitivity, confidence: "bounded", evidence_ids: globalEvidenceIds, proposed_by: "automatic-memory-promotion", valid_until: globalValidUntil,
+          promotion_support_refs: supportRefs });
         const governedPromotion = this.resolveRepeatedConflict(promoted, globalEvidenceIds);
         results.push({ tier: "global", repetition_count: projects.size, ...governedPromotion,
           ...(governedPromotion.auto_committed === true ? { memory_file: this.memory.ledger.files.sync({ kind: "global", id: "global" }) } : {}) });

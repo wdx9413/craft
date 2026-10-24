@@ -8,10 +8,13 @@ import { ActivationProofKernel } from "../core/activation-proof.ts";
 import { ComponentHistoryMigrationKernel } from "../core/component-history-migration.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-activation-proof-"));
-  return { root, store: await new CraftStore(craftPaths(root)).open() };
+  const store = await new CraftStore(craftPaths(root)).open();
+  new CraftService(store).scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: root });
+  return { root, store };
 }
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 

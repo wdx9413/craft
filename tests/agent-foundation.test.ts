@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -7,7 +7,14 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 
-async function fixture() { const root = await mkdtemp(join(tmpdir(), "craft-agent-foundation-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store); return { root, store, service }; }
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "craft-agent-foundation-"));
+  const projectRoot = join(root, "project"); await mkdir(projectRoot);
+  const store = await new CraftStore(craftPaths(root)).open();
+  store.create("scope_alias", "fixture-project-p", { scope: { kind: "project", id: "p" }, alias_kind: "path", alias: projectRoot, status: "active" });
+  const service = new CraftService(store);
+  return { root, store, service };
+}
 
 test("memory governance is candidate-first, conflict-aware and expiring", async () => {
   const { root, store, service } = await fixture();
@@ -36,9 +43,12 @@ test("memory governance is candidate-first, conflict-aware and expiring", async 
     assert.equal(Number(expired.count) >= 0, true);
     const claimEvidence = service.evidenceRecord({ evidence_id: "claim-expiry-evidence", source_type: "test", claim: "claim", confidence: "bounded" });
     const expiringClaim = service.knowledgeClaimSave({ claim_id: "expiring-claim", kind: "fact", content: "temporary claim", evidence_ids: [claimEvidence.id], valid_until: "2020-01-01T00:00:00.000Z" }).claim as JsonObject;
-    service.knowledgeClaimReview({ claim_id: expiringClaim.id, status: "reviewed", reviewer: "human", reason: "checked" });
-    assert.equal((service.knowledgeExpirySweep({ now: "2035-01-01T00:00:00.000Z" }).expired as JsonObject[]).some((item) => item.id === expiringClaim.id), true);
-    assert.equal((service.knowledgeConflictResolve({ claim_id: expiringClaim.id, decision: "reviewed", reviewer: "human", reason: "rechecked" }).claim as JsonObject).status, "reviewed");
+    assert.throws(() => service.knowledgeClaimReview({ claim_id: expiringClaim.id, status: "reviewed", reviewer: "human", reason: "checked" }),
+      /managed Host review and independent effectiveness evaluation/u);
+    assert.equal((service.knowledgeExpirySweep({ now: "2035-01-01T00:00:00.000Z" }).expired as JsonObject[]).some((item) => item.id === expiringClaim.id), false,
+      "an unreviewed candidate is not a formal Knowledge asset subject to automatic expiry");
+    assert.throws(() => service.knowledgeConflictResolve({ claim_id: expiringClaim.id, decision: "reviewed", reviewer: "human", reason: "rechecked" }),
+      /managed Host review and independent effectiveness evaluation/u);
     assert.throws(() => service.knowledgeConflictResolve({ claim_id: expiringClaim.id, decision: "bad", reviewer: "human", reason: "x" }), /unsupported/);
     assert.throws(() => service.memoryCandidatePropose({ source_id: source.id, kind: "working", scope_kind: "project", scope_id: "p", content: "token=secret-value" }), /credentials/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }

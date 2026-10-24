@@ -72,7 +72,29 @@ export class ContentMigrationKernel {
 
   migrate(args: JsonObject = {}): ContentMigrationResult {
     const dryRun = args.dry_run === true;
-    const rows = this.store.rawRecords().filter((row) => INLINE_KINDS.has(row.kind) || WIKI_KINDS.has(row.kind));
+    const requested = args.record_refs === undefined ? undefined : args.record_refs;
+    if (requested !== undefined && (!Array.isArray(requested) || requested.length > 500)) throw new Error("record_refs must contain at most 500 exact record versions");
+    const selected = requested === undefined ? undefined : new Set<string>();
+    const selectedRefs: Array<{ kind: string; id: string; version: number }> = [];
+    if (Array.isArray(requested)) for (const item of requested) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("record_refs entries must identify exact record versions");
+      const ref = item as Record<string, unknown>;
+      if (typeof ref.kind !== "string" || !INLINE_KINDS.has(ref.kind) && !WIKI_KINDS.has(ref.kind)
+        || typeof ref.id !== "string" || !ref.id.trim() || !Number.isSafeInteger(ref.version) || Number(ref.version) < 1) {
+        throw new Error("record_refs entries must identify exact record versions");
+      }
+      const key = JSON.stringify([ref.kind, ref.id, Number(ref.version)]);
+      if (selected!.has(key)) throw new Error("record_refs cannot repeat an exact record version");
+      selected!.add(key);
+      selectedRefs.push({ kind: ref.kind, id: ref.id, version: Number(ref.version) });
+    }
+    const rows = selected !== undefined ? selectedRefs.map(ref => {
+      const record = this.store.find(ref.kind, ref.id, ref.version);
+      if (!record) throw new Error("record_refs contain an unknown record version");
+      const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
+      return { kind: ref.kind, id: ref.id, version: ref.version, payload,
+        created_at: String(record.created_at), updated_at: String(record.updated_at) };
+    }) : this.store.rawRecords().filter((row) => INLINE_KINDS.has(row.kind) || WIKI_KINDS.has(row.kind));
     const pending: Pending[] = [];
     const records: ContentMigrationResult["records"] = [];
     for (const row of rows) {
@@ -80,7 +102,10 @@ export class ContentMigrationKernel {
       if (contentReference(existing)) {
         // Existing refs are verified rather than silently replaced. Drift is a
         // hard stop because migration must never discard user edits.
-        const current = this.store.contentStore.readCompatSync(existing);
+        // Older project references may predate the optional scope field. The
+        // record's scope is authoritative and lets the compatibility reader
+        // validate the legacy path against the correct project root.
+        const current = this.store.contentStore.readCompatSync(existing, this.scopeFor(row));
         if (this.store.contentStore.isCanonicalRef(existing)) {
           records.push({ kind: row.kind, id: row.id, version: row.version, action: "skip" });
           continue;

@@ -9,12 +9,13 @@
  */
 import { createHash } from "node:crypto";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
-import { payload } from "./digest.ts";
+import { payload, stableDigest } from "./digest.ts";
 import { text } from "./validation.ts";
 import { contentReference, type ContentRef } from "./infrastructure/content-store.ts";
 import { updateKnowledgeScenarioClaim } from "../capability/craft-knowledge/scenario-catalog.ts";
 import { scopeFromKey } from "../common/craft-common-base/src/scope-policy.ts";
 import { knowledgeDirectoryForScope } from "./project-knowledge-content.ts";
+import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationEvidence } from "./knowledge-evaluation-provenance.ts";
 
 type Verdict = "eligible" | "revalidation_required" | "rejected" | "already_reviewed";
 type Confidence = "bounded" | "confirmed";
@@ -168,10 +169,9 @@ export class KnowledgeAutoReviewKernel {
    * for another model provider: the Host is the reviewer and attests the exact
    * Claim/source revision it saw.
    *
-   * A supported Host review may promote current source-backed Knowledge in one
-   * step.  This is distinct from routing an Experience/Workflow: being
-   * `reviewed` makes a Claim available to Context, but never widens an Action
-   * Contract or grants an effect.
+   * A supported Host review only records that the supplied Evidence packet
+   * supports the Claim. It cannot promote the Claim: a separate independent
+   * effectiveness evaluation is required before the Claim can enter Context.
    */
   hostReview(args: JsonObject): JsonObject {
     const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id"));
@@ -195,7 +195,7 @@ export class KnowledgeAutoReviewKernel {
     if (!source || typeof sourceDigest !== "string" || sourceDigest !== suppliedSourceDigest) {
       throw new Error("source_digest must match the active Claim Source");
     }
-    const priorReviewId = claim.status === "reviewed" && typeof (claim.review as JsonObject | undefined)?.review_id === "string"
+    const priorReviewId = typeof (claim.review as JsonObject | undefined)?.review_id === "string"
       ? String((claim.review as JsonObject).review_id) : null;
     const priorReview = priorReviewId ? this.store.find("knowledge_host_review", priorReviewId) : null;
     // Promotion changes the Claim version. Only an exact replay of its original
@@ -235,8 +235,7 @@ export class KnowledgeAutoReviewKernel {
       automated: true, host_attested: true, packet_attested: packetDigest !== null, content_free: true,
       validation_status: packetDigest === null ? "revalidation_required" : "packet_bound",
     });
-    const promotable = decision === "supported" && !blockingReasons.length;
-    if (!promotable || claim.status === "reviewed") {
+    if (decision !== "supported" || blockingReasons.length || claim.status === "reviewed") {
       return {
         review, claim, promoted: false, idempotent: existing !== null,
         status: claim.status === "reviewed" ? "already_reviewed" : blockingReasons.length ? "needs_evidence" : decision,
@@ -249,20 +248,22 @@ export class KnowledgeAutoReviewKernel {
       claim: "A Host-managed model reviewed an exact source-backed Knowledge Claim.",
       locator: `host-review:${hostKind}:${hostRunKey}`,
       observed_at: new Date(now).toISOString(),
-      metadata: { review_id: review.id, source_id: source.id, source_digest: sourceDigest, host_kind: hostKind, host_run_key: hostRunKey, model_ref: modelRef, rubric_id: rubricId, reason_code: reasonCode },
+      metadata: { evidence_role: "review_attestation", review_id: review.id, source_id: source.id, source_digest: sourceDigest, host_kind: hostKind, host_run_key: hostRunKey, model_ref: modelRef, rubric_id: rubricId, reason_code: reasonCode },
     });
-    // `promotable` already proves this is an array containing credible Evidence.
-    const evidenceIds = [...new Set([...(claim.evidence_ids as unknown[]).map(String), String(evidence.id)])].sort();
-    const reviewedClaim = this.store.save("knowledge_claim", String(claim.id), {
-      ...payload(claim), evidence_ids: evidenceIds, status: "reviewed",
+    // A model review is an attestation, not another independent task Source.
+    // Keep it out of source Evidence so it cannot inflate support or poison provenance.
+    const supportedClaim = this.store.save("knowledge_claim", String(claim.id), {
+      ...payload(claim), status: "candidate",
       review: {
-        reviewer: `host:${hostKind}`, review_id: review.id, host_run_key: hostRunKey, model_ref: modelRef,
+        reviewer: `host:${hostKind}`, review_id: review.id, attestation_evidence_id: evidence.id, host_run_key: hostRunKey, model_ref: modelRef,
         rubric_id: rubricId, source_digest: sourceDigest, packet_digest: packetDigest, reason_code: reasonCode,
-        reviewed_at: new Date(now).toISOString(), automated: true, host_attested: true,
+        reviewed_at: new Date(now).toISOString(), automated: true, host_attested: true, source_supported: true,
+        evaluation_status: "pending_independent_effectiveness",
       },
     });
-    updateKnowledgeScenarioClaim(this.knowledgeDirectory(String(reviewedClaim.scope), reviewedClaim), reviewedClaim, "reviewed");
-    return { review, evidence, claim: reviewedClaim, promoted: true, idempotent: existing !== null, status: "reviewed", blocking_reasons: [] };
+    updateKnowledgeScenarioClaim(this.knowledgeDirectory(String(supportedClaim.scope), supportedClaim), supportedClaim, "candidate");
+    return { review, evidence, claim: supportedClaim, promoted: false, idempotent: existing !== null,
+      status: "awaiting_independent_evaluation", blocking_reasons: ["independent_effectiveness_evaluation_required"] };
   }
 
   assess(args: JsonObject = {}): JsonObject {
@@ -310,7 +311,13 @@ export class KnowledgeAutoReviewKernel {
     const reasons: string[] = [];
     let independentSupportCount = 0;
     let verdict: Verdict;
-    if (claim.status === "reviewed") verdict = "already_reviewed";
+    if (claim.status === "reviewed" && knowledgeClaimPromotionProofVerified(this.store, claim)) verdict = "already_reviewed";
+    else if (claim.status === "reviewed") {
+      const quarantined = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "candidate",
+        review: { ...(claim.review as JsonObject ?? {}), qualification_status: "legacy_promotion_quarantined", revalidation_required: true } });
+      updateKnowledgeScenarioClaim(this.knowledgeDirectory(String(quarantined.scope), quarantined), quarantined, "candidate");
+      return this.assessOne(claimId, now, autoPromote, policy);
+    }
     else if (claim.status !== "candidate") { verdict = "rejected"; reasons.push(`claim_status_${String(claim.status)}`); }
     else {
       const sourceId = typeof claim.source_id === "string" ? claim.source_id : null;
@@ -325,6 +332,8 @@ export class KnowledgeAutoReviewKernel {
       else if (!source) reasons.push("source_not_registered");
       else if (source.status !== "active" || source.trust === "untrusted") reasons.push("source_not_trusted_active");
       if (!credibleEvidence.length) reasons.push("credible_evidence_missing");
+      const effectivenessRun = this.independentEffectivenessRun(claim);
+      if (!effectivenessRun) reasons.push("independent_effectiveness_evaluation_required");
       const supports = this.supports(claim);
       const supportKeys = new Set<string>();
       const independentSupport = supports.filter((support) => {
@@ -332,8 +341,21 @@ export class KnowledgeAutoReviewKernel {
         if (!evidence || !["bounded", "confirmed"].includes(String(evidence.confidence))
           || CONFIDENCE_ORDER[String(evidence.confidence) as Confidence] < CONFIDENCE_ORDER[policy.minimum_confidence]) return false;
         const evidenceSource = typeof evidence.source_id === "string" ? this.store.find("knowledge_source", evidence.source_id) : null;
-        if (evidenceSource && (evidenceSource.status !== "active" || evidenceSource.trust === "untrusted")) return false;
-        const key = String(support.observation_key ?? support.evidence_id);
+        if (typeof evidence.source_id === "string") {
+          if (!evidenceSource || evidenceSource.status !== "active" || evidenceSource.trust === "untrusted") return false;
+        }
+        const metadata = evidence.metadata && typeof evidence.metadata === "object" && !Array.isArray(evidence.metadata)
+          ? evidence.metadata as JsonObject : {};
+        const sessionId = typeof metadata.source_session_id === "string" && metadata.source_session_id.trim()
+          ? metadata.source_session_id.trim() : null;
+        const verifiedSessionEvidence = evidence.source_type === "program" && metadata.provenance === "codex_session_program_verification"
+          && typeof metadata.task_id === "string" && typeof metadata.scope === "string"
+          && evidence.source_id === `knowledge_source_codex_session_${stableDigest(metadata.scope).slice(-24)}`;
+        const key = verifiedSessionEvidence && sessionId ? `session:${sessionId}`
+          : evidenceSource ? `source:${evidenceSource.id}` : sessionId ? `session:${sessionId}` : null;
+        // observation_key is an idempotency label supplied by the recorder, not
+        // proof that two observations came from independent sources.
+        if (!key) return false;
         if (supportKeys.has(key)) return false;
         supportKeys.add(key);
         return true;
@@ -346,7 +368,9 @@ export class KnowledgeAutoReviewKernel {
       if (contradicts.length) reasons.push("contradiction_requires_adjudication");
       verdict = reasons.length ? "revalidation_required" : "eligible";
     }
-    const identity = { claim_id: claim.id, claim_version: claim.version, claim_status: claim.status, claim_identity_digest: claim.identity_digest ?? null, verdict, reasons, policy_id: policy.id, policy_revision: policy.revision };
+    const effectivenessRun = claim.status === "candidate" ? this.independentEffectivenessRun(claim) : null;
+    const identity = { claim_id: claim.id, claim_version: claim.version, claim_status: claim.status, claim_identity_digest: claim.identity_digest ?? null,
+      effectiveness_run_id: effectivenessRun?.id ?? null, verdict, reasons, policy_id: policy.id, policy_revision: policy.revision };
     const reviewId = `knowledge_auto_review_${String(claim.id)}_${digest(identity).slice(-16)}`;
     const existing = this.store.find("knowledge_auto_review", reviewId);
     const review = existing ?? this.store.create("knowledge_auto_review", reviewId, { ...identity, identity_digest: digest(identity), automated: true, reviewed_at: new Date(now).toISOString() });
@@ -355,7 +379,7 @@ export class KnowledgeAutoReviewKernel {
     // with an active Source and credible Evidence can use it.  The result remains
     // auditable through both this review record and the normal Claim review field.
     if (autoPromote && policy.automatic && verdict === "eligible") {
-      reviewedClaim = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "reviewed", review: { reviewer: "automated-promotion-policy", source_digest: this.store.get("knowledge_source", String(claim.source_id)).content_digest, reason_digest: digest({ review_id: review.id, verdict, policy_id: policy.id, policy_revision: policy.revision }), reviewed_at: new Date(now).toISOString(), automated: true, policy_id: policy.id, policy_revision: policy.revision } });
+      reviewedClaim = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "reviewed", review: { reviewer: "automated-promotion-policy", source_digest: this.store.get("knowledge_source", String(claim.source_id)).content_digest, effectiveness_run_id: effectivenessRun!.id, promotion_review_id: review.id, promotion_claim_version: Number(claim.version) + 1, reason_digest: digest({ review_id: review.id, verdict, policy_id: policy.id, policy_revision: policy.revision, effectiveness_run_id: effectivenessRun!.id }), reviewed_at: new Date(now).toISOString(), automated: true, policy_id: policy.id, policy_revision: policy.revision } });
       updateKnowledgeScenarioClaim(this.knowledgeDirectory(String(reviewedClaim.scope), reviewedClaim), reviewedClaim, "reviewed");
     }
     return { claim_id: claim.id, claim_version: claim.version, verdict, reasons, review, claim: reviewedClaim ?? claim, promoted: reviewedClaim !== null, independent_support: independentSupportCount, required_independent_support: policy.minimum_independent_support, idempotent: existing !== null };
@@ -370,5 +394,36 @@ export class KnowledgeAutoReviewKernel {
 
   private supports(claim: JsonObject): JsonObject[] {
     return this.store.list("knowledge_claim_support", 10_000, (item) => item.claim_id === claim.id);
+  }
+
+  /** A candidate needs an independent held-out retrieval evaluation of this exact revision. */
+  private independentEffectivenessRun(claim: JsonObject): JsonObject | null {
+    const runs = this.store.list("knowledge_evaluation_run", 10_000,
+      (run) => run.mode === "candidate_shadow" && run.status === "eligible")
+      .sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")));
+    for (const run of runs) {
+      const candidateRefs = Array.isArray(run.candidate_claim_refs) ? run.candidate_claim_refs as JsonObject[] : [];
+      const candidateRef = candidateRefs.find((item) => item.claim_id === claim.id);
+      if (!candidateRef || candidateRef.claim_version !== claim.version
+        || candidateRef.identity_digest !== (claim.identity_digest ?? null)
+        || candidateRef.content_digest !== (claim.content_digest ?? null)) continue;
+      const caseRefs = Array.isArray(run.case_refs) ? run.case_refs as JsonObject[] : [];
+      const caseIds = Array.isArray(run.case_ids) ? run.case_ids.map(String) : [];
+      if (!caseRefs.length || caseRefs.length !== caseIds.length || candidateRefs.length === 0
+        || (run.metrics as JsonObject | undefined)?.provenance_eligible !== true) continue;
+      let sawPositiveLabel = false;
+      let valid = true;
+      for (const caseRef of caseRefs) {
+        if (typeof caseRef.case_id !== "string" || !caseIds.includes(caseRef.case_id)) { valid = false; break; }
+        const item = this.store.find("knowledge_evaluation_case", caseRef.case_id, undefined, false);
+        if (!item || item.version !== caseRef.case_version || item.identity_digest !== caseRef.identity_digest) { valid = false; break; }
+        if (Array.isArray(item.expected_claim_ids) && item.expected_claim_ids.includes(claim.id)) sawPositiveLabel = true;
+        const evidence = knowledgeEvaluationEvidence(this.store, item);
+        if (!assessKnowledgeEvaluationProvenance(item, evidence.sourceEvidence, evidence.claimEvidence,
+          knowledgeEvaluationAdjudicationVerified(this.store, item)).evaluation_eligible) { valid = false; break; }
+      }
+      if (valid && sawPositiveLabel) return run;
+    }
+    return null;
   }
 }

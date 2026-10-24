@@ -22,6 +22,7 @@ import type { CraftStore, JsonObject } from "../../common/craft-common-store-loc
 import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
 import { activeProcedure } from "./procedure-release.ts";
 import { retrievalTerms } from "../../common/craft-common-base/src/retrieval-terms.ts";
+import { contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
 
 /** Tokenize a query the same way `ContextResolutionKernel.resolve` does, so matching agrees. */
 function terms(query: string): string[] {
@@ -63,13 +64,17 @@ export class ExperienceContribution implements ContextContributionProvider {
     const eligible = scoped.map(latest => activeProcedure(this.store, String(latest.id))).filter((item): item is JsonObject => item !== null);
     if (eligible.length > 10_000) throw new Error("Experience candidate budget exceeded; narrow the scope stack");
     const descriptions = new Map(eligible.map(procedure => [String(procedure.id), this.describe(procedure)]));
+    const isRequired = (procedure: JsonObject) => (request.required_refs ?? []).some(ref => {
+      const description = descriptions.get(String(procedure.id));
+      return Boolean(description && contextAssetMatches(ref, contextAssetRef("experience", description, description.scope as JsonObject)));
+    });
     const procedures = eligible
-      .map((procedure) => ({
-        procedure,
-        score: request.candidate_mode ? 1 : wanted.reduce((sum, term) => sum + Number(String(descriptions.get(String(procedure.id))!.retrieval_text).toLowerCase().includes(term)), 0),
-      }))
+      .map((procedure) => {
+        const score = wanted.reduce((sum, term) => sum + Number(String(descriptions.get(String(procedure.id))!.retrieval_text).toLowerCase().includes(term)), 0);
+        return { procedure, score: score + Number(request.candidate_mode === true) };
+      })
       .filter((candidate) => candidate.score > 0)
-      .sort((left, right) => right.score - left.score || String(left.procedure.id).localeCompare(String(right.procedure.id)));
+      .sort((left, right) => Number(isRequired(right.procedure)) - Number(isRequired(left.procedure)) || right.score - left.score || String(left.procedure.id).localeCompare(String(right.procedure.id)));
 
     const selected: Array<{ item: JsonObject; reference: string }> = procedures
       .map((candidate) => ({ item: descriptions.get(String(candidate.procedure.id))!, reference: `procedure:${String(candidate.procedure.id)}@${Number(candidate.procedure.version)}` }));

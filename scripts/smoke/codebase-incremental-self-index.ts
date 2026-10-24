@@ -48,7 +48,7 @@ function graphDiff(leftStore: CraftStore, leftIndexId: string, rightStore: Craft
   const read = (store: CraftStore, indexId: string) => {
     const index = store.get("codebase_index", indexId);
     const workspace = store.get("workspace", String(index.workspace_id));
-    const graph = new ProjectGraphStore(String(workspace.root_path), String(workspace.id));
+    const graph = new ProjectGraphStore(String(workspace.root_path), String(workspace.id), store.paths);
     const shards = (index.shard_ids as string[]).map(id => graph.read(id));
     return { nodes: shards.flatMap(shard => shard.nodes as Record<string, unknown>[]), edges: shards.flatMap(shard => shard.edges as Record<string, unknown>[]) };
   };
@@ -132,7 +132,7 @@ try {
     const changedPath = join(projectRoot, sourceFile.path);
     writeFileSync(changedPath, `${readFileSync(changedPath, "utf8")}\n// isolated incremental benchmark change ${round + 1}\n`);
     const changedSnapshot = repositoryFiles(projectRoot);
-    const cachedUnits = new ProjectAnalysisCache(projectRoot, String(initial.workspace_id))
+    const cachedUnits = new ProjectAnalysisCache(projectRoot, String(initial.workspace_id), incrementalStore.paths)
       .list("codebase_semantic_file_analysis", 1_000);
     const repositoryState = incrementalStore.get("codebase_repository_state", `${String(initial.workspace_id)}_semantic`);
     const incrementalPlan = planTypeScriptIncremental(changedSnapshot.files

@@ -30,8 +30,8 @@ test("trusted LSP configuration accepts an executable and bounds its adapter con
     assert.deepEqual(second.adapters[0]!.relations, ["calls"]); assert.equal(second.adapters[0]!.max_documents, 4);
     assert.equal(second.adapters[0]!.relation_symbol_limit, 250);
     assert.equal(second.adapters[0]!.request_timeout_ms, 30_000);
-    write(f.dir, valid({ relation_symbol_limit: 2_000 }));
-    assert.equal(readTrustedLspConfig(f.dir).adapters[0]!.relation_symbol_limit, 2_000);
+    write(f.dir, valid({ relation_symbol_limit: 500 }));
+    assert.equal(readTrustedLspConfig(f.dir).adapters[0]!.relation_symbol_limit, 500);
     write(f.dir, valid({ relation_symbol_limit: MAX_RELATION_SYMBOLS }));
     assert.equal(readTrustedLspConfig(f.dir).adapters[0]!.relation_symbol_limit, MAX_RELATION_SYMBOLS);
     write(f.dir, { schema_version: 1, adapters: [...(valid() as any).adapters, ...(valid() as any).adapters] });

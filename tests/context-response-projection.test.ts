@@ -16,7 +16,7 @@ test("compact Context response preserves selected evidence and stable provenance
     pack_receipt: { id: "pack-1", scope: { kind: "project", id: "p" }, task_kind: "code", partial: true, partial_reasons: ["missing"], max_items: 3, max_chars: 1_200, total_items: 2, total_used_chars: 100, identity_digest: "discard", asset_refs: Array(50).fill("discard") },
     codebase: { status: "ready", workspace_id: "workspace", index_id: "index", checkpoint_id: "checkpoint", analysis_confidence: "partial", references: [{ node_id: "symbol-1", checkpoint_id: "checkpoint" }], full_graph: "discard" },
     injection_measurement: { serialized_chars: 100, estimated_tokens: 40, tokenizer: "estimated", exact: false, host_measured_tokens: null, sensitive_prompt: "discard" },
-    knowledge_source_discovery: { status: "ready", sources_registered: 2, sources_ingested: 1, candidates_created: 1, source_body: "discard" },
+    knowledge_source_discovery: { status: "unavailable", reason: "project_source_discovery_failed", failure_code: "STORAGE_BUSY", sources_registered: 0, sources_ingested: 0, candidates_created: 0, source_body: "discard" },
     host_refs: [{ member: "history", id: "host-ref" }], trace_correlation: { trace_id: "trace-1" }, telemetry_error: { category: "storage" }, host_execution_authority: false,
   };
   const result = compactContextResponse(source);
@@ -26,10 +26,23 @@ test("compact Context response preserves selected evidence and stable provenance
   assert.deepEqual(result.asset_refs, source.asset_refs);
   assert.deepEqual(result.trace_correlation, source.trace_correlation);
   assert.deepEqual(result.telemetry_error, source.telemetry_error);
+  assert.deepEqual(result.knowledge_source_discovery, { status: "unavailable", reason: "project_source_discovery_failed", failure_code: "STORAGE_BUSY", sources_registered: 0, sources_ingested: 0, candidates_created: 0 });
   assert.deepEqual(result.codebase, { status: "ready", workspace_id: "workspace", index_id: "index", checkpoint_id: "checkpoint", analysis_confidence: "partial", references: [{ node_id: "symbol-1", checkpoint_id: "checkpoint" }] });
   assert.equal(result.already_emitted_count, 1);
   assert.equal(JSON.stringify(result).includes("discard"), false);
   assert.equal(JSON.stringify(result).includes("/other/project"), false);
+});
+
+test("compact Context response keeps only the safe Knowledge discovery failure category", () => {
+  const result = compactContextResponse({ knowledge_source_discovery: {
+    status: "unavailable", reason: "project_source_discovery_failed", failure_code: "STORAGE_BUSY",
+    exception_message: "private path and source text", sources_registered: 0, sources_ingested: 0, partial_ingests: 0, failed_ingests: 0, candidates_created: 0,
+  } });
+  assert.deepEqual(result.knowledge_source_discovery, {
+    status: "unavailable", reason: "project_source_discovery_failed", failure_code: "STORAGE_BUSY",
+    sources_registered: 0, sources_ingested: 0, partial_ingests: 0, failed_ingests: 0, candidates_created: 0,
+  });
+  assert.equal(JSON.stringify(result).includes("private path"), false);
 });
 
 test("compact Context response is bounded for three Chinese items at the default token ceiling", () => {

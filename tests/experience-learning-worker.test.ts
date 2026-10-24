@@ -9,7 +9,7 @@ import { after, default as test } from "node:test";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { McpStdioClient, boundedPollInterval, learningComponents, learningPollInterval, learningWorkFound, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
+import { McpStdioClient, boundedPollInterval, learningComponents, learningMcpRequestTimeoutMs, learningPollInterval, learningWorkFound, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
 import { acquireLearningWorkerLocks } from "../core/interfaces/learning-worker-supervisor.ts";
@@ -288,6 +288,7 @@ test("continuous learning tick contains transient Experience and Knowledge failu
       return { tickets: [] };
     }
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_source_list") {
       sourceListAttempts += 1;
       if (sourceListAttempts === 1) throw "source locator must stay private";
@@ -325,6 +326,7 @@ test("continuous learning tick contains transient Experience and Knowledge failu
   assert.equal((await runLearningTick({ client: invalidNameClient, env: directWorkerEnv })).failure_kind, "Error");
   const knowledgeOnlyFailure = await runLearningTick({ client: { async call(name) {
     if (name === "craft_evaluation_model_ticket_list" || name === "craft_experience_learning_evaluation_dispatch_list") return { tickets: [], dispatches: [] };
+    if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_source_list") throw new Error("private");
     return {};
   } }, env: directWorkerEnv }, true);
@@ -361,6 +363,7 @@ test("learning failure diagnostics expose only safe error names", () => {
 test("Knowledge classification failures remain visible without dropping completed source sync", async () => {
   const client: ExperienceLearningClient = { async call(name) {
     if (name === "craft_experience_learning_evaluation_dispatch_list" || name === "craft_evaluation_model_ticket_list") return { dispatches: [], tickets: [] };
+    if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_source_list") return { sources: [] };
     if (name === "craft_knowledge_claim_list") throw new TypeError("private classification failure");
     throw new Error(`unexpected tool ${name}`);
@@ -408,6 +411,7 @@ test("standalone learning modes call only their mounted Knowledge or Experience 
     calls.push(name);
     if (name === "craft_evaluation_model_ticket_list") return { tickets: [] };
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_source_list") return { sources: [] };
     if (name === "craft_knowledge_claim_list") return { claims: [] };
     throw new Error(`unexpected tool ${name}`);
@@ -420,13 +424,39 @@ test("standalone learning modes call only their mounted Knowledge or Experience 
   const knowledge = await runLearningTick(deps, true, ["knowledge"]);
   assert.deepEqual(knowledge, { processed: 0, outcomes: [], skipped: true,
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
-  assert.deepEqual(calls, ["craft_knowledge_source_list", "craft_knowledge_claim_list"]);
+  assert.deepEqual(calls, ["craft_knowledge_storage_reconcile", "craft_knowledge_source_list", "craft_knowledge_claim_list"]);
+  calls.length = 0;
+  const knowledgeWithoutSync = await runLearningTick(deps, false, ["knowledge"]);
+  assert.deepEqual(knowledgeWithoutSync, { processed: 0, outcomes: [], skipped: true,
+    knowledge: { status: "not_due", processed: 0, content_stored: false, raw_content_stored: false,
+      classification: { processed: 0, outcomes: [] } } });
+  assert.deepEqual(calls, ["craft_knowledge_claim_list"]);
   assert.deepEqual(learningComponents({}), ["experience", "knowledge"]);
   assert.deepEqual(learningComponents({ CRAFT_LEARNING_COMPONENTS: "knowledge" }), ["knowledge"]);
   assert.deepEqual(learningComponents({ CRAFT_LEARNING_COMPONENTS: "experience,knowledge" }), ["experience", "knowledge"]);
   for (const invalid of ["", "memory", "experience,experience", "experience, memory"]) {
     assert.throws(() => learningComponents({ CRAFT_LEARNING_COMPONENTS: invalid }), /CRAFT_LEARNING_COMPONENTS/u);
   }
+});
+
+test("Knowledge worker surfaces a storage page only when migration made progress", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-storage-progress-"));
+  const calls: string[] = [];
+  try {
+    const client: ExperienceLearningClient = { async call(name) {
+      calls.push(name);
+      if (name === "craft_knowledge_storage_reconcile") return { status: "partial", phase: "records", examined: 1, migrated: 1,
+        skipped: 0, blocked: [], has_more: true, next_cursor: "cGFnZTI" };
+      if (name === "craft_knowledge_source_list") return { sources: [] };
+      if (name === "craft_knowledge_claim_list") return { claims: [] };
+      throw new Error(`unexpected tool ${name}`);
+    } };
+    const result = await runLearningTick({ client, env: { ...process.env, CRAFT_DATA_DIR: dataDir } }, true, ["knowledge"]);
+    const knowledge = result.knowledge as JsonObject;
+    assert.deepEqual(knowledge.storage_reconciliation, { status: "partial", examined: 1, migrated: 1, skipped: 0,
+      phase: "records", blocked_count: 0, has_more: true, raw_content_stored: false });
+    assert.equal(calls.filter(name => name === "craft_knowledge_storage_reconcile").length, 1);
+  } finally { rmSync(dataDir, { recursive: true, force: true }); }
 });
 
 test("distillation worker fails closed on malformed model output and never submits it", async () => {
@@ -891,6 +921,24 @@ test("MCP stdio client stops a child that never responds to a request", async ()
   } finally { client.close(); }
 });
 
+test("managed Knowledge adjudication has enough MCP time for the bounded Host deadline", () => {
+  assert.equal(learningMcpRequestTimeoutMs("tools/call", { name: "craft_knowledge_evaluation_case_adjudicate" }, 60_000), 135_000);
+  assert.equal(learningMcpRequestTimeoutMs("tools/call", { name: "craft_knowledge_evaluation_case_adjudicate" }, 200_000), 200_000);
+  assert.equal(learningMcpRequestTimeoutMs("tools/call", { name: "craft_knowledge_evaluation_case_list" }, 60_000), 60_000);
+  assert.equal(learningMcpRequestTimeoutMs("initialize", {}, 60_000), 60_000);
+});
+
+test("MCP diagnostics stay off stdout and a stdin stream error rejects pending work", async () => {
+  const client = new McpStdioClient(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+  try {
+    client.child.stderr.emit("data", Buffer.from("fixture diagnostic"));
+    const pending = client.initialize();
+    client.child.stdin.emit("error", new Error("fixture stdin disconnected"));
+    await assert.rejects(pending, /fixture stdin disconnected/u);
+    assert.equal(client.pending.size, 0);
+  } finally { client.close(); }
+});
+
 test("MCP stdio client refuses a stale Craft server before sending initialized notification", async () => {
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const keys = ["CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_INFO", "CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_NAME", "CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_VERSION"] as const;
@@ -1045,7 +1093,7 @@ test("runOnce contains scenario-classification queue failures and continues eval
   assert.equal((result.evaluation as JsonObject).processed, 0);
 });
 
-test("Knowledge worker incrementally executes session candidate and held-out evaluation stages", async () => {
+test("Knowledge worker incrementally executes session candidate, held-out evaluation and adjudication stages", async () => {
   for (const stage of ["session_candidate", "session_evaluation"] as const) {
     for (const malformedState of [false, true]) {
       const dataDir = mkdtempSync(join(tmpdir(), "craft-knowledge-stage-worker-"));
@@ -1075,6 +1123,29 @@ test("Knowledge worker incrementally executes session candidate and held-out eva
       } finally { rmSync(dataDir, { recursive: true, force: true }); }
     }
   }
+  const dataDir = mkdtempSync(join(tmpdir(), "craft-knowledge-adjudication-stage-"));
+  const cursorPath = join(dataDir, "knowledge", "learning-stage-cursor.json");
+  mkdirSync(join(dataDir, "knowledge"), { recursive: true });
+  writeFileSync(cursorPath, JSON.stringify({ schema: "craft.knowledge-learning-stage-cursor.v1", cursor: 3 }));
+  const idleClient: ExperienceLearningClient = { async call(name) {
+    if (name === "craft_knowledge_evaluation_case_list") return { cases: [], has_more: false, next_cursor: null };
+    if (name === "craft_knowledge_evaluation_run_list") return { runs: [] };
+    throw new Error(`unexpected MCP call ${name}`);
+  } };
+  try {
+    const result = await runLearningTick({ client: idleClient, env: { ...process.env, CRAFT_DATA_DIR: dataDir }, knowledge_stage_cursor_file: cursorPath }, false, ["knowledge"],
+      async () => ({ status: "completed", tasks_indexed: 0 }));
+    assert.equal((result.knowledge as JsonObject).session_adjudication, undefined, "idle adjudication stage avoids unnecessary model work");
+    writeFileSync(cursorPath, JSON.stringify({ schema: "craft.knowledge-learning-stage-cursor.v1", cursor: 3 }));
+    const failingClient: ExperienceLearningClient = { async call(name) {
+      if (name === "craft_knowledge_evaluation_case_list") throw new TypeError("private failure detail");
+      throw new Error(`unexpected MCP call ${name}`);
+    } };
+    const failed = await runLearningTick({ client: failingClient, env: { ...process.env, CRAFT_DATA_DIR: dataDir }, knowledge_stage_cursor_file: cursorPath }, false,
+      ["knowledge"], async () => ({ status: "completed", tasks_indexed: 0 }));
+    assert.deepEqual((failed.knowledge as JsonObject).session_adjudication, { status: "failed", failure_kind: "TypeError", raw_content_stored: false });
+    assert.equal((failed.knowledge as JsonObject).failure_kind, "TypeError");
+  } finally { rmSync(dataDir, { recursive: true, force: true }); }
   const noOp: ExperienceLearningClient = { async call() { throw new Error("no component should call the Host"); } };
   assert.equal((await runLearningTick({ client: noOp, contentLanguage: "en", env: directWorkerEnv }, false, [])).knowledge, null);
   const configuredDataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-language-config-"));

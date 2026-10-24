@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
@@ -17,6 +17,7 @@ import { payload } from "../core/digest.ts";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-context-design-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  new CraftService(store).scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: root });
   return { store, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
@@ -59,6 +60,10 @@ test("usage is scoped, excludes privileged receipts, preserves unknown and bound
     f.store.create("knowledge_claim", "k", { scope: "project:demo", status: "reviewed", proposed_by: "agent" });
     f.store.create("experience_procedure", "p", { scope: "project:demo", lifecycle: "routeable" });
     f.store.create("memory_ledger", "restricted", { scope, sensitivity: "restricted" });
+    const otherRoot = join((f.store.paths.root), "other-project");
+    await mkdir(otherRoot);
+    f.store.create("scope_alias", "context-workbench-other", { status: "active", alias_kind: "path", alias: otherRoot,
+      scope: { kind: "project", id: "other" } });
     f.store.create("memory_ledger", "foreign", { scope: { kind: "project", id: "other" } });
     const record = { scope, scope_access: {}, memory_refs: ["m", "missing", "restricted", "foreign"].map(memory_id => ({ memory_id, memory_version: 1, content_digest: "digest", reason: "required" })), contributions: [
       { member: "knowledge", item_count: 1, references: [{ id: "k", version: 1, digest: "kd", reason: "reviewed" }] },
@@ -92,17 +97,18 @@ test("usage is scoped, excludes privileged receipts, preserves unknown and bound
   } finally { await f.close(); }
 });
 
-test("actual resolution pins knowledge and procedure references; revoked sources disappear next turn", async () => {
+test("actual resolution rejects unverified Knowledge labels and pins routeable Experience references", async () => {
   const f = await fixture();
   try {
-    f.store.create("knowledge_source", "source", { status: "active", trust: "verified" });
-    f.store.create("knowledge_claim", "k", { source_id: "source", scope: "project:demo", status: "reviewed", content: "export terminal", content_digest: "k1", evidence_ids: [] });
+    f.store.create("knowledge_source", "source", { status: "active", trust: "verified", scope: "project:demo" });
+    const evidence = f.store.create("evidence", "knowledge-context-evidence", { status: "verified", confidence: "confirmed", claim: "export terminal is the project command" });
+    f.store.create("knowledge_claim", "k", { source_id: "source", scope: "project:demo", status: "reviewed", content: "export terminal", content_digest: "k1", evidence_ids: [evidence.id] });
     f.store.create("experience_procedure", "p", { scope: "project:demo", lifecycle: "routeable", routeable: true, trigger: "export terminal", title: "export", content_digest: "p1", procedure_kind: "prompt", acceptance_ref: "file", scenario_signature: {} });
     const reader = new ContextResolutionKernel(f.store, [new KnowledgeContribution(f.store), new ExperienceContribution(f.store)]);
     const query = { query: "export", scope_kind: "project", scope_id: "demo" };
     const resolved = await reader.resolve(query), receipt = resolved.receipt as JsonObject;
     const refs = (receipt.contributions as JsonObject[]).flatMap(part => part.references as JsonObject[]);
-    assert.deepEqual(refs.map(item => item.id).sort(), ["k", "p"]); assert(refs.every(item => item.version === 1));
+    assert.deepEqual(refs.map(item => item.id).sort(), ["p"], "a reviewed label without managed promotion proof is not executable Knowledge"); assert(refs.every(item => item.version === 1));
     assert(!JSON.stringify(refs).includes("export terminal"));
     const source = f.store.get("knowledge_source", "source"); f.store.save("knowledge_source", "source", { ...payload(source), status: "revoked" });
     const procedure = f.store.get("experience_procedure", "p"); f.store.save("experience_procedure", "p", { ...payload(procedure), routeable: false });
@@ -121,7 +127,8 @@ test("actual resolution pins knowledge and procedure references; revoked sources
     f.store.create("memory_ledger", "retire-me", { scope: { kind: "project", id: "demo" }, status: "active", content: "export", source_id: "source", kind: "episodic", sensitivity: "internal" });
     assert.equal(request("POST", "/api/workbench/context-retire", { scope_kind: "project", scope_id: "demo", member: "memory", id: "retire-me", expected_version: 1 }).status, 200);
     assert.equal(f.store.get("memory_ledger", "retire-me").status, "revoked");
-    assert.equal(request("POST", "/api/workbench/context-retire", { scope_kind: "project", scope_id: "demo", member: "knowledge", id: "k", expected_version: 1 }).status, 200);
+    const retiredKnowledge = request("POST", "/api/workbench/context-retire", { scope_kind: "project", scope_id: "demo", member: "knowledge", id: "k", expected_version: 1 });
+    assert.equal(retiredKnowledge.status, 200, retiredKnowledge.body);
     assert.equal(f.store.get("knowledge_claim", "k").status, "expired");
   } finally { await f.close(); }
 });

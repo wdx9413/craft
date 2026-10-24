@@ -11,6 +11,7 @@ import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { ContextReadGuard, assertContextReadCurrent } from "../core/context-access-guard.ts";
 import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
 import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 const scope = { scope_kind: "project", scope_id: "race" };
 const owner = { principal_id: "owner", tenant_id: "tenant" };
@@ -95,7 +96,8 @@ for (const member of ["knowledge", "experience"] as const) {
       try {
         if (member === "knowledge") {
           f.store.create("knowledge_document", "doc", { status: "current", content_digest: "doc" });
-          f.store.create("knowledge_claim", "claim", { source_id: "source", document_id: "doc", document_digest: "doc", scope: "project:race", status: "reviewed", content: "alpha private claim", content_digest: "claim", scope_envelope: f.memory.scope_envelope });
+          const claim = f.store.create("knowledge_claim", "claim", { source_id: "source", document_id: "doc", document_digest: "doc", scope: "project:race", status: "candidate", content: "alpha private claim", content_digest: "claim", evidence_ids: [], scope_envelope: f.memory.scope_envelope });
+          attachVerifiedPromotionFixture(f.store, claim);
         } else {
           f.store.create("experience_procedure", "procedure", { scope: "project:race", scope_envelope: f.memory.scope_envelope, routeable: true, lifecycle: "routeable", procedure_kind: "prompt", trigger: "alpha", title: "alpha", acceptance_ref: "accept", content_digest: "procedure", definition_digest: "one" });
           f.store.create("experience_release", "procedure", { status: "active", record_version: 1, definition_digest: "one" });
@@ -117,7 +119,8 @@ for (const member of ["knowledge", "experience"] as const) {
 test("direct Knowledge search rechecks its awaited result", async () => {
   const f = await fixture();
   try {
-    f.store.create("knowledge_claim", "claim", { source_id: "source", scope: "project:race", status: "reviewed", content: "alpha", scope_envelope: f.memory.scope_envelope });
+    const claim = f.store.create("knowledge_claim", "claim", { source_id: "source", scope: "project:race", status: "candidate", content: "alpha", evidence_ids: [], scope_envelope: f.memory.scope_envelope });
+    attachVerifiedPromotionFixture(f.store, claim);
     const reader = new KnowledgeContribution(f.store), gate = barrier();
     const kernel = new ContextResolutionKernel(f.store, [{ member: "knowledge", contribute: request => reader.contribute(request), async search(request, candidates) { const cached = await reader.search(request, candidates); await gate.wait(); return cached; } }]);
     const pending = kernel.searchKnowledge({ ...scope, ...owner, query: "alpha" }); const denied = assert.rejects(pending, /changed during recall/); await gate.started;

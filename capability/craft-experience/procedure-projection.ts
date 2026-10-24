@@ -35,8 +35,9 @@ function strings(value: unknown, name: string, minimum = 0): string[] {
 }
 function yaml(value: unknown): string { return JSON.stringify(value); }
 function scopeRef(value: string): { kind: string; id: string } {
-  const [kind, ...rest] = value.split(":");
-  return { kind: kind || "project", id: rest.join(":") || "unresolved" };
+  const separator = value.indexOf(":");
+  if (separator < 1 || separator === value.length - 1) throw new Error("Experience Procedure scope is malformed");
+  return { kind: value.slice(0, separator), id: value.slice(separator + 1) };
 }
 
 /**

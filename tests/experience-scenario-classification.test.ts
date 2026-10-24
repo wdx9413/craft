@@ -48,6 +48,8 @@ test("classifies a verified task and links the model decision through the normal
   const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
   assert.equal(result.processed, 1);
   assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
+  const completion = f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete");
+  assert.equal(completion?.args.trace_id, (result.outcomes as JsonObject[])[0]?.trace_id);
   const finalize = f.calls.find(call => call.name === "craft_learning_cycle_finalize");
   assert.equal(finalize?.args.scenario_key, "validation.repair");
   assert.equal(finalize?.args.session_id, "session-1");

@@ -2,7 +2,7 @@
   "description": "Resolve one bounded Knowledge, Memory, and Experience context receipt; automatically capture classified stable Memory facts and verified local signals.",
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member context", "timeout": 3, "statusMessage": "Checking Craft Context lifecycle" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member context", "timeout": 20, "statusMessage": "Resolving scoped Craft Context" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member context", "timeout": 20, "additionalContextLimit": 400, "statusMessage": "Resolving scoped Craft Context" }] }],
     "PostToolUse": [{ "matcher": "Bash|^apply_patch$|Edit|Write", "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member context", "timeout": 3, "statusMessage": "Recording verified Craft signals" }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member context", "timeout": 10, "statusMessage": "Closing Craft Context turn" }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member context", "timeout": 3, "statusMessage": "Closing Craft Context session" }] }]

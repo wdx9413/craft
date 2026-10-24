@@ -176,16 +176,16 @@ export class McpServer {
     // refusal returns without dispatching, and `tool_after` therefore does not run for it either.
     const context = this.hooks === undefined ? undefined : HookPlane.toolContext(name, supplied, classifyTool);
     const requestId = String(request.id);
+    let readOnlyHookChecked = false;
     const readOnly = this.tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint === true;
     const traced = !readOnly && name !== "craft_info" && name !== "craft_describe" && name !== "craft_list" && name !== "craft_get" && !name.startsWith("craft_trace_");
     const dispatch = async (): Promise<JsonObject> => {
-      if (context) {
+      if (context && !readOnlyHookChecked) {
         const gate = await this.hooks!.run("tool_before", context);
         if (gate.denied) {
           const refusal = gate.outcomes.find((entry) => entry.outcome.kind === "denied")!;
           const reason = refusal.outcome.kind === "denied" ? refusal.outcome.reason : "denied";
           const denied = { denied: true, hook: refusal.hook, capability: refusal.capability ?? null, reason };
-          if (traced || readOnly) return denied;
           const captured = await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: "hook.denied", input: supplied as JsonObject, handler: () => denied });
           return { ...denied, trace_correlation: captured.correlation, ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) };
         }
@@ -209,13 +209,29 @@ export class McpServer {
     };
     const response = await (async (): Promise<JsonObject> => {
       try {
-        const captured: ComponentTraceResult = readOnly
-          ? { ok: true, result: await withoutOperationPersistence(this.service.store,
+        let captured: ComponentTraceResult;
+        if (readOnly && context) {
+          const gate = await this.hooks!.run("tool_before", context);
+          if (gate.denied) {
+            const refusal = gate.outcomes.find(entry => entry.outcome.kind === "denied")!;
+            const reason = refusal.outcome.kind === "denied" ? refusal.outcome.reason : "denied";
+            const denied = { denied: true, hook: refusal.hook, capability: refusal.capability ?? null, reason };
+            captured = await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: "hook.denied", input: supplied as JsonObject, handler: () => denied });
+          } else {
+            readOnlyHookChecked = true;
+            captured = { ok: true, result: await withoutOperationPersistence(this.service.store,
+              () => observeOperation(this.service.store, "craft-mcp", name, { ...supplied as JsonObject, request_id: requestId }, dispatch),
+              event => this.recordReadOperation(event)), correlation: null };
+          }
+        } else if (readOnly) {
+          captured = { ok: true, result: await withoutOperationPersistence(this.service.store,
             () => observeOperation(this.service.store, "craft-mcp", name, { ...supplied as JsonObject, request_id: requestId }, dispatch),
-            event => this.recordReadOperation(event)), correlation: null }
-          : traced
-            ? await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: name, input: supplied as JsonObject, handler: dispatch })
-            : { ok: true, result: await dispatch(), correlation: null };
+            event => this.recordReadOperation(event)), correlation: null };
+        } else if (traced) {
+          captured = await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: name, input: supplied as JsonObject, handler: dispatch });
+        } else {
+          captured = { ok: true, result: await dispatch(), correlation: null };
+        }
         if (!captured.ok) {
           return this.ok(request.id, { content: [{ type: "text", text: captured.error instanceof Error ? captured.error.message : String(captured.error) }],
             structuredContent: safeFailure(captured.error), trace_correlation: captured.correlation, ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}), isError: true });

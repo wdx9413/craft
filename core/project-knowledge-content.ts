@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import type { CraftStore, JsonObject } from "../common/craft-common-store-local/src/store.ts";
 import { stableDigest } from "./digest.ts";
 import { scopeFromKey } from "./scope-policy.ts";
+import { canonicalCandidatePath, ensureProjectStorageDirectory, existingProjectStorageDirectory, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
 
 export interface ProjectKnowledgeDirectoryOptions {
   readonly project_root?: string;
@@ -45,25 +46,33 @@ export function projectKnowledgeContentDirectory(store: CraftStore, scope: strin
     .filter(item => typeof item.alias === "string" && isAbsolute(item.alias) && item.alias_digest === stableDigest(item.alias))
     .map(item => { try { return realpathSync(item.alias as string); } catch { return ""; } })
     .filter(Boolean);
+  const identity = store.find("project_identity", id);
+  const canonical = identity?.canonical_scope as Record<string, unknown> | undefined;
+  if (identity && canonical?.kind === "project" && canonical.id === id
+    && identity.identity_digest === stableDigest({ canonical, project_kind: identity.project_kind, remote_digest: identity.remote_digest })
+    && typeof identity.local_path_alias === "string" && isAbsolute(identity.local_path_alias)) {
+    try { aliases.push(realpathSync(identity.local_path_alias)); } catch { /* an unavailable project identity remains unbound */ }
+  }
   const roots = [...new Set(aliases)];
   const requested = options.project_root === undefined ? undefined : realpathSync(resolve(options.project_root));
   if (requested && !roots.includes(requested)) throw new Error("Project root is not registered for this Knowledge scope");
+  if (roots.length > 1) throw new Error("Project root is ambiguous for this Knowledge scope");
 
-  const target = options.reference_path === undefined ? undefined : resolve(options.reference_path);
-  const matches = roots.filter(root => {
-    if (requested && requested !== root) return false;
-    if (!target) return true;
-    const path = relative(join(root, ".craft_data", "knowledge", "md"), target);
-    return path !== "" && path !== ".." && !path.startsWith(`..${sep}`);
-  });
-  if (target && !matches.length) return null;
-  if (matches.length > 1) throw new Error("Project root is ambiguous for this Knowledge scope");
-  const root = matches[0];
+  const target = options.reference_path === undefined ? undefined : canonicalCandidatePath(options.reference_path);
+  const root = roots[0];
   if (!root) return null;
   if (!lstatSync(root).isDirectory()) throw new Error("Project root must be a directory");
-
-  const directory = join(root, ".craft_data", "knowledge", "md");
-  for (const path of [join(root, ".craft_data"), join(root, ".craft_data", "knowledge"), directory]) {
+  const projectDirectory = projectStorageDirectory(store.paths, root);
+  const directory = join(projectDirectory, "knowledge", "md");
+  if (target) {
+    const inside = (base: string) => { const part = relative(canonicalCandidatePath(base), target); return part !== "" && part !== ".." && !part.startsWith(`..${sep}`) && !isAbsolute(part); };
+    const legacy = join(root, ".craft_data", "knowledge", "md");
+    if (inside(legacy) && options.create !== true) return legacy;
+    if (!inside(directory) && !inside(legacy)) return null;
+  }
+  if (options.create) ensureProjectStorageDirectory(store.paths, root);
+  else existingProjectStorageDirectory(store.paths, root);
+  for (const path of [join(projectDirectory, "knowledge"), directory]) {
     const exists = existsSync(path);
     if (!exists && options.create) mkdirSync(path, { recursive: true, mode: 0o700 });
     if (!exists && !options.create) continue;

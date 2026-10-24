@@ -1,16 +1,20 @@
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { CraftStore } from "../core/infrastructure/store.ts";
-import { craftPaths } from "../core/infrastructure/paths.ts";
+import { craftPaths, projectStorageDirectory, sessionStorageDirectory } from "../core/infrastructure/paths.ts";
 import { contentReference, contentTitle, MarkdownContentStore } from "../core/infrastructure/content-store.ts";
 import { CraftService } from "../core/application/craft-service.ts";
 import { ContentMigrationKernel } from "../core/content-migration.ts";
+import { projectKnowledgeContentDirectory } from "../core/project-knowledge-content.ts";
+import { projectExperienceContentDirectory } from "../core/project-experience-directory.ts";
 import { MemoryConsolidationKernel } from "../core/memory-consolidation.ts";
 import { McpServer } from "../core/mcp.ts";
 import { stableDigest } from "../core/digest.ts";
@@ -66,7 +70,31 @@ test("project Knowledge bodies stay inside the registered checkout and reject cr
     f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:other", alias_kind: "path", alias: other });
     const ref = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "project-claim", version: 1, scope: "project:demo",
       status: "candidate", sensitivity: "internal", source_id: "project-source", body: "Project-only Knowledge." });
-    assert.ok(ref.path.startsWith(join(realpathSync(f.root), ".craft_data", "knowledge", "md")));
+    assert.ok(ref.path.startsWith(join(projectStorageDirectory(f.paths, f.root), "knowledge", "md")));
+    const legacyKnowledgePath = join(f.root, ".craft_data", "knowledge", "md", "legacy-claim.v1.md");
+    await mkdir(dirname(legacyKnowledgePath), { recursive: true });
+    await writeFile(legacyKnowledgePath, await readFile(ref.path, "utf8"), "utf8");
+    assert.equal(fs.realpathSync((f.store.contentStore as any).directory("knowledge", undefined, "project:demo", undefined, legacyKnowledgePath, false)),
+      fs.realpathSync(dirname(legacyKnowledgePath)));
+    assert.equal(f.store.contentStore.readCompatSync({ ...ref, path: legacyKnowledgePath }, "project:demo").body, "Project-only Knowledge.");
+    const experienceRef = f.store.contentStore.writeSync({ kind: "experience", record_id: "project-procedure", version: 1, scope: "project:demo",
+      status: "candidate", sensitivity: "internal", source_id: "project-source", body: "Project-only procedure." });
+    const legacyExperiencePath = join(f.root, ".craft_data", "experience", "md", "legacy-procedure.v1.md");
+    await mkdir(dirname(legacyExperiencePath), { recursive: true });
+    await writeFile(legacyExperiencePath, await readFile(experienceRef.path, "utf8"), "utf8");
+    assert.equal(fs.realpathSync((f.store.contentStore as any).directory("experience", undefined, "project:demo", undefined, legacyExperiencePath, false)),
+      fs.realpathSync(dirname(legacyExperiencePath)));
+    assert.equal(f.store.contentStore.readCompatSync({ ...experienceRef, path: legacyExperiencePath }, "project:demo").body, "Project-only procedure.");
+    const projectMemory = f.store.contentStore.writeSync({ kind: "memory", record_id: "project-memory-explicit-root", version: 1,
+      scope: "project:demo", project_root: f.root, status: "active", sensitivity: "internal", source_id: "project-source", body: "Project memory." });
+    assert.ok(projectMemory.path.startsWith(join(projectStorageDirectory(f.paths, f.root), "memory", "md")));
+    assert.ok(f.store.contentStore.pathFor("memory", "project-memory-explicit-path", undefined, undefined, "project:demo", f.root)
+      .startsWith(join(projectStorageDirectory(f.paths, f.root), "memory", "md")));
+    const legacyMemoryDirectory = join(f.root, ".craft_data", "memory", "md");
+    await mkdir(legacyMemoryDirectory, { recursive: true });
+    const legacyMemoryPath = join(legacyMemoryDirectory, "project-memory-explicit-root.v1.md");
+    await writeFile(legacyMemoryPath, await readFile(projectMemory.path, "utf8"));
+    assert.equal(f.store.contentStore.readCompatSync({ ...projectMemory, path: legacyMemoryPath }, "project:demo").body, "Project memory.");
     assert.equal(f.store.contentStore.readCompatSync(ref).body, "Project-only Knowledge.");
     const { scope: _scope, ...legacyRef } = ref;
     assert.equal(f.store.contentStore.readCompatSync(legacyRef, "project:demo").body, "Project-only Knowledge.");
@@ -76,12 +104,117 @@ test("project Knowledge bodies stay inside the registered checkout and reject cr
     f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: clone });
     assert.throws(() => f.store.contentStore.writeSync({ kind: "knowledge", record_id: "ambiguous-project-claim", version: 1,
       scope: "project:demo", status: "candidate", sensitivity: "internal", source_id: "project-source", body: "Ambiguous project." }), /ambiguous/u);
-    const cloneRef = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "clone-project-claim", version: 1, scope: "project:demo", project_root: clone,
-      status: "candidate", sensitivity: "internal", source_id: "project-source", body: "Clone-scoped Knowledge." });
-    assert.ok(cloneRef.path.startsWith(join(realpathSync(clone), ".craft_data", "knowledge", "md")));
+    assert.throws(() => f.store.contentStore.writeSync({ kind: "knowledge", record_id: "clone-project-claim", version: 1, scope: "project:demo", project_root: clone,
+      status: "candidate", sensitivity: "internal", source_id: "project-source", body: "Clone-scoped Knowledge." }), /ambiguous/u);
     await rm(other, { recursive: true, force: true });
     await rm(clone, { recursive: true, force: true });
   } finally { await f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("project Knowledge and Experience writes fail closed when no project root is registered", async () => {
+  const f = await fixture();
+  try {
+    assert.throws(() => f.store.contentStore.writeSync({ kind: "knowledge", record_id: "unbound-knowledge", version: 1,
+      scope: "project:unbound", status: "candidate", sensitivity: "internal", source_id: "source", body: "Unbound." }), /no registered project root/u);
+    assert.throws(() => f.store.contentStore.writeSync({ kind: "experience", record_id: "unbound-experience", version: 1,
+      scope: "project:unbound", status: "candidate", sensitivity: "internal", source_id: "source", body: "Unbound." }), /no registered project root/u);
+  } finally { await f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("session Memory reads only the two exact legacy temp layouts during migration", async () => {
+  const f = await fixture();
+  const sessionId = `coverage-${randomUUID()}`;
+  const standalone = new MarkdownContentStore(f.paths);
+  const fallbackSessionPath = standalone.pathFor("memory", "fallback-session", 1, undefined, "session:fallback-session");
+  assert.ok(fallbackSessionPath
+    .startsWith(join(sessionStorageDirectory(f.paths, "craft-mcp", "fallback-session"), "memory", "md")));
+  assert.equal(standalone.isCanonicalRef({ kind: "memory", record_id: "fallback-session", version: 1, path: fallbackSessionPath, scope: "session:fallback-session" }), true);
+  const legacyRoot = join("/tmp", ".craft_data", "memory");
+  const sessionDirectory = join(legacyRoot, sessionId);
+  const hashedDirectory = join(legacyRoot, createHash("sha256").update(sessionId).digest("hex").slice(0, 32));
+  try {
+    const current = f.store.contentStore.writeSync({ kind: "memory", record_id: "legacy-session", version: 1,
+      scope: `session:${sessionId}`, status: "active", sensitivity: "internal", source_id: "legacy", body: "legacy session body" });
+    for (const directory of [sessionDirectory, hashedDirectory]) {
+      const md = join(directory, "md"), oldPath = join(md, "legacy-session.v1.md");
+      await mkdir(md, { recursive: true });
+      await writeFile(oldPath, await readFile(current.path, "utf8"), "utf8");
+      assert.equal(f.store.contentStore.readCompatSync({ ...current, path: oldPath }, `session:${sessionId}`).body, "legacy session body");
+    }
+    assert.throws(() => f.store.contentStore.readCompatSync({ ...current, path: join(f.root, "outside.md") }, `session:${sessionId}`), /outside the canonical directory/u);
+    f.store.closeMemoryScope({ kind: "session", id: sessionId });
+  } finally {
+    await Promise.all([rm(sessionDirectory, { recursive: true, force: true }), rm(hashedDirectory, { recursive: true, force: true })]);
+    await f.store.close();
+  }
+});
+
+test("legacy project Experience reads traverse nested folders and reject missing or linked paths", async () => {
+  const f = await fixture();
+  try {
+    const projectRoot = join(f.root, "legacy-experience-project");
+    await mkdir(projectRoot);
+    const scope = "project:legacy-experience-project";
+    f.store.create("scope_alias", "legacy-experience-project", { status: "active", alias_kind: "path", alias: projectRoot,
+      alias_digest: stableDigest(projectRoot), scope: { kind: "project", id: scope } });
+    const current = f.store.contentStore.writeSync({ kind: "experience", record_id: "legacy-nested-flow", version: 1,
+      scope, status: "candidate", sensitivity: "internal", source_id: "legacy", body: "legacy procedure", folder: "workflows" });
+    const legacyDirectory = join(projectRoot, ".craft_data", "experience", "md", "workflows", "deep", "nested");
+    await mkdir(legacyDirectory, { recursive: true });
+    const oldPath = join(legacyDirectory, "legacy-nested-flow.v1.md");
+    await writeFile(oldPath, await readFile(current.path, "utf8"), "utf8");
+    const storeInternals = f.store as any;
+    assert.equal(storeInternals.legacyProjectContentDirectory(projectRoot, "experience", oldPath, false)?.endsWith(join(".craft_data", "experience", "md")), true);
+    assert.equal(fs.realpathSync((f.store.contentStore as any).directory("experience", undefined, scope, undefined, oldPath, false)), fs.realpathSync(join(projectRoot, ".craft_data", "experience", "md")));
+    assert.equal(storeInternals.legacyProjectContentDirectory(projectRoot, "experience", join(legacyDirectory, "missing.v1.md"), false), null);
+    assert.equal(storeInternals.legacyProjectContentDirectory(projectRoot, "experience", join(projectRoot, "outside.v1.md"), false), null);
+    assert.equal(storeInternals.legacyProjectContentDirectory(projectRoot, "experience", oldPath, true), null);
+    assert.equal(projectExperienceContentDirectory(f.store, scope, { reference_path: oldPath })?.endsWith(join(".craft_data", "experience", "md")), true);
+    assert.equal(projectExperienceContentDirectory(f.store, scope, { reference_path: join(legacyDirectory, "missing.v1.md") })?.endsWith(join(".craft_data", "experience", "md")), true);
+    assert.equal(f.store.contentStore.readCompatSync({ ...current, path: oldPath }, scope).body, "legacy procedure");
+    assert.throws(() => f.store.contentStore.readCompatSync({ ...current, path: join(legacyDirectory, "missing.v1.md") }, scope), /ENOENT|no such file/u);
+    const linked = join(legacyDirectory, "linked.v1.md");
+    await symlink(oldPath, linked);
+    assert.throws(() => storeInternals.legacyProjectContentDirectory(projectRoot, "experience", linked, false), /regular files and directories/u);
+    assert.throws(() => projectExperienceContentDirectory(f.store, scope, { reference_path: linked }), /regular files and directories/u);
+    f.store.contentStore.setProjectExperienceDirectoryResolver((_scope, options) => options.reference_path
+      ? join(projectRoot, ".craft_data", "experience", "md")
+      : join(projectStorageDirectory(f.paths, projectRoot), "experience", "md"));
+    assert.throws(() => f.store.contentStore.readCompatSync({ ...current, path: linked }, scope), /regular files and directories/u);
+    const parentPath = join(projectRoot, ".craft_data"), originalLstat = fs.lstatSync;
+    fs.lstatSync = ((path: Parameters<typeof fs.lstatSync>[0], ...args: Parameters<typeof fs.lstatSync>[1][]) => {
+      if (String(path) === parentPath) throw Object.assign(new Error("legacy path stat failed"), { code: "EIO" });
+      return originalLstat(path, ...args);
+    }) as typeof fs.lstatSync;
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => storeInternals.legacyProjectContentDirectory(projectRoot, "experience", oldPath, false), /legacy path stat failed/u);
+    } finally { fs.lstatSync = originalLstat; syncBuiltinESMExports(); }
+  } finally { await f.store.close(); }
+});
+
+test("legacy project Knowledge references resolve from their exact former content directory", async () => {
+  const f = await fixture();
+  try {
+    const projectRoot = join(f.root, "legacy-knowledge-project");
+    await mkdir(projectRoot);
+    const scope = "project:legacy-knowledge-project";
+    f.store.create("scope_alias", "legacy-knowledge-project", { status: "active", alias_kind: "path", alias: projectRoot,
+      alias_digest: stableDigest(projectRoot), scope: { kind: "project", id: scope } });
+    const legacyDirectory = join(projectRoot, ".craft_data", "knowledge", "md");
+    await mkdir(legacyDirectory, { recursive: true });
+    const reference = join(legacyDirectory, "legacy-fact.v1.md");
+    await writeFile(reference, "legacy knowledge body\n", "utf8");
+    const internals = f.store as any;
+    assert.equal(internals.legacyProjectContentDirectory(projectRoot, "knowledge", reference, false), legacyDirectory);
+    assert.deepEqual(internals.projectRoots("legacy-knowledge-project"), [fs.realpathSync(projectRoot)]);
+    assert.equal(fs.realpathSync((f.store.contentStore as any).directory("knowledge", undefined, scope, undefined, reference, false)), fs.realpathSync(legacyDirectory));
+    assert.equal(projectKnowledgeContentDirectory(f.store, scope, { reference_path: reference })?.endsWith(join(".craft_data", "knowledge", "md")), true);
+    const current = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "legacy-knowledge-read", version: 1,
+      scope, status: "candidate", sensitivity: "internal", source_id: "legacy", body: "legacy knowledge body" });
+    await writeFile(reference, await readFile(current.path, "utf8"), "utf8");
+    assert.equal(f.store.contentStore.readCompatSync({ ...current, path: reference }, scope).body, "legacy knowledge body");
+  } finally { await f.store.close(); }
 });
 
 test("content drift and unsafe identifiers fail closed", async () => {
@@ -205,7 +338,7 @@ test("bound project Experience content stays in the project tree and old shared 
     const content = f.store.contentStore;
     const project = content.writeSync({ kind: "experience", folder: "workflows", record_id: "project-flow", version: 1,
       scope: "project:craft", project_root: f.root, status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# Project flow" });
-    assert.equal(dirname(project.path), join(realpathSync(f.root), ".craft_data", "experience", "md", "workflows"));
+    assert.equal(dirname(project.path), join(projectStorageDirectory(f.paths, f.root), "experience", "md", "workflows"));
     assert.equal(content.readSync(project).body, "# Project flow");
     const rewritten = content.rewriteSync({ kind: "experience", record_id: "project-flow", version: 1, current_path: project.path,
       scope: "project:craft", status: "routeable", sensitivity: "internal", source_id: "fixture", title: "Project flow updated", body: "# Project flow updated" });
@@ -223,12 +356,16 @@ test("bound project Experience content stays in the project tree and old shared 
     assert.equal(content.readCompatSync({ ...legacy, path: legacyPath }, "project:craft").body, "# Legacy project flow");
     const memory = content.writeSync({ kind: "memory", record_id: "project-memory", version: 1, scope: "project:craft",
       project_root: f.root, status: "active", sensitivity: "internal", source_id: "fixture", body: "Project memory" });
-    assert.equal(dirname(memory.path), join(realpathSync(f.root), ".craft_data", "memory", "md"));
+    assert.equal(dirname(memory.path), join(projectStorageDirectory(f.paths, f.root), "memory", "md"));
     assert.equal(content.readSync(memory).body, "Project memory");
     assert.throws(() => content.writeSync({ kind: "memory", record_id: "unbound-memory", version: 1, scope: "project:unbound",
       status: "active", sensitivity: "internal", source_id: "fixture", body: "Unbound memory" }), /no registered project root/u);
-    assert.match(content.pathFor("memory", "session-memory", undefined, undefined, "session:session-123"), /\/tmp\/.craft_data\/memory\/session-123\/md\/session-memory\.md$/u);
-    assert.throws(() => content.pathFor("memory", "invalid-session", undefined, undefined, "session:../escape"), /session_id/u);
+    assert.equal(content.pathFor("memory", "session-memory", undefined, undefined, "session:session-123"),
+      join(sessionStorageDirectory(f.paths, "craft-mcp", "session-123"), "memory", "md", "session-memory.md"));
+    assert.equal(content.pathFor("memory", "hashed-session", undefined, undefined, "session:../escape"),
+      join(sessionStorageDirectory(f.paths, "craft-mcp", "../escape"), "memory", "md", "hashed-session.md"));
+    assert.throws(() => content.pathFor("memory", "empty-session", undefined, undefined, "session:"), /session_id/u);
+    assert.throws(() => content.pathFor("memory", "oversized-session", undefined, undefined, `session:${"x".repeat(65_537)}`), /session_id/u);
     const global = content.writeSync({ kind: "experience", record_id: "global-flow", version: 1, scope: "global",
       status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# Global flow" });
     assert.equal(global.path.startsWith(f.paths.experienceContentDir), true);
@@ -319,6 +456,9 @@ test("startup content indexes stream every content-bearing record family", async
     f.store.create(recordKind, id, { content_ref: ref });
   }
   f.store.create("knowledge_claim", "claim-without-reference", { content_ref: null });
+  f.store.create("knowledge_claim", "claim-with-string-reference", { content_ref: "invalid" });
+  f.store.create("knowledge_claim", "claim-with-array-reference", { content_ref: [] });
+  f.store.create("knowledge_claim", "claim-with-unknown-reference-kind", { content_ref: { kind: "unknown" } });
 
   await f.store.close();
   const reopened = await new CraftStore(f.paths).open();
@@ -336,10 +476,28 @@ test("startup content indexes stream every content-bearing record family", async
     const missing = databaseByContentKind.knowledge.prepare("SELECT COUNT(*) count FROM content_index WHERE id=?")
       .get("claim-without-reference") as { count: number };
     assert.equal(Number(missing.count), 0);
+    for (const id of ["claim-with-string-reference", "claim-with-array-reference", "claim-with-unknown-reference-kind"]) {
+      const count = databaseByContentKind.knowledge.prepare("SELECT COUNT(*) count FROM content_index WHERE id=?").get(id) as { count: number };
+      assert.equal(Number(count.count), 0);
+    }
   } finally {
     for (const database of Object.values(databaseByContentKind)) database.close();
     reopened.close();
   }
+  // A further start exercises the already-current index path, including the
+  // non-empty equality scan that must not take a writer lock or rebuild data.
+  const stable = await new CraftStore(f.paths).open();
+  stable.close();
+});
+
+test("startup fails closed when an existing content index has an incompatible schema", async () => {
+  const f = await fixture();
+  await f.store.close();
+  const index = new DatabaseSync(f.paths.knowledgeDatabaseFile);
+  index.exec("DROP TABLE content_index; CREATE TABLE content_index (malformed TEXT)");
+  index.close();
+  try { await assert.rejects(new CraftStore(f.paths).open(), /no such column/u); }
+  finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
 test("layout exposes flat content directories without forcing records on installation", async () => {
@@ -485,6 +643,50 @@ test("content migration relocates old content references into the domain directo
   assert.equal(result.migrated, 1);
   assert.match(String((f.store.rawRecords("memory_ledger")[0]!.payload.content_ref as Record<string, unknown>).path), /memory[\\/]md[\\/]old-reference--[a-f0-9]{12}\.v1\.md$/);
   await f.store.close();
+});
+
+test("legacy project Knowledge paths are compatibility-only and migrate from an exact project identity", async () => {
+  const f = await fixture();
+  try {
+    const projectRoot = join(f.root, "legacy-project");
+    await mkdir(projectRoot);
+    const scope = "project:legacy-project-identity";
+    const canonicalScope = { kind: "project", id: scope };
+    const identity = { canonical_scope: canonicalScope, project_kind: "local_fingerprint", remote_digest: null };
+    f.store.create("project_identity", scope, { ...identity, local_path_alias: projectRoot,
+      identity_digest: stableDigest({ canonical: canonicalScope, project_kind: identity.project_kind, remote_digest: identity.remote_digest }) });
+    assert.equal(f.store.find("project_identity", scope)?.identity_digest,
+      stableDigest({ canonical: canonicalScope, project_kind: identity.project_kind, remote_digest: identity.remote_digest }));
+    f.store.create("scope_alias", "legacy-project-path", { scope: canonicalScope, alias_kind: "path", alias: projectRoot,
+      alias_digest: stableDigest(projectRoot), identity_digest: "fixture", status: "active" });
+    const current = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "legacy-project-claim", version: 1,
+      scope, status: "candidate", sensitivity: "internal", source_id: "legacy", body: "Verified legacy body" });
+    const legacyPath = join(projectRoot, ".craft_data", "knowledge", "md", "legacy-project-claim.v1.md");
+    await mkdir(dirname(legacyPath), { recursive: true });
+    await writeFile(legacyPath, await readFile(current.path, "utf8"), "utf8");
+    const { scope: _scope, ...legacyReferenceWithoutScope } = current;
+    const claim = f.store.create("knowledge_claim", "legacy-project-claim", {
+      scope, status: "candidate", source_id: "legacy", content_ref: { ...legacyReferenceWithoutScope, path: legacyPath },
+    });
+    f.store.remove("scope_alias", "legacy-project-path");
+    assert.equal(f.store.list("scope_alias", 10, item => item.status === "active"
+      && (item.scope as Record<string, unknown> | undefined)?.id === scope).length, 0);
+    assert.equal(f.store.contentStore.isCanonicalRef(claim.content_ref as any), false);
+    assert.equal((claim.content_ref as Record<string, unknown>).scope, undefined);
+    assert.equal(projectKnowledgeContentDirectory(f.store, scope, { reference_path: legacyPath }), fs.realpathSync(dirname(legacyPath)));
+    assert.equal(f.store.contentStore.readCompatSync(claim.content_ref as any, scope).body, "Verified legacy body");
+
+    const migration = new ContentMigrationKernel(f.store);
+    const record_refs = [{ kind: "knowledge_claim", id: "legacy-project-claim", version: 1 }];
+    assert.equal(migration.migrate({ dry_run: true, record_refs }).migrated, 1);
+    assert.equal(migration.migrate({ record_refs }).migrated, 1);
+
+    const moved = f.store.get("knowledge_claim", "legacy-project-claim").content_ref as Record<string, unknown>;
+    assert.ok(String(moved.path).startsWith(join(projectStorageDirectory(f.paths, projectRoot), "knowledge", "md")));
+    assert.equal(f.store.contentStore.verifySync(moved as any).status, "verified");
+    assert.equal(existsSync(legacyPath), true, "migration keeps the old file for rollback and audit");
+    assert.throws(() => f.store.contentStore.readCompatSync({ ...current, path: join(projectRoot, "outside.md"), scope }), /outside the canonical directory/u);
+  } finally { await f.store.close(); }
 });
 
 test("content migration preserves old wiki files and fails closed on secrets", async () => {
@@ -639,4 +841,46 @@ test("Wiki compatibility reads and refreshes cover canonical, legacy, and drifte
   f.store.create("wiki_page", "refresh-legacy", { title: "Refresh", file_path: refreshPath, body_digest: digest("old"), identity_digest: null });
   assert.equal((f.service.wikiPageRefresh({ page_id: "refresh-legacy" }) as Record<string, unknown>).changed, true);
   await f.store.close();
+});
+
+
+test("content relocation is idempotent and refuses scope drift and destination collisions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-relocate-content-"));
+  try {
+    const paths = craftPaths(join(root, "data"));
+    const legacy = new MarkdownContentStore(paths);
+    const original = legacy.writeSync({ kind: "experience", record_id: "relocate", version: 1, scope: "project:demo",
+      status: "candidate", sensitivity: "internal", source_id: "task", body: "# 已验证流程", folder: "graphs" });
+    const content = new MarkdownContentStore(paths);
+    const targetDir = join(root, "project", ".craft_data", "experience", "md");
+    await mkdir(join(targetDir, "graphs"), { recursive: true });
+    content.setProjectExperienceDirectoryResolver(() => targetDir);
+    assert.throws(() => content.relocateSync(original, "project:other"), /scope drifted/);
+    const migrated = content.relocateSync(original, "project:demo");
+    assert.deepEqual(content.relocateSync(original, "project:demo"), migrated);
+    assert.deepEqual(content.relocateSync(migrated, "project:demo"), migrated);
+    await writeFile(migrated.path, "conflicting bytes");
+    assert.throws(() => content.relocateSync(original, "project:demo"), /destination conflicts/);
+    await unlink(migrated.path);
+    await symlink(original.path, migrated.path);
+    assert.throws(() => content.relocateSync(original, "project:demo"), /regular file/);
+    assert.equal((await readdir(dirname(migrated.path))).some(name => name.endsWith(".tmp")), false);
+    assert.equal(legacy.readSync(original).body, "# 已验证流程");
+    await unlink(migrated.path);
+    const link = fs.linkSync;
+    try {
+      fs.linkSync = () => { throw Object.assign(new Error("link I/O failure"), { code: "EIO" }); };
+      syncBuiltinESMExports();
+      assert.throws(() => content.relocateSync(original, "project:demo"), /link I\/O failure/);
+    } finally { fs.linkSync = link; syncBuiltinESMExports(); }
+    assert.equal((await readdir(dirname(migrated.path))).some(name => name.endsWith(".tmp")), false);
+    await rm(dirname(migrated.path), { recursive: true });
+    const outside = join(root, "outside"); await mkdir(outside);
+    await symlink(outside, dirname(migrated.path));
+    assert.throws(() => content.relocateSync(original, "project:demo"), /directory must be regular/);
+    await unlink(dirname(migrated.path));
+    await writeFile(original.path, (await readFile(original.path, "utf8")).replace(/^title:.*\n/m, ""));
+    const withoutTitle = content.relocateSync(original, "project:demo");
+    assert.equal(content.readSync(withoutTitle).body, "# 已验证流程");
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

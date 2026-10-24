@@ -255,7 +255,7 @@ test("trace archive query and retention branches remain observable", async () =>
     f.store.save("trace", "existing-archive", { ...f.store.get("trace", "existing-archive"), last_event_at: "2020-01-01T00:00:00Z" });
     const existingTrace = f.store.get("trace", "existing-archive");
     const existingVersion = Number(existingTrace.version);
-    const pointer = trace.archives.write({ trace_id: "existing-archive", trace_version: existingVersion, archived_at: "2020-01-01T00:00:00Z", trace: { id: "existing-archive", version: existingVersion }, events: [], feedback: [] });
+    const pointer = trace.archives.write({ trace_id: "existing-archive", trace_version: existingVersion, archived_at: "2020-01-01T00:00:00Z", trace: { id: "existing-archive", version: existingVersion }, events: f.store.listTraceChildren("trace_event", "existing-archive"), feedback: [] });
     f.store.create("trace_archive", "existing-archive", { trace_id: "existing-archive", trace_version: existingVersion, status: "completed", archive_storage: pointer.storage, archive_locator: pointer.locator, archive_uri: pointer.uri, archive_format: pointer.format, content_digest: pointer.content_digest, bytes: pointer.bytes });
     assert.equal(trace.retentionSweep({ now: "2030-01-01T00:00:00Z", max_days: 1 }).archived, 1);
     const eventPointer = trace.archives.write({ trace_id: "archived-events", trace_version: 1, archived_at: "2020-01-01T00:00:00Z", trace: { id: "archived-events", task_id: "task" }, events: [{ id: "archive-event", event_kind: "archived" }], feedback: [] });
@@ -517,7 +517,7 @@ test("service compatibility paths cover explicit workbench nodes, claim evidence
     f.store.create("knowledge_source", "claim-review-source", { status: "active", access: "read_only" });
     f.store.create("evidence", "ev", { confidence: "bounded", source_id: "claim-review-source" });
     f.store.create("knowledge_claim", "claim-array", { status: "candidate", source_id: "claim-review-source", evidence_ids: ["ev"] });
-    assert.equal((service.knowledgeConflictResolve({ claim_id: "claim-array", decision: "reviewed", reviewer: "r", reason: "r" }).claim as JsonObject).status, "reviewed");
+    assert.throws(() => service.knowledgeConflictResolve({ claim_id: "claim-array", decision: "reviewed", reviewer: "r", reason: "r" }), /managed Host review/u);
     assert.throws(() => service.modelAdd({ id: "!!!" }), /model id|name/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
@@ -704,7 +704,9 @@ test("small compatibility kernels exercise explicit invalid and default branches
     f.store.create("task", "task-state", { project_id: "p", title: "task" });
     const state = new TaskStateKernel(f.store);
     assert.equal((state.transition({ task_id: "task-state", state: "prepared", evidence_ids: "bad" as never }).projection as JsonObject).state, "prepared");
-    f.store.create("knowledge_claim", "home-task", { task_id: "task-state", scope: "other", status: "candidate" });
+    const { CraftService } = await import("../core/service.ts");
+    new CraftService(f.store).scopeAliasBind({ scope_kind: "project", scope_id: "other", alias_kind: "path", alias: f.root });
+    f.store.create("knowledge_claim", "home-task", { task_id: "task-state", scope: "project:other", status: "candidate" });
     f.store.create("knowledge_claim", "home-scope", { scope: "task:task-state", status: "candidate" });
     assert.equal(((new HomeKernel(f.store).task({ task_id: "task-state" }).context as JsonObject).knowledge as JsonObject[]).length, 2);
     const verified = new VerifiedAutonomousWorkKernel(f.store);
@@ -891,7 +893,7 @@ test("remaining fallback branches are exercised through bounded seams", async ()
     await assert.rejects((service as unknown as { invokeInternalAction: (action: string, args: JsonObject) => Promise<JsonObject> }).invokeInternalAction("workspace_write", { task_id: "session-task", workspace: f.root, relative_path: "note-approved.txt", content: "note", approval_ref: "approval" }), /approval/);
     service.workbenchWorkflowCompatSave({ workflow_id: "compat-empty-steps", name: "Empty steps" });
     const claim = f.store.create("knowledge_claim", "claim-null-evidence", { kind: "fact", content: "x", evidence_ids: null, status: "candidate" });
-    assert.throws(() => service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "r", reason: "r" }), /Evidence/);
+    assert.throws(() => service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "r", reason: "r" }), /managed Host review/u);
     await service.settingsUpdate({ models: [{ id: "model", name: "Model", protocol: "openai-compatible", baseUrl: "https://model.example/v1", model: "model", apiKeyEnv: "CRAFT_FINAL_KEY", supportsTools: false }] });
     const previousFetch = globalThis.fetch; const previousKey = process.env.CRAFT_FINAL_KEY; process.env.CRAFT_FINAL_KEY = "test-key";
     globalThis.fetch = (async () => new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], model: "model" }), { status: 200 })) as typeof fetch;

@@ -46,6 +46,21 @@ test("Procedure drafts and qualification reject a retired Experience scenario", 
   } finally { f.close(); }
 });
 
+test("Procedure draft rejects legacy observations without a registered project root", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("workflow_evolution_request", "scope-fallback-request", { scenario_key: "legacy", scenario_signature: { domain: "legacy" }, observation_refs: [{ source: {}, evidence_ids: ["e"] }], output_contract_ref: "acceptance:legacy" });
+    f.store.create("workflow_evolution_proposal", "scope-fallback-proposal", { request_id: "scope-fallback-request", request_version: 1, name: "Legacy", description: "Legacy scope", inputs: [], steps: [] });
+    assert.throws(() => f.procedures.draft({ proposal_id: "scope-fallback-proposal" }), /project root is not registered/u);
+    const request = f.store.get("workflow_evolution_request", "scope-fallback-request");
+    f.store.database.prepare("UPDATE records SET payload_json=? WHERE kind='workflow_evolution_request' AND id=? AND version=?")
+      .run(JSON.stringify({ ...request, observation_refs: [{ source: { scope: ":" }, evidence_ids: ["e"] }] }), String(request.id), Number(request.version));
+    assert.throws(() => f.procedures.draft({ procedure_id: "malformed-scope", proposal_id: "scope-fallback-proposal" }), /scope is malformed/u);
+    assert.equal(f.store.find("experience_procedure", "malformed-scope"), null);
+    assert.throws(() => f.store.create("workflow_evolution_request", "empty-scope-request", { scenario_key: "empty", scenario_signature: { domain: "legacy" }, observation_refs: [{ source: { scope: "" }, evidence_ids: ["e"] }], output_contract_ref: "acceptance:legacy" }), /observation scope is malformed/u);
+  } finally { f.close(); }
+});
+
 test("retired-scenario checks honor a pinned path alias and fail closed on ambiguous roots", async () => {
   const f = await fixture();
   const otherRoot = mkdtempSync(join(tmpdir(), "craft-procedure-other-project-"));
@@ -68,7 +83,9 @@ test("retired-scenario checks propagate unsafe project-data failures", async () 
   const f = await fixture();
   const externalRoot = mkdtempSync(join(tmpdir(), "craft-procedure-linked-data-"));
   try {
-    symlinkSync(externalRoot, join(f.root, ".craft_data"));
+    const projectData = projectExperienceDirectory(f.store, "project:project", f.root, true);
+    rmSync(projectData, { recursive: true, force: true });
+    symlinkSync(externalRoot, projectData);
     assert.throws(() => belongsToRetiredScenario(f.store, { scope: "project:project", scenario_signature: {
       project: { kind: "project", id: "project" }, scenario_key: "engineering.tests" } }), /project data path must contain regular directories/u);
   } finally { f.close(); rmSync(externalRoot, { recursive: true, force: true }); }
@@ -185,10 +202,11 @@ test("active release refuses a retired scenario after the latest candidate loses
     const signature = { project: { kind: "project", id: "retire-project" }, scenario_key: "engineering.tests" };
     const catalog = recordExperienceScenario({ experience_dir: projectExperienceDirectory(f.store, "project:retire-project", f.root, true), project_id: "retire-project", scenario_key: "engineering.tests",
       observation_id: "observation", verified_task_id: "task" });
-    f.store.save("workflow_evolution_request", "request", { ...f.store.get("workflow_evolution_request", "request"),
-      scenario_key: "engineering.tests", scenario_signature: signature, observation_refs: [{ source: { scope: "project:retire-project" }, evidence_ids: ["e"] }] });
-    f.store.save("workflow_evolution_proposal", "proposal", { ...f.store.get("workflow_evolution_proposal", "proposal"), request_version: 2 });
-    const procedure = f.draft({ procedure_id: "retired-release", evolve: true, scenario_signature: signature });
+    const scopedRequest = f.store.create("workflow_evolution_request", "retired-release-request", { scenario_key: "engineering.tests",
+      scenario_signature: signature, observation_refs: [{ source: { scope: "project:retire-project" }, evidence_ids: ["e"] }], output_contract_ref: "acceptance:test" });
+    f.store.create("workflow_evolution_proposal", "retired-release-proposal", { request_id: scopedRequest.id, request_version: scopedRequest.version,
+      name: "Retired release", description: "Project scoped fixture", inputs: [], steps: [] });
+    const procedure = f.procedures.draft({ proposal_id: "retired-release-proposal", procedure_id: "retired-release", evolve: true, scenario_signature: signature }).procedure as JsonObject;
     f.promote(procedure);
     const retired = retireExperienceScenario({ experience_dir: projectExperienceDirectory(f.store, "project:retire-project", f.root), project_id: "retire-project", scenario_key: "engineering.tests",
       expected_catalog_version: Number(catalog.catalog_version), request_id: "retire-after-release", reason: "obsolete" });
@@ -227,9 +245,11 @@ test("Procedure projection handles legacy scopes, graph defaults and absent opti
   const f = await fixture();
   try {
     const request = f.store.get("workflow_evolution_request", "request");
-    f.store.save("workflow_evolution_request", "request", { ...request, observation_refs: [{ source: { scope: ":" }, evidence_ids: ["e"] }] });
+    assert.throws(() => f.store.save("workflow_evolution_request", "request", { ...request,
+      observation_refs: [{ source: { scope: ":" }, evidence_ids: ["e"] }] }), /Experience observation scope/u,
+    "malformed legacy source scope must be rejected without relocating the Project Experience record");
     const proposal = f.store.get("workflow_evolution_proposal", "proposal");
-    f.store.save("workflow_evolution_proposal", "proposal", { ...proposal, request_version: 2, procedure_kind: "graph", inputs: null });
+    f.store.save("workflow_evolution_proposal", "proposal", { ...proposal, request_version: 1, procedure_kind: "graph", inputs: null });
     const graph = f.draft();
     assert.deepEqual(f.procedures.definitions.read(graph.definition_ref as never).definition, { inputs: [], nodes: [], edges: [], outputs: {}, checkpoint_policy: { mode: "step" } });
     const workflowRequest = f.store.create("workflow_evolution_request", "workflow-input-request", { ...request, scenario_key: "inspect-input" });
@@ -247,7 +267,8 @@ test("Procedure projection handles legacy scopes, graph defaults and absent opti
     assert.equal(rejected.lifecycle, "rejected");
     assert.match(f.store.contentStore.readCompatSync(rejected.content_ref as never).body, /Preconditions\n- None/);
     for (const content_ref of [null, {}, { kind: "knowledge" }, { kind: "experience" }, { kind: "experience", record_id: "legacy" }, { kind: "experience", record_id: "legacy", version: 1.5 }, { kind: "experience", record_id: "legacy", version: 1 }]) {
-      f.store.save("experience_procedure", String(legacy.id), { ...legacy, content_ref });
+      const latest = f.store.get("experience_procedure", String(legacy.id));
+      f.store.save("experience_procedure", String(legacy.id), { ...latest, content_ref });
       assert.equal((f.procedures.gate({ procedure_id: legacy.id, stage: "shadow", gate_id: `legacy-${JSON.stringify(content_ref)}`, evidence_ids: ["e"] }).procedure as JsonObject).lifecycle, "rejected");
     }
   } finally { f.close(); }

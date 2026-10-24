@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,7 +10,9 @@ import { CraftService } from "../core/service.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-cognitive-write-"));
+  const projectRoot = join(root, "project"); await mkdir(projectRoot);
   const store = await new CraftStore(craftPaths(root)).open();
+  store.create("scope_alias", "fixture-project-p", { scope: { kind: "project", id: "p" }, alias_kind: "path", alias: projectRoot, status: "active" });
   const service = new CraftService(store);
   return { store, service, module: service.cognitiveWrites, async close() { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
@@ -108,7 +110,10 @@ test("conflict resolution cannot elevate unsupported Evidence or bypass Claim re
     assert.throws(() => f.module.resolveClaimConflict({ ...request, decision: "invalid" }), /unsupported/);
     assert.throws(() => f.module.resolveClaimConflict(request), /Evidence/);
     assert.throws(() => f.module.resolveClaimConflict({ ...request, claim_id: "weak" }), /Evidence/);
-    for (const claim_id of ["bounded-claim", "confirmed-claim"]) assert.equal((f.module.resolveClaimConflict({ ...request, claim_id }).claim as JsonObject).status, "reviewed");
+    for (const claim_id of ["bounded-claim", "confirmed-claim"]) {
+      assert.throws(() => f.module.resolveClaimConflict({ ...request, claim_id }), /managed Host review and independent effectiveness evaluation/);
+      assert.equal(f.store.get("knowledge_claim", claim_id).status, "candidate");
+    }
     assert.equal((f.module.resolveClaimConflict({ ...request, decision: "disputed" }).claim as JsonObject).status, "disputed");
     assert.throws(() => f.module.resolveClaimConflict({ ...request, decision: "superseded", reviewer: "" }), /reviewer/);
   } finally { await f.close(); }

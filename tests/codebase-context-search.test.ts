@@ -248,6 +248,12 @@ test("natural-language synonyms recover JavaScript app, token, and profile metho
     ["bridge-helper", "request user profile service"],
   ]));
   assert.equal(contextual.rank("fetch user token with webviewUtil getUserInfo from the Didi bridge", 2)[0]!.node.id, "bridge-wrapper");
+
+  const callerOnly = new CodeSymbolSearchIndex([
+    { ...symbol("caller-only", "invokeAgent", "internal/agent/runtime.go"), declaration_kind: "function" },
+  ], new Map([["caller-only", "formatAgentModel provider model identifier"]]));
+  assert.equal(callerOnly.rank("formatAgentModel", 1)[0]?.node.id, "caller-only",
+    "identifiers found only in a declaration body must still surface that declaration");
 });
 
 test("task retrieval favors core business terms over generic test and API names, with bilingual plural matching", () => {

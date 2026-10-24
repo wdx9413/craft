@@ -7,10 +7,12 @@
 安装 Skill 与 MCP 后，Agent 在仓库任务开始时调用：
 
 ```json
-{"project_root":"/path/to/current/repository-or-subdirectory","query":"review alpha changes","max_items":12,"max_chars":12000}
+{"project_root":"/path/to/current/repository-or-subdirectory","query":"review alpha changes"}
 ```
 
-工具是 `craft_context_open`。它识别 Git 根目录、解析项目作用域、召回三类积累上下文，并自动建立或复用当前 worktree 的 Codebase 基础索引。没有用户逐项目激活步骤。多根任务对涉及的仓库各调用一次；不搜索用户其他项目。纯知识或规划任务可传 `include_codebase:false`，跳过索引准备和代码引用。
+工具是 `craft_context_open`。默认返回紧凑结果：最多 3 条、1,200 字符，并把完整序列化响应限制在估算 1,500 token 内；调用方可调小材料预算，不能调大。紧凑结果保留选中材料、稳定引用、部分结果原因和必要索引身份，贡献摘要只返回条数和状态，不重复材料正文；同时省略重复的详细审计载荷。`content.text` 承载紧凑 JSON，兼容只读取文本块的 Host；`structuredContent` 提供同一结果的结构化副本。需要完整回执时显式传 `response_detail:"full"`，且必须设置 `max_tokens`；超出估算预算会报错，不会截断必需材料。token 估算不包含 MCP 协议封装和 Host 历史。工具识别 Git 根目录、解析项目作用域、召回三类积累上下文，并自动建立或复用当前 worktree 的 Codebase 基础索引。没有用户逐项目激活步骤。多根任务对涉及的仓库各调用一次；不搜索用户其他项目。纯知识或规划任务可传 `include_codebase:false`，跳过索引准备和代码引用。
+
+Codex 插件的自动 `UserPromptSubmit` 注入上限为约 400 token；独立 Knowledge、Memory、Experience 插件各为约 150 token。四者同时安装时，配置上限合计约 850 token；Codex 按 Handler 分别执行上限，实际总量还会受同时触发的其他插件影响。超限输出按 Codex Hook 规则溢写并向模型显示预览。MCP `craft_context_open` 默认对紧凑结构化响应进行 1,500 token 估算硬校验；传入 `max_tokens` 可进一步收紧预算。完整回执模式也必须显式给出预算。超限时报错，不截断材料。精确用量只有 Host 报告后才能写入 Context 反馈。
 
 Codebase 单独安装时调用 `craft_codebase_repository_ensure`，只需 `project_root`。返回 `workspace_id`、`checkpoint_id`、`index_id`，可直接用于符号查询。再次进入仓库、修改文件或切换分支后重调该入口；未变化文件复用持久分析缓存，新增、修改和删除反映在新 checkpoint。不同 worktree 有不同本地索引身份；同一真实路径在不同宿主中复用索引。
 

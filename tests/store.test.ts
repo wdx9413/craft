@@ -28,6 +28,36 @@ test("latest-first ordering uses insertion order when timestamps tie", async () 
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("ID-ordered record pages resume after a stable cursor and include latest versions", async () => {
+  const { root, store } = await fixture();
+  try {
+    store.create("paged", "case-c", { value: 3 });
+    store.create("paged", "case-a", { value: 1 });
+    store.create("paged", "case-b", { value: 2 });
+    store.save("paged", "case-b", { value: 22 });
+    const first = store.listByIdPage("paged", "", 2);
+    assert.deepEqual(first.records.map(item => [item.id, item.value]), [["case-a", 1], ["case-b", 22]]);
+    assert.equal(first.has_more, true);
+    assert.equal(first.next_cursor, "case-b");
+    const last = store.listByIdPage("paged", first.next_cursor!, 2);
+    assert.deepEqual(last.records.map(item => item.id), ["case-c"]);
+    assert.equal(last.has_more, false);
+    assert.equal(last.next_cursor, null);
+    const empty = store.listByIdPage("paged", "case-z", 2);
+    assert.deepEqual(empty, { records: [], has_more: false, next_cursor: null });
+    assert.throws(() => store.listByIdPage("paged", "", 1_001), /not exceed/u);
+    assert.throws(() => store.listByIdPage("", "", 2), /kind must not be empty/u);
+    assert.throws(() => store.listByIdPage("paged", null as unknown as string, 2), /after_id must be a string/u);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Knowledge records reject malformed unqualified string scopes", async () => {
+  const { root, store } = await fixture();
+  try {
+    assert.throws(() => store.create("knowledge_claim", "legacy-scope", { scope: "other", status: "candidate" }), /storage scope is malformed/u);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("version history remains bounded and excludes the current version", async () => {
   const { root, store } = await fixture();
   try {
@@ -156,6 +186,7 @@ test("migration payload updates and content hydration remain recoverable", async
     assert.equal(store.get("migration", "one").value, "after");
     store.replacePayloadBatch([{ kind: "migration", id: "one", version: 1, payload: { value: "committed" } }]);
     assert.equal(store.get("migration", "one").value, "committed");
+    store.create("scope_alias", "project-test", { scope: { kind: "project", id: "test" }, alias_kind: "path", alias: root, status: "active" });
     const ref = store.contentStore.writeSync({ kind: "knowledge", record_id: "body", version: 1, scope: "project:test", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "readable body" });
     store.create("knowledge_claim", "body", { content_ref: ref });
     assert.equal(store.get("knowledge_claim", "body").content, "readable body");
@@ -233,8 +264,8 @@ test("versioned records and events provide the shared persistence primitives", a
     assert.equal(store.remove("thing", "a"), 2);
     assert.equal(store.remove("thing", "a"), 0);
     store.create("trace", "archived", {});
-    store.create("trace_event", "event", {});
-    store.create("trace_feedback", "feedback", {});
+    store.create("trace_event", "event", { trace_id: "archived" });
+    store.create("trace_feedback", "feedback", { trace_id: "archived" });
     assert.equal(store.removeTraceRecords("archived", ["event"], ["feedback"]), 3);
     store.create("trace", "archived-with-telemetry", {});
     store.create("telemetry_event", "telemetry", { trace_id: "archived-with-telemetry" });

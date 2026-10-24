@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { stableDigest } from "../core/digest.ts";
-import { craftPaths } from "../core/infrastructure/paths.ts";
+import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
-import { experienceDataDirectory, projectExperienceContentDirectory, projectExperienceDirectory, projectPathAliasDigest } from "../core/project-experience-directory.ts";
+import { bindProjectExperienceContentDirectory, experienceDataDirectory, projectExperienceContentDirectory, projectExperienceDirectory, projectPathAliasDigest } from "../core/project-experience-directory.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-project-experience-"));
@@ -18,16 +18,27 @@ async function fixture() {
   return { root, project, clone, store, bind, close: () => { store.close(); rmSync(root, { recursive: true, force: true }); } };
 }
 
-test("project Experience directory resolves only the registered project .craft_data path", async () => {
+test("project Experience directory resolves only the registered shared project path", async () => {
   const f = await fixture();
   try {
     f.bind("project", f.project);
-    const projectData = join(realpathSync(f.project), ".craft_data", "experience");
+    const projectData = join(projectStorageDirectory(f.store.paths, f.project), "experience");
     assert.equal(projectExperienceDirectory(f.store, "project:test", f.project), projectData);
     assert.equal(projectExperienceDirectory(f.store, "project:test", f.project, true), projectData);
+    assert.throws(() => projectExperienceDirectory(f.store, "project:test", f.project, false, stableDigest("other")), /not registered/u);
+    bindProjectExperienceContentDirectory(f.store);
+    assert.equal(f.store.contentStore.writeSync({ kind: "experience", record_id: "procedure", version: 1,
+      scope: "project:test", status: "candidate", sensitivity: "internal", source_id: "test", body: "steps" }).path.startsWith(join(projectData, "md")), true);
     assert.equal(projectExperienceContentDirectory(f.store, "project:test", { create: true }), join(projectData, "md"));
     assert.equal(projectExperienceContentDirectory(f.store, "project:project:test"), join(projectData, "md"));
     assert.equal(projectExperienceContentDirectory(f.store, "project:test", { reference_path: join(projectData, "md", "flow.v1.md") }), join(projectData, "md"));
+    assert.equal(projectExperienceContentDirectory(f.store, "project:test", { reference_path: join(f.project, ".craft_data", "experience", "md", "legacy.v1.md") }),
+      join(realpathSync(f.project), ".craft_data", "experience", "md"));
+    const legacyDirectory = join(f.project, ".craft_data", "experience", "md");
+    mkdirSync(legacyDirectory, { recursive: true });
+    const legacyTarget = join(legacyDirectory, "legacy-target.md"), legacyLink = join(legacyDirectory, "legacy-link.md");
+    writeFileSync(legacyTarget, "legacy"); symlinkSync(legacyTarget, legacyLink);
+    assert.throws(() => projectExperienceContentDirectory(f.store, "project:test", { reference_path: legacyLink }), /regular files and directories/u);
     assert.equal(projectExperienceContentDirectory(f.store, "project:test", { reference_path: join(f.store.paths.experienceContentDir, "legacy.v1.md") }), null);
     assert.equal(projectExperienceContentDirectory(f.store, "global"), null);
     assert.equal(projectExperienceContentDirectory(f.store, "bad"), null);
@@ -36,7 +47,9 @@ test("project Experience directory resolves only the registered project .craft_d
     assert.equal(experienceDataDirectory(f.store, "project:test"), projectData);
     assert.equal(experienceDataDirectory(f.store, "project:test", true), projectData);
     assert.equal(projectExperienceDirectory(f.store, "project:test", f.project, true), projectData);
+    assert.equal(projectPathAliasDigest(f.store, "project:test"), stableDigest(f.project), "a single registered root can be resolved without an explicit request");
     assert.equal(projectPathAliasDigest(f.store, "project:test", f.project), stableDigest(f.project));
+    assert.throws(() => projectPathAliasDigest(f.store, "project:test", f.clone), /not registered/u);
     assert.throws(() => projectExperienceDirectory(f.store, "invalid", f.project), /scope is invalid/u);
     assert.equal(experienceDataDirectory(f.store, "tenant:test"), f.store.paths.experienceDir);
     assert.throws(() => experienceDataDirectory(f.store, "project:missing"), /not registered/u);
@@ -60,13 +73,15 @@ test("project Experience directory pins a clone and rejects ambiguity and symlin
     assert.throws(() => projectExperienceDirectory(f.store, "project:test"), /ambiguous/u);
     assert.throws(() => projectExperienceContentDirectory(f.store, "project:test"), /ambiguous/u);
     assert.throws(() => projectPathAliasDigest(f.store, "project:test"), /ambiguous/u);
-    const cloneData = join(realpathSync(f.clone), ".craft_data", "experience");
+    assert.throws(() => projectPathAliasDigest(f.store, "project:test", f.clone), /ambiguous/u);
+    const cloneData = join(projectStorageDirectory(f.store.paths, f.clone), "experience");
+    assert.throws(() => projectExperienceDirectory(f.store, "project:test", undefined, true, stableDigest(f.clone)), /ambiguous/u);
+    f.store.remove("scope_alias", "project");
     assert.equal(projectExperienceDirectory(f.store, "project:test", undefined, true, stableDigest(f.clone)), cloneData);
     const outside = join(f.root, "outside"); mkdirSync(outside);
-    rmSync(join(f.clone, ".craft_data"), { recursive: true, force: true });
-    symlinkSync(outside, join(f.clone, ".craft_data"));
+    rmSync(cloneData, { recursive: true, force: true });
+    symlinkSync(outside, cloneData);
     assert.throws(() => projectExperienceDirectory(f.store, "project:test", f.clone, true), /regular directories/u);
-    rmSync(join(f.clone, ".craft_data"), { recursive: true, force: true });
     rmSync(cloneData, { recursive: true, force: true });
     mkdirSync(cloneData, { recursive: true });
     symlinkSync(outside, join(cloneData, "md"));

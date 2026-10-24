@@ -39,7 +39,9 @@ async function fixture() {
     [CORE_KERNELS.store]: store,
     [CORE_KERNELS.modelProviders]: PROVIDER_CATALOG,
   };
-  return { root, store, core, service: new CraftService(store) };
+  const service = new CraftService(store);
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:p", alias_kind: "path", alias: root });
+  return { root, store, core, service };
 }
 async function close(f: Awaited<ReturnType<typeof fixture>>) {
   f.store.close();

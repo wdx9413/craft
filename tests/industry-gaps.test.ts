@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
+import { projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
 import { payload, stableDigest } from "../core/digest.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
@@ -20,6 +21,7 @@ import { normalizeLspSymbols } from "../capability/craft-codebase/lsp-adapter.ts
 import { runRetrievalEvaluation } from "../core/retrieval-evaluation.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -42,7 +44,8 @@ test("shared ranking prevents weak Memory starving Knowledge; required items and
   const f = await fixture();
   try {
     f.memory("weak");
-    f.store.create("knowledge_claim", "specific", { source_id: "source", scope: "project:fixture", status: "reviewed", content: "alpha beta gamma", content_digest: "specific", evidence_ids: [] });
+    const specific = f.store.create("knowledge_claim", "specific", { source_id: "source", scope: "project:fixture", status: "candidate", content: "alpha beta gamma", content_digest: "specific", evidence_ids: [] });
+    attachVerifiedPromotionFixture(f.store, specific);
     const args = { ...f.scope, query: "alpha beta gamma", max_items: 1 };
     const mixed = await f.context.resolve(args);
     assert.deepEqual(mixed.items, []);
@@ -53,6 +56,28 @@ test("shared ranking prevents weak Memory starving Knowledge; required items and
     await assert.rejects(() => f.context.resolve({ ...args, memory_ids: ["weak"], max_chars: 1 }), /budget/);
     f.memory("another", { content: "gamma" });
     await assert.rejects(() => f.context.resolve({ ...args, memory_ids: ["weak", "another"] }), /budget/);
+  } finally { await f.close(); }
+});
+
+test("Knowledge Source list supports bounded scope filters and rejects incomplete scopes", async () => {
+  const f = await fixture();
+  try {
+    const registry = new KnowledgeSourceRegistry(f.store);
+    registry.sourceRegister({ source_id: "source-a", kind: "readme", label: "A", scope_kind: "project", scope_id: "fixture",
+      locator: join(f.root, "a.md"), content_digest: "a", trust: "bounded", access: "read_only" });
+    registry.sourceRegister({ source_id: "source-b", kind: "readme", label: "B", scope_kind: "project", scope_id: "other",
+      locator: join(f.root, "b.md"), content_digest: "b", trust: "bounded", access: "read_only" });
+    registry.sourceRegister({ source_id: "source-global", kind: "custom", label: "Global", scope_kind: "global", scope_id: "global",
+      locator: join(f.root, "global.md"), content_digest: "global", trust: "bounded", access: "read_only" });
+    registry.sourceRegister({ source_id: "source-disabled", kind: "readme", label: "Disabled", scope_kind: "project", scope_id: "fixture",
+      locator: join(f.root, "disabled.md"), content_digest: "disabled", trust: "bounded", access: "read_only" });
+    registry.sourceTransition({ source_id: "source-disabled", status: "disabled", reason: "test" });
+
+    assert.deepEqual((registry.sourceList().sources as JsonObject[]).map(source => source.id).sort(), ["source", "source-a", "source-b", "source-global"]);
+    assert.deepEqual((registry.sourceList({ scope_kind: "project", scope_id: "fixture" }).sources as JsonObject[]).map(source => source.id), ["source-a"]);
+    assert.equal((registry.sourceList({ limit: 1 }).sources as JsonObject[]).length, 1);
+    assert.throws(() => registry.sourceList({ scope_kind: "project" }), /supplied together/u);
+    assert.throws(() => registry.sourceList({ scope_id: "fixture" }), /supplied together/u);
   } finally { await f.close(); }
 });
 
@@ -108,7 +133,7 @@ test("ingestion keeps unchanged review, invalidates edits/deletions, and exposes
   } finally { await f.close(); }
 });
 
-test("source revision invalidation resolves the owning project for legacy content paths", async () => {
+test("source revision invalidation preserves project scope for legacy content paths", async () => {
   for (const scenarioKey of [undefined, "legacy-source-scene"]) {
     const f = await fixture();
     try {
@@ -120,8 +145,6 @@ test("source revision invalidation resolves the owning project for legacy conten
       const first = sources.sourceIngest({ source_id: source.id });
       const claimId = (first.candidates as JsonObject[])[0]!.claim_id as string;
       const prior = f.store.get("knowledge_claim", claimId);
-      const additionalProjectRoot = join(f.root, "projects", "fixture-alias"); await mkdir(additionalProjectRoot);
-      new CraftService(f.store).scopeAliasBind({ scope_kind: "project", scope_id: "project:fixture", alias_kind: "path", alias: additionalProjectRoot });
       const globalContentRoot = join(f.root, "data", "knowledge", "md"); await mkdir(globalContentRoot, { recursive: true });
       const oldContentPath = join(globalContentRoot, "legacy.md"); await writeFile(oldContentPath, "legacy content");
       f.store.save("knowledge_claim", claimId, { ...payload(prior), content_ref: { path: oldContentPath },
@@ -136,12 +159,35 @@ test("source revision invalidation resolves the owning project for legacy conten
       assert.equal(updated.invalidated_documents, 1);
       assert.equal(f.store.get("knowledge_claim", claimId).status, "stale");
       if (scenarioKey) {
-        const catalog = JSON.parse(await readFile(join(f.root, "projects", "fixture", ".craft_data", "knowledge", "projects", "fixture", "knowledge-scenarios.json"), "utf8")) as JsonObject;
+        const catalog = JSON.parse(await readFile(join(projectStorageDirectory(f.store.paths, projectRoot), "knowledge", "projects", "fixture", "knowledge-scenarios.json"), "utf8")) as JsonObject;
         const scenario = (catalog.scenarios as JsonObject[]).find(item => item.scenario_key === scenarioKey);
         assert.equal(((scenario?.claim_refs as JsonObject[])[0]?.status), "inactive");
       }
     } finally { await f.close(); }
   }
+});
+
+test("global source revision invalidates a legacy scenario claim without explicit scope or content path", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "global-source"); await mkdir(root);
+    const readme = join(root, "README.md"); await writeFile(readme, "Initial global source text.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    const source = sources.sourceRegister({ source_id: "global-legacy-source", kind: "custom", label: "Global fixture",
+      scope_kind: "global", scope_id: "global", locator: root, content_digest: "initial", trust: "verified", access: "read_only" }).source as JsonObject;
+    const first = sources.sourceIngest({ source_id: source.id });
+    const revisionId = String((first.revision as JsonObject).id);
+    f.store.create("knowledge_claim", "legacy-global-scenario", { source_id: source.id, source_revision_id: revisionId,
+      scenario_key: "global.legacy", status: "candidate", content: "Legacy global scenario claim." });
+
+    await writeFile(readme, "Revised global source text.");
+    const updated = sources.sourceIngest({ source_id: source.id });
+
+    assert.equal(updated.status, "completed");
+    assert.equal(f.store.get("knowledge_claim", "legacy-global-scenario").status, "stale");
+    const transitioned = sources.sourceTransition({ source_id: source.id, status: "disabled", reason: "legacy source retired" });
+    assert.equal((transitioned.source as JsonObject).status, "disabled");
+  } finally { await f.close(); }
 });
 
 test("custom Knowledge Sources continue to use the scoped project resolver", async () => {
@@ -156,7 +202,7 @@ test("custom Knowledge Sources continue to use the scoped project resolver", asy
     assert.equal(result.status, "completed");
     const candidate = (result.candidates as JsonObject[])[0]!;
     const claim = f.store.get("knowledge_claim", String(candidate.claim_id));
-    assert.equal(String((claim.content_ref as JsonObject).path).includes(join(".craft_data", "knowledge", "md")), true);
+    assert.equal(String((claim.content_ref as JsonObject).path).startsWith(join(projectStorageDirectory(f.store.paths, projectRoot), "knowledge", "md")), true);
   } finally { await f.close(); }
 });
 
@@ -177,7 +223,7 @@ test("project notes and Serena Sources bind Knowledge content to their owning pr
       const result = sources.sourceIngest({ source_id: source.id });
       assert.equal(result.status, "completed");
       const fragment = f.store.list("knowledge_fragment", 10, item => item.source_id === source.id)[0]!;
-      assert.equal(String((fragment.content_ref as JsonObject).path).includes(join(projectRoot, ".craft_data", "knowledge", "md")), true);
+      assert.equal(String((fragment.content_ref as JsonObject).path).startsWith(join(projectStorageDirectory(f.store.paths, projectRoot), "knowledge", "md")), true);
     }
 
     const unavailable = sources.sourceRegister({ source_id: "missing-readme", kind: "readme", label: "Missing README", ...f.scope,
@@ -245,7 +291,7 @@ test("retrieval eligibility requires executed labelled results, not caller-repor
     const run = f.store.get("retrieval_evaluation_run", String(evaluation.run_id));
     assert.equal((run.metrics as JsonObject).recall, 1); assert.equal((run.metrics as JsonObject).cross_project_leak_count, 0);
     assert(!JSON.stringify(run).includes('"body"'));
-    const knowledge = f.store.create("knowledge_claim", "semantic", { source_id: "source", scope: "project:fixture", status: "reviewed", content: "different words", content_digest: "s" });
+    const knowledge = attachVerifiedPromotionFixture(f.store, f.store.create("knowledge_claim", "semantic", { source_id: "source", scope: "project:fixture", status: "candidate", content: "different words", content_digest: "s" }));
     const resolved = await f.context.resolve({ ...f.scope, query: "alpha", members: ["knowledge"], retrieval_adapter_id: adapter.id });
     assert.equal(((resolved.contributions as JsonObject[])[0]!.items as JsonObject[])[0]!.claim_id, knowledge.id);
     delete process.env.CRAFT_INDUSTRY_EMBED_KEY;
@@ -373,15 +419,15 @@ test("LSP relations retain real endpoints and reject dangling, malformed or out-
 test("changed document guards remain fail-closed even if a stale claim is externally marked reviewed", async () => {
   const f = await fixture();
   try {
-    const claim = { source_id: "source", status: "reviewed", scope: "project:fixture", content: "alpha", document_id: "doc", document_digest: "current", evidence_ids: [] };
-    f.store.create("knowledge_claim", "claim", claim);
-    assert.deepEqual((await f.context.searchKnowledge({ ...f.scope, query: "alpha" })).hits, []);
-    f.store.create("knowledge_document", "doc", { status: "changed", content_digest: "current" });
-    assert.deepEqual((await f.context.searchKnowledge({ ...f.scope, query: "alpha" })).hits, []);
-    f.store.save("knowledge_document", "doc", { status: "current", content_digest: "wrong" });
-    assert.deepEqual((await f.context.searchKnowledge({ ...f.scope, query: "alpha" })).hits, []);
-    f.store.save("knowledge_document", "doc", { status: "current", content_digest: "current" });
+    f.store.create("knowledge_document", "doc", { status: "current", content_digest: "current" });
+    const claim = f.store.create("knowledge_claim", "claim", { source_id: "source", status: "candidate", scope: "project:fixture", content: "alpha", document_id: "doc", document_digest: "current", evidence_ids: [] });
+    attachVerifiedPromotionFixture(f.store, claim);
     assert.equal(((await f.context.searchKnowledge({ ...f.scope, query: "alpha" })).hits as unknown[]).length, 1);
+    f.store.save("knowledge_document", "doc", { status: "changed", content_digest: "current" });
+    assert.deepEqual((await f.context.searchKnowledge({ ...f.scope, query: "alpha" })).hits, []);
+    const stale = f.store.save("knowledge_claim", "claim", { ...payload(f.store.get("knowledge_claim", "claim")), status: "stale" });
+    f.store.save("knowledge_claim", "claim", { ...payload(stale), status: "reviewed" });
+    assert.deepEqual((await f.context.searchKnowledge({ ...f.scope, query: "alpha" })).hits, []);
   } finally { await f.close(); }
 });
 
@@ -531,12 +577,14 @@ test("history reads all recorded versions within budget and scoped document bund
     const a = f.memory("history"); f.store.save("memory_ledger", "history", { ...payload(a), content: "new alpha" });
     assert.equal(((await f.context.resolve({ ...f.scope, query: "alpha", known_at: "2099-01-01" })).items as JsonObject[]).length, 1);
     f.store.create("knowledge_document", "document", { source_id: "source", status: "current", content_digest: "doc-digest" });
-    f.store.create("knowledge_claim", "portable", { source_id: "source", scope: "project:portable", status: "reviewed", content_ref: f.store.contentStore.writeSync({ kind: "knowledge", record_id: "portable", version: 1, scope: "project:portable", status: "reviewed", sensitivity: "internal", source_id: "source", body: "portable alpha" }), content: "portable alpha", document_id: "document", document_digest: "doc-digest", evidence_ids: [] });
+    const portable = f.store.create("knowledge_claim", "portable", { source_id: "source", scope: "project:portable", status: "candidate", content_ref: f.store.contentStore.writeSync({ kind: "knowledge", record_id: "portable", version: 1, scope: "project:portable", status: "candidate", sensitivity: "internal", source_id: "source", body: "portable alpha" }), content: "portable alpha", document_id: "document", document_digest: "doc-digest", evidence_ids: [] });
+    attachVerifiedPromotionFixture(f.store, portable);
     const sourceService = new CraftService(f.store), receiver = new CraftService(target.store);
     const bundle = sourceService.knowledgeMemoryBundleExport({ scope_kind: "project", scope_id: "portable" }).bundle;
     receiver.knowledgeMemoryBundleImportApply({ bundle, approved: true });
     assert.equal(target.store.get("knowledge_document", "document").content_digest, "doc-digest");
-    assert.equal(((await target.context.searchKnowledge({ scope_kind: "project", scope_id: "portable", query: "portable" })).hits as JsonObject[]).length, 1);
+    assert.equal(target.store.get("knowledge_claim", "portable").status, "candidate");
+    assert.deepEqual((await target.context.searchKnowledge({ scope_kind: "project", scope_id: "portable", query: "portable" })).hits, []);
     f.store.database.prepare("WITH RECURSIVE versions(n) AS (SELECT 3 UNION ALL SELECT n+1 FROM versions WHERE n<10001) INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) SELECT 'memory_ledger','history',n,?,'2020-01-01','2020-01-01' FROM versions").run(JSON.stringify(payload(a)));
     await assert.rejects(() => f.context.resolve({ ...f.scope, query: "alpha", history_view: true }), /history budget/);
   } finally { await f.close(); await target.close(); }

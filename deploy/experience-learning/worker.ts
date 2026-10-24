@@ -14,7 +14,9 @@ import { validateDistilledWorkflowSteps } from "./workflow-contract.ts";
 import { runKnowledgeSyncOnce, type KnowledgeLearningClient } from "./knowledge-sync.ts";
 import { runKnowledgeScenarioClassificationOnce } from "./knowledge-classification.ts";
 import { runSessionKnowledgeCandidateOnce } from "./session-knowledge-candidates.ts";
+import { runKnowledgeStorageReconcileOnce } from "./knowledge-storage.ts";
 import { runSessionKnowledgeEvaluationOnce } from "./session-knowledge-evaluation.ts";
+import { runSessionKnowledgeAdjudicationOnce } from "./session-knowledge-adjudication.ts";
 import { nextKnowledgeLearningStage, nextLearningPassOrder } from "./knowledge-stage-scheduler.ts";
 import { runExperienceScenarioClassificationOnce } from "./experience-scenario-classification.ts";
 import { createLearningModelTransport } from "./codex-cli-transport.ts";
@@ -48,6 +50,7 @@ export interface DistillationDependencies {
   contentLanguage?: string;
   knowledge_stage_cursor_file?: string;
   learning_pass_cursor_file?: string;
+  knowledge_adjudication_cursor_file?: string;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -107,7 +110,9 @@ export async function runLearningTick(deps: DistillationDependencies, syncKnowle
     ...(runSessionCollection ? { run_session_collection: runSessionCollection } : {}),
     run_experience_pass: () => includesExperience ? runOnce(configuredDeps) : Promise.resolve({ processed: 0, outcomes: [], skipped: true }),
     run_knowledge_pass: async () => {
-      const ingestion = syncKnowledge ? await runKnowledgeSyncOnce(deps.client as KnowledgeLearningClient)
+      const storage = syncKnowledge ? await runKnowledgeStorageReconcileOnce(deps.client, join(paths.knowledgeDir, "storage-migration-state.json")) : null;
+      const ingestion = syncKnowledge ? { ...await runKnowledgeSyncOnce(deps.client as KnowledgeLearningClient),
+          ...(storage && (Number(storage.examined) > Number(storage.skipped) || storage.has_more === true) ? { storage_reconciliation: storage } : {}) }
         : { status: "not_due", processed: 0, content_stored: false, raw_content_stored: false };
       const knowledgeDir = paths.knowledgeDir;
       const stage = await nextKnowledgeLearningStage(deps.knowledge_stage_cursor_file ?? join(knowledgeDir, "learning-stage-cursor.json"),
@@ -127,12 +132,20 @@ export async function runLearningTick(deps: DistillationDependencies, syncKnowle
         return { ...ingestion, ...(taskCandidates.status !== "idle" && taskCandidates.status !== "skipped" ? { task_candidates: taskCandidates } : {}),
           ...(taskCandidates.status === "failed" ? { failure_kind: taskCandidates.failure_kind } : {}) };
       }
-      let evaluationCases: JsonObject;
-      try { evaluationCases = await runSessionKnowledgeEvaluationOnce({ client: configuredDeps.client, providers: configuredDeps.providers,
-        transport: configuredDeps.transport, contentLanguage: configuredDeps.contentLanguage, env }); }
-      catch (error) { evaluationCases = { status: "failed", failure_kind: learningFailureKind(error), raw_content_stored: false }; }
-      return { ...ingestion, ...(evaluationCases.status !== "idle" && evaluationCases.status !== "skipped" ? { evaluation_cases: evaluationCases } : {}),
-        ...(evaluationCases.status === "failed" ? { failure_kind: evaluationCases.failure_kind } : {}) };
+      if (stage === "session_evaluation") {
+        let evaluationCases: JsonObject;
+        try { evaluationCases = await runSessionKnowledgeEvaluationOnce({ client: configuredDeps.client, providers: configuredDeps.providers,
+          transport: configuredDeps.transport, contentLanguage: configuredDeps.contentLanguage, env }); }
+        catch (error) { evaluationCases = { status: "failed", failure_kind: learningFailureKind(error), raw_content_stored: false }; }
+        return { ...ingestion, ...(evaluationCases.status !== "idle" && evaluationCases.status !== "skipped" ? { evaluation_cases: evaluationCases } : {}),
+          ...(evaluationCases.status === "failed" ? { failure_kind: evaluationCases.failure_kind } : {}) };
+      }
+      let adjudication: JsonObject;
+      try { adjudication = await runSessionKnowledgeAdjudicationOnce({ ...configuredDeps,
+        knowledge_adjudication_cursor_file: join(paths.knowledgeDir, "session-adjudication-cursor.json") }); }
+      catch (error) { adjudication = { status: "failed", failure_kind: learningFailureKind(error), raw_content_stored: false }; }
+      return { ...ingestion, ...(adjudication.status !== "idle" && adjudication.status !== "skipped" ? { session_adjudication: adjudication } : {}),
+        ...(adjudication.status === "failed" ? { failure_kind: adjudication.failure_kind } : {}) };
     },
   }, includesKnowledge);
 }
@@ -328,6 +341,10 @@ export async function runDistillationOnce(deps: DistillationDependencies): Promi
 interface PendingRequest { resolve(value: JsonObject): void; reject(error: Error): void }
 const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 60_000;
 const MAX_MCP_REQUEST_TIMEOUT_MS = 300_000;
+export function learningMcpRequestTimeoutMs(method: string, params: JsonObject, configuredMs: number): number {
+  return method === "tools/call" && params.name === "craft_knowledge_evaluation_case_adjudicate"
+    ? Math.max(configuredMs, 135_000) : configuredMs;
+}
 export class McpStdioClient implements ExperienceLearningClient {
   readonly child: ChildProcessWithoutNullStreams;
   readonly pending = new Map<number, PendingRequest>();
@@ -377,10 +394,11 @@ export class McpStdioClient implements ExperienceLearningClient {
         resolve: value => { clearTimeout(timer); resolve(value); },
         reject: error => { clearTimeout(timer); reject(error); },
       });
+      const timeoutMs = learningMcpRequestTimeoutMs(method, params, this.requestTimeoutMs);
       timer = setTimeout(() => {
         this.failAll(new Error(`MCP request timed out: ${method}`));
         this.child.kill();
-      }, this.requestTimeoutMs);
+      }, timeoutMs);
       try {
         this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, error => {
           if (error) { const pending = this.pending.get(id); this.pending.delete(id); pending?.reject(error); }

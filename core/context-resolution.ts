@@ -1,6 +1,7 @@
 import { observeOperation } from "../common/craft-common-log/src/index.ts";
-import { ContextBudget } from "../common/craft-common-base/src/context-assets.ts";
+import { ContextBudget, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from "../common/craft-common-base/src/context-assets.ts";
 import { MemoryContribution } from "../capability/craft-memory/contribution.ts";
+import { retrievalExcerpt } from "../common/craft-common-base/src/retrieval-excerpt.ts";
 import { ContextReadGuard } from "./context-access-guard.ts";
 /**
  * The context plane: retrieving accumulated material into a bounded, reproducible pack.
@@ -40,6 +41,40 @@ import { contextAssetMatches, contextAssetRef, requiredContextRef } from "../com
 
 const STRATEGIES = new Set(["keyword", "vector", "hybrid"]);
 const SECRET_KEY = /(?:api[_-]?key|authorization|cookie|password|secret|token)/iu;
+const MAX_RETRIEVAL_EXCERPT_CHARS = 600;
+const DEFAULT_CANDIDATE_POOL_ITEMS = 8;
+const DEFAULT_CANDIDATE_POOL_CHARS = 6_000;
+const MAX_CANDIDATE_POOL_ITEMS = 24;
+
+export function projectKnowledgeRetrieval(item: JsonObject, query: string, required = false, maxChars = MAX_RETRIEVAL_EXCERPT_CHARS): JsonObject {
+  const { retrieval_text: _retrievalText, ...source } = item;
+  if (required || typeof item.content !== "string") return source;
+  const excerpt = retrievalExcerpt(item.content, query, Math.max(1, maxChars));
+  if (excerpt.reason === "complete") return source;
+  return { ...source, content: excerpt.text, content_excerpt: {
+    source_start: excerpt.source_start, source_end: excerpt.source_end, source_chars: excerpt.source_chars, reason: excerpt.reason,
+    ...(excerpt.matched_terms ? { matched_terms: excerpt.matched_terms } : {}),
+  } };
+}
+
+export function projectMemoryRetrieval(item: JsonObject, query: string, required: boolean): JsonObject {
+  if (required || typeof item.content !== "string") return item;
+  const excerpt = retrievalExcerpt(item.content, query, MAX_RETRIEVAL_EXCERPT_CHARS);
+  if (excerpt.reason === "complete") return item;
+  return { ...item, content: excerpt.text, content_excerpt: {
+    source_start: excerpt.source_start, source_end: excerpt.source_end, source_chars: excerpt.source_chars, reason: excerpt.reason,
+    ...(excerpt.matched_terms ? { matched_terms: excerpt.matched_terms } : {}),
+  } };
+}
+
+/** Expansion-only hits contribute bounded lexical evidence to ranking, not a
+ * fabricated excerpt or the oversized source sentence. */
+function projectionRetrievalText(item: JsonObject, fallback: string): string {
+  const excerpt = item.content_excerpt as JsonObject | undefined;
+  if (excerpt?.reason === "requires_expansion") return Array.isArray(excerpt.matched_terms)
+    ? excerpt.matched_terms.filter((term): term is string => typeof term === "string" && term.length <= 64).slice(0, 8).join(" ") : "";
+  return typeof item.content === "string" ? item.content : fallback;
+}
 
 /**
  * Refuse credentials anywhere inside a retrieval adapter's configuration.
@@ -73,8 +108,10 @@ export class ContextResolutionKernel {
     const scope = optionalScope(legacy.length > 1 ? { ...args, scope_kind: legacy[0], scope_id: legacy.slice(1).join(":") } : args);
     if (!scope) return { hits: [], skipped: true, reason: "scope_unavailable" };
     const query = noCredentialAssignment(text(args.query, "query"), "query");
-    const limit = Number(args.limit ?? 20);
+    const limit = Number(args.limit ?? 5);
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("Knowledge search limit must be between 1 and 100");
+    const maxChars = Number(args.max_chars ?? DEFAULT_CONTEXT_MAX_CHARS);
+    if (!Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > 12_000) throw new Error("Knowledge search max_chars must be between 1 and 12000");
     const scopes = this.scopes.resolveStack(scope, args);
     const provider = this.contributors.find((item) => item.member === "knowledge");
     if (!provider?.search) return { hits: [], skipped: true, reason: "knowledge_unavailable" };
@@ -85,8 +122,17 @@ export class ContextResolutionKernel {
       scope_stack: scopes.attempted_scopes, max_items: limit, max_chars: 12_000, ...access, cognitive_purpose: access.purpose }, args.include_candidates === true);
     for (const item of result.items) guard.contribution("knowledge", item);
     guard.assertCurrent();
-    return { hits: result.items, scope: scopes.canonical_scope, include_candidates: args.include_candidates === true,
-      omitted_count: result.omitted_count, receipt_id: result.receipt_id, execution_context: false };
+    let usedChars = 0, projectedOmitted = 0;
+    const hits: JsonObject[] = [];
+    for (const item of result.items) {
+      const hit = projectKnowledgeRetrieval(item, query, false, Math.min(MAX_RETRIEVAL_EXCERPT_CHARS, maxChars));
+      const size = JSON.stringify(hit).length;
+      if (usedChars + size > maxChars) { projectedOmitted += 1; continue; }
+      usedChars += size;
+      hits.push(hit);
+    }
+    return { hits, scope: scopes.canonical_scope, include_candidates: args.include_candidates === true,
+      omitted_count: result.omitted_count + projectedOmitted, receipt_id: result.receipt_id, execution_context: false };
   }
 
   retrievalConfigure(args: JsonObject): JsonObject {
@@ -159,7 +205,7 @@ export class ContextResolutionKernel {
     const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp");
     const scopeResolution = this.scopes.resolveStack(requestedScope, args);
     const access = scopeAccess(args);
-    const maxItems = Number(args.max_items ?? 12); const maxChars = Number(args.max_chars ?? 12_000); const budget = new ContextBudget(maxItems, maxChars);
+    const maxItems = Number(args.max_items ?? DEFAULT_CONTEXT_MAX_ITEMS); const maxChars = Number(args.max_chars ?? DEFAULT_CONTEXT_MAX_CHARS); const budget = new ContextBudget(maxItems, maxChars);
     const sourceIds = sortedUniqueList(args.source_ids, "source_ids"); const requestedIds = sortedUniqueList(args.memory_ids, "memory_ids"); const allowRestricted = args.allow_restricted === true; const adapter = args.retrieval_adapter_id === undefined ? null : this.store.get("retrieval_adapter", text(args.retrieval_adapter_id, "retrieval_adapter_id"));
     const guard = new ContextReadGuard(this.store, undefined, scopeResolution.attempted_scopes, sourceIds);
     for (const alias of scopeResolution.matched_aliases) guard.track("scope_alias", String(alias.id), Number(alias.version));
@@ -188,7 +234,11 @@ export class ContextResolutionKernel {
       let contribution: ContextContribution;
       try { contribution = await contributor.contribute({ query,
         scope_kind: scopeResolution.canonical_scope.kind as ContextRequest["scope_kind"], scope_id: scopeResolution.canonical_scope.id,
-        max_items: 10_000, max_chars: 8_000_000, candidate_mode: true,
+        // Each capability first returns its own query-ranked shortlist. Exact required
+        // refs retain their strict resolution path; ordinary turns never fan out the
+        // entire scoped corpus to the shared (possibly remote) retrieval adapter.
+        max_items: Math.min(MAX_CANDIDATE_POOL_ITEMS, Math.max(DEFAULT_CANDIDATE_POOL_ITEMS, maxItems * 2)),
+        max_chars: Math.max(DEFAULT_CANDIDATE_POOL_CHARS, maxChars), candidate_mode: true,
         now: now.toISOString(), source_ids: sourceIds, scope_stack: scopeResolution.attempted_scopes, ...access, cognitive_purpose: access.purpose,
         memory_ids: requestedIds, required_refs: requiredRefs, allow_restricted: allowRestricted, include_working_notes: args.include_working_notes === true, history_view: args.history_view === true, as_of: args.as_of as string | undefined, known_at: args.known_at as string | undefined });
         if (contribution.member !== contributor.member || !Number.isSafeInteger(contribution.omitted_count) || contribution.omitted_count < 0) throw new Error("Context contributor returned invalid member or omission count");
@@ -205,14 +255,26 @@ export class ContextResolutionKernel {
       if (contributor.member === "memory") memoryPart = contribution;
       else recalled.push(contribution);
     }
-    const available = (memoryPart?.items ?? []).map(item => ({ item, body: String(item.content), required: requestedIds.includes(String(item.memory_id)) || requiredRefs.some(ref => contextAssetMatches(ref, contextAssetRef("memory", item, item.scope as JsonObject))), key: historical ? `${item.memory_id}@${item.memory_version}` : String(item.memory_id) }));
+    const available = (memoryPart?.items ?? []).map(item => {
+      const required = requestedIds.includes(String(item.memory_id)) || requiredRefs.some(ref => contextAssetMatches(ref, contextAssetRef("memory", item, item.scope as JsonObject)));
+      return { item, body: String(item.content), projection: projectMemoryRetrieval(item, query, required), required,
+        key: historical ? `${item.memory_id}@${item.memory_version}` : String(item.memory_id) };
+    });
     const memoryDiagnostics = memoryPart?.diagnostics ?? { eligible_memory_count: available.length, after_scope_precedence_count: available.length, after_temporal_policy_count: available.length, temporal_excluded: [] };
-    const extra = recalled.flatMap((part, group) => part.items.map((item, index) => ({
+    const extra = recalled.flatMap((part, group) => part.items.map((item, index) => {
+      const required = requiredRefs.some(ref => contextAssetMatches(ref, contextAssetRef(part.member, item, scopeResolution.canonical_scope as unknown as JsonObject)));
+      return {
       id: `contribution:${group}:${index}`, group, item,
+      projection: part.member === "knowledge" ? projectKnowledgeRetrieval(item, query, required) : item,
       body: String(item.retrieval_text ?? item.content ?? item.trigger ?? ""),
-      required: requiredRefs.some(ref => contextAssetMatches(ref, contextAssetRef(part.member, item, scopeResolution.canonical_scope as unknown as JsonObject))),
-    })));
-    const documents = [...available.map(item => ({ id: item.key, body: item.body })), ...extra];
+      required,
+    }; }));
+    const documents = [
+      ...available.map(item => ({ id: item.key, body: projectionRetrievalText(item.projection, item.body) })),
+      ...extra.map(item => ({ id: item.id, body: recalled[item.group]!.member === "knowledge"
+        ? projectionRetrievalText(item.projection, item.body)
+        : String(item.item.retrieval_text ?? item.item.content ?? item.item.trigger ?? "") })),
+    ];
     recheck(); // Recheck after contributors and before any corpus can leave the process.
     let retrieval = await port.search(query, documents);
     recheck(); // A failed provider must never turn revocation into a keyword fallback.
@@ -242,9 +304,10 @@ export class ContextResolutionKernel {
     const items: JsonObject[] = []; let usedChars = 0;
     const selectedExtras = new Set<string>(); let contributionChars = 0;
     const pool = [
-      ...candidatesRanked.map(candidate => ({ id: candidate.key, required: candidate.required, score: candidate.score, weight: Number(candidate.item.ranking_weight ?? 1), size: candidate.body.length, memory: candidate, extra: null })),
+      ...candidatesRanked.map(candidate => ({ id: candidate.key, required: candidate.required, score: candidate.score, weight: Number(candidate.item.ranking_weight ?? 1),
+        size: (candidate.projection.content_excerpt as JsonObject | undefined)?.reason === "requires_expansion" ? JSON.stringify(candidate.projection).length : String(candidate.projection.content ?? "").length, memory: candidate, extra: null })),
       ...extra.filter(candidate => hitScores.has(candidate.id) || candidate.required).map(candidate => ({ id: candidate.id, required: candidate.required, score: hitScores.get(candidate.id)?.score ?? 0, weight: 1,
-        size: JSON.stringify(candidate.item).length, memory: null, extra: candidate })),
+        size: JSON.stringify(candidate.projection).length, memory: null, extra: candidate })),
     ].sort((a, b) => Number(b.required) - Number(a.required) || b.score - a.score || b.weight - a.weight || a.id.localeCompare(b.id));
     for (const required of requiredRefs) {
       const present = pool.some(candidate => contextAssetMatches(required, candidate.memory
@@ -268,7 +331,7 @@ export class ContextResolutionKernel {
       if (candidate.memory) {
         const value = candidate.memory;
         usedChars += candidate.size;
-        const { confirmed_at: _confirmedAt, ...projection } = value.item;
+        const { confirmed_at: _confirmedAt, ...projection } = value.projection;
         items.push({ ...projection, ranking_weight: candidate.weight, reason: value.required ? "required" : value.hit?.reason ?? "not_selected", score: candidate.score });
       } else {
         selectedExtras.add(candidate.id); contributionChars += candidate.size;
@@ -277,7 +340,7 @@ export class ContextResolutionKernel {
     }
     const contributionItems = selectedExtras.size;
     const contributions = recalled.map((part, group) => {
-      const selected = extra.filter(candidate => candidate.group === group && selectedExtras.has(candidate.id)).map(candidate => candidate.item);
+      const selected = extra.filter(candidate => candidate.group === group && selectedExtras.has(candidate.id)).map(candidate => candidate.projection);
       const matches = extra.filter(candidate => candidate.group === group && (hitScores.has(candidate.id) || candidate.required)).length;
       const diagnostics = part.member === "experience" ? { ...part.diagnostics, matching_count: matches, selected_count: selected.length,
         reason: selected.length ? "recalled_not_bound" : matches ? "budget_excluded" : part.items.length ? "query_not_matched" : part.diagnostics?.reason,
