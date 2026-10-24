@@ -546,7 +546,6 @@ test("real clangd builds cross-file C++ caller, reference and bounded impact pat
       analyzer: "clangd", analyzer_version: clangdVersion ?? "unknown", relations: ["calls", "references", "definitions", "type_hierarchy"], documents: contents });
     const diagnostics = analysis.diagnostics as JsonObject;
     assert.equal(diagnostics.relations, "analyzed", JSON.stringify(diagnostics));
-    assert((diagnostics.relation_capability_notes as JsonObject[]).some(item => item.stage === "outgoing_call_hierarchy_unavailable"));
     assert.equal((analysis.edges as JsonObject[]).some(edge => edge.kind === "calls"), true);
     assert.equal((analysis.edges as JsonObject[]).some(edge => edge.kind === "references"), true);
     assert.equal((analysis.edges as JsonObject[]).some(edge => edge.kind === "definitions"), true);

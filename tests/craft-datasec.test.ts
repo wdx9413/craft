@@ -36,7 +36,7 @@ test("Datasec CLI validates events, uses configured rules, and emits closed fail
     assert.match(runDataSecHookCli(["claude", "PostToolUse"], "not json", { CRAFT_DATASEC_DIR: f.root }).stdout!, /"continue":false/u);
     assert.match(runDataSecHookCli(["claude", "PreToolUse"], "not json", {}).stdout!, /"permissionDecision":"deny"/u);
     assert.match(runDataSecHookCli(["codex", "PostToolUse"], "[]", { CRAFT_DATASEC_DIR: f.root }).stdout!, /"decision":"block"/u);
-    assert.match(runDataSecHookCli(["claude", "PostToolUse"], "{}", { CRAFT_DATASEC_RULES: join(f.temp, "missing.json") }).stdout!, /"continue":false/u);
+    assert.match(runDataSecHookCli(["claude", "PostToolUse"], JSON.stringify({ hook_event_name: "PostToolUse" }), { CRAFT_DATASEC_RULES: join(f.temp, "missing.json") }).stdout!, /"continue":false/u);
   } finally { f.close(); }
 });
 

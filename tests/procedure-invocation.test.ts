@@ -86,7 +86,7 @@ test("strict invocation inputs, optimistic concurrency, policy, scope and revoca
     f.store.save("experience_procedure", String(p.id), { ...payload(original), lifecycle: "rolled_back", routeable: false });
     assert.throws(() => f.dispatch(), /revoked/);
     assert.equal(f.store.list("procedure_invocation_dispatch").length, 0);
-    f.store.save("experience_procedure", String(p.id), { ...payload(original), scope_envelope: { applicability: { kind: "project", id: "invocation" }, audience: { mode: "private", principal_ids: ["owner"] } } });
+    f.store.save("experience_procedure", String(p.id), { ...payload(original), scope_envelope: { applicability: { kind: "project", id: scope.slice("project:".length) }, audience: { mode: "private", principal_ids: ["owner"] } } });
     assert.throws(() => f.service.procedureInvocationGet(f.params()), /audience/);
   } finally { await f.close(); }
 });

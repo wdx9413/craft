@@ -20,6 +20,7 @@
     "README.en.md",
     "LICENSE",
     "docs",
+    "deploy",
     "scripts/codebase",
     "scripts/eval"
   ],

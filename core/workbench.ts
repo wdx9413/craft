@@ -39,6 +39,12 @@ function matchesScope(memory: JsonObject, taskId?: string, workspaceId?: string)
   if (scope === "workspace" || scope === "project") return memory.workspace_id === workspaceId;
   return false;
 }
+function memoryScopeName(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const kind = String((value as JsonObject).kind ?? "");
+  return kind === "global" ? "user" : kind;
+}
 
 function profileSelector(value: unknown, name: string, allowed: Set<string>): string[] {
   const values = strings(value, name);
@@ -192,7 +198,7 @@ export class WorkbenchKernel {
     if (validUntil !== null && Number.isNaN(Date.parse(validUntil))) throw new Error("valid_until must be an ISO timestamp");
     const superseded = args.supersedes_id === undefined ? null : this.store.get("memory_item", text(args.supersedes_id, "supersedes_id"));
     if (superseded && superseded.status !== "active") throw new Error("Only an active memory can be superseded");
-    if (superseded && (superseded.scope !== scope || superseded.task_id !== (args.task_id ?? null) || superseded.workspace_id !== (args.workspace_id ?? null))) {
+    if (superseded && (memoryScopeName(superseded.scope) !== scope || superseded.task_id !== (args.task_id ?? null) || superseded.workspace_id !== (args.workspace_id ?? null))) {
       throw new Error("Replacement memory must keep the same scope target");
     }
     const content = text(args.content, "content"); const source = text(args.source, "source");

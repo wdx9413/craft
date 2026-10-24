@@ -117,9 +117,10 @@ test("automatic Context observation stores shown usage and turn outcome without 
 test("SQL scoped selection handles string/object scopes and predicates before hydration", async () => {
   const f = await fixture();
   try {
-    f.store.create("thing", "a", { scope: { kind: "project", id: "a" } }); f.store.create("thing", "b", { scope: "project:b" }); f.store.create("thing", "g", { scope: "global" });
+    f.store.create("thing", "a", { scope: { kind: "project", id: "a" } }); f.store.create("thing", "b", { scope: "project:b" }); f.store.create("thing", "canonical", { scope: "project:canonical" }); f.store.create("thing", "canonical-object", { scope: { kind: "project", id: "canonical" } }); f.store.create("thing", "g", { scope: "global" });
     assert.deepEqual(f.store.listScoped("thing", [{ kind: "project", id: "a" }]).map(item => item.id), ["a"]);
     assert.deepEqual(f.store.listScoped("thing", [{ kind: "project", id: "b" }], 1, item => item.id === "b").map(item => item.id), ["b"]);
+    assert.deepEqual(f.store.listScoped("thing", [{ kind: "project", id: "project:canonical" }]).map(item => item.id).sort(), ["canonical", "canonical-object"]);
     assert.equal(f.store.listScoped("thing", [{ kind: "global", id: "global" }]).length, 1); assert.deepEqual(f.store.listScoped("thing", []), []);
     assert.throws(() => f.store.listScoped("thing", [null] as never), /Invalid/); assert.throws(() => f.store.listScoped("thing", "bad" as never), /Invalid/);
   } finally { f.close(); }
@@ -544,11 +545,13 @@ test("scoped Knowledge/Memory corrections and active Experience releases appear 
     f.service.knowledgeClaimSave({ claim_id: "k", kind: "fact", scope: `${f.scope.kind}:${f.scope.id}`, content: "login fact", evidence_ids: ["proof"] });
     attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", "k"));
     const pack = await f.service.contextOpen({ project_root: f.repo, query: "login", include_codebase: false }); f.service.contextResolutionFeedback({ receipt_id: (pack.pack_receipt as JsonObject).id, outcome: "incorrect", asset_refs: pack.asset_refs });
-    for (const [member, id] of [["memory", "m"], ["knowledge", "k"]]) assert.equal((f.service.componentAssetInspect(member!, { action: "explain", asset_id: id, scope_kind: f.scope.kind, scope_id: f.scope.id }).corrections as unknown[]).length, 1);
+    for (const [member, id] of [["memory", "m"], ["knowledge", "k"]]) {
+      assert.equal((f.service.componentAssetInspect(member!, { action: "explain", asset_id: id, scope_kind: f.scope.kind, scope_id: f.scope.id }).corrections as unknown[]).length, 1);
+    }
   } finally { f.close(); }
   const invocation = await invocationFixture();
   try {
-    const p = invocation.create(); assert.equal((invocation.service.componentAssetInspect("experience", { action: "explain", asset_id: p.id, scope_kind: "project", scope_id: "invocation" }).release as JsonObject).current_record_version, p.version);
+    const p = invocation.create(); assert.equal((invocation.service.componentAssetInspect("experience", { action: "explain", asset_id: p.id, scope_kind: "project", scope_id: scope.slice("project:".length) }).release as JsonObject).current_record_version, p.version);
   } finally { await invocation.close(); }
 });
 

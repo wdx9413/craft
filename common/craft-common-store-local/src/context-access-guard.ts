@@ -35,8 +35,10 @@ export class ContextReadGuard {
     }
     const scopeSql = `EXISTS (SELECT 1 FROM json_each(?) s WHERE
       json_extract(payload_json,'$.scope')=json_extract(s.value,'$.kind')||':'||json_extract(s.value,'$.id')
+      OR (json_extract(payload_json,'$.scope')=json_extract(s.value,'$.id') AND substr(json_extract(s.value,'$.id'),1,length(json_extract(s.value,'$.kind'))+1)=json_extract(s.value,'$.kind')||':')
       OR (json_extract(s.value,'$.kind')='global' AND json_extract(payload_json,'$.scope')='global')
-      OR (json_extract(payload_json,'$.scope.kind')=json_extract(s.value,'$.kind') AND json_extract(payload_json,'$.scope.id')=json_extract(s.value,'$.id')))`;
+      OR (json_extract(payload_json,'$.scope.kind')=json_extract(s.value,'$.kind') AND json_extract(payload_json,'$.scope.id')=json_extract(s.value,'$.id'))
+      OR (json_extract(payload_json,'$.scope.kind')=json_extract(s.value,'$.kind') AND substr(json_extract(s.value,'$.id'),1,length(json_extract(s.value,'$.kind'))+1)=json_extract(s.value,'$.kind')||':' AND json_extract(payload_json,'$.scope.id')=substr(json_extract(s.value,'$.id'),length(json_extract(s.value,'$.kind'))+2)))`;
     const rows = scopes?.length ? store.database.prepare(`WITH relevant AS (
       SELECT kind,id,payload_json FROM records WHERE kind IN ('memory_ledger','knowledge_claim','experience_procedure') AND (${scopeSql})
     ), wanted(kind,id) AS (

@@ -65,6 +65,7 @@ test("seed memories in scope are carried into the resolution as digest refs", as
   const f = await fixture();
   try {
     const service = new CraftService(f.store);
+    service.scopeAliasMigrate({ project_root: f.root, legacy_scope_id: "local" });
     service.knowledgeSourceRegister({ source_id: "src", kind: "project_note", label: "Project notes", scope_kind: "project", scope_id: "local", locator: ".notes", content_digest: "digest:notes:v1", trust: "bounded", access: "read_only" });
     service.memoryLedgerRemember({ memory_id: "mem", source_id: "src", kind: "preference", scope_kind: "project", scope_id: "local", content: "Invoices prefer weekly billing cadence.", confidence: "bounded" });
     const resolved = await resolveStandaloneContext(service, { goal: "billing cadence", projectRoot: f.root, contextScope: "project", scopeId: "local" });

@@ -306,7 +306,10 @@ test("Memory Maintenance is proposal-only and records usage signals", async () =
     f.store.create("semantic_memory", "plain-content", { status: "active", scope: "project:p", content: "plain text" });
     f.store.create("semantic_memory", "bad-ref", { status: "active", scope: "project:p", content_ref: { locator: "missing" } });
     f.store.create("semantic_memory", "array-ref", { status: "active", scope: "project:p", content_ref: [] });
+    f.store.create("semantic_memory", "nested-task-scope", { status: "active", scope: { kind: "task", id: "p:sub" }, content: "plain nested task scope" });
     assert.equal((f.service.memoryConsolidationSearch({ query: "plain", scope: "project:p" }).results as JsonObject[]).length, 1);
+    assert.equal((f.service.memoryConsolidationSearch({ query: "plain", scope: "task:p" }).results as JsonObject[]).length, 0,
+      "a nested scope with a matching prefix must not leak into its parent scope");
     assert.equal((f.service.memoryConsolidationSearch({ query: "same", scope: { kind: "project", id: "p" } }).results as JsonObject[]).length >= 1, true);
     const emptyObjectScope = f.service.memoryConsolidationSearch({ query: "plain", scope: {} });
     assert.equal(emptyObjectScope.skipped, true);

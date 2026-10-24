@@ -13,7 +13,7 @@
   },
   "scripts": {
     "clean": "node --experimental-strip-types scripts/clean.ts",
-    "build": "pnpm run clean && pnpm run build:core && pnpm run build:common && pnpm run build:plugin && pnpm run build:datasec && pnpm run pack:plugin",
+    "build": "pnpm run clean && pnpm run build:core && pnpm run build:common && pnpm run build:plugin && pnpm run build:datasec && pnpm run build:deepseek && pnpm run pack:plugin",
     "build:datasec": "node --experimental-strip-types capability/craft-datasec/build.ts",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
     "build:plugin": "esbuild bin/craft-mcp.ts --bundle --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-mcp.cjs && esbuild bin/craft-mcp-full.ts --bundle --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-mcp-full.cjs && esbuild bin/craft-mcp-http.ts --bundle --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-mcp-http.cjs && esbuild bin/craft-codex-hook.ts --bundle --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-codex-hook.cjs && esbuild bin/craft-parser-worker.ts --bundle --platform=node --format=esm --target=node23 --outfile=dist/plugin/craft-parser-worker.js && esbuild deploy/experience-learning/worker.ts --bundle --platform=node --format=esm --target=node23 --outfile=dist/plugin/craft-experience-learning-worker.js",

@@ -10,6 +10,7 @@ import { CraftService, VERSION } from "../core/service.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { LocalWorkbenchServer, WorkbenchWebApp } from "../core/workbench-server.ts";
 import { McpServer } from "../core/mcp.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft-web-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store); return { store, service }; }
 
@@ -51,6 +52,7 @@ test("Workbench web application exposes a token-gated same-origin API and bounde
   const kitLaunch = JSON.parse(app.handle({ method: "POST", path: "/api/verified-work-loops", token: "secret", body: JSON.stringify({ work_loop_id: "kit-loop", title: "Video", goal: "Deliver", host: "codex-cli", workspace: f.store.paths.root, prompt: "video", sandbox: "workspace-write" }) }).body).launch; const kitApplied = app.handle({ method: "POST", path: "/api/domain-kits/builtin.video-delivery/apply", token: "secret", body: JSON.stringify({ launch_id: kitLaunch.id, values: { video_path: "final.mp4" } }) }); assert.equal(JSON.parse(kitApplied.body).jobs.length, 1);
   const knowledgeEvidence = f.service.evidenceRecord({ evidence_id: "knowledge-evidence", source_type: "program", claim: "The launch facts were checked.", confidence: "bounded" });
   const knowledgeClaim = f.service.knowledgeClaimSave({ claim_id: "knowledge-claim", kind: "fact", content: "Use only checked launch facts.", evidence_ids: [knowledgeEvidence.id] }).claim as Record<string, unknown>;
+  attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", "knowledge-claim"));
   assert.equal(app.handle({ method: "POST", path: "/api/knowledge/claims/knowledge-claim/review", token: "secret", body: JSON.stringify({ status: "reviewed", reviewer: "reviewer", reason: "checked" }) }).status, 422);
   const page = (await f.service.wikiPageSave({ page_id: "knowledge-page", title: "Launch facts", body: "# Checked facts\n\nUse only checked launch facts.", claim_ids: [knowledgeClaim.id] })).page as Record<string, unknown>;
   assert.match(JSON.parse(app.handle({ method: "GET", path: "/api/knowledge/pages/knowledge-page?version=1", token: "secret" }).body).body, /Checked facts/); assert.match(JSON.parse(app.handle({ method: "GET", path: "/api/knowledge/pages/knowledge-page", token: "secret" }).body).body, /Checked facts/); assert.equal(app.handle({ method: "POST", path: "/api/knowledge/pages/knowledge-page/refresh", token: "secret", body: "{}" }).status, 200); assert.equal(app.handle({ method: "POST", path: "/api/knowledge/pages/knowledge-page", token: "secret", body: "{}" }).status, 404);

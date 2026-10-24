@@ -16,7 +16,7 @@ test("graph diagnosis distinguishes scoped draft, candidate and qualified releas
     let p = f.service.experienceGraphEdit({ action: "submit", scope, graph_id: "engineering", expected_draft_digest: saved.draft_digest }).procedure as JsonObject;
     assert.equal((inspect().graphs as JsonObject[])[0].usage_status, "no_promoted_release");
     const reader = new ExperienceContribution(f.store);
-    const request = { query: "诊断", scope_kind: "project", scope_id: "invocation", max_items: 10, max_chars: 20000 } as const;
+    const request = { query: "诊断", scope_kind: "project", scope_id: scope.slice("project:".length), max_items: 10, max_chars: 20000 } as const;
     const candidate = await reader.contribute(request);
     assert.equal(candidate.items.length, 0); assert.equal(candidate.diagnostics?.reason, "no_promoted_release");
     // Fixture-only gate proofs exercise the same promotion contract as the runtime tests.
@@ -34,9 +34,8 @@ test("graph diagnosis distinguishes scoped draft, candidate and qualified releas
     assert.equal(recalled.items[0].host_next_step, "match_graph_then_plan_and_bind");
     assert.equal((inspect().graphs as JsonObject[])[0].usage_status, "available_requires_host_binding");
     assert.equal((await reader.contribute({ ...request, scope_id: "other" })).items.length, 0);
-    const hidden = f.service.experienceGraphInspect({ action: "diagnose", scope: "project:other", graph_id: "engineering" });
-    assert.equal((hidden.graphs as JsonObject[]).length, 0);
-    const result = await f.service.contextResolutionResolve({ query: "诊断", scope_kind: "project", scope_id: "invocation", members: ["experience"] });
+    assert.throws(() => f.service.experienceGraphInspect({ action: "diagnose", scope: "project:other", graph_id: "engineering" }), /root is not registered/u);
+    const result = await f.service.contextResolutionResolve({ query: "诊断", scope_kind: "project", scope_id: scope, members: ["experience"], max_items: 10, max_chars: 20_000 });
     assert.equal(((result.contributions as JsonObject[])[0].diagnostics as JsonObject).reason, "recalled_not_bound");
   } finally { await f.close(); }
 });

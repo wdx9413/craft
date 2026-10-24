@@ -21,7 +21,8 @@ export function runDataSecHookCli(args: string[], raw: string, env: NodeJS.Proce
     const root = env.CRAFT_DATASEC_DIR ?? join(homedir(), ".craft-datasec");
     return { exitCode: 0, stdout: `${JSON.stringify(handleHook(host, event, input, root, rules))}\n` };
   } catch {
-    const fallback = event === "PostToolUse" ? hidden(host, FAILURE, blankResult(input?.tool_response ?? null))
+    const fallback = event === "PostToolUse"
+      ? { ...hidden(host, FAILURE, blankResult(input?.tool_response ?? null)), ...(host === "claude" ? { continue: false, stopReason: FAILURE } : {}) }
       : handleHook(host, event, {}, "", []);
     return { exitCode: 0, stdout: `${JSON.stringify(fallback)}\n` };
   }

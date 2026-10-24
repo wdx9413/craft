@@ -97,7 +97,15 @@ export class MemoryConsolidationKernel {
       return { query, scope: null, results: [], skipped: true, reason: "scope_unavailable" };
     }
     const scope = resolvedScope.scope;
-    const memories = this.store.list("semantic_memory", 10_000, (item) => item.status === "active" && (scope === null || storedScopeKey(item.scope) === scope));
+    const memories = this.store.list("semantic_memory", 10_000, (item) => {
+      if (item.status !== "active" || scope === null) return item.status === "active";
+      const stored = storedScopeKey(item.scope);
+      const separator = scope.indexOf(":");
+      const legacyPartitionKey = separator > 0 ? `${scope.slice(0, separator)}:${scope}` : null;
+      return stored === scope || stored === legacyPartitionKey
+        || ["user", "task", "workspace"].includes(scope) && (stored?.startsWith(`${scope}:`) ?? false)
+        || scope === "user" && (stored === "global" || stored === "global:global");
+    });
     const results = memories.filter((item) => this.body(item).toLowerCase().includes(query))
       .map((item) => ({ ...item, content: this.body(item) }));
     return { query, results };

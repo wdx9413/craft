@@ -269,7 +269,7 @@ export async function resolveStandaloneContext(service: CraftService, input: { g
   // Indexing project files must establish the same canonical root registry used
   // by scoped Memory/Knowledge writes. Without it, a later partitioned read can
   // fail closed even though this command already has the real project root.
-  service.scopeIdentityResolveProject({ project_root: input.projectRoot, project_id: input.scopeId });
+  service.scopeAliasMigrate({ project_root: input.projectRoot, legacy_scope_id: input.scopeId });
   try {
     const sync = service.knowledgeIndexSync({ project_root: input.projectRoot, limit: 2000 });
     const plan = (sync.plan ?? {}) as JsonObject;

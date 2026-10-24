@@ -34,6 +34,14 @@ function recordScope(value: unknown): { kind: string; id: string } {
   return { kind, id: rest.join(":") };
 }
 
+function scopeKey(scope: { kind: string; id: string }): string {
+  return scope.id.startsWith(`${scope.kind}:`) ? scope.id : `${scope.kind}:${scope.id}`;
+}
+
+function matchesScope(stored: unknown, scope: { kind: string; id: string }): boolean {
+  return stored === scopeKey(scope) || stored === `${scope.kind}:${scope.id}`;
+}
+
 export class ExperienceContribution implements ContextContributionProvider {
   readonly member = "experience" as const;
   readonly store: CraftStore;
@@ -56,10 +64,10 @@ export class ExperienceContribution implements ContextContributionProvider {
     // Filter the complete collection before applying the candidate cap. Store.list
     // still scans all records; unrelated projects must not consume this scope's budget.
     const scoped = this.store.listScoped("experience_procedure", scopes, 10_001, procedure =>
-      scopes.some(scope => procedure.scope === `${scope.kind}:${scope.id}`)
+      scopes.some(scope => matchesScope(procedure.scope, scope))
       && scopeAllows(scopeEnvelope(procedure.scope_envelope, recordScope(procedure.scope)), access));
     const hasDraft = this.store.listScoped("experience_graph_draft", scopes, 1, draft =>
-      scopes.some(scope => draft.scope === `${scope.kind}:${scope.id}`)
+      scopes.some(scope => matchesScope(draft.scope, scope))
       && scopeAllows(scopeEnvelope(draft.scope_envelope, recordScope(draft.scope)), access)).length > 0;
     const eligible = scoped.map(latest => activeProcedure(this.store, String(latest.id))).filter((item): item is JsonObject => item !== null);
     if (eligible.length > 10_000) throw new Error("Experience candidate budget exceeded; narrow the scope stack");

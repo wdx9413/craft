@@ -3,6 +3,7 @@ import test from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fixture, scope } from "./helpers/procedure-invocation-fixture.ts";
+import { procedureHostControl } from "../core/application/procedure-host-control.ts";
 import { McpServer } from "../core/mcp.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 
@@ -17,6 +18,20 @@ test("daily Experience exposes the embedded Host control without launching anoth
     assert.equal((result.launch as JsonObject).deferred_start,true); assert.equal(f.store.count("host_run"),0);
     assert.equal(result.host_execution_authority,false);
   } finally { await f.close(); }
+});
+
+test("Host next asks the graph transition tool when no work item is ready", () => {
+  const service = (graph?: JsonObject) => ({
+    procedureInvocationGet() {
+      return { invocation: { id: "graph-invocation", lifecycle: "active", ...(graph ? { graph } : {}), version: 3 },
+        dispatches: [], receipts: [], work_items: [], loop: { lifecycle: "active" } };
+    },
+  }) as never;
+  const result = procedureHostControl(service({ id: "graph" }), { action: "next", invocation_id: "graph-invocation", input: {} });
+  assert.equal(result.next_tool, "craft_procedure_invocation_transition");
+  assert.deepEqual(result.ready_item_keys, []);
+  assert.equal(procedureHostControl(service(), { action: "next", invocation_id: "graph-invocation", input: {} }).next_tool,
+    "craft_procedure_invocation_resume");
 });
 
 test("embedded Host receipts stay bound to their dispatch, Task and independent program observation", async () => {

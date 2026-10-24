@@ -24,4 +24,14 @@ test("Host session Memory scope is partitioned and bound without changing other 
   assert.equal(hostSessionMemoryArgs(same, sameStore), same);
   assert.equal(hostSessionMemoryArgs({ scope_kind: "session", scope_id: "session", session_host: "codex" }).scope_id,
     sessionStorageScopeId("codex", "session"));
+
+  const unhostedSession = { scope_kind: "session", scope_id: "session" };
+  const unhostedStore = { resolveSessionStorageScopeId(session: string, host?: string) {
+    assert.equal(session, "session"); assert.equal(host, undefined); return undefined;
+  } } as unknown as CraftStore;
+  assert.equal(hostSessionMemoryArgs(unhostedSession, unhostedStore), unhostedSession);
+
+  const unresolvedStore = { bindSessionStorageHost() {}, resolveSessionStorageScopeId() { return undefined; } } as unknown as CraftStore;
+  assert.equal(hostSessionMemoryArgs({ scope_kind: "session", scope_id: "session", session_host: "codex" }, unresolvedStore).scope_id,
+    sessionStorageScopeId("codex", "session"));
 });

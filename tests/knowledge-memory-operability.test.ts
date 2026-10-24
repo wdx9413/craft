@@ -9,6 +9,7 @@ import { McpServer } from "../core/mcp.ts";
 import { productSurfaceOf } from "../core/interfaces/mcp/product-launch.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { CognitiveSearchCoordinator } from "../core/application/coordinators/cognitive-search.ts";
 import { stableDigest } from "../core/digest.ts";
 import { projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
@@ -74,6 +75,70 @@ test("reviewed knowledge contributes to a scoped Context receipt while candidate
     const blockedKnowledge = ((blocked.contributions as JsonObject[]).find((item) => item.member === "knowledge") as JsonObject).items as JsonObject[];
     assert.deepEqual(blockedKnowledge, []);
     assert.equal((f.service.knowledgeSearch({ query: "focused", scope: "project:p" }).hits as JsonObject[])[0]!.claim_id, "reviewed-routing");
+  } finally { await close(f); }
+});
+
+test("Knowledge coordinator handles missing scope and keeps scenario administration explicit", async () => {
+  const f = await fixture();
+  try {
+    assert.equal((f.service.knowledgeSearch({ query: "nothing" }).hits as JsonObject[]).length, 0);
+    assert.equal((f.service.knowledgeSearch({ query: "nothing", scope_kind: "project", scope_id: "p" }).hits as JsonObject[]).length, 0);
+    assert.throws(() => f.service.knowledgeSearch({ query: "nothing", scenario_key: "testing.focused" }), /explicit Knowledge scope/);
+    assert.throws(() => f.service.knowledgeSearch({ query: "nothing", scope: "project:p", scenario_key: "Invalid Key" }), /bounded stable identifier/);
+    assert.equal((f.service.knowledgeSearch({ query: "nothing", scope: "tenant:other", scenario_key: "testing.focused" }).scenario_filter as JsonObject).status,
+      "inactive_or_unclassified");
+
+    assert.equal(f.service.knowledgeScenarioList({ scope: "global" }).scope, "global");
+    assert.equal(f.service.knowledgeScenarioList({ scope: "project:p", project_root: join(f.root, "projects", "p") }).scope, "project:p");
+    assert.throws(() => f.service.knowledgeScenarioList({ scope: "tenant:other" }), /explicit project or global scope/);
+    assert.throws(() => f.service.knowledgeScenarioRetire({ scope: "tenant:other" }), /explicit project or global scope/);
+    assert.throws(() => f.service.knowledgeScenarioRetire({ scope: "global", scenario_key: "missing.scene", expected_catalog_version: 0,
+      request_id: "missing-retire", reason: "not present" }));
+    assert.throws(() => f.service.knowledgeScenarioMigrationPropose({ scope: "tenant:other", source_keys: [], targets: [] }), /explicit project or global scope/);
+    assert.throws(() => f.service.knowledgeScenarioMigrationPropose({ scope: "global", source_keys: "bad", targets: [] }), /must be arrays/);
+    assert.throws(() => f.service.knowledgeScenarioMigrationPropose({ scope: "global", mode: "merge", source_keys: [], targets: [],
+      expected_catalog_version: 0, request_id: "empty-migration", reason: "no source scenarios" }));
+    assert.throws(() => f.service.knowledgeScenarioRetire({ scope: "project:p", project_root: join(f.root, "projects", "p"),
+      scenario_key: "missing.scene", expected_catalog_version: 0, request_id: "missing-project-retire", reason: "not present" }));
+    assert.throws(() => f.service.knowledgeScenarioMigrationPropose({ scope: "project:p", project_root: join(f.root, "projects", "p"),
+      mode: "merge", source_keys: [], targets: [], expected_catalog_version: 0, request_id: "empty-project-migration", reason: "no source scenarios" }));
+    assert.deepEqual((await f.service.memorySearch({ query: "nothing", scope_kind: "project", scope_id: "p" })).memories, []);
+    const isolated = new CognitiveSearchCoordinator(f.store,
+      { resolve: async () => ({ items: undefined, receipt: null }) } as never,
+      { neighbors: () => ({ relations: [] }) } as never);
+    assert.deepEqual(await isolated.memorySearch({ query: "x", scope_kind: "project", scope_id: "p" }), {
+      memories: [], count: 0, omitted_count: 0, receipt_id: null, content_free_receipt: true,
+    });
+  } finally { await close(f); }
+});
+
+test("diagnostic Knowledge search filters claim scope, sensitivity, expiry and content references", async () => {
+  const f = await fixture();
+  try {
+    await bindProject(f, "other");
+    const claim = (id: string, extra: JsonObject = {}) => f.store.create("knowledge_claim", id, {
+      id, version: 1, kind: "fact", status: "candidate", scope: "global", content: "alpha migration rule",
+      tags: ["alpha"], sensitivity: "internal", evidence_ids: [], ...extra,
+    });
+    claim("search-public");
+    claim("search-restricted", { sensitivity: "restricted" });
+    claim("search-other-scope", { scope: "project:other" });
+    claim("search-invalid-status", { status: "retired" });
+    claim("search-expired", { valid_until: "2000-01-01T00:00:00Z" });
+    claim("search-malformed-expiry", { valid_until: "not-a-date" });
+    claim("search-not-expiring", { valid_until: null });
+    const contentRef = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "search-body", version: 1,
+      scope: "global", status: "candidate", sensitivity: "internal", source_id: "diagnostic-test", body: "alpha body reference" });
+    claim("search-content-ref", { content: undefined, content_ref: contentRef });
+    assert.deepEqual((f.service.knowledgeSearch({ query: "alpha", scope: "global" }).hits as JsonObject[]).map(hit => hit.claim_id),
+      ["search-content-ref", "search-not-expiring", "search-public"]);
+    assert.ok((f.service.knowledgeSearch({ query: "alpha", scope: "global", allow_restricted: true }).hits as JsonObject[])
+      .some(hit => hit.claim_id === "search-restricted"));
+    assert.ok((f.service.knowledgeSearch({ query: "alpha", scope_kind: "global", scope_id: "global", include_candidates: false }).hits as JsonObject[]).length === 0);
+    assert.equal((f.service.knowledgeSearch({ query: "unmatched", scope: "global" }).hits as JsonObject[]).length, 0);
+    assert.equal((f.service.knowledgeSearch({ query: "!!!", scope: "global", scenario_key: "test.scene" }).hits as JsonObject[]).length, 0);
+    claim("search-invalid-ref", { content_ref: "not-a-content-reference" });
+    assert.throws(() => f.service.knowledgeSearch({ query: "alpha", scope: "global", allow_restricted: true }), /invalid/u);
   } finally { await close(f); }
 });
 

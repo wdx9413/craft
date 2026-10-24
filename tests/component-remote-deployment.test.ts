@@ -61,7 +61,7 @@ test("deployable HTTPS component binds verified principals to isolated tenant st
     assert.equal((await send("bob", "tools/list")).status, 401);
     assert.equal((await send("alice", "initialize", { protocolVersion: "2025-11-25" })).status, 200);
     assert((await send("alice", "tools/list")).body.result.tools.some((tool: { name: string }) => tool.name === "craft_context_open"));
-    const pack = await call("alice", "craft_context_open", { project_root: root, query: "scoped verification" });
+    const pack = await call("alice", "craft_context_open", { project_root: root, query: "scoped verification", include_codebase: true });
     assert.equal(pack.codebase.status, "skipped"); assert.equal(pack.codebase.reason, "not_repository");
     assert(pack.pack_receipt.id); assert.equal(pack.host_execution_authority, false);
   } finally { runtime?.close(); globalThis.fetch = fetchBefore; await rm(root, { recursive: true, force: true }); }

@@ -94,7 +94,7 @@ test("assembles attributable bounded context and preserves memory history", asyn
     assert.equal((service.memoryTransition({ memory_id: "replacement", status: "rejected", reason: "user corrected" }).memory as JsonObject).status, "rejected");
     assert.equal((service.memoryTransition({ memory_id: "future", status: "expired" }).memory as JsonObject).status, "expired");
 
-    store.create("memory_item", "foreign", { kind: "fact", scope: "foreign", content: "lesson foreign", source: "test", status: "active",
+    store.create("memory_item", "foreign", { kind: "fact", scope: "task:foreign", content: "lesson foreign", source: "test", status: "active",
       valid_until: null, task_id: null, workspace_id: null });
     assert.equal((service.contextAssemble({ query: "lesson" }).items as JsonObject[]).some((item) => item.source_id === "foreign"), false);
     assert.equal((service.contextAssemble({ query: "!!!" }).items as JsonObject[]).length, 0);
