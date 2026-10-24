@@ -277,7 +277,7 @@
         "tests/config.test.ts",
         "tests/project-storage-paths.test.ts",
         "tests/project-experience-directory.test.ts",
-      "tests/storage-migration-preflight.test.ts",
+        "tests/storage-migration-preflight.test.ts",
         "tests/legacy-session-memory-preflight.test.ts",
         "tests/project-knowledge-content.test.ts",
         "tests/memory-session-storage.test.ts",
@@ -839,9 +839,9 @@
         "tests/context-optimization.test.ts",
         "tests/context-read-snapshot.test.ts",
         "tests/memory-contribution.test.ts",
-      "tests/memory-session-storage.test.ts",
-      "tests/memory-tiers.test.ts",
-      "tests/memory-commit-optimization.test.ts"
+        "tests/memory-session-storage.test.ts",
+        "tests/memory-tiers.test.ts",
+        "tests/memory-commit-optimization.test.ts"
       ],
       "branches": true
     },
@@ -1279,7 +1279,7 @@
         "tests/memory-session-storage.test.ts",
         "tests/context-remediation.test.ts",
         "tests/memory-commit-optimization.test.ts",
-      "tests/memory-tiers.test.ts",
+        "tests/memory-tiers.test.ts",
         "tests/cognitive-write.test.ts"
       ],
       "branches": true
@@ -1988,6 +1988,83 @@
       ],
       "tests": [
         "tests/retrieval-excerpt.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "cognitive-search-coordinator",
+      "include": [
+        "core/application/coordinators/cognitive-search.ts"
+      ],
+      "tests": [
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/knowledge-scope.test.ts",
+        "tests/knowledge-relation.test.ts",
+        "tests/knowledge-promotion-authority.test.ts",
+        "tests/service-coverage.test.ts",
+        "tests/integration.test.ts",
+        "tests/component-integration.test.ts",
+        "tests/component-hookless.test.ts",
+        "tests/loop-memory-access.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "evaluation-run-coordinator",
+      "include": [
+        "core/application/coordinators/evaluation-runs.ts"
+      ],
+      "tests": [
+        "tests/mcp.test.ts",
+        "tests/closed-loop.test.ts",
+        "tests/promotion-gates.test.ts",
+        "tests/wiki-candidate-evaluation-bridge.test.ts",
+        "tests/evaluation-model-workflow-evolution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "procedure-decision",
+      "include": [
+        "core/application/procedure-decision.ts"
+      ],
+      "tests": [
+        "tests/procedure-decision.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "procedure-host-control",
+      "include": [
+        "core/application/procedure-host-control.ts"
+      ],
+      "tests": [
+        "tests/procedure-host-control.test.ts",
+        "tests/experience-usage.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "session-memory-scope",
+      "include": [
+        "core/application/use-cases/session-memory-scope.ts"
+      ],
+      "tests": [
+        "tests/session-memory-scope.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "datasec-cli-and-capability",
+      "include": [
+        "bin/craft-datasec-hook.ts",
+        "capability/craft-datasec/build.ts",
+        "capability/craft-datasec/hook.ts",
+        "capability/craft-datasec/rules.ts",
+        "capability/craft-datasec/vault.ts"
+      ],
+      "tests": [
+        "tests/craft-datasec.test.ts"
       ],
       "branches": true
     }

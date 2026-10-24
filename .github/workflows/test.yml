@@ -49,7 +49,7 @@ jobs:
         # `test:ts` only executes assertions.  The separate, per-module gate is
         # the release contract for line/function/branch coverage and must run in
         # CI too; a descriptive step name is not evidence.
-        run: pnpm run audit:coverage-inventory -- --check && pnpm run test:ts && pnpm run test:coverage-gates
+        run: pnpm run audit:coverage-inventory --check && pnpm run test:ts && pnpm run test:coverage-gates
       - name: CLI smoke test
         run: pnpm run test:smoke
       - name: Isolated plugin smoke test

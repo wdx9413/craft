@@ -10,6 +10,7 @@ import test, { mock } from "node:test";
 import { DEFAULT_RULES, Sanitizer, type Json } from "../capability/craft-datasec/rules.ts";
 import { TokenVault } from "../capability/craft-datasec/vault.ts";
 import { blank, blankResult, FAILURE, handleHook, type Event, type HookInput, type Host } from "../capability/craft-datasec/hook.ts";
+import { runDataSecHookCli, runIfInvoked, writeCliResult } from "../bin/craft-datasec-hook.ts";
 import { allReleaseProducts, externalDistributionContract, externalMarketplaceProducts, releaseManifest, releaseProduct, releaseProductNames } from "../core/release-catalog.ts";
 
 // Synthetic values are assembled to keep literal PII-shaped data out of the source fixture.
@@ -17,6 +18,43 @@ const phone = ["138", "1234", "5678"].join("");
 const identity = ["110105", "19900307", "6754"].join("");
 const bank = ["622202", "1234567890123"].join("");
 const project = resolve(import.meta.dirname, "..");
+await import("../capability/craft-datasec/build.ts");
+
+test("Datasec CLI validates events, uses configured rules, and emits closed failure responses", () => {
+  const f = fixture();
+  try {
+    assert.equal(runDataSecHookCli([], "{}").exitCode, 2);
+    assert.equal(runDataSecHookCli(["bad", "PostToolUse"], "{}").exitCode, 2);
+    assert.equal(runDataSecHookCli(["codex", "bad"], "{}").exitCode, 2);
+    writeFileSync(join(f.temp, "rules.json"), JSON.stringify([{ name: "secret", pattern: "secret" }]));
+    const result = runDataSecHookCli(["claude", "PostToolUse"], JSON.stringify({ tool_response: { text: "secret" } }), {
+      CRAFT_DATASEC_DIR: f.root, CRAFT_DATASEC_RULES: join(f.temp, "rules.json"),
+    });
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout!, /\[CRAFT_DATASEC_secret_/u);
+    assert.deepEqual(JSON.parse(runDataSecHookCli(["codex", "UserPromptSubmit"], "{}", {}).stdout!), {});
+    assert.match(runDataSecHookCli(["claude", "PostToolUse"], "not json", { CRAFT_DATASEC_DIR: f.root }).stdout!, /"continue":false/u);
+    assert.match(runDataSecHookCli(["claude", "PreToolUse"], "not json", {}).stdout!, /"permissionDecision":"deny"/u);
+    assert.match(runDataSecHookCli(["codex", "PostToolUse"], "[]", { CRAFT_DATASEC_DIR: f.root }).stdout!, /"decision":"block"/u);
+    assert.match(runDataSecHookCli(["claude", "PostToolUse"], "{}", { CRAFT_DATASEC_RULES: join(f.temp, "missing.json") }).stdout!, /"continue":false/u);
+  } finally { f.close(); }
+});
+
+test("Datasec executable guard and output writer are deterministic", () => {
+  const run = () => ({ exitCode: 7, stdout: "out\n", stderr: "err\n" });
+  assert.equal(runIfInvoked(undefined, "/bin/hook.mjs", run), null);
+  assert.equal(runIfInvoked("/bin/other.mjs", "/bin/hook.mjs", run), null);
+  assert.deepEqual(runIfInvoked("/bin/hook.mjs", "/bin/hook.mjs", run), run());
+  const seen: string[] = [];
+  const output = { write(value: string) { seen.push(value); } } as unknown as NodeJS.WriteStream;
+  const errors = { write(value: string) { seen.push(value); } } as unknown as NodeJS.WriteStream;
+  writeCliResult(null, output, errors);
+  writeCliResult({ exitCode: 0, stdout: "ok\n", stderr: "warn\n" }, output, errors);
+  assert.deepEqual(seen, ["warn\n", "ok\n"]);
+  const built = JSON.parse(readFileSync(join(project, "plugins/craft-datasec/dist/build.json"), "utf8"));
+  assert.equal(built.name, "craft-datasec");
+  assert.equal(built.version, "0.12.106");
+});
 test("independent Datasec is discoverable in release catalogs without joining the Context runtime", () => {
   assert.equal(releaseProduct("craft-datasec")!.surface, "standalone-hooks");
   assert.equal(releaseProduct("unknown"), undefined);
