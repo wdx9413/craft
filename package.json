@@ -52,7 +52,7 @@
     "lint": "node --experimental-strip-types scripts/ci/lint.ts",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "build:common": "node --experimental-strip-types scripts/release/build-common-packages.ts",
-    "build:deepseek": "node node_modules/typescript/bin/tsc -p adapters/deepseek-harness/tsconfig.json",
+    "build:deepseek": "node node_modules/typescript/bin/tsc -p adapters/deepseek-harness/tsconfig.json && node -e \"const fs=require('node:fs'); fs.mkdirSync('dist/adapters/deepseek-harness',{recursive:true}); fs.copyFileSync('adapters/deepseek-harness/package.json','dist/adapters/deepseek-harness/package.json')\"",
     "pack:adapters": "node --experimental-strip-types scripts/release/pack-adapters.ts"
   },
   "engines": {

@@ -285,6 +285,9 @@ test("content titles provide readable Unicode filenames without changing identit
   assert.throws(() => contentTitle("", undefined, ""), /title/);
   assert.throws(() => contentTitle("body", "token: 12345678", "fallback"), /credentials|secrets/);
   assert.match(content.namedPathFor("knowledge", "named", undefined, "!!!"), /untitled--[a-f0-9]{12}\.md$/);
+  const longTitle = "不要在未满足以下条件时" + "背景说明 ".repeat(100);
+  const longTitlePath = content.namedPathFor("memory", "long-title", 1, longTitle, undefined, "global");
+  assert(Buffer.byteLength(longTitlePath.split(/[\\/]/u).at(-1)!, "utf8") < 180);
   assert.match(content.pathFor("memory", "memory-path"), /memory-path\.md$/);
   const ref = await content.write({ kind: "knowledge", record_id: "metadata-title", version: 1, title: "可读名称 / API", scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body" });
   const withoutTitle = (await readFile(ref.path, "utf8")).replace(/title: .*\n/u, "");

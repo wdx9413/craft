@@ -128,14 +128,20 @@ export function contentTitle(body: string, title?: string, fallback = "untitled"
 }
 
 function titleSlug(title: string): string {
-  const slug = title
+  const normalized = title
     .replace(/[\\/]/gu, " ")
     .replace(/[^\p{L}\p{N}._ -]/gu, " ")
     .trim()
     .replace(/\s+/gu, "-")
     .replace(/-+/gu, "-")
-    .replace(/^[.-]+|[.-]+$/gu, "")
-    .slice(0, 96);
+    .replace(/^[.-]+|[.-]+$/gu, "");
+  // Bound by encoded bytes: CJK characters can take three bytes each.
+  // The stable record hash in the filename preserves uniqueness after trim.
+  let slug = "";
+  for (const character of normalized) {
+    if (Buffer.byteLength(slug + character, "utf8") > 80) break;
+    slug += character;
+  }
   return slug || "untitled";
 }
 

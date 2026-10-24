@@ -18,7 +18,8 @@ test("editable Wiki material remains separate from evidence-backed claim review"
     await assert.rejects(Promise.resolve().then(() => service.knowledgeClaimSave({ claim_id: "claim-1", kind: "fact", content: "Different.", evidence_ids: [evidence.id] })), /idempotency/);
     await assert.rejects(Promise.resolve().then(() => service.knowledgeClaimSave({ kind: "bad", content: "x", evidence_ids: [evidence.id] })), /unsupported/);
     await assert.rejects(Promise.resolve().then(() => service.knowledgeClaimSave({ kind: "fact", content: "token=leak", evidence_ids: [evidence.id] })), /sensitive/);
-    const reviewed = service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "human", reason: "Checked source." }).claim as JsonObject; assert.equal(reviewed.status, "reviewed"); assert.equal((service.knowledgeClaimGet({ claim_id: claim.id, version: 1 }).claim as JsonObject).status, "candidate");
+    await assert.rejects(Promise.resolve().then(() => service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "human", reason: "Checked source." })), /managed Host review and independent effectiveness evaluation/u);
+    assert.equal((service.knowledgeClaimGet({ claim_id: claim.id }).claim as JsonObject).status, "candidate");
     await assert.rejects(Promise.resolve().then(() => service.knowledgeClaimReview({ claim_id: claim.id, status: "candidate", reviewer: "human", reason: "no" })), /unsupported/);
     await assert.rejects(Promise.resolve().then(() => service.knowledgeClaimReview({ claim_id: claim.id, status: "bad", reviewer: "human", reason: "no" })), /unsupported/);
     const page = (await service.wikiPageSave({ page_id: "page", title: "Playbook", body: "Editable explanation.", scope: "project:a", claim_ids: [claim.id], author: "agent" })).page as JsonObject;

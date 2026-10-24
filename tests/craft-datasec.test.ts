@@ -27,7 +27,7 @@ test("Datasec CLI validates events, uses configured rules, and emits closed fail
     assert.equal(runDataSecHookCli(["bad", "PostToolUse"], "{}").exitCode, 2);
     assert.equal(runDataSecHookCli(["codex", "bad"], "{}").exitCode, 2);
     writeFileSync(join(f.temp, "rules.json"), JSON.stringify([{ name: "secret", pattern: "secret" }]));
-    const result = runDataSecHookCli(["claude", "PostToolUse"], JSON.stringify({ tool_response: { text: "secret" } }), {
+    const result = runDataSecHookCli(["claude", "PostToolUse"], JSON.stringify({ hook_event_name: "PostToolUse", session_id: "fixture-session", tool_response: { text: "secret" } }), {
       CRAFT_DATASEC_DIR: f.root, CRAFT_DATASEC_RULES: join(f.temp, "rules.json"),
     });
     assert.equal(result.exitCode, 0);
@@ -53,7 +53,7 @@ test("Datasec executable guard and output writer are deterministic", () => {
   assert.deepEqual(seen, ["warn\n", "ok\n"]);
   const built = JSON.parse(readFileSync(join(project, "plugins/craft-datasec/dist/build.json"), "utf8"));
   assert.equal(built.name, "craft-datasec");
-  assert.equal(built.version, "0.12.106");
+  assert.equal(built.version, "0.1.2");
 });
 test("independent Datasec is discoverable in release catalogs without joining the Context runtime", () => {
   assert.equal(releaseProduct("craft-datasec")!.surface, "standalone-hooks");

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { CraftService } from "../../core/service.ts";
 import { payload, stableDigest } from "../../core/digest.ts";
 import { ProcedureDefinitionStore } from "../../capability/craft-experience/procedure-definition.ts";
 
-export const scope = "project:invocation";
+export const scope = `project:${createHash("sha256").update("named:invocation").digest("hex").slice(0, 24)}`;
 export const spec = (preconditions: string[] = []): JsonObject => ({
   steps: [{ id: "review", type: "instruction", side_effect: "read_only", requires: ["diff"], provides: ["report"], instruction: "Review diff" }],
   composition: { entries: [{ id: "review", title: "Review", required_inputs: ["diff"], preconditions, routes: [{ exit_id: "reviewed", step_ids: ["review"] }] }],
@@ -22,6 +23,7 @@ export async function fixture() {
   store.create("scope_alias", "observed-project-root", { status: "active", scope: { kind: "project", id: "project:internet-product-engineering" },
     alias_kind: "path", alias: root, alias_digest: stableDigest(root) });
   let service = new CraftService(store), n = 0;
+  service.scopeIdentityResolveProject({ project_root: root, project_id: "invocation" });
   store.create("task", "task", { status: "active" });
   store.create("task_control_contract", "contract", { task_id: "task", allowed_effects: ["read_only", "local_write"] });
   store.create("task_run", "run", { contract_id: "contract" });

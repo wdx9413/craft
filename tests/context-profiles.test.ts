@@ -18,7 +18,7 @@ test("bounded context profiles remain separate from generic task-graph execution
     service.workspaceOpen({ workspace_id: "lesson_ws", name: "Lesson workspace", root_path: worktree, include_paths: ["docs"] });
     service.workObjectPut({ workspace_id: "lesson_ws", object_id: "brief", object_type: "brief", name: "Lesson brief", data: { grade: 5 }, expected_state_revision: 1 });
     service.workObjectPut({ workspace_id: "lesson_ws", object_id: "plan", object_type: "plan", name: "Lesson plan", data: { topic: "fractions" }, expected_state_revision: 2 });
-    service.memoryRemember({ memory_id: "preference", kind: "preference", scope: "user", content: "Use editable visual materials", source: "user" });
+    service.memoryRemember({ memory_id: "preference", kind: "preference", scope: "workspace", workspace_id: "lesson_ws", content: "Use editable visual materials", source: "user" });
     service.memoryRemember({ memory_id: "fact", kind: "fact", scope: "task", task_id: task.id, content: "The lesson targets grade five", source: "brief" });
     const profile = service.contextProfileSave({ profile_id: "lesson_context", name: "Lesson authoring", task_id: task.id, workspace_id: "lesson_ws",
       memory_kinds: ["preference", "fact"], object_types: ["brief"], required_memory_ids: ["preference"], required_object_ids: ["brief"], max_items: 3, max_chars: 1_000 }).profile as JsonObject;
