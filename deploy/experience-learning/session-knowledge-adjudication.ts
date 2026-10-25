@@ -13,6 +13,11 @@ function safeFailureKind(error: unknown): string {
   const name = error instanceof Error ? error.name : "Error";
   return /^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(name) ? name : "Error";
 }
+function safeFailureCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(code) ? code : undefined;
+}
 function providerFor(profile: JsonObject, detail: JsonObject, providers: readonly ModelProviderSpec[]): ModelProviderSpec | undefined {
   return providers.find(item => item.provider === profile.provider)
     ?? (detail.provider ? defineProvider(object(detail.provider, "Knowledge adjudication provider")) : undefined);
@@ -139,7 +144,7 @@ export async function runSessionKnowledgeAdjudicationOnce(deps: DistillationDepe
       adjudication_id: adjudication.id, raw_content_stored: false });
   } catch (error) {
     if (deps.knowledge_adjudication_cursor_file) await recordKnowledgeAdjudicationFailure(
-      deps.knowledge_adjudication_cursor_file, String(current.id), safeFailureKind(error), now);
+      deps.knowledge_adjudication_cursor_file, String(current.id), safeFailureKind(error), now, safeFailureCode(error));
     throw error;
   }
 }

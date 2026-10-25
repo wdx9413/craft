@@ -40,7 +40,8 @@ test("adjudication cursor rejects malformed IDs and corrupted state", async () =
     assert.throws(() => readKnowledgeAdjudicationCursor(f.path));
     writeFileSync(f.path, JSON.stringify({ schema: "craft.knowledge-session-adjudication-cursor.v2", after_id: "!" }));
     assert.throws(() => readKnowledgeAdjudicationCursor(f.path), /cursor is invalid/u);
-    for (const retries of [null, [], { "!": {} }, { "case-a": null }, { "case-a": { attempts: 0, last_failure_at: "bad", next_attempt_at: "bad", failure_kind: "!" } }]) {
+    for (const retries of [null, [], { "!": {} }, { "case-a": null }, { "case-a": { attempts: 0, last_failure_at: "bad", next_attempt_at: "bad", failure_kind: "!" } },
+      { "case-a": { attempts: 1, last_failure_at: "2026-10-23T00:00:00.000Z", next_attempt_at: "2026-10-23T00:00:30.000Z", failure_kind: "Error", failure_code: "unsafe code" } }]) {
       writeFileSync(f.path, JSON.stringify({ schema: "craft.knowledge-session-adjudication-cursor.v2", after_id: null, retries }));
       assert.throws(() => readKnowledgeAdjudicationRetries(f.path), /retry state is invalid/u);
     }
@@ -78,7 +79,12 @@ test("adjudication failures use bounded exponential backoff and clear after reco
     assert.equal(second.attempts, 2);
     assert.equal(second.next_attempt_at, "2026-10-23T00:02:00.000Z");
     assert.deepEqual(readKnowledgeAdjudicationRetries(f.path), { "case-a": second });
+    const coded = await recordKnowledgeAdjudicationFailure(f.path, "case-b", "Error", "2026-10-23T00:02:00.000Z", "ERR_MCP_INTERNAL_ERROR");
+    assert.equal(coded.failure_code, "ERR_MCP_INTERNAL_ERROR");
+    await assert.rejects(recordKnowledgeAdjudicationFailure(f.path, "case-c", "Error", "2026-10-23T00:02:00.000Z", "unsafe code"), /failure code/u);
     await clearKnowledgeAdjudicationFailure(f.path, "case-a");
+    assert.deepEqual(readKnowledgeAdjudicationRetries(f.path), { "case-b": coded });
+    await clearKnowledgeAdjudicationFailure(f.path, "case-b");
     assert.deepEqual(readKnowledgeAdjudicationRetries(f.path), {});
     assert.equal(readKnowledgeAdjudicationCursor(f.path), null);
     await clearKnowledgeAdjudicationFailure(f.path, "case-a");

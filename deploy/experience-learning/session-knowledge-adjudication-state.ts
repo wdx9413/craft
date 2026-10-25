@@ -9,7 +9,7 @@ const MAX_STATE_BYTES = 4_194_304;
 const RETRY_BASE_MS = 30_000;
 const RETRY_MAX_MS = 3_600_000;
 
-export type KnowledgeAdjudicationRetry = { attempts: number; last_failure_at: string; next_attempt_at: string; failure_kind: string };
+export type KnowledgeAdjudicationRetry = { attempts: number; last_failure_at: string; next_attempt_at: string; failure_kind: string; failure_code?: string };
 type KnowledgeAdjudicationState = { after_id: string | null; retries: Record<string, KnowledgeAdjudicationRetry> };
 
 function checkCursorDirectory(path: string): void {
@@ -41,7 +41,8 @@ function readState(path: string): KnowledgeAdjudicationState {
       if (!ID.test(id) || !item || typeof item !== "object" || !Number.isSafeInteger(item.attempts) || Number(item.attempts) < 1
         || typeof item.last_failure_at !== "string" || !Number.isFinite(Date.parse(item.last_failure_at))
         || typeof item.next_attempt_at !== "string" || !Number.isFinite(Date.parse(item.next_attempt_at))
-        || typeof item.failure_kind !== "string" || !/^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(item.failure_kind)) {
+        || typeof item.failure_kind !== "string" || !/^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(item.failure_kind)
+        || item.failure_code !== undefined && (typeof item.failure_code !== "string" || !/^[A-Z][A-Z0-9_]{0,63}$/u.test(item.failure_code))) {
         throw new Error("Knowledge adjudication retry state is invalid");
       }
     }
@@ -71,15 +72,17 @@ export async function writeKnowledgeAdjudicationCursor(path: string, afterId: st
   await writeState(path, { ...state, after_id: afterId });
 }
 
-export async function recordKnowledgeAdjudicationFailure(path: string, caseId: string, failureKind: string, now: string): Promise<KnowledgeAdjudicationRetry> {
+export async function recordKnowledgeAdjudicationFailure(path: string, caseId: string, failureKind: string, now: string, failureCode?: string): Promise<KnowledgeAdjudicationRetry> {
   if (!ID.test(caseId) || !/^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(failureKind)) throw new Error("Knowledge adjudication retry input is invalid");
+  if (failureCode !== undefined && !/^[A-Z][A-Z0-9_]{0,63}$/u.test(failureCode)) throw new Error("Knowledge adjudication failure code is invalid");
   const nowMs = Date.parse(now);
   if (!Number.isFinite(nowMs)) throw new Error("Knowledge adjudication retry time is invalid");
   const state = readState(path), prior = state.retries[caseId];
   if (!prior && Object.keys(state.retries).length >= MAX_RETRIES) throw new Error("Knowledge adjudication retry capacity reached");
   const attempts = Math.min(Number(prior?.attempts ?? 0) + 1, 31);
   const delay = Math.min(RETRY_BASE_MS * 2 ** Math.min(attempts - 1, 16), RETRY_MAX_MS);
-  const retry = { attempts, last_failure_at: new Date(nowMs).toISOString(), next_attempt_at: new Date(nowMs + delay).toISOString(), failure_kind: failureKind };
+  const retry = { attempts, last_failure_at: new Date(nowMs).toISOString(), next_attempt_at: new Date(nowMs + delay).toISOString(), failure_kind: failureKind,
+    ...(failureCode ? { failure_code: failureCode } : {}) };
   await writeState(path, { ...state, retries: { ...state.retries, [caseId]: retry } });
   return retry;
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,14 +19,15 @@ const caseRecord: JsonObject = { id: "held-case", version: 1, identity_digest: "
 
 function fixture(options: { cases?: JsonObject[]; caseListResult?: JsonObject; runsResult?: JsonObject; evidenceSession?: string; evidence?: JsonObject;
   response?: string; profileStatus?: string; profileResult?: JsonObject; profileDetail?: JsonObject; profile?: JsonObject; provider?: JsonObject;
-  packetResult?: JsonObject; packetByClaim?: Record<string, JsonObject>; throwOn?: string; throwRaw?: boolean; throwName?: string;
-  traceStartResult?: JsonObject; adjudicationResult?: JsonObject;
+  packetResult?: JsonObject; packetByClaim?: Record<string, JsonObject>; throwOn?: string; throwRaw?: boolean; throwName?: string; throwCode?: string;
+  traceStartResult?: JsonObject; adjudicationResult?: JsonObject; evidenceDirect?: boolean;
   usage?: { input_tokens: number; output_tokens: number; cache_hit_tokens?: number; cache_miss_tokens?: number } | null; acquire?: boolean } = {}) {
   const calls: Array<{ name: string; args: JsonObject }> = [];
   let failTransportOnce = options.throwOn === "transport.complete";
   const client: ExperienceLearningClient = { async call(name, args = {}) {
     calls.push({ name, args });
-    if (options.throwOn === name) { if (options.throwRaw) throw "controlled failure"; throw Object.assign(new Error("controlled failure"), { name: options.throwName ?? "TypeError" }); }
+    if (options.throwOn === name) { if (options.throwRaw) throw "controlled failure"; throw Object.assign(new Error("controlled failure"), {
+      name: options.throwName ?? "TypeError", ...(options.throwCode ? { code: options.throwCode } : {}) }); }
     if (name === "craft_knowledge_evaluation_case_list") {
       if (options.caseListResult) return options.caseListResult;
       const allCases = options.cases ?? [caseRecord];
@@ -40,7 +41,8 @@ function fixture(options: { cases?: JsonObject[]; caseListResult?: JsonObject; r
       const claim = options.packetByClaim?.[claimId] ?? { id: "candidate-1", version: 2, identity_digest: "claim-identity", content_digest: "claim-content", content: "事实内容", title: "事实", tags: [] };
       return options.packetResult ?? { status: "ready", claim_status: "candidate", packet: { claim } };
     }
-    if (name === "craft_evidence_get") return options.evidence ? { evidence: options.evidence } : { evidence: { id: "held-evidence", source_type: "program", confidence: "confirmed", claim: "任务验证通过",
+    if (name === "craft_evidence_get") return options.evidenceDirect ? (options.evidence ?? { id: "held-evidence", source_type: "program", confidence: "confirmed", claim: "任务验证通过",
+      metadata: { source_session_id: options.evidenceSession ?? "held-session", task_id: "held-task" } }) : options.evidence ? { evidence: options.evidence } : { evidence: { id: "held-evidence", source_type: "program", confidence: "confirmed", claim: "任务验证通过",
       metadata: { source_session_id: options.evidenceSession ?? "held-session", task_id: "held-task" } } };
     if (name === "craft_evaluation_model_profile_ensure_single") return options.profileResult ?? (options.profileStatus === "missing" ? { status: "missing" } : { status: "ready_for_adapter", profile: options.profile ?? { id: "profile", version: 1, provider: "codex-cli", model: "gpt-6-luna", max_output_tokens: 256 } });
     if (name === "craft_evaluation_model_profile_get") return options.profileDetail ?? { readiness: { status: "ready_for_adapter" }, ...(options.provider ? { provider: options.provider } : {}) };
@@ -322,6 +324,31 @@ test("malformed Host output is retained only as a failed Trace and never adjudic
     const fallbackDate = fixture({ adjudicationResult: { case: case_, adjudication: { id: "a", decision: "accepted" } } });
     assert.equal((await runSessionKnowledgeAdjudicationOnce({ client: fallbackDate.client, providers: [provider], transport: fallbackDate.transport })).status, "adjudicated");
   }
+});
+
+test("retry cursor keeps only a validated structured MCP error code", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-knowledge-adjudication-code-"));
+  const cursor = join(root, "knowledge", "cursor.json");
+  try {
+    const f = fixture({ throwOn: "craft_knowledge_evaluation_case_adjudicate", throwCode: "ERR_MCP_INTERNAL_ERROR" });
+    await assert.rejects(runSessionKnowledgeAdjudicationOnce({ client: f.client, transport: f.transport, providers: [provider],
+      knowledge_adjudication_cursor_file: cursor }));
+    const saved = readKnowledgeAdjudicationRetries(cursor)["held-case"];
+    assert.equal(saved?.failure_kind, "TypeError");
+    assert.equal(saved?.failure_code, "ERR_MCP_INTERNAL_ERROR");
+    assert.equal(readFileSync(cursor, "utf8").includes("controlled failure"), false);
+
+    const unsafe = fixture({ throwOn: "craft_knowledge_evaluation_case_adjudicate", throwCode: "private/path" });
+    await assert.rejects(runSessionKnowledgeAdjudicationOnce({ client: unsafe.client, transport: unsafe.transport, providers: [provider],
+      knowledge_adjudication_cursor_file: join(root, "knowledge", "unsafe.json") }));
+    assert.equal(readKnowledgeAdjudicationRetries(join(root, "knowledge", "unsafe.json"))["held-case"]?.failure_code, undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("adjudication accepts a direct Evidence response shape", async () => {
+  const f = fixture({ evidenceDirect: true });
+  const result = await runSessionKnowledgeAdjudicationOnce({ client: f.client, transport: f.transport, providers: [provider] });
+  assert.equal(result.status, "adjudicated");
 });
 
 test("malformed MCP replies and raw failures retain safe retry state", async () => {
