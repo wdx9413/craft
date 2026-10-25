@@ -458,13 +458,19 @@ test("Context Hook keeps sibling recall available after a rejected memory captur
     f.service.memoryCaptureUserStatement = original;
     await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "capture-success", prompt: "记住：以后默认使用 Node.js" });
     await bridge.handle("context", { hook_event_name: "SessionStart", cwd, session_id: "session" });
+    const resumedSession = f.store.list("context_hook_session", 10).find(item => item.session_id === "session");
+    assert.deepEqual(resumedSession?.pending_turn_ids, []);
     await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "turn", prompt: "Fix the failing test" });
     await bridge.handle("context", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: "turn", tool_name: "Edit" });
     await bridge.handle("context", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: "turn", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     await bridge.handle("context", { hook_event_name: "Stop", cwd, session_id: "session", turn_id: "turn" });
     await bridge.handle("context", { hook_event_name: "SessionEnd", cwd, session_id: "session" });
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
-    assert.equal(f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.lifecycle").length, 9);
+    const lifecycle = f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.lifecycle");
+    assert.deepEqual(lifecycle.map(event => ({ member: (event.payload as JsonObject).member, event: (event.payload as JsonObject).event })), [
+      { member: "experience", event: "Stop" },
+      { member: "memory", event: "SessionEnd" },
+    ]);
     assert.deepEqual(await bridge.handle("context", { hook_event_name: "UnknownEvent", cwd }), {});
   } finally { await dispose(f); }
 });

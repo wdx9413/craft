@@ -400,14 +400,21 @@ export class CodexHookBridge {
       const event = text(input.hook_event_name) as HookEvent | null;
       input = this.correlateTurn(input, event);
       if (member === "context") {
-        if (event === "SessionStart" || event === "SessionEnd") {
-          for (const component of CONTEXT_MEMBERS) this.lifecycle(component, event, input, component === "memory");
+        if (event === "SessionStart") return {};
+        if (event === "SessionEnd") {
+          // Only Memory has lifecycle work here: archive temporary facts and
+          // schedule maintenance. Readiness-only records for the other members
+          // added repeated SQLite writes without representing capability use.
+          this.lifecycle("memory", event, input);
           return {};
         }
         if (event === "UserPromptSubmit") return await this.prompt(member, input);
         if (event === "PostToolUse") return this.tool(input);
         if (event === "Stop") {
-          for (const component of CONTEXT_MEMBERS) this.stop(component, input);
+          // Experience owns task finalization. It also records the one Context
+          // usage receipt, so invoking the other two no-op stop handlers only
+          // duplicates feedback, activation proofs, and lifecycle writes.
+          this.stop("experience", input);
         }
         return {};
       }

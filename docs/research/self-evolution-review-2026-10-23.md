@@ -383,4 +383,8 @@ Experience 范围修复：新写入子记录缺父项且无可确定范围时失
 - Craft 旧 Trace 只在 Store 打开后开始记录，进程被超时杀掉时可能没有完成记录。新增 `trace/hook-runtime/v1/*.jsonl` 内容无关诊断：先追加 `started`（成员、事件、匿名会话摘要），Store 打开后完成时追加阶段耗时；不记录提示词、工具输入或原始会话 ID。超时/崩溃会留下无匹配 `finished` 的 `started` 记录，能定位 Craft Hook 的事件，但不能单独证明进程为何终止。
 - 新诊断模块独立覆盖门行/函数/分支均 100%；诊断单测 5/5，打包 Hook 进程测试 6/6。Codex App 随附 Node `v24.21.0`，隔离数据根、串行运行 30 次 `UserPromptSubmit` Hook：失败 0，最小值 426 ms，P50 444 ms、P95 548 ms、P99/最大值 592 ms。这是本地子进程基准，不是交互式 Host 负载或并发尾延迟证明。
 - `.108` 发布包完整插件链通过，含打包 MCP 与本地隔离自动演化 smoke；MCP initialize/tools-list 通过，工具调用耗时为 fixture semantic 2.59 秒、大仓 basic 6.70 秒、大仓首次 semantic 45.27 秒。45.27 秒对应主动 semantic 索引工具调用，仍是未解决的性能热点。自动演化 smoke 使用隔离数据和本地模型 fixture，不能代替真实用户 Host 效果。
-- 新 Hook 诊断与性能修复尚未推送、尚未经固定远端 URL 安装；当前 Host 仍缓存 `.105`，新日志无法回溯旧超时。
+- Craft `.108` 已推送到 `wdx9413/craft/main`（`97ad0f63`）；Marketplace `.108` 已推送到 `wdx9413/craft-marketplace/main`（`4ec8262`），并由 Codex CLI 从远端刷新，插件清单读回 `craft-context 0.12.108`。
+- 新建的 Codex CLI `gpt-6-luna` Host 进程返回 `READY`，并产生 SessionStart、UserPromptSubmit、Stop、SessionEnd 四组完整 Hook 诊断记录，未匹配的 started 记录为 0。真实数据根上的 Store 打开耗时为 2–6 ms，处理器总耗时分别为 1,655 ms、1,648 ms、1,998 ms、1,361 ms；这证明 `.108` Hook 已运行，但单次会话不能代表 P95。SessionStart/Stop 已接近 3 秒 Hook 上限。
+- 该最小 Host 调用报告总输入 25,555 tokens（12,544 cached）；该值包含 Host/system/plugin 全部输入，不能归因于 Craft Context 注入。仍需单独测量 Context 实际发出与模型实际使用 token。
+- 本轮 `.109` 优化去掉 SessionStart 三个 readiness/activation 写入，SessionEnd 只留 Memory 归档，Stop 只留 Experience 最终化与一次 Context 使用反馈；相关行为测试 57/57 通过，桥接模块覆盖行/分支/函数均 100%。`.109` 的远端发布和新 Host P95/并发验证仍待完成。
+- `.109` 打包 Hook 在隔离数据根按事件各运行 20 次：SessionStart P50/P95/最大值 397/433/504 ms，UserPromptSubmit 498/609/662 ms，PostToolUse 404/470/486 ms，Stop 498/648/749 ms，SessionEnd 502/619/648 ms。样本是单进程串行子进程，不含正式 6.1 GB 数据库负载和并发；发布后的 Host 复测仍是性能验收条件。

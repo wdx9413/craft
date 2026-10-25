@@ -140,12 +140,13 @@ test("packaged Hook does not run legacy partition migration during lifecycle sta
   const f = await replayFixture("codex");
   try {
     const now = new Date().toISOString();
-    // A maintenance-only legacy row must not prevent a short-lived lifecycle Hook
-    // from recording its own event. Full CLI/MCP startup still validates it.
+    // A maintenance-only legacy row must not prevent a short-lived Hook from
+    // recording its trace. Full CLI/MCP startup still validates it.
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run("memory_ledger", "legacy-invalid", 1, "{", now, now);
     await f.execute({ hook_event_name: "SessionStart" });
-    assert(f.store.events("codex-hook").some(event => event.event_type === "codex_hook.lifecycle"));
+    assert(f.store.list("trace_event", 100).some(event => event.operation_id === "handle.context.SessionStart"));
+    assert.equal(f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.lifecycle").length, 0);
     assert.equal(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='memory_ledger' AND id='legacy-invalid'")
       .get()?.payload_json, "{");
   } finally { await f.close(); }

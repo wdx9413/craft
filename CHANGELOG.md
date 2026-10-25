@@ -1,3 +1,9 @@
+## v0.12.109（降低 Hook 生命周期写入）
+
+- SessionStart 保留会话恢复清理，但移除三个能力重复写入的 readiness/activation 记录；SessionEnd 只执行 Memory 归档，Stop 只执行 Experience 收尾并记录一次 Context 使用反馈。
+- 保留 Context Hook Trace 与事件诊断，避免把 readiness 误记为能力使用；降低 3 秒生命周期 Hook 在真实数据上的锁争用和尾延迟风险。
+- Hook 桥接覆盖 100% 行、分支、函数；相关桥接、打包进程和诊断测试通过。
+
 ## v0.12.108（Hook 超时留痕与范围存储稳定性）
 
 - Hook 在打开 Store 前写入不含会话正文的事件启动记录，完成时补充 Store 与处理阶段耗时；超时留下的未完成记录可定位到 Craft 成员和事件。
