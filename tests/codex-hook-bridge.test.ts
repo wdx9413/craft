@@ -46,6 +46,8 @@ test("session-only Hook events join one generated turn and stop cannot finalize 
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "generated-turn" };
     await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "verify changes" });
     const session = f.store.list("context_hook_session", 10)[0]!;
+    assert.equal(session.trace_id, session.id);
+    assert.equal(f.store.traceShards.find("context_hook_session", String(session.id), undefined, String(session.id))?.session_id, "generated-turn");
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     const journal = f.store.list("codex_hook_turn", 10)[0]!;

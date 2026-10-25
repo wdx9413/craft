@@ -83,8 +83,9 @@ async function main(): Promise<void> {
     const service = await CraftService.open(store);
     serviceOpenMs = performance.now() - serviceOpenStarted;
     const handlerStarted = performance.now();
-    const output = await new CodexHookBridge(service).handle(component, input);
-    handlerMs = performance.now() - handlerStarted;
+    let output;
+    try { output = await new CodexHookBridge(service).handle(component, input); }
+    finally { handlerMs = performance.now() - handlerStarted; }
     const outputStarted = performance.now();
     process.stdout.write(`${JSON.stringify(output)}\n`);
     outputWriteMs = performance.now() - outputStarted;

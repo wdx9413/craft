@@ -451,7 +451,7 @@ export class CodexHookBridge {
       const turnId = text(input.turn_id) ?? (prior?.ambiguous !== true && pending.length === 1 ? pending[0] : undefined);
       return turnId ? { ...input, turn_id: turnId } : input;
     }
-    return this.service.store.transaction(() => {
+    return this.service.store.traceTransaction(sessionKey, () => {
       const prior = this.service.store.find("context_hook_session", sessionKey);
       let pending = Array.isArray(prior?.pending_turn_ids) ? prior.pending_turn_ids as string[] : [];
       let ambiguous = prior?.ambiguous === true;
@@ -461,17 +461,17 @@ export class CodexHookBridge {
         turnId ??= `hook_turn_${sessionKey.slice(-24)}_${sequence}`;
         if (!pending.includes(turnId)) pending = [...pending, turnId];
         ambiguous ||= pending.length > 1;
-        this.service.store.save("context_hook_session", sessionKey, { scope, session_id: sessionId, sequence, last_turn_id: turnId, pending_turn_ids: pending, ambiguous, content_free: true });
+        this.service.store.save("context_hook_session", sessionKey, { trace_id: sessionKey, scope, session_id: sessionId, sequence, last_turn_id: turnId, pending_turn_ids: pending, ambiguous, content_free: true });
       } else if (event === "Stop") {
         // Overlapping turns stay ambiguous until all are closed; a delayed event
         // must never be attributed to whichever turn happens to remain.
         if (!turnId && !ambiguous && pending.length === 1) turnId = pending[0]!;
         if (event === "Stop" && turnId && pending.includes(turnId)) {
           pending = pending.filter(id => id !== turnId);
-          this.service.store.save("context_hook_session", sessionKey, { ...payload(prior!), pending_turn_ids: pending, ambiguous: pending.length > 0 && ambiguous });
+          this.service.store.save("context_hook_session", sessionKey, { ...payload(prior!), trace_id: sessionKey, pending_turn_ids: pending, ambiguous: pending.length > 0 && ambiguous });
         }
       } else if ((event === "SessionStart" || event === "SessionEnd") && prior) {
-        this.service.store.save("context_hook_session", sessionKey, { ...payload(prior), pending_turn_ids: [], ambiguous: false });
+        this.service.store.save("context_hook_session", sessionKey, { ...payload(prior), trace_id: sessionKey, pending_turn_ids: [], ambiguous: false });
       }
       return turnId ? { ...input, turn_id: turnId } : input;
     });

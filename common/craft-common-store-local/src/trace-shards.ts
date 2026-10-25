@@ -7,7 +7,7 @@ import type { JsonObject } from "./store.ts";
 
 export const TRACE_KINDS = new Set(["trace", "trace_event", "trace_feedback", "telemetry_event", "trace_archive"]);
 /** High-volume turn journals share Trace shard locking without Trace retention semantics. */
-export const TRACE_SHARDED_KINDS = new Set([...TRACE_KINDS, "codex_hook_turn", "codex_hook_signal"]);
+export const TRACE_SHARDED_KINDS = new Set([...TRACE_KINDS, "codex_hook_turn", "codex_hook_signal", "context_hook_session"]);
 export type TraceRecordRow = { kind: string; id: string; version: number; payload_json: string; created_at: string; updated_at: string };
 export type TraceEventRow = { stream: string; sequence: number; event_type: string; payload_json: string; created_at: string };
 const SHARD_COUNT = 16;

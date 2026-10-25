@@ -136,6 +136,12 @@ test("packaged Hook returns promptly instead of waiting on the full SQLite lock 
     assert(elapsed < 1_000, `Hook exceeded its contention response budget: ${elapsed.toFixed(0)}ms`);
     const traces = f.store.list("trace_event", 1_000);
     assert(traces.some(event => event.operation_id === "handle.context.UserPromptSubmit" && event.error_class === "STORAGE_BUSY"));
+    const diagnosticFiles = await readdir(join(f.store.paths.root, "trace", "hook-runtime", "v1"));
+    const diagnosticRows = (await readFile(join(f.store.paths.root, "trace", "hook-runtime", "v1", diagnosticFiles[0]!), "utf8"))
+      .trim().split("\n").map(line => JSON.parse(line) as JsonObject);
+    assert.equal(diagnosticRows[1]!.outcome, "failed");
+    assert.equal(diagnosticRows[1]!.error_code, "STORAGE_BUSY");
+    assert(Number(diagnosticRows[1]!.handler_ms) > 0);
   } finally {
     if (locked) f.store.database.exec("ROLLBACK");
     await f.close();
