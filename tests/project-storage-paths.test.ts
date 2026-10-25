@@ -9,7 +9,14 @@ import { canonicalCandidatePath, craftPaths, ensureProjectStorageDirectory, ensu
   isLegacySafeSessionId, parseSessionStorageScopeId, projectStorageDirectory, projectStorageIdentity, sessionStorageDirectory,
   sessionStorageDirectoryForScopeId, sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
 import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { sqliteBusyTimeoutMs } from "../common/craft-common-store-local/src/sqlite-busy-timeout.ts";
 import { stableDigest } from "../common/craft-common-base/src/digest.ts";
+
+test("SQLite contention timeout is short only inside Craft Hook subprocesses", () => {
+  assert.equal(sqliteBusyTimeoutMs({} as NodeJS.ProcessEnv), 15_000);
+  assert.equal(sqliteBusyTimeoutMs({ CRAFT_HOOK_MODE: "1" } as NodeJS.ProcessEnv), 750);
+  assert.equal(sqliteBusyTimeoutMs({ CRAFT_HOOK_MODE: "0" } as NodeJS.ProcessEnv), 15_000);
+});
 
 test("project storage isolates equal names and canonicalizes symlink aliases", () => {
   const root = mkdtempSync(join(tmpdir(), "craft-project-storage-"));

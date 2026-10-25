@@ -83,7 +83,7 @@ test("local contribution revisions, source/document changes and releases are pin
   const f = await fixture();
   try {
     const guard = new ContextReadGuard(f.store); guard.contribution("knowledge", { ref_id: "external" }); guard.contribution("knowledge", { claim_id: "external" }); guard.assertCurrent();
-    f.writer.create("knowledge_claim", "external", {}); assert.throws(() => guard.assertCurrent(), /changed/);
+    f.writer.create("knowledge_claim", "external", { scope: "global" }); assert.throws(() => guard.assertCurrent(), /changed/);
     const newer = new ContextReadGuard(f.store); f.writer.save("knowledge_source", "source", { ...payload(f.writer.get("knowledge_source", "source")), status: "revoked" }); assert.throws(() => newer.track("knowledge_source", "source"), /changed/);
     const local = new ContextReadGuard(f.store); local.contribution("knowledge", { claim_id: "external" }); local.assertCurrent();
   } finally { await f.close(); }
@@ -95,7 +95,7 @@ for (const member of ["knowledge", "experience"] as const) {
       const f = await fixture();
       try {
         if (member === "knowledge") {
-          f.store.create("knowledge_document", "doc", { status: "current", content_digest: "doc" });
+          f.store.create("knowledge_document", "doc", { scope: "project:race", status: "current", content_digest: "doc" });
           const claim = f.store.create("knowledge_claim", "claim", { source_id: "source", document_id: "doc", document_digest: "doc", scope: "project:race", status: "candidate", content: "alpha private claim", content_digest: "claim", evidence_ids: [], scope_envelope: f.memory.scope_envelope });
           attachVerifiedPromotionFixture(f.store, claim);
         } else {

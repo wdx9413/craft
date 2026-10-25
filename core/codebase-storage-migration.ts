@@ -52,8 +52,8 @@ function snapshotTree(root: string): { directories: string[]; files: Set<string>
     for (const name of readdirSync(directory)) {
       const path = join(directory, name), stat = lstatSync(path);
       if (stat.isSymbolicLink()) throw new Error("source_snapshot_unsafe");
-      if (stat.isDirectory()) { directories.push(relative(root, path)); walk(path); }
-      else if (stat.isFile()) files.add(relative(root, path));
+      if (stat.isDirectory()) { directories.push(relative(root, path).replaceAll("\\", "/")); walk(path); }
+      else if (stat.isFile()) files.add(relative(root, path).replaceAll("\\", "/"));
       else throw new Error("source_snapshot_unsafe");
     }
   };
@@ -254,7 +254,7 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
       const sourceStat = lstatSync(entry.source_root);
       if (sourceStat.isSymbolicLink() || !sourceStat.isDirectory()) throw new Error("source_snapshot_unsafe");
       const tree = snapshotTree(entry.source_root);
-      const declared = new Set((payload.entries as SnapshotFile[]).map(file => file.path));
+      const declared = new Set((payload.entries as SnapshotFile[]).map(file => file.path.replaceAll("\\", "/")));
       if (declared.size !== payload.entries.length || tree.files.size !== declared.size
         || [...tree.files].some(path => !declared.has(path))) throw new Error("snapshot_manifest_mismatch");
       let currentDirectory = projectDirectory;

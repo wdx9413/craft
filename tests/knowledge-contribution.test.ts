@@ -201,7 +201,7 @@ async function fixture() {
   const otherRoot = join(root, "other-project"); await mkdir(otherRoot);
   store.create("scope_alias", "other-path", { scope: { kind: "project", id: "other" }, alias_kind: "path", alias: otherRoot, status: "active" });
   const reader = new KnowledgeContribution(store);
-  store.create("knowledge_source", "source", { status: "active", trust: "verified", content_digest: "source-v1" });
+  store.create("knowledge_source", "source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", content_digest: "source-v1" });
   const claim = (id: string, extra: JsonObject = {}) => {
     const { status = "reviewed", ...rest } = extra;
     const record = store.create("knowledge_claim", id, { status: status === "reviewed" ? "candidate" : status,
@@ -228,6 +228,8 @@ test("Knowledge contribution fails closed for invalid request time and malformed
 test("Knowledge contribution separates candidate diagnostics and rejects missing, revoked and drifted sources", async (t) => {
   const f = await fixture();
   try {
+    f.store.create("knowledge_source", "source-record-missing", { scope: "global", status: "active", trust: "verified" });
+    f.store.create("knowledge_source", "absent", { scope: "global", status: "active", trust: "verified" });
     f.claim("good", { review: { source_digest: "source-v1" } });
     f.claim("candidate", { status: "candidate", review: { source_digest: "old" } });
     f.claim("candidate-missing-source-record", { status: "candidate", source_id: "source-record-missing" });
@@ -235,12 +237,14 @@ test("Knowledge contribution separates candidate diagnostics and rejects missing
     f.claim("missing-source", { source_id: "absent" });
     f.claim("legacy-source", { source_id: null });
     f.claim("empty-source", { source_id: "" });
+    f.store.remove("knowledge_source", "source-record-missing");
+    f.store.remove("knowledge_source", "absent");
     f.claim("drift", { review: { source_digest: "old" } });
     const reviewDigestDrift = f.claim("review-digest-drift");
     f.store.save("knowledge_claim", String(reviewDigestDrift.id), { ...f.store.get("knowledge_claim", String(reviewDigestDrift.id)),
       review: { ...(reviewDigestDrift.review as JsonObject), source_digest: "sha256:stale-source" } });
-    f.store.create("knowledge_source", "revoked", { status: "revoked", trust: "verified" });
-    f.store.create("knowledge_source", "untrusted", { status: "active", trust: "untrusted" });
+    f.store.create("knowledge_source", "revoked", { scope: { kind: "global", id: "global" }, status: "revoked", trust: "verified" });
+    f.store.create("knowledge_source", "untrusted", { scope: { kind: "global", id: "global" }, status: "active", trust: "untrusted" });
     f.claim("candidate-untrusted-source", { status: "candidate", source_id: "untrusted" });
     f.claim("revoked", { source_id: "revoked" });
     f.claim("untrusted", { source_id: "untrusted" });
@@ -255,7 +259,7 @@ test("Knowledge contribution separates candidate diagnostics and rejects missing
     assert.equal((await f.reader.contribute({ ...request, source_ids: ["source"] })).items.length, 1);
     assert.equal((await f.reader.contribute({ ...request, source_ids: [] })).items.length, 1);
 
-    const racingSource = f.store.create("knowledge_source", "racing-source", { status: "active", trust: "verified", content_digest: "racing-source-v1" });
+    const racingSource = f.store.create("knowledge_source", "racing-source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", content_digest: "racing-source-v1" });
     f.claim("source-changed-during-recall", { source_id: racingSource.id });
     const find = f.store.find.bind(f.store); let sourceReads = 0;
     t.mock.method(f.store, "find", ((kind: string, id: string, version?: number, hydrate?: boolean) => {
@@ -279,8 +283,10 @@ test("Knowledge contribution applies explicit scope stacks, active aliases and a
     f.claim("project");
     f.claim("other", { scope: "project:other" });
     f.claim("global", { scope: "global" });
-    f.claim("absent", { scope: null });
     const timestamp = new Date().toISOString();
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("knowledge_claim", "absent", 1, JSON.stringify({ id: "absent", version: 1, status: "reviewed", scope: null,
+        source_id: "source", content: "alpha", evidence_ids: [] }), timestamp, timestamp);
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run("knowledge_claim", "empty-scope", 1, JSON.stringify({ id: "empty-scope", version: 1, status: "reviewed", scope: "", source_id: "source", content: "alpha", evidence_ids: ["fixture-evidence"] }), timestamp, timestamp);
     f.claim("private", { scope_envelope: { audience: { mode: "private", principal_ids: ["owner"] }, tenant_id: "tenant" } });

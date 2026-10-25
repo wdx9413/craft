@@ -2588,8 +2588,13 @@ export class CraftService extends ServiceFoundation {
   workbenchMemoryRetire(args: JsonObject): JsonObject { return this.memoryTransition({ memory_id: text(args.memory_id, "memory_id"), status: "expired", reason: "retired by studio user" }); }
   workbenchKnowledgeCompatSave(args: JsonObject): JsonObject {
     const content = assertNoSecret(document(args.content, "content"), "content");
-    const evidence = this.evidenceRecord({ source_type: "human", confidence: "bounded", claim: "User-authored knowledge record.", locator: "studio:knowledge" });
-    return this.knowledgeClaimSave({ kind: args.kind ?? "fact", content, scope: args.scope ?? "global", tags: args.tags ?? [], evidence_ids: [evidence.id] });
+    const scope = text(args.scope, "scope");
+    scopeFromKey(scope);
+    return this.store.transaction(() => {
+      const evidence = this.evidenceRecord({ source_type: "human", confidence: "bounded", claim: "User-authored knowledge record.",
+        locator: "studio:knowledge", scope, metadata: { capability_owner: "knowledge", scope } });
+      return this.knowledgeClaimSave({ kind: args.kind ?? "fact", content, scope, tags: args.tags ?? [], evidence_ids: [evidence.id] });
+    });
   }
   workbenchWorkflowCompatSave(args: JsonObject): JsonObject { return this.workflowSave({ workflow_id: args.workflow_id, name: text(args.name, "name"), description: args.description ?? "", inputs: args.inputs ?? [], steps: args.steps ?? [] }); }
   codexDispatchPrepare(args: JsonObject): JsonObject { return this.codexHost.prepare(args); }
@@ -3944,7 +3949,10 @@ export class CraftService extends ServiceFoundation {
     return this.store.save("evidence", String(args.evidence_id ?? id("evidence")), {
       source_type: text(args.source_type, "source_type"), claim: text(args.claim, "claim"), confidence,
       artifact_id: args.artifact_id ?? null, locator: args.locator ?? null,
-      observed_at: args.observed_at ?? new Date().toISOString(), metadata: args.metadata ?? {} });
+      observed_at: args.observed_at ?? new Date().toISOString(), metadata: args.metadata ?? {},
+      ...(args.source_id === undefined ? {} : { source_id: args.source_id }),
+      ...(args.fragment_id === undefined ? {} : { fragment_id: args.fragment_id }),
+      ...(args.scope === undefined ? {} : { scope: args.scope }) });
   }
 
   saveVersioned(kind: string, prefix: string, args: JsonObject, required: string[]): JsonObject {

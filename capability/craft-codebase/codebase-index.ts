@@ -37,6 +37,18 @@ type Node = JsonObject & { readonly id: string; readonly kind: "file" | "symbol"
 type Edge = JsonObject & { readonly id: string; readonly kind: "imports" | "calls" | "references" | "definitions" | "implements" | "extends" | "type_definition"; readonly from_node_id: string; readonly to_node_id: string; readonly provenance: "extracted" | "heuristic"; readonly confidence: "high" | "partial"; readonly source_span: JsonObject };
 type EdgeRoute = { bucket: string; id: string; digest: string };
 type ImpactDependencies = { readonly routes: Set<string>; readonly shards: Set<string> };
+type IndexPublicationGuard = { readonly workspace_version: number; readonly checkpoint_id: string; readonly activation_version: number };
+
+function publicationGuard(value: unknown): IndexPublicationGuard | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("publication_guard must be an object");
+  const guard = value as JsonObject;
+  if (!Number.isSafeInteger(guard.workspace_version) || Number(guard.workspace_version) < 1
+    || typeof guard.checkpoint_id !== "string" || !guard.checkpoint_id.trim()
+    || !Number.isSafeInteger(guard.activation_version) || Number(guard.activation_version) < 1)
+    throw new Error("publication_guard is invalid");
+  return { workspace_version: Number(guard.workspace_version), checkpoint_id: guard.checkpoint_id, activation_version: Number(guard.activation_version) };
+}
 type NodeReadCache = { readonly routes: Map<string, JsonObject>; readonly shards: Map<string, Node[]>; readonly dependencies?: ImpactDependencies };
 type ImpactCacheEntry = { readonly fingerprint: string; readonly dependencies: ImpactDependencies; readonly result: JsonObject };
 type AnalyzerFlowResult = { result?: JsonObject; diagnostic?: JsonObject };
@@ -241,7 +253,8 @@ export class CodebaseIndexKernel {
       diagnostics_count: graph.diagnostics.length,
       relation_analysis: relationAnalysisSummary(ANALYZER, graph.diagnostics, graph.edges),
     };
-    const index = this.persistIndex(identity, indexId, files.length, analysis, graph.nodes, graph.edges, graph.diagnostics);
+    const index = this.persistIndex(identity, indexId, files.length, analysis, graph.nodes, graph.edges, graph.diagnostics,
+      publicationGuard(args.publication_guard));
     return { index: this.indexStatus(index, workspace), idempotent: false };
   }
 
@@ -312,7 +325,8 @@ export class CodebaseIndexKernel {
     const uniqueEdges = [...new Map(edges.map(edge => [edge.id, edge])).values()];
     const analysis = { analyzer, analyzer_version: analyzerVersion, provenance: "adapter_reported", certainty: "partial", offset_encoding: "utf-16", supported_languages: [...new Set(nodes.map((node) => node.language))].sort(), supported_file_count: files.size, unsupported_file_count: entries.size - files.size, total_checkpoint_file_count: entries.size, scope_digest: stableDigest({ workspace_id: workspaceId, checkpoint_id: checkpointId, allowed_paths: workspace.include_paths }), allowed_paths: workspace.include_paths,
       relation_analysis: relationAnalysisSummary(analyzer, input.diagnostics, uniqueEdges) };
-    const index = this.persistIndex(identity, indexId, files.size, analysis, nodes, uniqueEdges, Array.isArray(input.diagnostics) ? input.diagnostics as JsonObject[] : []);
+    const index = this.persistIndex(identity, indexId, files.size, analysis, nodes, uniqueEdges,
+      Array.isArray(input.diagnostics) ? input.diagnostics as JsonObject[] : [], publicationGuard(args.publication_guard));
     return { index: this.indexStatus(index, workspace), idempotent: false };
   }
 
@@ -746,7 +760,7 @@ export class CodebaseIndexKernel {
     return index.graph_storage === PROJECT_GRAPH_STORAGE ? this.projectGraphStore(index).read(id) : this.store.get(kind, id);
   }
   private persistIndex(identity: JsonObject, indexId: string, sourceFileCount: number, analysis: JsonObject,
-    rawNodes: readonly Node[], rawEdges: readonly Edge[], diagnostics: readonly JsonObject[]): JsonObject {
+    rawNodes: readonly Node[], rawEdges: readonly Edge[], diagnostics: readonly JsonObject[], guard?: IndexPublicationGuard): JsonObject {
     const nodes = sorted(rawNodes);
     const edges = sorted(rawEdges);
     if (nodes.length > MAX_GRAPH_NODES || edges.length > MAX_GRAPH_EDGES) throw new Error("Codebase graph exceeds storage budget");
@@ -851,6 +865,13 @@ export class CodebaseIndexKernel {
         { ...route.payload, route_digest: route.descriptor.digest, id: route.descriptor.id, version: 1 });
     }
     return this.store.transaction(() => {
+      if (guard) {
+        const current = this.store.get("workspace", String(identity.workspace_id));
+        const activation = this.store.get("codebase_activation", `codebase_activation_${identity.workspace_id}`);
+        if (current.version !== guard.workspace_version || current.latest_checkpoint_id !== guard.checkpoint_id
+          || guard.checkpoint_id !== identity.checkpoint_id || activation.status !== "active" || activation.version !== guard.activation_version)
+          throw new Error("Repository snapshot changed before index publication");
+      }
       const existingShards = projectGraphStore ? new Map<string, JsonObject>()
         : new Map(this.store.findMany("codebase_index_shard", shardIds, false).map(record => [String(record.id), record]));
       const newGraphRecords = immutableGraphRecords.filter(record => {

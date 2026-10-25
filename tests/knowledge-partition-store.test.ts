@@ -95,6 +95,49 @@ test("Knowledge derives artifact custody from parents while template configurati
   } finally { cleanup(f); }
 });
 
+test("Knowledge refuses to infer global storage when neither the record nor its parents declare a scope", async () => {
+  const f = await fixture();
+  try {
+    assert.throws(() => f.store.create("knowledge_claim", "unscoped", { content: "must not become global" }), /Knowledge storage scope is unavailable/u);
+    assert.throws(() => f.store.create("knowledge_claim", "null-scope", { scope: null, content: "must not become global" }), /Knowledge storage scope is unavailable/u);
+    assert.throws(() => new CraftService(f.store).knowledgeClaimSave({ kind: "fact", content: "must declare scope", evidence_ids: [] }), /scope/u);
+    f.store.create("knowledge_claim", "scoped-claim", { scope: "project:demo", content: "scoped parent" });
+    const now = new Date().toISOString();
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("knowledge_source", "unscoped-parent", 1, JSON.stringify({ title: "legacy parent without a scope" }), now, now);
+    assert.throws(() => f.store.create("knowledge_document", "unscoped-child", { source_id: "unscoped-parent", path: "document" }),
+      /Knowledge storage scope is unavailable/u);
+
+    f.store.create("knowledge_evaluation_case", "global-case", { scope: "global", query: "global query" });
+    f.store.create("knowledge_evaluation_run", "global-run", { case_ids: ["global-case"], results: [] });
+    const globalRun = JSON.parse(String(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='knowledge_evaluation_run' AND id='global-run'").get()!.payload_json));
+    assert.deepEqual(globalRun._knowledge_partition.scope, { kind: "global", id: "global" });
+    f.store.create("knowledge_source", "global-source", { scope: "global", title: "global source" });
+    f.store.create("knowledge_source", "user-source", { scope: "user:principal", title: "user source" });
+    f.store.create("knowledge_claim", "global-child", { scope: "global", source_id: "global-source", content: "global child" });
+    f.store.create("knowledge_claim", "project-from-global", { scope: "project:demo", source_id: "global-source", content: "project child" });
+    assert.throws(() => f.store.create("knowledge_relation", "explicit-global-over-project", {
+      scope: "global", claim_ids: ["scoped-claim"],
+    }), /different storage scopes/u);
+    f.store.create("knowledge_relation", "explicit-project-match", { scope: "project:demo", claim_ids: ["scoped-claim"] });
+    f.store.create("knowledge_relation", "project-child-from-global", { scope: "project:demo", claim_ids: ["global-child"] });
+    assert.throws(() => f.store.create("knowledge_relation", "mixed-neutral-scopes", {
+      source: { kind: "knowledge_source", id: "global-source" }, target: { kind: "knowledge_source", id: "user-source" },
+    }), /different storage scopes/u);
+    assert.throws(() => f.store.create("knowledge_relation", "mixed-project-user-scopes", {
+      from_claim_id: "scoped-claim", source: { kind: "knowledge_source", id: "user-source" },
+    }), /different storage scopes/u);
+    const ownedEvidence = f.store.create("evidence", "owned-evidence", {
+      source_type: "knowledge_fragment", metadata: { capability_owner: "knowledge", scope: "project:demo" }, claim: "scoped evidence",
+    });
+    f.store.create("knowledge_relation", "evidence-scope", {
+      candidate_claim_refs: [{ id: "scoped-claim" }], evidence_ids: [ownedEvidence.id], evidence_id: ownedEvidence.id,
+    });
+    const evidenceHeader = JSON.parse(String(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='knowledge_relation' AND id='evidence-scope'").get()!.payload_json));
+    assert.deepEqual(evidenceHeader._knowledge_partition.scope, { kind: "project", id: "demo" });
+  } finally { cleanup(f); }
+});
+
 test("Knowledge migration is bounded, repeatable and leaves unavailable projects explicit", async () => {
   const f = await fixture();
   try {
@@ -277,13 +320,14 @@ test("Knowledge scope inheritance covers catalogs, references, relations and exp
       { metadata: { scope: "project:demo" } }, { project_scope_id: "project:demo" }, { metadata: { project_scope_id: "project:demo" } },
       { project_id: "demo" }, { document_id: "doc" }, { claim_ids: ["claim"] }, { claim_refs: [{ claim_id: "claim" }, { id: "claim" }] },
       { source: { kind: "knowledge_source", id: "source" }, target: { kind: "evidence", id: "core" } },
-      { source: { kind: "unrelated", id: "ignored" }, target: [] },
     ];
     for (const [i, payload] of forms.entries()) {
       f.store.create("knowledge_relation", `relation-${i}`, payload);
       const header = JSON.parse(String(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='knowledge_relation' AND id=?").get(`relation-${i}`)!.payload_json));
-      assert.equal(header.scope.kind, i === forms.length - 1 ? "global" : "project");
+      assert.equal(header.scope.kind, "project");
     }
+    assert.throws(() => f.store.create("knowledge_relation", "unbound-relation", { source: { kind: "unrelated", id: "ignored" }, target: [] }),
+      /Knowledge storage scope is unavailable/u);
     f.store.create("wiki_candidate_review", "review", { candidate_id: "candidate" });
     assert.deepEqual(JSON.parse(String(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='wiki_candidate_review' AND id='review'").get()!.payload_json)).scope, { kind: "project", id: "demo" });
     for (const owner of ["knowledge", "memory", "experience"]) {

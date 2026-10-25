@@ -108,14 +108,14 @@ test("Knowledge keeps an ingested fact pending after source support until indepe
         assert.deepEqual(review[0]!.reasons, ["independent_effectiveness_evaluation_required", "independent_support_below_threshold"]);
         assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
         assert.equal(f.store.count("knowledge_claim_support"), 1);
-        const duplicate = f.service.evidenceRecord({ evidence_id: "duplicate-source-evidence", source_type: "knowledge_fragment", confidence: "bounded", claim: "Copied text is still one source." });
+        const duplicate = f.service.evidenceRecord({ evidence_id: "duplicate-source-evidence", source_type: "knowledge_fragment", confidence: "bounded", claim: "Copied text is still one source.", scope: { kind: "project", id: "p" } });
         f.store.create("knowledge_claim_support", "duplicate-source-support", { claim_id: claimId, evidence_id: duplicate.id, observation_key: "knowledge-source:source-0", scope: "project:p", confidence: "bounded" });
         const rechecked = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "p", claim_ids: [claimId] }).assessments as JsonObject[];
         assert.equal(rechecked[0]!.promoted, false);
         assert.equal(rechecked[0]!.independent_support, 1);
         const revokedSource = f.service.knowledgeSourceRegister({ source_id: "revoked-support-source", kind: "readme", label: "revoked corroboration", scope_kind: "project", scope_id: "p", locator: root, content_digest: "revoked-source", trust: "verified", access: "read_only" }).source as JsonObject;
         const revokedEvidence = f.service.evidenceRecord({ evidence_id: "revoked-source-evidence", source_type: "knowledge_fragment",
-          source_id: revokedSource.id, confidence: "bounded", claim: "Support from this source will be revoked." });
+          source_id: revokedSource.id, confidence: "bounded", claim: "Support from this source will be revoked.", scope: { kind: "project", id: "p" } });
         f.service.knowledgeClaimSupportRecord({ claim_id: claimId, evidence_id: revokedEvidence.id, observation_key: "knowledge-source:revoked-support-source", scope: "project:p" });
         f.service.knowledgeSourceTransition({ source_id: revokedSource.id, status: "revoked", reason: "fixture trust revoked" });
         const revokedRecheck = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "p", claim_ids: [claimId] }).assessments as JsonObject[];

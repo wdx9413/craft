@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { sqliteBusyTimeoutMs } from "./sqlite-busy-timeout.ts";
 import type { JsonObject } from "./store.ts";
 
 export const TRACE_KINDS = new Set(["trace", "trace_event", "trace_feedback", "telemetry_event", "trace_archive"]);
@@ -50,7 +51,7 @@ export class TraceShardStore {
     }
     const database = new DatabaseSync(file);
     try {
-      database.exec("PRAGMA busy_timeout=15000; PRAGMA foreign_keys=ON;");
+      database.exec(`PRAGMA busy_timeout=${sqliteBusyTimeoutMs()}; PRAGMA foreign_keys=ON;`);
       if (create && String((database.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toLowerCase() !== "wal")
         database.exec("PRAGMA journal_mode=WAL;");
       if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get()) database.exec(`BEGIN IMMEDIATE;

@@ -57,7 +57,8 @@ test("automatic promotion requires independent evidence by default and records t
     assert((heldBeforeEvaluation.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
     const shadow = evaluateCandidate(f, claim);
     assert.equal(shadow.status, "eligible");
-    f.store.create("knowledge_evaluation_run", "older-unrelated-eligible-run", { mode: "candidate_shadow", status: "eligible",
+    f.store.create("knowledge_claim", "unrelated-claim", { scope: "project:demo", status: "candidate", source_id: "source", content: "Unrelated fact." });
+    f.store.create("knowledge_evaluation_run", "older-unrelated-eligible-run", { scope: "project:demo", mode: "candidate_shadow", status: "eligible",
       candidate_claim_refs: [{ claim_id: "unrelated-claim" }], created_at: "2026-09-19T00:00:00.000Z" });
     const list = f.store.list.bind(f.store);
     (f.store as unknown as { list: CraftStore["list"] }).list = ((kind: string, limit?: number, predicate?: (record: JsonObject) => boolean) => {
@@ -132,6 +133,7 @@ test("automatic Knowledge review requires one explicit scope and rejects cross-s
   const f = await fixture();
   try {
     const { claim } = candidate(f.service, "project-claim");
+    f.service.knowledgeSourceRegister({ source_id: "global-source", kind: "project_note", label: "Global source", trust: "verified", scope_kind: "global", scope_id: "global", locator: "global.md", content_digest: `sha256:${"f".repeat(64)}` });
     f.store.create("knowledge_claim", "global-claim", { status: "candidate", scope: "global", source_id: "global-source", content: "Global fact." });
     assert.throws(() => f.service.knowledgeAutoReview({ claim_ids: [claim.id], auto_promote: false }), /scope_kind and scope_id/u);
     assert.throws(() => f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: ["global-claim"], auto_promote: false }), /requested Knowledge scope/u);
@@ -396,12 +398,15 @@ test("promotion policy rejects malformed inputs and reports every non-promotable
     assert.equal(quarantined.claim_id, legacyReviewedId);
     assert.equal((f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [String(legacyReviewedWithoutReview.id)], auto_promote: false }).assessments as JsonObject[])[0]!.claim_id,
       legacyReviewedWithoutReview.id);
+    f.service.knowledgeSourceRegister({ source_id: "missing-source", kind: "project_note", label: "Removed source", trust: "verified", scope_kind: "project", scope_id: "demo", locator: "removed.md", content_digest: `sha256:${"a".repeat(64)}` });
     raw("missing-source", { source_id: "missing-source" });
+    f.store.remove("knowledge_source", "missing-source");
     f.service.knowledgeSourceRegister({ source_id: "paused", kind: "project_note", label: "Paused", trust: "verified", scope_kind: "project", scope_id: "demo", locator: "paused.md", content_digest: `sha256:${"c".repeat(64)}` });
     f.service.knowledgeSourceTransition({ source_id: "paused", status: "revoked", reason: "fixture" });
     raw("untrusted-source", { source_id: "paused" });
     raw("no-evidence-array", { evidence_ids: null });
-    raw("no-scope", { scope: null });
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('knowledge_claim','no-scope',1,?,?,?)")
+      .run(JSON.stringify({ status: "candidate", source_id: "source", evidence_ids: [first.id], content: "body" }), "2026-09-20T00:00:00.000Z", "2026-09-20T00:00:00.000Z");
     assert.throws(() => raw("invalid-scope", { scope: "not-a-scope" }), /storage scope is malformed/u);
     // Historical malformed data can still exist; new writes must reject it.
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('knowledge_claim','invalid-scope',1,?,?,?)")
@@ -452,7 +457,7 @@ test("semantic review packets and provider responses stay evidence-bound across 
     const makePacketClaim = (id: string, scenarioKey?: string) => {
       const fragmentRef = f.store.contentStore.writeSync({ kind: "knowledge", record_id: `${id}-fragment`, version: 1, scope: "project:demo", status: "current", sensitivity: "internal", source_id: "source", body: "Focused tests verify the changed behavior." });
       f.store.create("knowledge_fragment", `${id}-fragment`, { source_id: "source", source_revision_id: `${id}-revision`, locator: `${id}.md#1`, content_ref: fragmentRef, content_digest: fragmentRef.digest });
-      f.store.create("evidence", `${id}-evidence`, { source_type: "knowledge_fragment", confidence: "confirmed", fragment_id: `${id}-fragment` });
+    f.store.create("evidence", `${id}-evidence`, { scope: "project:demo", source_type: "knowledge_fragment", confidence: "confirmed", fragment_id: `${id}-fragment` });
       return f.service.knowledgeClaimSave({ claim_id: id, kind: "fact", content: "Run focused tests first.", scope: "project:demo", source_id: "source",
         ...(scenarioKey ? { scenario_key: scenarioKey } : {}), evidence_ids: [`${id}-evidence`] }).claim as JsonObject;
     };
@@ -496,21 +501,22 @@ test("semantic review packets and provider responses stay evidence-bound across 
     assert.equal((await f.service.knowledgeSemanticProviderReview(base) as JsonObject).status, "completed");
     const fresh = makePacketClaim("semantic-packet-check");
     assert.throws(() => f.service.knowledgeHostReview({ claim_id: fresh.id, host_run_key: "packet-check", source_digest: `sha256:${"b".repeat(64)}`, decision: "supported", packet_digest: "sha256:wrong" }), /packet_digest/u);
-    const noSource = f.store.create("knowledge_claim", "packet-no-source", { status: "candidate", content: "body", evidence_ids: [] });
+    const noSource = f.store.create("knowledge_claim", "packet-no-source", { status: "candidate", scope: "project:demo", content: "body", evidence_ids: [] });
     assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: noSource.id }) as JsonObject).reason, "source_unavailable");
-    const noBody = f.store.create("knowledge_claim", "packet-no-body", { status: "candidate", source_id: "source", evidence_ids: [] });
+    const noBody = f.store.create("knowledge_claim", "packet-no-body", { status: "candidate", scope: "project:demo", source_id: "source", evidence_ids: [] });
     assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: noBody.id }) as JsonObject).reason, "claim_content_unavailable");
     const disappearedBody = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "packet-disappeared-body", version: 1, scope: "project:demo", status: "candidate", sensitivity: "internal", source_id: "source", body: "body before removal" });
     const disappearedClaim = f.store.create("knowledge_claim", "packet-disappeared-body", { status: "candidate", source_id: "source", scope: "project:demo", content_ref: disappearedBody, evidence_ids: [] });
     await unlink(disappearedBody.path);
     assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: disappearedClaim.id }) as JsonObject).reason, "claim_content_unavailable");
-    const noEvidence = f.store.create("knowledge_claim", "packet-no-evidence", { status: "candidate", source_id: "source", content: "body" });
+    const noEvidence = f.store.create("knowledge_claim", "packet-no-evidence", { status: "candidate", scope: "project:demo", source_id: "source", content: "body" });
     assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: noEvidence.id }) as JsonObject).reason, "evidence_fragment_unavailable");
-    const missingFragment = f.store.create("knowledge_claim", "packet-missing-fragment", { status: "candidate", source_id: "source", content: "body", evidence_ids: ["packet-evidence-missing"] });
-    f.store.create("evidence", "packet-evidence-missing", { confidence: "confirmed", fragment_id: "missing" });
+    f.store.create("evidence", "packet-evidence-missing", { source_type: "program", confidence: "confirmed", fragment_id: "missing" });
+    const missingFragment = f.store.create("knowledge_claim", "packet-missing-fragment", { status: "candidate", scope: "project:demo", source_id: "source", content: "body", evidence_ids: ["packet-evidence-missing"] });
     assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: missingFragment.id }) as JsonObject).reason, "evidence_fragment_unavailable");
-    const invalidFragment = f.store.create("knowledge_claim", "packet-invalid-fragment", { status: "candidate", source_id: "source", content: "body", evidence_ids: ["packet-evidence-invalid"] });
-    f.store.create("evidence", "packet-evidence-invalid", { confidence: "confirmed", fragment_id: "invalid" }); f.store.create("knowledge_fragment", "invalid", {});
+    f.store.create("evidence", "packet-evidence-invalid", { source_type: "program", confidence: "confirmed", fragment_id: "invalid" });
+    const invalidFragment = f.store.create("knowledge_claim", "packet-invalid-fragment", { status: "candidate", scope: "project:demo", source_id: "source", content: "body", evidence_ids: ["packet-evidence-invalid"] });
+    f.store.create("knowledge_fragment", "invalid", { scope: "project:demo", source_id: "source" });
     assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: invalidFragment.id }) as JsonObject).reason, "evidence_fragment_unavailable");
     const thrownFragment = makePacketClaim("semantic-thrown-fragment");
     await unlink(String((f.store.get("knowledge_fragment", "semantic-thrown-fragment-fragment").content_ref as JsonObject).path));

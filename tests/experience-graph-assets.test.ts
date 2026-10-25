@@ -49,7 +49,7 @@ test("a scenario draft is discoverable, editable on disk and submitted as an imm
     assert.throws(() => inspect({ action: "template", template_id: "unknown" }), /Unknown/);
     const saved = edit({ action: "save", template_id: "internet-product-engineering" });
     assert.equal(inspect({ action: "diff", graph_id: "engineering" }).valid, true);
-    assert.match(String(saved.path), /experience\/graph\/engineering\/draft.json$/);
+    assert.match(String(saved.path).replaceAll("\\", "/"), /experience\/graph\/engineering\/draft\.json$/);
     assert.equal(f.store.count("experience_procedure"), 0);
     assert.equal((inspect({ action: "list", scenario_id: "internet-product-engineering" }).drafts as JsonObject[]).length, 1);
     assert.equal(inspect({ action: "list" }).data_root, join(projectStorageDirectory(f.store.paths, f.root), "experience"));
@@ -65,7 +65,7 @@ test("a scenario draft is discoverable, editable on disk and submitted as an imm
     const submitted = edit({ action: "submit", expected_draft_digest: draft.draft_digest });
     const first = submitted.procedure as JsonObject;
     assert.equal(first.routeable, false); assert.equal(first.content_version, 1); assert.equal(f.store.count("experience_observation"), 0);
-    assert.match(String((first.definition_ref as JsonObject).path), /versions\/000001.json$/);
+    assert.match(String((first.definition_ref as JsonObject).path).replaceAll("\\", "/"), /versions\/000001\.json$/);
     assert.equal(edit({ action: "submit", expected_draft_digest: draft.draft_digest }).idempotent, true);
     await f.reopen();
     assert.equal((inspect({ action: "read", graph_id: "engineering" }).definition as JsonObject).procedure_version, 1);
@@ -121,7 +121,7 @@ test("Workflow shares graph storage; relation edges are checked and do not becom
     const value = workflow(); (value.definition as JsonObject).relations = [{ id: "strategy", from: "review", to: "review", kind: "supports", evidence_ids: ["acceptance:review"] }];
     const draft = edit({ action: "save", json: JSON.stringify(value) });
     const saved = edit({ action: "submit", expected_draft_digest: draft.draft_digest }).procedure as JsonObject;
-    assert.equal(saved.procedure_kind, "workflow"); assert.match(String((saved.definition_ref as JsonObject).path), /experience\/graph\/review\//);
+    assert.equal(saved.procedure_kind, "workflow"); assert.match(String((saved.definition_ref as JsonObject).path).replaceAll("\\", "/"), /experience\/graph\/review\//);
     const same = f.service.experienceGraphInspect({ scope, graph_id: "review", action: "diff", json: JSON.stringify(value) }); assert.equal(same.relation_execution, false);
     const changed = workflow(); ((changed.definition as JsonObject).steps as JsonObject[])[0]!.instruction = "Read all changes";
     const preview = f.service.experienceGraphInspect({ scope, graph_id: "review", action: "diff", configuration: changed }); assert.deepEqual(preview.changed_nodes, ["review"]);
@@ -215,7 +215,7 @@ test("content publication checks failure recovery, stable ID paths and removed-e
     const definitions = new ProcedureDefinitionStore(f.store), p = f.create(), value = definitions.read(p.definition_ref as never);
     for (const invalid of [null, [], "bad", { ...value, procedure_version: 0 }, { ...value, kind: "prompt" }]) assert.throws(() => definitions.write(invalid as never, "Unused title"), /invalid/);
     const leaf = definitions.write({ ...value, procedure_id: "🌿" }, "First title");
-    assert.match(leaf.path, /graph\/untitled--/);
+    assert.match(leaf.path.replaceAll("\\", "/"), /graph\/untitled--/);
     assert.equal(definitions.write({ ...value, procedure_id: "🌿" }, "Renamed").path, leaf.path);
     const original = fs.renameSync;
     let fault = mock.method(fs, "renameSync", () => { throw "injected publication failure"; }); syncBuiltinESMExports();

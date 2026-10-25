@@ -189,7 +189,7 @@ try {
         "repeated independent sessions must promote Memory to each project tier");
       assert(store.list("activation_proof_receipt", 1_000, proof => proof.component === "memory" && proof.event === "UserPromptSubmit" && proof.memory_written === true).length > 0,
         "automatic Memory capture and promotion must leave a current Host invocation receipt");
-      assert(store.list("trace_event", 10_000, event => event.source === "craft-hook" && event.operation_id === "handle").length > 0,
+      assert(store.list("trace_event", 10_000, event => event.source === "craft-hook" && event.operation_id === "handle.context.UserPromptSubmit").length > 0,
         "Memory Hook invocation must leave a queryable component trace");
     } finally {
       for (const sessionId of memorySessions) {
@@ -248,7 +248,7 @@ try {
   let knowledgeIngestCallsAfterUpdate = 0;
   let tracedCalls = new Set<string>();
   let diagnostic: JsonObject = {};
-  const expectedCalls = new Set(["handle", "craft_experience_procedure_submit", "craft_experience_learning_evaluation_dispatch",
+  const expectedCalls = new Set(["handle.context.UserPromptSubmit", "craft_experience_procedure_submit", "craft_experience_learning_evaluation_dispatch",
     "craft_experience_learning_evaluation_run", "craft_knowledge_source_ingest"]);
   for (let attempt = 0; attempt < 300; attempt += 1) {
     const observed = await new CraftStore(paths).open();

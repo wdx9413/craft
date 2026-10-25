@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -79,6 +80,13 @@ test("concurrent packaged prompts reject ambiguous signals and session boundarie
   const f = await replayFixture("codex");
   try {
     await Promise.all(["one", "two"].map(prompt => f.execute({ hook_event_name: "UserPromptSubmit", prompt })));
+    const diagnostics = await readdir(join(f.store.paths.root, "trace", "hook-runtime", "v1"));
+    const records = (await Promise.all(diagnostics.map(async name => (await readFile(join(f.store.paths.root, "trace", "hook-runtime", "v1", name), "utf8")))))
+      .flatMap(content => content.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as JsonObject));
+    const phases = new Map<string, string[]>();
+    for (const record of records) phases.set(String(record.request_id), [...(phases.get(String(record.request_id)) ?? []), String(record.phase)]);
+    assert.equal(phases.size, 2);
+    assert([...phases.values()].every(value => value.length === 2 && value.includes("started") && value.includes("finished")));
     const session = f.store.list("context_hook_session", 10)[0]!;
     assert.equal((session.pending_turn_ids as string[]).length, 2);
     const ambiguousTurns = f.store.list("codex_hook_turn", 10);
@@ -99,5 +107,65 @@ test("concurrent packaged prompts reject ambiguous signals and session boundarie
     const edited = turns.filter(turn => turn.has_edit === true);
     assert.equal(edited.length, 1);
     assert(!ambiguousIds.has(String(edited[0]!.id)));
+  } finally { await f.close(); }
+});
+
+test("packaged Hook returns promptly instead of waiting on the full SQLite lock timeout", async () => {
+  const f = await replayFixture("codex");
+  let locked = false;
+  try {
+    f.store.database.exec("BEGIN IMMEDIATE");
+    locked = true;
+    const started = performance.now();
+    const child = spawnSync(process.execPath, [join(root, "plugins/craft-context/dist/plugin/craft-codex-hook.cjs"), "--member", "context"], {
+      cwd: root, encoding: "utf8", timeout: 4_000,
+      env: { PATH: process.env.PATH, CRAFT_DATA_DIR: f.store.paths.root, NODE_NO_WARNINGS: "1" },
+      input: JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: f.store.paths.root, session_id: "busy-timeout", prompt: "verify the change" }),
+    });
+    const elapsed = performance.now() - started;
+    f.store.database.exec("ROLLBACK");
+    locked = false;
+    assert.equal(child.error, undefined, child.error?.message);
+    assert.equal(child.status, 0, child.stderr);
+    assert(elapsed < 3_000, `Hook exceeded its Host-facing response budget: ${elapsed.toFixed(0)}ms`);
+    const traces = f.store.list("trace_event", 1_000);
+    assert(traces.some(event => event.operation_id === "handle.context.UserPromptSubmit" && event.error_class === "STORAGE_BUSY"));
+  } finally {
+    if (locked) f.store.database.exec("ROLLBACK");
+    await f.close();
+  }
+});
+
+test("packaged Hook does not run legacy partition migration during lifecycle startup", async () => {
+  const f = await replayFixture("codex");
+  try {
+    const now = new Date().toISOString();
+    // A maintenance-only legacy row must not prevent a short-lived lifecycle Hook
+    // from recording its own event. Full CLI/MCP startup still validates it.
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("memory_ledger", "legacy-invalid", 1, "{", now, now);
+    await f.execute({ hook_event_name: "SessionStart" });
+    assert(f.store.events("codex-hook").some(event => event.event_type === "codex_hook.lifecycle"));
+    assert.equal(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='memory_ledger' AND id='legacy-invalid'")
+      .get()?.payload_json, "{");
+  } finally { await f.close(); }
+});
+
+test("packaged Hook records event and phase timings without logging prompt content", async () => {
+  const f = await replayFixture("codex");
+  try {
+    await f.execute({ hook_event_name: "UserPromptSubmit", prompt: "sensitive prompt must not be logged" });
+    const directory = join(f.store.paths.root, "trace", "hook-runtime", "v1");
+    const names = await readdir(directory);
+    assert.equal(names.length, 1);
+    const records = (await readFile(join(directory, names[0]!), "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line) as JsonObject);
+    assert.deepEqual(records.map(record => record.phase), ["started", "finished"]);
+    assert.equal(records[0]!.event, "UserPromptSubmit");
+    assert.equal(records[0]!.member, "context");
+    assert.equal(records[1]!.store_open_ms === undefined, false);
+    assert.equal(records[1]!.handler_ms === undefined, false);
+    assert(!JSON.stringify(records).includes("sensitive prompt must not be logged"));
+    assert(!JSON.stringify(records).includes("codex-process"));
   } finally { await f.close(); }
 });

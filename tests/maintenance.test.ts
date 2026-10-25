@@ -53,7 +53,7 @@ test("maintenance schedules populated lifecycle projections and records their ac
   try {
     const now = "2030-01-01T00:00:00.000Z"; const calls: JsonObject[] = [];
     f.store.create("trace", "trace", {});
-    f.store.create("knowledge_claim", "claim", {});
+    f.store.create("knowledge_claim", "claim", { scope: "global" });
     f.store.create("memory_ledger", "memory", {});
     f.service.traceRetentionSweep = (args) => { calls.push({ component: "trace", ...args }); return { archived: 2, deleted: 1 }; };
     f.service.knowledgeExpirySweep = (args) => { calls.push({ component: "knowledge", ...args }); return { count: 3 }; };

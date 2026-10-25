@@ -464,7 +464,7 @@ test("project brain and work session cover default projection and reference bran
 test("memory governance covers conflict resolution, expiry and consolidation idempotency", async () => {
   const f = await fixture("craft-memory-remaining-");
   try {
-    f.store.create("knowledge_source", "source", { status: "active" }); f.store.create("evidence", "ev", { confidence: "confirmed" });
+    f.store.create("knowledge_source", "source", { scope: "global", status: "active" }); f.store.create("evidence", "ev", { confidence: "confirmed" });
     const memory = new MemoryGovernanceKernel(f.store, new MemoryLedgerKernel(f.store));
     const base = { source_id: "source", kind: "episodic", scope_kind: "task", scope_id: "t", topic: "topic", evidence_ids: ["ev"] };
     f.store.create("memory_candidate", "legacy-no-conflict-ids", { source_id: "source", kind: "episodic", scope: { kind: "task", id: "t" }, topic: "topic", content_digest: digest("legacy"), status: "candidate" });
@@ -508,15 +508,15 @@ test("service compatibility paths cover explicit workbench nodes, claim evidence
     service.workbenchWorkflowSave({ workflow_id: "steps-complete", name: "Steps complete", steps: [{ id: "s", type: "action", side_effect: "read_only", action: "noop", depends_on: [] }] });
     service.workbenchWorkflowCompatSave({ workflow_id: "compat", name: "Compat", steps: [{ id: "s", type: "action" }] });
     service.workbenchWorkflowCompatSave({ workflow_id: "compat-inputs", name: "Compat inputs", description: "desc", inputs: [{ id: "x" }], steps: [] });
-    service.workbenchKnowledgeClaimSave({ claim_id: "studio-claim", kind: "fact", content: "candidate" });
+    service.workbenchKnowledgeClaimSave({ claim_id: "studio-claim", kind: "fact", content: "candidate", scope: "global" });
     service.capabilityProjection({ candidates: [], token_budget: 1 });
     service.durableRunRecover({ owner: "none" });
     await assert.rejects(service.adapterInstall({ manifest_path: join(f.root, "missing-adapter.json"), integrity: "sha256:missing" }));
-    f.store.create("knowledge_claim", "claim", { status: "candidate", evidence_ids: "bad" });
+    f.store.create("knowledge_claim", "claim", { scope: "global", status: "candidate", evidence_ids: "bad" });
     assert.throws(() => service.knowledgeConflictResolve({ claim_id: "claim", decision: "reviewed", reviewer: "r", reason: "r" }), /Evidence/);
-    f.store.create("knowledge_source", "claim-review-source", { status: "active", access: "read_only" });
+    f.store.create("knowledge_source", "claim-review-source", { scope: "global", status: "active", access: "read_only" });
     f.store.create("evidence", "ev", { confidence: "bounded", source_id: "claim-review-source" });
-    f.store.create("knowledge_claim", "claim-array", { status: "candidate", source_id: "claim-review-source", evidence_ids: ["ev"] });
+    f.store.create("knowledge_claim", "claim-array", { scope: "global", status: "candidate", source_id: "claim-review-source", evidence_ids: ["ev"] });
     assert.throws(() => service.knowledgeConflictResolve({ claim_id: "claim-array", decision: "reviewed", reviewer: "r", reason: "r" }), /managed Host review/u);
     assert.throws(() => service.modelAdd({ id: "!!!" }), /model id|name/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
@@ -892,7 +892,7 @@ test("remaining fallback branches are exercised through bounded seams", async ()
     (service as unknown as { assertShadowWorkflowReadOnly: (workflow: JsonObject) => void }).assertShadowWorkflowReadOnly({ steps: [{}] });
     await assert.rejects((service as unknown as { invokeInternalAction: (action: string, args: JsonObject) => Promise<JsonObject> }).invokeInternalAction("workspace_write", { task_id: "session-task", workspace: f.root, relative_path: "note-approved.txt", content: "note", approval_ref: "approval" }), /approval/);
     service.workbenchWorkflowCompatSave({ workflow_id: "compat-empty-steps", name: "Empty steps" });
-    const claim = f.store.create("knowledge_claim", "claim-null-evidence", { kind: "fact", content: "x", evidence_ids: null, status: "candidate" });
+    const claim = f.store.create("knowledge_claim", "claim-null-evidence", { kind: "fact", content: "x", scope: "global", evidence_ids: null, status: "candidate" });
     assert.throws(() => service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "r", reason: "r" }), /managed Host review/u);
     await service.settingsUpdate({ models: [{ id: "model", name: "Model", protocol: "openai-compatible", baseUrl: "https://model.example/v1", model: "model", apiKeyEnv: "CRAFT_FINAL_KEY", supportsTools: false }] });
     const previousFetch = globalThis.fetch; const previousKey = process.env.CRAFT_FINAL_KEY; process.env.CRAFT_FINAL_KEY = "test-key";

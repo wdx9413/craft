@@ -1,5 +1,6 @@
 import type { CraftStore, JsonObject } from "../../infrastructure/store.ts";
 import { digestJson } from "../../digest.ts";
+import { scopeFromKey } from "../../scope-policy.ts";
 import { CRAFT_RELEASE_VERSION } from "../../version.ts";
 
 type Command = (args: JsonObject) => JsonObject;
@@ -32,7 +33,14 @@ export class CognitiveWorkbenchCoordinator {
     return this.ports.proposeMemory({ ...args, kind, source_id: sourceId, scope_kind: args.scope_kind ?? args.scope ?? "user", scope_id: args.scope_id ?? "local" });
   }
   saveClaim(args: JsonObject): JsonObject {
-    const evidence = args.evidence_ids === undefined ? this.ports.recordEvidence({ source_type: "human", confidence: "bounded", claim: "Studio-authored candidate.", locator: "studio://knowledge" }) : null;
-    return this.ports.saveClaim({ ...args, evidence_ids: args.evidence_ids ?? [evidence?.id], scope: args.scope ?? "global" });
+    const scope = typeof args.scope === "string" ? args.scope : "";
+    if (!scope) throw new Error("scope must be a non-empty string");
+    scopeFromKey(scope);
+    return this.ports.store.transaction(() => {
+      const evidence = args.evidence_ids === undefined ? this.ports.recordEvidence({ source_type: "human", confidence: "bounded",
+        claim: "Studio-authored candidate.", locator: "studio://knowledge", scope,
+        metadata: { capability_owner: "knowledge", scope } }) : null;
+      return this.ports.saveClaim({ ...args, scope, evidence_ids: args.evidence_ids ?? [evidence?.id] });
+    });
   }
 }

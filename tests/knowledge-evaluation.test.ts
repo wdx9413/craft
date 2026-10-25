@@ -16,7 +16,7 @@ test("knowledge retrieval evaluation does not change routing", async () => {
     service.scopeAliasBind({ scope_kind: "project", scope_id: "project:a", alias_kind: "path", alias: root });
     await assert.rejects(Promise.resolve().then(() => service.knowledgeEvaluationRun({})), /at least/);
     service.knowledgeSourceRegister({ source_id: "alpha-source", kind: "project_note", label: "Alpha source", trust: "verified", scope_kind: "global", scope_id: "global", locator: "fixture", content_digest: "alpha-source-v1" });
-    const evidence = service.evidenceRecord({ source_type: "program", claim: "Observed.", confidence: "confirmed", metadata: { source_session_id: "claim-session", task_id: "claim-task" } }); const claim = service.knowledgeClaimSave({ claim_id: "alpha", kind: "fact", content: "alpha rule", source_id: "alpha-source", evidence_ids: [evidence.id] }).claim as JsonObject; attachVerifiedPromotionFixture(store, claim);
+    const evidence = service.evidenceRecord({ source_type: "program", claim: "Observed.", confidence: "confirmed", metadata: { source_session_id: "claim-session", task_id: "claim-task" } }); const claim = service.knowledgeClaimSave({ claim_id: "alpha", kind: "fact", content: "alpha rule", scope: "global", source_id: "alpha-source", evidence_ids: [evidence.id] }).claim as JsonObject; attachVerifiedPromotionFixture(store, claim);
     const evaluationEvidence = service.evidenceRecord({ source_type: "program", claim: "Independent held-out result.", confidence: "confirmed", metadata: { source_session_id: "evaluation-session", task_id: "evaluation-task" } });
     const provenance = { source_session_id: "evaluation-session", source_task_id: "evaluation-task", source_evidence_ids: [evaluationEvidence.id], evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "model_candidate", sanitized: true };
     const saved = service.knowledgeEvaluationCaseSave({ case_id: "case", query: "alpha", expected_claim_ids: [claim.id], ...provenance }).case as JsonObject; assert.equal(String((service.knowledgeEvaluationCaseSave({ query: "alpha", expected_claim_ids: [claim.id] }).case as JsonObject).id).startsWith("knowledge_evaluation_case_"), true); assert.equal((service.knowledgeEvaluationCaseSave({ case_id: "case", query: "alpha", expected_claim_ids: [claim.id], ...provenance }) as JsonObject).idempotent, true); await assert.rejects(Promise.resolve().then(() => service.knowledgeEvaluationCaseSave({ case_id: "case", query: "other", expected_claim_ids: [claim.id], ...provenance })), /idempotency/);
@@ -36,11 +36,11 @@ test("knowledge retrieval evaluation does not change routing", async () => {
     await assert.rejects(Promise.resolve().then(() => service.knowledgeEvaluationRun({ mode: "unknown", case_ids: [saved.id] })), /mode is unsupported/u);
     await assert.rejects(Promise.resolve().then(() => service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [saved.id], candidate_claim_ids: [] })), /candidate_claim_ids/u);
     await assert.rejects(Promise.resolve().then(() => service.knowledgeEvaluationRun({ mode: "retrieval", case_ids: [saved.id], candidate_claim_ids: [claim.id] })), /require candidate_shadow/u);
-    const nonCandidate = service.knowledgeClaimSave({ claim_id: "reviewed-for-shadow", kind: "fact", content: "reviewed fact", source_id: "alpha-source", evidence_ids: [evidence.id] }).claim as JsonObject;
+    const nonCandidate = service.knowledgeClaimSave({ claim_id: "reviewed-for-shadow", kind: "fact", content: "reviewed fact", scope: "global", source_id: "alpha-source", evidence_ids: [evidence.id] }).claim as JsonObject;
     attachVerifiedPromotionFixture(store, nonCandidate);
     await assert.rejects(Promise.resolve().then(() => service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [saved.id], candidate_claim_ids: [nonCandidate.id] })), /current candidate Claims/u);
-    const candidate = service.knowledgeClaimSave({ claim_id: "candidate-shadow-claim", kind: "fact", content: "candidate fact", evidence_ids: [evidence.id] }).claim as JsonObject;
-    const candidateTwo = service.knowledgeClaimSave({ claim_id: "candidate-shadow-claim-two", kind: "fact", content: "candidate fact two", evidence_ids: [evidence.id] }).claim as JsonObject;
+    const candidate = service.knowledgeClaimSave({ claim_id: "candidate-shadow-claim", kind: "fact", content: "candidate fact", scope: "global", evidence_ids: [evidence.id] }).claim as JsonObject;
+    const candidateTwo = service.knowledgeClaimSave({ claim_id: "candidate-shadow-claim-two", kind: "fact", content: "candidate fact two", scope: "global", evidence_ids: [evidence.id] }).claim as JsonObject;
     const candidateRef = { claim_id: candidate.id, claim_version: candidate.version,
       identity_digest: candidate.identity_digest, content_digest: candidate.content_digest };
     await assert.rejects(Promise.resolve().then(() => service.knowledgeEvaluationCaseSave({ query: "candidate", expected_claim_ids: [candidate.id],
@@ -139,7 +139,7 @@ test("Knowledge adjudication API is idempotent, rejects stale or forged traces, 
   try {
     const source = service.evidenceRecord({ evidence_id: "adjudication-source", source_type: "program", confidence: "confirmed", claim: "Source fact",
       metadata: { source_session_id: "source-session", task_id: "source-task" } });
-    const candidate = service.knowledgeClaimSave({ claim_id: "adjudication-claim", kind: "fact", content: "Candidate fact", evidence_ids: [source.id] }).claim as JsonObject;
+    const candidate = service.knowledgeClaimSave({ claim_id: "adjudication-claim", kind: "fact", content: "Candidate fact", scope: "global", evidence_ids: [source.id] }).claim as JsonObject;
     const held = service.evidenceRecord({ evidence_id: "adjudication-held", source_type: "program", confidence: "confirmed", claim: "Held-out result",
       metadata: { source_session_id: "held-session", task_id: "held-task" } });
     const provenance = { source_session_id: "held-session", source_task_id: "held-task", source_evidence_ids: [held.id],
@@ -243,9 +243,9 @@ test("Knowledge evaluation cases support stable ID pages while legacy list calls
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-case-pages-"));
   const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
-    store.create("knowledge_evaluation_case", "case-page-c", { query: "gamma" });
-    store.create("knowledge_evaluation_case", "case-page-a", { query: "alpha" });
-    store.create("knowledge_evaluation_case", "case-page-b", { query: "beta" });
+    store.create("knowledge_evaluation_case", "case-page-c", { scope: "global", query: "gamma" });
+    store.create("knowledge_evaluation_case", "case-page-a", { scope: "global", query: "alpha" });
+    store.create("knowledge_evaluation_case", "case-page-b", { scope: "global", query: "beta" });
     const first = service.knowledgeEvaluationCaseList({ after_id: "", limit: 2 });
     assert.deepEqual((first.cases as JsonObject[]).map(item => item.id), ["case-page-a", "case-page-b"]);
     assert.equal(first.has_more, true);
@@ -270,7 +270,7 @@ test("Knowledge evaluation case pagination returns every case beyond the one-tho
   try {
     store.transaction(() => {
       for (let index = 0; index < 1_005; index += 1) {
-        store.create("knowledge_evaluation_case", `case-${String(index).padStart(4, "0")}`, { query: `query-${index}` });
+        store.create("knowledge_evaluation_case", `case-${String(index).padStart(4, "0")}`, { scope: "global", query: `query-${index}` });
       }
     });
     const first = service.knowledgeEvaluationCaseList({ after_id: "", limit: 1_000 });

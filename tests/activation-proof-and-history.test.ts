@@ -56,14 +56,14 @@ test("legacy reviewed Knowledge and workflow evolution migrate only through expl
   const f = await fixture();
   try {
     const migration = new ComponentHistoryMigrationKernel(f.store);
-    const evidence = f.store.create("evidence", "bounded", { confidence: "bounded" });
-    f.store.create("knowledge_claim", "legacy", { status: "reviewed", evidence_ids: [evidence.id] });
-    f.store.create("knowledge_claim", "no-evidence", { status: "reviewed", source_revision_id: "rev" });
-    f.store.create("knowledge_claim", "fragment-only", { status: "reviewed", source_revision_id: "rev", fragment_id: "frag", evidence_ids: [evidence.id] });
-    f.store.create("knowledge_claim", "semantic-only", { status: "reviewed", evidence_ids: [evidence.id], semantic_review_id: "review" });
-    f.store.create("knowledge_claim", "complete", { status: "reviewed", source_revision_id: "rev", fragment_id: "frag", evidence_ids: [evidence.id], semantic_review_id: "review" });
-    f.store.create("knowledge_claim", "model-review", { status: "reviewed", source_revision_id: "rev", fragment_id: "frag", evidence_ids: [evidence.id], model_review_id: "review" });
-    f.store.create("knowledge_claim", "human-review", { status: "reviewed", source_revision_id: "rev", fragment_id: "frag", evidence_ids: [evidence.id], review: { reviewer: "human" } });
+    const evidence = f.store.create("evidence", "bounded", { scope: "global", confidence: "bounded" });
+    f.store.create("knowledge_claim", "legacy", { scope: "global", status: "reviewed", evidence_ids: [evidence.id] });
+    f.store.create("knowledge_claim", "no-evidence", { scope: "global", status: "reviewed", source_revision_id: "rev" });
+    f.store.create("knowledge_claim", "fragment-only", { scope: "global", status: "reviewed", source_revision_id: "rev", fragment_id: "frag", evidence_ids: [evidence.id] });
+    f.store.create("knowledge_claim", "semantic-only", { scope: "global", status: "reviewed", evidence_ids: [evidence.id], semantic_review_id: "review" });
+    f.store.create("knowledge_claim", "complete", { scope: "global", status: "reviewed", source_revision_id: "rev", fragment_id: "frag", evidence_ids: [evidence.id], semantic_review_id: "review" });
+    f.store.create("knowledge_claim", "model-review", { scope: "global", status: "reviewed", source_revision_id: "rev", fragment_id: "frag", evidence_ids: [evidence.id], model_review_id: "review" });
+    f.store.create("knowledge_claim", "human-review", { scope: "global", status: "reviewed", source_revision_id: "rev", fragment_id: "frag", evidence_ids: [evidence.id], review: { reviewer: "human" } });
     const knowledgePlan = migration.knowledgeReviewed();
     assert.equal(knowledgePlan.mode, "dry_run");
     const legacyPlan = (knowledgePlan.revalidation_required as JsonObject[]).find((item) => item.claim_id === "legacy")!;

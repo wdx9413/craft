@@ -883,6 +883,16 @@
       "branches": true
     },
     {
+      "name": "hook-runtime-diagnostics",
+      "include": [
+        "core/interfaces/codex-hook-runtime-diagnostics.ts"
+      ],
+      "tests": [
+        "tests/codex-hook-runtime-diagnostics.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "codex-component-hook-bridge",
       "include": [
         "core/interfaces/codex-hook-bridge.ts"
@@ -2065,6 +2075,16 @@
       ],
       "tests": [
         "tests/craft-datasec.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "hook-sqlite-busy-timeout",
+      "include": [
+        "common/craft-common-store-local/src/sqlite-busy-timeout.ts"
+      ],
+      "tests": [
+        "tests/project-storage-paths.test.ts"
       ],
       "branches": true
     }

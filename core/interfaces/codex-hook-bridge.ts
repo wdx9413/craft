@@ -385,8 +385,10 @@ export class CodexHookBridge {
   }
 
   async handle(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
+    const rawEvent = text(input.hook_event_name);
+    const event = rawEvent && ["SessionStart", "SessionEnd", "UserPromptSubmit", "PostToolUse", "Stop"].includes(rawEvent) ? rawEvent : "unknown";
     const captured = await new ComponentTraceKernel(this.service.trace, "hook").capture({ requestId: hookRequestId(), component: "craft-hook",
-      operation: "handle", input: { member, envelope: input }, handler: () => this.dispatch(member, input) });
+      operation: `handle.${member}.${event}`, input: { member, hook_event: event }, handler: () => this.dispatch(member, input) });
     if (!captured.ok) {
       this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, error_type: captured.error instanceof Error ? captured.error.name : "unknown" });
       return {};

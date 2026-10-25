@@ -16,7 +16,6 @@
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
-  "hooks": "./hooks/codex-hooks.json",
   "interface": {
     "displayName": "Craft Memory",
     "shortDescription": "Scoped memory and reproducible context receipts.",

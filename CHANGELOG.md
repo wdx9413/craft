@@ -1,3 +1,10 @@
+## v0.12.108（Hook 超时留痕与范围存储稳定性）
+
+- Hook 在打开 Store 前写入不含会话正文的事件启动记录，完成时补充 Store 与处理阶段耗时；超时留下的未完成记录可定位到 Craft 成员和事件。
+- Hook 跳过长时旧分区迁移，并在 SQLite 写争用时有界等待；Knowledge、Memory、Experience 生命周期由 Context 统一注册，减少重复 Hook 写竞争。
+- 收紧存储范围、Codebase 快照与 Knowledge 来源边界，并补齐相应并发、迁移和恢复测试。
+- 增量覆盖、类型检查和插件 smoke 通过。大仓首次 semantic 索引仍耗时约 54 秒；统一存量迁移与真实 Host 效果验证仍未完成。
+
 ## v0.12.96（Worker 并发执行保护）
 
 - 独立 Worker 按能力获取运行锁，避免同一轮学习任务重复执行和重复调用模型。

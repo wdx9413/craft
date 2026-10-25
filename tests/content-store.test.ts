@@ -424,7 +424,7 @@ test("content frontmatter validates every required field and accepts plain scala
 test("knowledge and memory writes persist body in Markdown and only a reference in SQLite", async () => {
   const f = await fixture();
   const evidence = f.store.create("evidence", "evidence-1", { source_type: "test", confidence: "confirmed", claim: "fixture" });
-  const claim = f.service.knowledgeClaimSave({ kind: "fact", content: "A durable fact", evidence_ids: [evidence.id] }).claim as Record<string, unknown>;
+  const claim = f.service.knowledgeClaimSave({ kind: "fact", content: "A durable fact", scope: "global", evidence_ids: [evidence.id] }).claim as Record<string, unknown>;
   assert.equal("content" in claim, false);
   assert.equal((claim.content_ref as Record<string, unknown>).format, "markdown");
   const claimPath = String((claim.content_ref as Record<string, unknown>).path);
@@ -458,10 +458,10 @@ test("startup content indexes stream every content-bearing record family", async
       scope: "global", status: "candidate", sensitivity: "internal", source_id: "source:test", body: `Body ${id}` });
     f.store.create(recordKind, id, { content_ref: ref });
   }
-  f.store.create("knowledge_claim", "claim-without-reference", { content_ref: null });
-  f.store.create("knowledge_claim", "claim-with-string-reference", { content_ref: "invalid" });
-  f.store.create("knowledge_claim", "claim-with-array-reference", { content_ref: [] });
-  f.store.create("knowledge_claim", "claim-with-unknown-reference-kind", { content_ref: { kind: "unknown" } });
+  f.store.create("knowledge_claim", "claim-without-reference", { scope: "global", content_ref: null });
+  f.store.create("knowledge_claim", "claim-with-string-reference", { scope: "global", content_ref: "invalid" });
+  f.store.create("knowledge_claim", "claim-with-array-reference", { scope: "global", content_ref: [] });
+  f.store.create("knowledge_claim", "claim-with-unknown-reference-kind", { scope: "global", content_ref: { kind: "unknown" } });
 
   await f.store.close();
   const reopened = await new CraftStore(f.paths).open();
@@ -548,6 +548,7 @@ test("legacy source rehydration restores the full digest-pinned page body", asyn
   const source = "---\ntitle: Full page\nstatus: confirmed\n---\n# Full page\n\nThis is the complete source body.\n";
   await writeFile(sourcePath, source, "utf8");
   f.store.create("legacy_knowledge_migration", "rehydrate-migration", { source_root: sourceRoot, source_digest: "snapshot" });
+  f.store.create("knowledge_source", "legacy-import", { scope: { kind: "legacy", id: "shared:shared" }, status: "active", trust: "bounded" });
   f.store.create("knowledge_claim", "rehydrate-claim", { kind: "fact", scope: "legacy:shared:shared", status: "candidate", source_id: "legacy-import", content: "Full page\n\nShort summary" });
   new ContentMigrationKernel(f.store).migrate();
   f.store.create("legacy_knowledge_migration_candidate", "rehydrate-candidate", {
@@ -581,6 +582,7 @@ test("legacy source rehydration restores the full digest-pinned page body", asyn
 test("legacy source rehydration rejects missing, unsafe, stale, and malformed sources", async () => {
   const f = await fixture();
   const migration = new ContentMigrationKernel(f.store);
+  f.store.create("knowledge_source", "legacy", { scope: "global", status: "active", trust: "bounded" });
   const rawDigest = (value: string) => `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
   async function candidate(migrationId: string, candidateId: string, claimId: string | null, locator: string | undefined, source: string | undefined, sourceDigest: string | undefined): Promise<void> {
     const sourceRoot = join(f.root, migrationId);
@@ -605,7 +607,7 @@ test("legacy source rehydration rejects missing, unsafe, stale, and malformed so
   assert.throws(() => migration.rehydrateLegacy({ migration_id: "missing-claim" }), /claim reference is missing/);
   await candidate("missing-ref", "missing-ref-candidate", "missing-ref-claim", "data/pages/missing.md", "body", rawDigest("body"));
   const missingRef = f.store.rawRecords("knowledge_claim").find((row) => row.id === "missing-ref-claim")!;
-  f.store.replacePayload("knowledge_claim", missingRef.id, missingRef.version, { content: "summary" });
+  f.store.replacePayload("knowledge_claim", missingRef.id, missingRef.version, { scope: "global", content: "summary" });
   assert.throws(() => migration.rehydrateLegacy({ migration_id: "missing-ref" }), /claim reference is missing/);
   await candidate("missing-locator", "missing-locator-candidate", "missing-locator-claim", undefined, undefined, undefined);
   assert.throws(() => migration.rehydrateLegacy({ migration_id: "missing-locator" }), /source locator is missing/);
@@ -662,6 +664,7 @@ test("legacy project Knowledge paths are compatibility-only and migrate from an 
       stableDigest({ canonical: canonicalScope, project_kind: identity.project_kind, remote_digest: identity.remote_digest }));
     f.store.create("scope_alias", "legacy-project-path", { scope: canonicalScope, alias_kind: "path", alias: projectRoot,
       alias_digest: stableDigest(projectRoot), identity_digest: "fixture", status: "active" });
+    f.store.create("knowledge_source", "legacy", { scope: { kind: "project", id: "legacy-project-identity" }, status: "active", trust: "bounded" });
     const current = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "legacy-project-claim", version: 1,
       scope, status: "candidate", sensitivity: "internal", source_id: "legacy", body: "Verified legacy body" });
     const legacyPath = join(projectRoot, ".craft_data", "knowledge", "md", "legacy-project-claim.v1.md");
@@ -703,7 +706,7 @@ test("content migration preserves old wiki files and fails closed on secrets", a
   assert.match(String(page.file_path), /knowledge[\\/]md[\\/]Legacy--[a-f0-9]{12}\.v1\.md$/);
   assert.equal(f.store.contentStore.readSync(page.content_ref as never).body, "legacy wiki");
 
-  f.store.create("knowledge_claim", "secret-claim", { kind: "fact", content: "api_key: abcdefgh", evidence_ids: [] });
+  f.store.create("knowledge_claim", "secret-claim", { kind: "fact", scope: "global", content: "api_key: abcdefgh", evidence_ids: [] });
   assert.throws(() => migration.migrate(), /credentials|secrets/);
   assert.equal(f.store.rawRecords("knowledge_claim").find((item) => item.id === "secret-claim")!.payload.content, "api_key: abcdefgh");
   await f.store.close();
@@ -712,7 +715,7 @@ test("content migration preserves old wiki files and fails closed on secrets", a
 test("content migration resolves wiki defaults, legacy source fields, and primitive rollback errors", async () => {
   const f = await fixture();
   const migration = new ContentMigrationKernel(f.store);
-  f.store.create("wiki_page", "wiki-default", { title: "Wiki", file_path: join(f.root, "wiki-default.md") });
+  f.store.create("wiki_page", "wiki-default", { title: "Wiki", scope: "global", file_path: join(f.root, "wiki-default.md") });
   await writeFile(join(f.root, "wiki-default.md"), "wiki body", "utf8");
   f.store.create("memory_ledger", "source-only", { content: "memory body", source: "legacy-source", status: "active" });
   f.store.create("memory_ledger", "fallback-source", { content: "fallback body" });
@@ -746,7 +749,7 @@ test("content references reject metadata drift in canonical and legacy files", a
 
 test("content migration rejects missing legacy bodies and reports database rollback", async () => {
   const f = await fixture();
-  f.store.create("wiki_page", "missing-page", { title: "Missing", file_path: join(f.root, "does-not-exist.md") });
+  f.store.create("wiki_page", "missing-page", { title: "Missing", scope: "global", file_path: join(f.root, "does-not-exist.md") });
   assert.throws(() => new ContentMigrationKernel(f.store).migrate(), /ENOENT|no such file/);
   f.store.remove("wiki_page", "missing-page");
   f.store.create("memory_ledger", "rollback-memory", { content: "will not be attached" });
@@ -841,7 +844,7 @@ test("Wiki compatibility reads and refreshes cover canonical, legacy, and drifte
   await assert.rejects(f.service.wikiPageSave({ page_id: "missing-legacy-save", title: "Missing", body: "new", scope: "global" }), /unrecorded changes/);
   const refreshPath = join(f.root, "refresh-legacy.md");
   await writeFile(refreshPath, "refresh body", "utf8");
-  f.store.create("wiki_page", "refresh-legacy", { title: "Refresh", file_path: refreshPath, body_digest: digest("old"), identity_digest: null });
+  f.store.create("wiki_page", "refresh-legacy", { title: "Refresh", file_path: refreshPath, body_digest: digest("old"), identity_digest: null, scope: "global" });
   assert.equal((f.service.wikiPageRefresh({ page_id: "refresh-legacy" }) as Record<string, unknown>).changed, true);
   await f.store.close();
 });

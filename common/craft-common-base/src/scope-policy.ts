@@ -109,8 +109,15 @@ export function scopeAllows(envelope: ScopeEnvelope, access: ScopeAccess): boole
 
 /** Source custody constrains its derivatives; its purpose does not redefine their purpose. */
 export function sourceAllows(source: JsonObject, access: ScopeAccess): boolean {
-  const applicability = scope(source.scope, { kind: "global", id: "global" });
-  return scopeAllows(scopeEnvelope(source.scope_envelope, applicability), { ...access, purpose: undefined });
+  if (source.scope === undefined || source.scope === null) return false;
+  try {
+    const applicability = typeof source.scope === "string"
+      ? scopeFromKey(source.scope)
+      : scope(source.scope, { kind: "global", id: "global" });
+    return scopeAllows(scopeEnvelope(source.scope_envelope, applicability), { ...access, purpose: undefined });
+  } catch {
+    return false;
+  }
 }
 
 /** Parse host-attested access metadata without turning model text into identity. */

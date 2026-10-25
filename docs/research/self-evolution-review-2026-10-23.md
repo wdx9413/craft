@@ -376,3 +376,11 @@ Experience 范围修复：新写入子记录缺父项且无可确定范围时失
 - `scripts/ci/check-version.ts` 暂未通过，唯一已知阻断是相邻 `craft-marketplace/release.json` 仍为 `0.12.104`。Marketplace 当前 `main` 与 `origin/main` 一致且干净；需在 Craft 发布后使用已推送 Craft 提交的远端 URL 同步包载荷和版本，再复跑版本门。
 - 已构建并打包核心 CLI、MCP、Codex Hook、Experience Worker、数据安全能力和 Context 插件。`plugin-smoke.ts`、`plugin-component-smoke.ts`、`plugin-full-smoke.ts` 与 `experience-autoevolution-smoke.ts` 通过。后者使用本地模型夹具验证：Memory 三级晋升和归档清理；Knowledge 生成有双来源支持的候选，并因缺少候选版本绑定的独立效果评测而保留候选；Experience 四阶段评测通过并在下一轮迭代。该结果证明隔离夹具中的运行链路，不等于真实用户 Host 任务效果。
 - 此记录仍是源码与发布候选验证，不代表数据迁移全部完成：历史无项目根/会话 Host 的数据继续隔离，旧项目数据未整体搬迁或删除。也未证明实际 Host 已加载 `.105`，或真实独立任务已产生有效 Knowledge、Memory、Experience 并通过效果反馈；Host 版本读回和效果门仍待完成。
+
+### 2026-10-25 Hook 超时观测与性能增量
+
+- 当前已安装 Craft Context 缓存为 `.105`。它的 `Stop` Hook 超时配置是 10 秒，`SessionStart`、`PostToolUse`、`SessionEnd` 是 3 秒；`UserPromptSubmit` 是 20 秒。全局 `~/.codex/hooks.json` 同时配置了 DCC `UserPromptSubmit` 10 秒及 DCC `SessionStart`/`Stop` 3 秒。因此仅凭 Host 提示的 `3s`/`10s` 不能确定是哪一个来源；需要下一次带事件字段的运行记录或 Host 侧逐 Hook 输出确认。
+- Craft 旧 Trace 只在 Store 打开后开始记录，进程被超时杀掉时可能没有完成记录。新增 `trace/hook-runtime/v1/*.jsonl` 内容无关诊断：先追加 `started`（成员、事件、匿名会话摘要），Store 打开后完成时追加阶段耗时；不记录提示词、工具输入或原始会话 ID。超时/崩溃会留下无匹配 `finished` 的 `started` 记录，能定位 Craft Hook 的事件，但不能单独证明进程为何终止。
+- 新诊断模块独立覆盖门行/函数/分支均 100%；诊断单测 5/5，打包 Hook 进程测试 6/6。Codex App 随附 Node `v24.21.0`，隔离数据根、串行运行 30 次 `UserPromptSubmit` Hook：失败 0，最小值 426 ms，P50 444 ms、P95 548 ms、P99/最大值 592 ms。这是本地子进程基准，不是交互式 Host 负载或并发尾延迟证明。
+- `.108` 发布包完整插件链通过，含打包 MCP 与本地隔离自动演化 smoke；MCP initialize/tools-list 通过，工具调用耗时为 fixture semantic 2.59 秒、大仓 basic 6.70 秒、大仓首次 semantic 45.27 秒。45.27 秒对应主动 semantic 索引工具调用，仍是未解决的性能热点。自动演化 smoke 使用隔离数据和本地模型 fixture，不能代替真实用户 Host 效果。
+- 新 Hook 诊断与性能修复尚未推送、尚未经固定远端 URL 安装；当前 Host 仍缓存 `.105`，新日志无法回溯旧超时。

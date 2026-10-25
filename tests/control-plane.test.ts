@@ -100,7 +100,7 @@ test("Context Working Set explains selection and keeps host members fixed", asyn
     const projectId = String(scope.id);
     const hostOnly = await kernel.resolve({ working_set_id: "host-only", query: "current", members: ["history", "state"] });
     assert.equal(hostOnly.skipped, true); assert.deepEqual(hostOnly.selected_refs, []);
-    const source = f.store.create("knowledge_source", "source", { status: "active", trust: "trusted" });
+    const source = f.store.create("knowledge_source", "source", { scope: { kind: "project", id: projectId }, status: "active", trust: "trusted" });
     f.store.create("memory_ledger", "memory", { status: "active", source_id: source.id, scope: { kind: "project", id: projectId }, valid_until: null, sensitivity: "internal", content: "focused tests", content_digest: "sha256:memory" });
     const selected = await kernel.resolve({ working_set_id: "selected", query: "focused tests", members: ["knowledge", "memory", "history"], scope_kind: "project", scope_id: projectId });
     assert.equal((selected.selected_refs as string[]).length, 1); assert.equal((selected.selection_reasons as JsonObject[])[0]!.reason, "scoped_retrieval");

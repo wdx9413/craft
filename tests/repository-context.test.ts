@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
@@ -1683,15 +1683,11 @@ test("repository policy digest detects same-path ignore and Codebase config edit
     mkdirSync(join(f.root, "empty-xdg", "git"), { recursive: true });
     mkdirSync(join(f.root, "empty-xdg", "git", "ignore"));
     assert.throws(() => repositoryPolicyDigest(f.repo));
-    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-    const wrapperDir = join(f.root, "git-wrapper"), wrapper = join(wrapperDir, "git");
-    mkdirSync(wrapperDir);
-    writeFileSync(wrapper, `#!/bin/sh\nif [ "$3" = "config" ]; then exit 2; fi\nexec "${realGit}" "$@"\n`);
-    chmodSync(wrapper, 0o755);
-    const oldPath = process.env.PATH;
-    process.env.PATH = `${wrapperDir}:${oldPath ?? ""}`;
-    try { assert.throws(() => repositoryPolicyDigest(f.repo)); }
-    finally { if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath; }
+    const failConfig = (root: string, args: string[], input?: string) => {
+      if (args[0] === "config") throw Object.assign(new Error("Command failed"), { status: 2 });
+      return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", input, stdio: ["pipe", "pipe", "ignore"] });
+    };
+    assert.throws(() => repositoryPolicyDigest(f.repo, failConfig));
   } finally {
     if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = oldXdg;
     if (oldGlobalConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = oldGlobalConfig;
@@ -1817,16 +1813,14 @@ test("repository Context pack carries language-level source omissions into parti
 
 test("repository ignore-check failures other than no matches fail closed", async () => {
   const f = await fixture();
-  const originalPath = process.env.PATH;
   try {
     f.write("main.ts", "export const value = 1;");
-    const wrapperDir = join(f.root, "fake-bin"); mkdirSync(wrapperDir);
-    const gitPath = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-    const wrapper = join(wrapperDir, "git");
-    writeFileSync(wrapper, `#!/bin/sh\nif [ "$3" = "check-ignore" ]; then exit 2; fi\nexec ${gitPath} "$@"\n`);
-    chmodSync(wrapper, 0o755); process.env.PATH = `${wrapperDir}:${originalPath ?? ""}`;
-    assert.throws(() => repositoryFiles(f.repo), /Command failed/);
-  } finally { if (originalPath === undefined) delete process.env.PATH; else process.env.PATH = originalPath; f.close(); }
+    const failIgnore = (root: string, args: string[], input?: string) => {
+      if (args[0] === "check-ignore") throw Object.assign(new Error("Command failed"), { status: 2 });
+      return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", input, stdio: ["pipe", "pipe", "ignore"] });
+    };
+    assert.throws(() => repositoryFiles(f.repo, "", failIgnore), /Command failed/);
+  } finally { f.close(); }
 });
 
 test("aggregate MCP resolves bounded scope and code references while standalone surfaces remain isolated", async () => {
@@ -2354,4 +2348,112 @@ test("Java graph caches reuse across non-Java edits and fall back safely when in
       assert.notEqual(updated.index_id, first.index_id);
     } finally { f.close(); }
   }
+});
+
+test("repository graph file publication does not hold the shared database writer lock", async () => {
+  const f = await fixture();
+  const { DatabaseSync } = await import("node:sqlite");
+  const otherWriter = new DatabaseSync(f.store.paths.databaseFile);
+  otherWriter.exec("PRAGMA busy_timeout=0");
+  const put = ProjectGraphStore.prototype.put;
+  let probes = 0;
+  ProjectGraphStore.prototype.put = function (id, record) {
+    otherWriter.exec("BEGIN IMMEDIATE");
+    otherWriter.exec("ROLLBACK");
+    probes++;
+    return put.call(this, id, record);
+  };
+  try {
+    f.write("main.ts", "export function caller() { return target(); }\nexport function target() { return 1; }\n");
+    const indexed = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(indexed.status, "ready");
+    assert(probes > 0, "probe must run while immutable graph files are published");
+  } finally {
+    ProjectGraphStore.prototype.put = put;
+    otherWriter.close();
+    f.close();
+  }
+});
+
+test("repository index publication rejects an activation revoked during graph file writes", async () => {
+  const f = await fixture();
+  const put = ProjectGraphStore.prototype.put;
+  const workspaceId = `repository_${stableDigest(realpathSync(f.repo)).slice(-24)}`;
+  let revoked = false;
+  ProjectGraphStore.prototype.put = function (id, record) {
+    const result = put.call(this, id, record);
+    if (!revoked) {
+      revoked = true;
+      f.service.codebaseDeactivate({ workspace_id: workspaceId, actor: "test-revocation-race" });
+    }
+    return result;
+  };
+  try {
+    f.write("main.ts", "export function caller() { return target(); }\nexport function target() { return 1; }\n");
+    assert.throws(() => f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }), /snapshot changed before index publication/u);
+    assert.equal(revoked, true);
+    assert.equal(f.store.list("codebase_index", 1_000, item => item.workspace_id === workspaceId && item.status === "ready").length, 0);
+  } finally {
+    ProjectGraphStore.prototype.put = put;
+    f.close();
+  }
+});
+
+test("repository state publication rejects an activation version that changes after index creation", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export const value = 1;\n");
+    const workspaceId = `repository_${stableDigest(realpathSync(f.repo)).slice(-24)}`;
+    const importAnalysis = f.service.codebaseAnalysisImport.bind(f.service);
+    f.service.codebaseAnalysisImport = args => {
+      const result = importAnalysis(args);
+      f.service.codebaseDeactivate({ workspace_id: workspaceId, actor: "repository-auto" });
+      f.service.codebaseActivate({ workspace_id: workspaceId, actor: "repository-auto" });
+      return result;
+    };
+    assert.throws(() => f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }), /activation changed before state publication/u);
+    assert.equal(f.store.get("codebase_activation", `codebase_activation_${workspaceId}`).status, "active");
+    assert.equal(f.store.find("codebase_repository_state", `${workspaceId}_semantic`), null);
+  } finally { f.close(); }
+});
+
+test("repository state publication rejects workspace version and checkpoint drift after index creation", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  for (const drift of ["version", "checkpoint"] as const) {
+    const f = await fixture();
+    try {
+      f.write("main.ts", "export const value = 1;\n");
+      const workspaceId = `repository_${stableDigest(realpathSync(f.repo)).slice(-24)}`;
+      const importAnalysis = f.service.codebaseAnalysisImport.bind(f.service);
+      f.service.codebaseAnalysisImport = args => {
+        const result = importAnalysis(args);
+        const workspace = f.store.get("workspace", workspaceId);
+        if (drift === "version") f.store.save("workspace", workspaceId, { ...payload(workspace), name: "concurrent workspace update" });
+        else {
+          const database = new DatabaseSync(f.store.paths.databaseFile);
+          try {
+            database.prepare("UPDATE records SET payload_json=? WHERE kind='workspace' AND id=? AND version=?")
+              .run(JSON.stringify({ ...payload(workspace), latest_checkpoint_id: "concurrent_checkpoint" }), workspaceId, Number(workspace.version));
+          } finally { database.close(); }
+        }
+        return result;
+      };
+      assert.throws(() => f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }), /snapshot changed before state publication/u);
+    } finally { f.close(); }
+  }
+});
+
+test("Codebase index publication rejects malformed repository guards", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export const value = 1;\n");
+    const indexed = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "basic" });
+    const workspaceId = String(indexed.workspace_id);
+    const invalid: unknown[] = [null, {}, { workspace_version: 0, checkpoint_id: "checkpoint", activation_version: 1 },
+      { workspace_version: 1, checkpoint_id: "", activation_version: 1 },
+      { workspace_version: 1, checkpoint_id: "checkpoint", activation_version: 0 }];
+    for (const [index, publication_guard] of invalid.entries()) {
+      assert.throws(() => f.service.codebaseIndexBuild({ workspace_id: workspaceId, index_id: `invalid_guard_${index}`, publication_guard } as JsonObject), /publication_guard/u);
+    }
+  } finally { f.close(); }
 });

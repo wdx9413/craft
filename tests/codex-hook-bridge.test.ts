@@ -59,6 +59,20 @@ test("session-only Hook events join one generated turn and stop cannot finalize 
   } finally { await dispose(f); }
 });
 
+test("Hook traces identify the bounded lifecycle event without recording prompt text", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", prompt: "private diagnostic phrase" });
+    await bridge.handle("context", { hook_event_name: "unrecognized-event", prompt: "another private phrase" });
+    const events = f.store.list("trace_event", 1_000);
+    assert(events.some(event => event.operation_id === "handle.context.UserPromptSubmit"));
+    assert(events.some(event => event.operation_id === "handle.context.unknown"));
+    assert(!JSON.stringify(events).includes("private diagnostic phrase"));
+    assert(!JSON.stringify(events).includes("another private phrase"));
+  } finally { await dispose(f); }
+});
+
 test("overlapping Hook turns refuse missing IDs even after one explicitly closes", async () => {
   const f = await fixture();
   try {

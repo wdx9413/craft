@@ -86,8 +86,8 @@ test("trusted LSP configuration rejects malformed files and reports invalid adap
 test("Go worker caches stay in the owning Codebase data directory", () => {
   const inherited = { PATH: "/usr/bin", GOPLSCACHE: "/host-gopls-cache", GOCACHE: "/host-go-build-cache" };
   const go = configuredLspWorkerEnvironment("go", "/project/.craft_data/codebase", inherited);
-  assert.equal(go.GOPLSCACHE, "/project/.craft_data/codebase/gopls-cache");
-  assert.equal(go.GOCACHE, "/project/.craft_data/codebase/go-build-cache");
+  assert.equal(go.GOPLSCACHE, join("/project/.craft_data/codebase", "gopls-cache"));
+  assert.equal(go.GOCACHE, join("/project/.craft_data/codebase", "go-build-cache"));
   assert.equal(go.PATH, inherited.PATH);
   assert.equal(inherited.GOPLSCACHE, "/host-gopls-cache");
   assert.equal(inherited.GOCACHE, "/host-go-build-cache");

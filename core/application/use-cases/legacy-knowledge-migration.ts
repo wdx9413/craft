@@ -13,7 +13,7 @@ export function installLegacyKnowledgeMigrationMethods(serviceClass: typeof Craf
     if (args.offline !== true) throw new Error("Legacy knowledge import is offline-only; use scripts/import-legacy-knowledge.ts");
     const migration = this.store.get("legacy_knowledge_migration", String(args.migration_id));
     const sourceId = `legacy_knowledge_source_${String(migration.source_digest).slice(-24)}`;
-    this.knowledgeSourceRegister({ source_id: sourceId, kind: "custom", label: "Offline legacy formal knowledge snapshot", scope_kind: "user", scope_id: "local", locator: `offline://legacy-import/${String(migration.source_digest).slice(-24)}`, content_digest: String(migration.source_digest), trust: "bounded", access: "proposal_only" });
+    this.knowledgeSourceRegister({ source_id: sourceId, kind: "custom", label: "Offline legacy formal knowledge snapshot", scope_kind: "global", scope_id: "global", locator: `offline://legacy-import/${String(migration.source_digest).slice(-24)}`, content_digest: String(migration.source_digest), trust: "bounded", access: "proposal_only" });
     return this.legacyKnowledgeMigration.importCandidates(args, sourceId, (entry, _source, importedSourceId, candidateId) => {
       const evidenceId = `legacy_knowledge_evidence_${candidateId.slice(-24)}`; const claimId = `legacy_knowledge_claim_${candidateId.slice(-24)}`;
       this.evidenceRecord({ evidence_id: evidenceId, source_type: "legacy_kefu_wiki_formal_page", claim: `Legacy formal page imported as unverified candidate: ${entry.title}`, confidence: "unverified", locator: entry.rel_path, metadata: { source_digest: entry.page_digest, evidence_type: entry.evidence_type, migration: true } });

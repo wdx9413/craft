@@ -66,6 +66,7 @@ export class KnowledgeAutoReviewKernel {
     const identity = { automatic, minimum_independent_support: minimum, minimum_confidence: confidence };
     if (existing.identity_digest === digest(identity)) return { policy: existing, idempotent: true };
     const saved = this.store.save("knowledge_promotion_policy", DEFAULT_POLICY_ID, {
+      scope: { kind: "global", id: "global" },
       ...identity,
       policy_id: DEFAULT_POLICY_ID,
       revision: Number(existing.revision) + 1,

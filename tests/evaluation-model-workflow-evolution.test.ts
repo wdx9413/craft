@@ -139,7 +139,7 @@ test("archiving a completed model Trace does not reissue its Knowledge task", as
     const env = { DASHSCOPE_API_KEY: "configured-for-test" };
     const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, env, f.service.trace);
     const profile = kernel.save({ provider: "qwen", model: "qwen-plus", purposes: ["knowledge_scenario_classification"], network_execution_enabled: true }).profile as JsonObject;
-    f.store.create("knowledge_source", "archive-source", { status: "active", trust: "verified" });
+    f.store.create("knowledge_source", "archive-source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified" });
     f.store.create("knowledge_claim", "archive-claim", { status: "candidate", scope: "global", source_id: "archive-source", content_digest: "sha256:claim" });
     const input = { profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "archive-claim",
       input_ref: "craft-knowledge://claim/archive-claim/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" };
@@ -184,12 +184,12 @@ test("Knowledge classification tickets track the live candidate and keep result 
     const completionSchema = knowledgeTools.find(item => item.name === "craft_evaluation_model_ticket_complete")?.inputSchema as JsonObject;
     assert.deepEqual((completionSchema.properties as JsonObject).trace_id, { type: "string" });
     assert.equal((completionSchema.required as string[]).includes("trace_id"), false, "Workflow tickets do not require a Knowledge Trace");
-    f.store.create("knowledge_source", "source-1", { status: "active", trust: "verified" });
+    f.store.create("knowledge_source", "source-1", { scope: { kind: "project", id: "demo" }, status: "active", trust: "verified" });
     f.store.create("knowledge_claim", "claim-1", { status: "candidate", scope: "project:demo", version: 1,
       content_digest: "sha256:claim", source_id: "source-1" });
     f.store.create("knowledge_claim", "reviewed-claim", { status: "reviewed", scope: "project:demo", version: 1,
       content_digest: "sha256:reviewed", source_id: "source-1" });
-    f.store.create("knowledge_source", "global-source", { status: "active", trust: "verified" });
+    f.store.create("knowledge_source", "global-source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified" });
     f.store.create("knowledge_claim", "global-candidate", { status: "candidate", scope: "global", version: 1,
       content_digest: "sha256:global-candidate", source_id: "global-source" });
     const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, { DASHSCOPE_API_KEY: "configured-for-test" });
@@ -223,7 +223,7 @@ test("Knowledge classification tickets track the live candidate and keep result 
     f.store.create("knowledge_claim", "rejected-claim", { status: "rejected", scope: "project:demo", version: 1, content_digest: "sha256:rejected" });
     f.store.create("knowledge_claim", "classified-claim", { status: "candidate", scenario_key: "existing", scope: "project:demo", version: 1, content_digest: "sha256:classified" });
     f.store.create("knowledge_claim", "session-claim", { status: "candidate", scope: "session:one", version: 1, content_digest: "sha256:session" });
-    f.store.create("knowledge_claim", "issue-missing-scope", { status: "candidate", version: 1, content_digest: "sha256:no-scope" });
+    f.store.create("knowledge_claim", "issue-missing-scope", { status: "candidate", scope: "legacy:unbound", version: 1, content_digest: "sha256:no-scope" });
     for (const [suffix, staleTarget] of staleTargets) f.store.create("evaluation_model_ticket", `stale-${suffix}`, {
       profile_id: profile.id, profile_version: profile.version, purpose: "knowledge_scenario_classification", status: "ready_for_adapter", target: staleTarget,
     });
@@ -333,15 +333,16 @@ test("Knowledge classification tickets track the live candidate and keep result 
         recovery_of: exhaustedBase.id, recovery_attempt: attempt });
     }
     assert.throws(() => kernel.issue(exhaustedArgs), /recovery attempt limit/u);
+    f.store.create("knowledge_source", "session-source", { scope: { kind: "session", id: "one" }, status: "active", trust: "verified" });
+    f.store.create("knowledge_source", "untrusted-source", { scope: { kind: "project", id: "demo" }, status: "active", trust: "untrusted" });
     for (const [claimId, claimValue] of [
       ["issue-rejected", { status: "rejected", scope: "project:demo", version: 1, content_digest: "sha256:rejected", source_id: "source-1" }],
       ["issue-classified", { status: "candidate", scenario_key: "known", scope: "project:demo", version: 1, content_digest: "sha256:classified", source_id: "source-1" }],
-      ["issue-session-scope", { status: "candidate", scope: "session:one", version: 1, content_digest: "sha256:session-scope", source_id: "source-1" }],
+      ["issue-session-scope", { status: "candidate", scope: "session:one", version: 1, content_digest: "sha256:session-scope", source_id: "session-source" }],
       ["untrusted-claim", { status: "candidate", scope: "project:demo", version: 1, content_digest: "sha256:untrusted", source_id: "untrusted-source" }],
       ["missing-source-ref", { status: "candidate", scope: "project:demo", version: 1, content_digest: "sha256:no-source" }],
       ["missing-scope", { status: "candidate", version: 1, content_digest: "sha256:no-scope", source_id: "source-1" }],
     ] as const) f.store.create("knowledge_claim", claimId, claimValue);
-    f.store.create("knowledge_source", "untrusted-source", { status: "active", trust: "untrusted" });
     for (const claimId of ["issue-rejected", "issue-classified", "issue-session-scope", "untrusted-claim", "missing-source-ref", "missing-scope"]) {
       assert.throws(() => kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: claimId,
         input_ref: "input", output_contract_ref: "contract" }), /unclassified (project or global )?Claim from an active trusted Source/u);
@@ -361,7 +362,7 @@ test("Knowledge Ticket listing fails closed without throwing when a project root
   try {
     const readme = join(f.root, "README.md"); await writeFile(readme, "Registered project source.");
     const secondRoot = join(f.root, "alternate-checkout"); await mkdir(secondRoot);
-    f.store.create("knowledge_source", "legacy-project-source", { status: "active", trust: "verified", kind: "readme", locator: readme });
+    f.store.create("knowledge_source", "legacy-project-source", { scope: { kind: "project", id: "demo" }, status: "active", trust: "verified", kind: "readme", locator: readme });
     f.store.create("knowledge_claim", "legacy-project-claim", { status: "candidate", scope: "project:demo", version: 1,
       content_digest: "sha256:legacy-project-claim", source_id: "legacy-project-source",
       content_ref: { kind: "knowledge", path: join(tmpdir(), ".craft_data", "knowledge", "md", "legacy.md") } });
@@ -377,7 +378,7 @@ test("Knowledge Ticket listing fails closed without throwing when a project root
     const noContentRefTicket = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "project-claim-without-content-ref",
       project_root: f.root, input_ref: "craft-knowledge://claim/project-claim-without-content-ref/v1/catalog/0",
       output_contract_ref: "craft-knowledge-scenario-classification-v1" }).ticket as JsonObject;
-    f.store.create("knowledge_source", "custom-project-source", { status: "active", trust: "verified", kind: "external", locator: "external://project-source" });
+    f.store.create("knowledge_source", "custom-project-source", { scope: { kind: "project", id: "demo" }, status: "active", trust: "verified", kind: "external", locator: "external://project-source" });
     f.store.create("knowledge_claim", "project-claim-with-custom-source", { status: "candidate", scope: "project:demo", version: 1,
       content_digest: "sha256:project-claim-with-custom-source", source_id: "custom-project-source",
       content_ref: { kind: "knowledge", path: join(f.root, ".craft_data", "knowledge", "md", "custom.md") } });
@@ -409,7 +410,7 @@ test("Knowledge Ticket listing fails closed without throwing when a project root
       ["claim-with-revoked-source", "revoked-project-source", "candidate", "verified"],
       ["claim-with-untrusted-source", "untrusted-project-source", "candidate", "untrusted"],
     ] as const) {
-      if (sourceId) f.store.create("knowledge_source", sourceId, { status: id.includes("revoked") ? "revoked" : "active", trust,
+      if (sourceId) f.store.create("knowledge_source", sourceId, { scope: { kind: "project", id: "demo" }, status: id.includes("revoked") ? "revoked" : "active", trust,
         kind: "readme", locator: readme });
       f.store.create("knowledge_claim", id, { status, scope: "project:demo", version: 1, content_digest: `sha256:${id}`, ...(sourceId ? { source_id: sourceId } : {}) });
       f.store.create("evaluation_model_ticket", `ticket-${id}`, { profile_id: profile.id, profile_version: profile.version,

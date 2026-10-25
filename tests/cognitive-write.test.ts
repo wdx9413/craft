@@ -86,11 +86,11 @@ test("expiry changes only elapsed reviewed claims and retains content references
     const source = f.store.get("knowledge_source", "builtin.evidence-wiki");
     assert.equal(f.module.sweepExpiredClaims().count, 0);
     assert.throws(() => f.module.sweepExpiredClaims({ now: "invalid" }), /ISO/);
-    f.store.create("knowledge_claim", "candidate", { status: "candidate", valid_until: "2000-01-01" });
-    f.store.create("knowledge_claim", "no-expiry", { status: "reviewed", source_id: source.id, review: { source_digest: source.content_digest } });
-    f.store.create("knowledge_claim", "future", { status: "reviewed", source_id: source.id, review: { source_digest: source.content_digest }, valid_until: "2099-01-01" });
-    f.store.create("knowledge_claim", "elapsed-legacy", { status: "reviewed", valid_until: "2000-01-01", content: "legacy" });
-    f.store.create("knowledge_claim", "elapsed-ref", { status: "reviewed", valid_until: "2000-01-01", content_ref: { digest: "pinned" }, content: "must not duplicate" });
+    f.store.create("knowledge_claim", "candidate", { scope: "global", status: "candidate", valid_until: "2000-01-01" });
+    f.store.create("knowledge_claim", "no-expiry", { scope: "global", status: "reviewed", source_id: source.id, review: { source_digest: source.content_digest } });
+    f.store.create("knowledge_claim", "future", { scope: "global", status: "reviewed", source_id: source.id, review: { source_digest: source.content_digest }, valid_until: "2099-01-01" });
+    f.store.create("knowledge_claim", "elapsed-legacy", { scope: "global", status: "reviewed", valid_until: "2000-01-01", content: "legacy" });
+    f.store.create("knowledge_claim", "elapsed-ref", { scope: "global", status: "reviewed", valid_until: "2000-01-01", content_ref: { digest: "pinned" }, content: "must not duplicate" });
     assert.equal(f.module.sweepExpiredClaims({ now: "2030-01-01" }).count, 2);
     assert.equal(f.store.get("knowledge_claim", "candidate").status, "candidate");
     assert.equal(f.store.get("knowledge_claim", "future").status, "reviewed");
@@ -105,7 +105,7 @@ test("conflict resolution cannot elevate unsupported Evidence or bypass Claim re
   try {
     f.service.knowledgeMemoryInstallBuiltins();
     for (const [id, confidence] of [["unverified", "unverified"], ["bounded", "bounded"], ["confirmed", "confirmed"]]) f.store.create("evidence", id, { confidence });
-    for (const [id, evidence] of [["none", null], ["weak", ["unverified"]], ["bounded-claim", ["bounded"]], ["confirmed-claim", ["confirmed"]]]) f.store.create("knowledge_claim", id as string, { status: "candidate", source_id: "builtin.evidence-wiki", evidence_ids: evidence });
+    for (const [id, evidence] of [["none", null], ["weak", ["unverified"]], ["bounded-claim", ["bounded"]], ["confirmed-claim", ["confirmed"]]]) f.store.create("knowledge_claim", id as string, { scope: "global", status: "candidate", source_id: "builtin.evidence-wiki", evidence_ids: evidence });
     const request = { claim_id: "none", decision: "reviewed", reviewer: "human", reason: "checked" };
     assert.throws(() => f.module.resolveClaimConflict({ ...request, decision: "invalid" }), /unsupported/);
     assert.throws(() => f.module.resolveClaimConflict(request), /Evidence/);

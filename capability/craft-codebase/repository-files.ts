@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 export type RepositoryFile = { path: string; digest: string; content: string; language: string; file_version?: string };
 export type RepositoryContextFile = { path: string; digest: string; content: string; file_version?: string };
 export type RepositoryFiles = { root: string; state: "ready" | "disabled" | "not_repository"; files: RepositoryFile[]; context_files: RepositoryContextFile[]; context_files_omitted: number; omitted: number; omitted_by_language: Record<string, number> };
+export type RepositoryGitRunner = (root: string, args: string[], input?: string) => string;
 const LANGUAGE_EXTENSIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   "typescript-javascript": [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
   python: [".py"], java: [".java"], go: [".go"], rust: [".rs"], "c-cpp": [".c", ".h", ".cc", ".cxx", ".c++", ".hh", ".hpp", ".hxx", ".cpp", ".mm", ".m"],
@@ -28,12 +29,12 @@ const MAX_TOTAL_BYTES = 12 * 1024 * 1024;
 const GO_CONTEXT_FILES = new Set(["go.mod", "go.sum", "go.work", "go.work.sum"]);
 const MAX_CONTEXT_FILE_BYTES = 512 * 1024;
 const MAX_CONTEXT_TOTAL_BYTES = 1024 * 1024;
-const git = (root: string, args: string[], input?: string) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", input, timeout: 5000, maxBuffer: 8 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"] });
+const git: RepositoryGitRunner = (root, args, input) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", input, timeout: 5000, maxBuffer: 8 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"] });
 const fileVersion = (stat: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }): string =>
   [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
 
 /** Digest only repository selection policy, without reading source bodies. */
-export function repositoryPolicyDigest(root: string): string {
+export function repositoryPolicyDigest(root: string, runGit: RepositoryGitRunner = git): string {
   root = realpathSync(root);
   const configPath = join(root, ".craft-codebase.json");
   let config = "missing";
@@ -42,11 +43,11 @@ export function repositoryPolicyDigest(root: string): string {
     if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Repository config must be a regular file");
     config = createHash("sha256").update(readFileSync(configPath)).digest("hex");
   }
-  const paths = [...new Set(git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean))].sort();
+  const paths = [...new Set(runGit(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean))].sort();
   const policyFiles = paths.filter(path => path === ".gitignore" || path.endsWith("/.gitignore"));
-  const infoExclude = resolve(root, git(root, ["rev-parse", "--git-path", "info/exclude"]).trim());
+  const infoExclude = resolve(root, runGit(root, ["rev-parse", "--git-path", "info/exclude"]).trim());
   const configured = (() => {
-    try { return git(root, ["config", "--path", "--get-all", "core.excludesfile"]).split(/\r?\n/u).filter(Boolean); }
+    try { return runGit(root, ["config", "--path", "--get-all", "core.excludesfile"]).split(/\r?\n/u).filter(Boolean); }
     catch (error) { if ((error as { status?: number }).status === 1) return []; throw error; }
   })();
   const defaultExclude = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "git", "ignore");
@@ -70,16 +71,16 @@ function hasSymlinkPath(root: string, path: string): boolean {
 }
 
 /** Only the current repository is discovered. No parent-directory or home scan. */
-export function repositoryRoot(path: unknown): { root: string; isRepository: boolean } {
+export function repositoryRoot(path: unknown, runGit: RepositoryGitRunner = git): { root: string; isRepository: boolean } {
   if (typeof path !== "string" || !path.trim()) throw new Error("project_root is required");
   const current = realpathSync(path);
   if (!lstatSync(current).isDirectory()) throw new Error("project_root must be a directory");
-  try { return { root: realpathSync(git(current, ["rev-parse", "--show-toplevel"]).trim()), isRepository: true }; }
+  try { return { root: realpathSync(runGit(current, ["rev-parse", "--show-toplevel"]).trim()), isRepository: true }; }
   catch { return { root: current, isRepository: false }; }
 }
 
 /** Git ignore rules, local opt-out and language-balanced bounded source selection precede content reads. */
-export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
+export function repositoryFiles(root: string, _query = "", runGit: RepositoryGitRunner = git): RepositoryFiles {
   root = realpathSync(root);
   const configPath = join(root, ".craft-codebase.json");
   if (existsSync(configPath) && lstatSync(configPath).isSymbolicLink()) throw new Error("Repository config must be a regular file");
@@ -89,7 +90,7 @@ export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
   const excludes: unknown = config.exclude_paths ?? [];
   if (!Array.isArray(excludes) || excludes.some(p => typeof p !== "string" || !p || isAbsolute(p) || p.includes("\\") || p.split("/").includes(".."))) throw new Error("exclude_paths must contain repository-relative paths");
   if (config.enabled === false || process.env.CRAFT_CODEBASE_AUTO_INDEX === "0") return { root, state: "disabled", files: [], context_files: [], context_files_omitted: 0, omitted: 0, omitted_by_language: {} };
-  const paths = [...new Set(git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean))].sort();
+  const paths = [...new Set(runGit(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean))].sort();
   const symlinkPaths = new Set(paths.filter(path => {
     const extension = extname(path).toLowerCase();
     return EXTENSIONS.has(extension) && !GENERATED.test(path)
@@ -99,7 +100,7 @@ export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
   // --exclude-standard applies only to untracked paths in ls-files. Recheck
   // tracked paths too, before reading bodies; NUL input preserves legal names.
   let ignored = "";
-  try { ignored = git(root, ["check-ignore", "--no-index", "-z", "--stdin"], paths.filter(path => !symlinkPaths.has(path)).map(path => `${path}\0`).join("")); }
+  try { ignored = runGit(root, ["check-ignore", "--no-index", "-z", "--stdin"], paths.filter(path => !symlinkPaths.has(path)).map(path => `${path}\0`).join("")); }
   catch (error) { if ((error as { status?: number }).status !== 1) throw error; }
   const ignoredPaths = new Set(ignored.split("\0"));
   const context_files: RepositoryContextFile[] = [];

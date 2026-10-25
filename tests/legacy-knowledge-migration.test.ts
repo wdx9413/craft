@@ -177,7 +177,13 @@ test("legacy migration discovery and import cover metadata, drift and failure br
     assert.equal(diff.changed, true); assert.ok((diff.tombstones as string[]).some((item) => item.endsWith("unsupported.md"))); assert.notEqual(diff.current_digest, beforeDigest);
     const fresh = await kernel.discover({ migration_id: "edge-import", source_root: legacy });
     const freshMigration = fresh.migration as JsonObject; const eligible = (freshMigration.entries as JsonObject[]).find((item) => String(item.rel_path).endsWith("valid.md"))!;
-    const imported = await kernel.importCandidates({ migration_id: "edge-import", candidate_ids: [String(eligible.rel_path), "unknown.md"] }, "source", (entry) => ({ evidence_id: `e:${entry.rel_path}`, claim_id: `c:${entry.rel_path}` }));
+    store.create("knowledge_source", "source", { scope: "global", status: "active", trust: "bounded" });
+    const imported = await kernel.importCandidates({ migration_id: "edge-import", candidate_ids: [String(eligible.rel_path), "unknown.md"] }, "source", (entry) => {
+      const evidenceId = `e:${entry.rel_path}`, claimId = `c:${entry.rel_path}`;
+      store.create("evidence", evidenceId, { source_type: "legacy_import", confidence: "unverified" });
+      store.create("knowledge_claim", claimId, { scope: `legacy:${entry.scope}:${entry.project ?? "shared"}`, status: "candidate", source_id: "source", evidence_ids: [evidenceId], content: "Imported fixture." });
+      return { evidence_id: evidenceId, claim_id: claimId };
+    });
     assert.equal((imported.candidates as JsonObject[]).length, 1); assert.equal((imported.failures as JsonObject[])[0]?.code, "unknown_candidate");
     const again = await kernel.importCandidates({ migration_id: "edge-import", candidate_ids: [String(eligible.rel_path)] }, "source", () => { throw new Error("should not be called"); });
     assert.equal((again.candidates as JsonObject[])[0]?.idempotent, true);
@@ -185,8 +191,9 @@ test("legacy migration discovery and import cover metadata, drift and failure br
     await assert.rejects(kernel.importCandidates({ migration_id: "edge-import", candidate_ids: "bad" }, "source", () => ({ evidence_id: "e", claim_id: "c" })), /non-empty/);
     assert.equal(kernel.recordFailure("edge-import", "import", "x", "token=secret-value").startsWith("legacy_knowledge_migration_report_"), true);
     const candidate = (imported.candidates as JsonObject[])[0]!;
+    store.remove("knowledge_claim", String(candidate.claim_id));
     await assert.rejects(Promise.resolve().then(() => kernel.publishReady({ candidate_id: candidate.id })), /knowledge_claim/);
-    store.create("knowledge_claim", String(candidate.claim_id), { status: "candidate", evidence_ids: [candidate.evidence_id] });
+    store.create("knowledge_claim", String(candidate.claim_id), { scope: "global", status: "candidate", evidence_ids: [candidate.evidence_id] });
     assert.throws(() => kernel.publishReady({ candidate_id: candidate.id }), /verified managed promotion/u);
     store.save("knowledge_claim", String(candidate.claim_id), { ...store.get("knowledge_claim", String(candidate.claim_id)), status: "reviewed" });
     assert.throws(() => kernel.publishReady({ candidate_id: candidate.id }), /verified managed promotion/u);

@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 import { MCP_PREFERRED_PROTOCOL_VERSION } from "../../core/distribution-and-first-run.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { CraftStore } from "../../core/infrastructure/store.ts";
@@ -12,7 +13,10 @@ import { craftPaths } from "../../core/infrastructure/paths.ts";
 const root = resolve(import.meta.dirname, "..", "..");
 import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
 
-const components = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
+const allComponents: string[] = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
+const selectedComponents = process.env.CRAFT_COMPONENT_SMOKE?.split(",").map(value => value.trim()).filter(Boolean);
+assert(!selectedComponents?.some(name => !allComponents.includes(name)), "Unknown smoke component");
+const components = selectedComponents?.length ? allComponents.filter(name => selectedComponents.includes(name)) : allComponents;
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, name: string): Promise<T> {
   let timeout: ReturnType<typeof setTimeout>;
@@ -78,7 +82,14 @@ async function smoke(name: string): Promise<void> {
       const response = new Promise<Record<string, any>>((resolveResponse, reject) => pending.set(id, { resolve: resolveResponse, reject }));
       child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, ...(params ? { params } : {}) })}\n`);
       const operation = params && typeof params.name === "string" ? `${method}:${params.name}` : method;
-      return withTimeout(response, timeoutMs, `${name}:${operation}`);
+      const args = params?.arguments as Record<string, unknown> | undefined;
+      const phase = params?.name === "craft_context_open"
+        ? `${args?.project_root === root ? "large" : "fixture"}-${args?.index_depth ?? "basic"}` : undefined;
+      const started = performance.now();
+      return withTimeout(response, timeoutMs, `${name}:${operation}${phase ? `:${phase}` : ""}`).then(value => {
+        if (phase) process.stderr.write(`[perf] ${operation}:${phase} ${Math.round(performance.now() - started)}ms\n`);
+        return value;
+      });
     };
     const expectedDailyTool = name === "craft-codebase" ? "craft_codebase_status" : name === "craft-context" ? "craft_context_open" : ["craft-knowledge", "craft-memory", "craft-experience"].includes(name) ? "craft_component_readiness_get" : "craft_info";
     const callTool = name === "craft-codebase" ? "craft_codebase_repository_ensure" : expectedDailyTool;
@@ -156,6 +167,16 @@ async function smoke(name: string): Promise<void> {
       assert(opened.codebase?.checkpoint_id);
       contextCodebaseSummary = await persistedCodebaseSummary(opened.codebase.workspace_id, opened.codebase.index_id);
       await rm(join(data, "config", "codebase-lsp.json"), { force: true });
+      const basicOpen = await request("tools/call", { name: "craft_context_open", arguments: {
+        project_root: root, query: "Verify bounded default Codebase context on the real repository", max_items: 1, max_chars: 1_000,
+      } }, 20_000);
+      assert.equal(basicOpen.result?.isError, false, JSON.stringify(basicOpen.result));
+      const basicCodebase = basicOpen.result.structuredContent.codebase;
+      assert.equal(basicCodebase.status, "ready", JSON.stringify(basicCodebase));
+      assert.equal(Object.hasOwn(basicCodebase, "summary"), false);
+      assert.equal(Object.hasOwn(basicCodebase, "source"), false);
+      const basicSummary = await persistedCodebaseSummary(basicCodebase.workspace_id, basicCodebase.index_id);
+      assert.equal(basicSummary?.analyzer, "craft-basic-symbols");
       const largeOpen = await request("tools/call", { name: "craft_context_open", arguments: {
         project_root: root, query: "Verify packaged Codebase context on the real multi-language repository", index_depth: "semantic", max_items: 1, max_chars: 1_000,
       } }, timeoutMs);

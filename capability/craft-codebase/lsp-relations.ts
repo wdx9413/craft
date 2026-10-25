@@ -1,10 +1,17 @@
 import { fileURLToPath } from "node:url";
-import { relative, resolve, sep } from "node:path";
+import { relative, resolve } from "node:path";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 
 type SymbolRange = { readonly node: JsonObject; readonly start: number; readonly end: number };
 type TextIndex = { offset(raw: JsonObject | undefined): number | undefined };
 type DocumentInfo = { readonly path: string; readonly content: string; readonly uri: string; readonly index: TextIndex; readonly symbols: readonly SymbolRange[] };
+
+function checkpointPath(path: string): string { return path.replaceAll("\\", "/"); }
+export function isCheckpointRelativePath(path: string): boolean {
+  const normalized = checkpointPath(path);
+  return Boolean(normalized) && normalized !== ".." && !normalized.startsWith("../")
+    && !normalized.startsWith("/") && !/^[A-Za-z]:\//u.test(normalized);
+}
 
 /** Spread a bounded relation budget across checkpoint files instead of exhausting it in the first large file. */
 export function selectLspRelationSymbols(nodes: readonly JsonObject[], limit: number, prioritizeCallables = false): JsonObject[] {
@@ -58,13 +65,13 @@ export function collectLspRelations(input: JsonObject): JsonObject {
   const nodesById = new Map((input.nodes as JsonObject[]).map(node => [String(node.id), node]));
   const nodesByPathOffset = new Map<string, Map<number, JsonObject>>();
   for (const node of input.nodes as JsonObject[]) {
-    const path = String(node.path), offset = Number((node.span as JsonObject).start_offset);
+    const path = checkpointPath(String(node.path)), offset = Number((node.span as JsonObject).start_offset);
     if (!nodesByPathOffset.has(path)) nodesByPathOffset.set(path, new Map());
     const at = nodesByPathOffset.get(path)!;
     if (!at.has(offset)) at.set(offset, node);
   }
   for (const raw of input.documents as JsonObject[]) {
-    const path = String(raw.path), content = String(raw.content), uri = String(raw.uri);
+    const path = checkpointPath(String(raw.path)), content = String(raw.content), uri = String(raw.uri);
     const index = textIndex(content), symbols = flatten(raw.symbols as unknown[], index, nodesByPathOffset.get(path) ?? new Map());
     const info = { path, content, uri, index, symbols };
     byUri.set(uri, info); byPath.set(path, info);
@@ -235,8 +242,8 @@ function documentForUri(uri: string, root: string, byUri: Map<string, DocumentIn
   try {
     const url = new URL(uri);
     if (url.protocol !== "file:") return undefined;
-    const path = relative(root, resolve(fileURLToPath(url)));
-    if (!path || path === ".." || path.startsWith(`..${sep}`)) return undefined;
+    const path = checkpointPath(relative(root, resolve(fileURLToPath(url))));
+    if (!isCheckpointRelativePath(path)) return undefined;
     return byPath.get(path);
   } catch { return undefined; }
 }

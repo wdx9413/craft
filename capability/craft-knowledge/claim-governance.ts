@@ -64,7 +64,7 @@ export class KnowledgeClaimGovernance {
   knowledgeSessionEvidenceRecord(args: JsonObject): JsonObject { return recordKnowledgeSessionEvidence(this.store, args); }
   knowledgeClaimSave(args: JsonObject): JsonObject {
     const kind = text(args.kind, "kind"); if (!KNOWLEDGE_KINDS.has(kind)) throw new Error("Knowledge claim kind is unsupported");
-    const content = assertNoSecret(document(args.content, "content"), "content"); const scope = String(args.scope ?? "global");
+    const content = assertNoSecret(document(args.content, "content"), "content"); const scope = text(args.scope, "scope");
     const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids"); evidenceIds.forEach((item) => this.store.get("evidence", item));
     const tags = optionalTextArray(args.tags, "tags"); const validUntil = args.valid_until === undefined ? null : new Date(validIsoTime(args.valid_until, "valid_until")).toISOString();
     const claimId = String(args.claim_id ?? id("knowledge_claim")); const existing = this.store.find("knowledge_claim", claimId);

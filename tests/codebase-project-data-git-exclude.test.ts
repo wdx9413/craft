@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -58,23 +58,17 @@ test("existing project ignore rules are reused and missing Git exclude files are
 
 test("invalid Git metadata paths and Git command failures fail closed", () => {
   const root = repository();
-  const fakeBin = join(root, "bin");
-  const fakeGit = join(fakeBin, "git");
-  const previousPath = process.env.PATH;
   try {
-    mkdirSync(fakeBin);
-    writeFileSync(fakeGit, "#!/bin/sh\ncase \"$*\" in\n  *--git-common-dir*) printf '.git\\n' ;;\n  *'--git-path info/exclude'*) printf '../outside\\n' ;;\n  *) exit 2 ;;\nesac\n", "utf8");
-    chmodSync(fakeGit, 0o755);
-    process.env.PATH = `${fakeBin}:${previousPath ?? ""}`;
-    assert.throws(() => ensureProjectDataGitExcluded(root), /outside the repository metadata/u);
+    const outsidePath = (args: string[]) => args.includes("--git-common-dir") ? ".git\n" : args.includes("--git-path") ? "../outside\n" : "";
+    assert.throws(() => ensureProjectDataGitExcluded(root, args => outsidePath(args)), /outside the repository metadata/u);
 
-    writeFileSync(fakeGit, "#!/bin/sh\ncase \"$*\" in\n  *--git-common-dir*) printf '.git\\n' ;;\n  *'--git-path info/exclude'*) printf '.git/info/exclude\\n' ;;\n  *) exit 2 ;;\nesac\n", "utf8");
-    assert.throws(() => ensureProjectDataGitExcluded(root), /Command failed/u);
-  } finally {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-    rmSync(root, { recursive: true, force: true });
-  }
+    const failedCommand = (args: string[]) => {
+      if (args.includes("--git-common-dir")) return ".git\n";
+      if (args.includes("--git-path")) return ".git/info/exclude\n";
+      throw new Error("Command failed");
+    };
+    assert.throws(() => ensureProjectDataGitExcluded(root, failedCommand), /Command failed/u);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("unsafe Git exclude paths fail closed", () => {

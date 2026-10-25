@@ -6,6 +6,7 @@ import { prepareAblations } from "../scripts/eval/component-ablation.ts";
 import { mkdtemp, mkdir, readFile, writeFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
@@ -32,7 +33,7 @@ async function fixture() {
     const projectRoot = join(root, "projects", scopeId); await mkdir(projectRoot, { recursive: true });
     service.scopeAliasBind({ scope_kind: "project", scope_id: `project:${scopeId}`, alias_kind: "path", alias: projectRoot });
   }
-  store.create("knowledge_source", "source", { status: "active", trust: "verified" });
+  store.create("knowledge_source", "source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified" });
   const context = new ContextResolutionKernel(store, [new KnowledgeContribution(store)]);
   const scope = { scope_kind: "project", scope_id: "fixture" };
   const memory = (id: string, extra: JsonObject = {}) => store.create("memory_ledger", id, { source_id: "source", scope: { kind: "project", id: "fixture" }, status: "active", valid_until: null,
@@ -167,7 +168,7 @@ test("source revision invalidation preserves project scope for legacy content pa
   }
 });
 
-test("global source revision invalidates a legacy scenario claim without explicit scope or content path", async () => {
+test("global source revision reports an unscoped legacy scenario claim without assigning it global scope", async () => {
   const f = await fixture();
   try {
     const root = join(f.root, "global-source"); await mkdir(root);
@@ -177,16 +178,75 @@ test("global source revision invalidates a legacy scenario claim without explici
       scope_kind: "global", scope_id: "global", locator: root, content_digest: "initial", trust: "verified", access: "read_only" }).source as JsonObject;
     const first = sources.sourceIngest({ source_id: source.id });
     const revisionId = String((first.revision as JsonObject).id);
-    f.store.create("knowledge_claim", "legacy-global-scenario", { source_id: source.id, source_revision_id: revisionId,
-      scenario_key: "global.legacy", status: "candidate", content: "Legacy global scenario claim." });
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("knowledge_claim", "legacy-global-scenario", 1, JSON.stringify({ source_id: source.id, source_revision_id: revisionId,
+        scenario_key: "global.legacy", status: "candidate", content: "Legacy global scenario claim." }), new Date().toISOString(), new Date().toISOString());
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("knowledge_claim", "scoped-global-scenario", 1, JSON.stringify({ source_id: source.id, source_revision_id: revisionId,
+        scenario_key: "global.scoped", scope: "global", status: "candidate", content: "Scoped global scenario claim." }), new Date().toISOString(), new Date().toISOString());
 
     await writeFile(readme, "Revised global source text.");
     const updated = sources.sourceIngest({ source_id: source.id });
 
     assert.equal(updated.status, "completed");
-    assert.equal(f.store.get("knowledge_claim", "legacy-global-scenario").status, "stale");
+    assert.equal(updated.unscoped_claims_skipped, 1);
+    const legacy = f.store.get("knowledge_claim", "legacy-global-scenario");
+    assert.equal(legacy.status, "candidate");
+    assert.equal(legacy.scope, undefined);
+    const scoped = f.store.get("knowledge_claim", "scoped-global-scenario");
+    assert.equal(scoped.status, "stale");
+    assert.equal(scoped.scope, "global");
     const transitioned = sources.sourceTransition({ source_id: source.id, status: "disabled", reason: "legacy source retired" });
     assert.equal((transitioned.source as JsonObject).status, "disabled");
+    assert.equal(f.store.get("knowledge_claim", "legacy-global-scenario").scope, undefined);
+  } finally { await f.close(); }
+});
+
+test("source revision invalidation accepts canonical project identity scopes", async () => {
+  const f = await fixture();
+  try {
+    const projectRoot = join(f.root, "projects", "canonical-project");
+    await mkdir(projectRoot, { recursive: true });
+    const identity = new CraftService(f.store).scopeIdentityResolveProject({ project_root: projectRoot }).identity as JsonObject;
+    const scopeId = String((identity.canonical_scope as JsonObject).id);
+    const readme = join(projectRoot, "README.md"); await writeFile(readme, "Initial canonical project rule.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    const source = sources.sourceRegister({ source_id: "canonical-project-source", kind: "custom", label: "Canonical project fixture",
+      scope_kind: "project", scope_id: scopeId, locator: readme, content_digest: "fixture", trust: "verified", access: "read_only" }).source as JsonObject;
+    const first = sources.sourceIngest({ source_id: source.id });
+    const claimId = String((first.candidates as JsonObject[])[0]!.claim_id);
+    assert.equal(String(f.store.get("knowledge_claim", claimId).scope), `project:${scopeId}`);
+
+    await writeFile(readme, "Revised canonical project rule.");
+    const updated = sources.sourceIngest({ source_id: source.id });
+    assert.equal(updated.unscoped_claims_skipped, 0);
+    assert.equal(f.store.get("knowledge_claim", claimId).status, "stale");
+  } finally { await f.close(); }
+});
+
+test("source transitions route valid string, object and content-reference scopes and skip malformed legacy scopes", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "transition-source"); await mkdir(root);
+    const sources = new KnowledgeSourceRegistry(f.store);
+    const source = sources.sourceRegister({ source_id: "transition-source", kind: "custom", label: "Transition fixture",
+      scope_kind: "global", scope_id: "global", locator: root, content_digest: "fixture", trust: "verified", access: "read_only" }).source as JsonObject;
+    const now = new Date().toISOString();
+    const records: Array<[string, JsonObject]> = [
+      ["transition-string-scope", { scope: "global" }],
+      ["transition-object-scope", { scope: { kind: "global", id: "global" } }],
+      ["transition-content-ref-scope", { content_ref: { kind: "knowledge", scope: "global" } }],
+      ["transition-malformed-scope", { scope: "project:" }],
+      ["transition-array-scope", { scope: [] }],
+      ["transition-unscoped", {}],
+    ];
+    for (const [id, scope] of records) {
+      f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        .run("knowledge_claim", id, 1, JSON.stringify({ source_id: source.id, scenario_key: `global.${id.replaceAll("-", ".")}`, status: "candidate", ...scope }), now, now);
+    }
+
+    assert.equal((sources.sourceTransition({ source_id: source.id, status: "revoked", reason: "source retired" }).source as JsonObject).status, "revoked");
+    for (const [id, scope] of records) assert.deepEqual(f.store.get("knowledge_claim", id).scope, scope.scope);
   } finally { await f.close(); }
 });
 
@@ -419,11 +479,11 @@ test("LSP relations retain real endpoints and reject dangling, malformed or out-
 test("changed document guards remain fail-closed even if a stale claim is externally marked reviewed", async () => {
   const f = await fixture();
   try {
-    f.store.create("knowledge_document", "doc", { status: "current", content_digest: "current" });
+    f.store.create("knowledge_document", "doc", { scope: { kind: "project", id: "fixture" }, status: "current", content_digest: "current" });
     const claim = f.store.create("knowledge_claim", "claim", { source_id: "source", status: "candidate", scope: "project:fixture", content: "alpha", document_id: "doc", document_digest: "current", evidence_ids: [] });
     attachVerifiedPromotionFixture(f.store, claim);
     assert.equal(((await f.context.searchKnowledge({ ...f.scope, query: "alpha" })).hits as unknown[]).length, 1);
-    f.store.save("knowledge_document", "doc", { status: "changed", content_digest: "current" });
+    f.store.save("knowledge_document", "doc", { scope: { kind: "project", id: "fixture" }, status: "changed", content_digest: "current" });
     assert.deepEqual((await f.context.searchKnowledge({ ...f.scope, query: "alpha" })).hits, []);
     const stale = f.store.save("knowledge_claim", "claim", { ...payload(f.store.get("knowledge_claim", "claim")), status: "stale" });
     f.store.save("knowledge_claim", "claim", { ...payload(stale), status: "reviewed" });
@@ -562,7 +622,7 @@ test("ablation preparation uses real campaign slots, requires curated cases and 
     assert.deepEqual(prepareAblations(service, manifest), prepared);
     const explicit = prepareAblations(service, { ...manifest, trials_per_case: 2 }); assert.equal(explicit.trials_per_case, 2);
     const manifestFile = join(f.root, "ablation.json"); await writeFile(manifestFile, JSON.stringify(manifest));
-    const command = new URL("../scripts/eval/component-ablation.ts", import.meta.url).pathname;
+    const command = fileURLToPath(new URL("../scripts/eval/component-ablation.ts", import.meta.url));
     const invoked = spawnSync(process.execPath, [command, join(f.root, "data"), manifestFile], { encoding: "utf8" });
     assert.equal(invoked.status, 0, invoked.stderr); assert.equal(JSON.parse(invoked.stdout).status, "awaiting_actual_host_runs");
     const invalid = spawnSync(process.execPath, [command], { encoding: "utf8" }); assert.match(invalid.stderr, /Usage/);
@@ -576,7 +636,7 @@ test("history reads all recorded versions within budget and scoped document bund
   try {
     const a = f.memory("history"); f.store.save("memory_ledger", "history", { ...payload(a), content: "new alpha" });
     assert.equal(((await f.context.resolve({ ...f.scope, query: "alpha", known_at: "2099-01-01" })).items as JsonObject[]).length, 1);
-    f.store.create("knowledge_document", "document", { source_id: "source", status: "current", content_digest: "doc-digest" });
+    f.store.create("knowledge_document", "document", { scope: { kind: "project", id: "portable" }, source_id: "source", status: "current", content_digest: "doc-digest" });
     const portable = f.store.create("knowledge_claim", "portable", { source_id: "source", scope: "project:portable", status: "candidate", content_ref: f.store.contentStore.writeSync({ kind: "knowledge", record_id: "portable", version: 1, scope: "project:portable", status: "candidate", sensitivity: "internal", source_id: "source", body: "portable alpha" }), content: "portable alpha", document_id: "document", document_digest: "doc-digest", evidence_ids: [] });
     attachVerifiedPromotionFixture(f.store, portable);
     const sourceService = new CraftService(f.store), receiver = new CraftService(target.store);

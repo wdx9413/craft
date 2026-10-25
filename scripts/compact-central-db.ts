@@ -37,7 +37,7 @@ export function compactCentralDb(dataRoot: string, apply = false): {
       }
     } finally { compact.close(); }
     const afterBytes = statSync(compactPath).size;
-    const fd = openSync(compactPath, "r");
+    const fd = openSync(compactPath, "r+");
     try { fsyncSync(fd); } finally { closeSync(fd); }
     source.close();
     if (existsSync(`${paths.databaseFile}-wal`) || existsSync(`${paths.databaseFile}-shm`))
@@ -52,8 +52,12 @@ export function compactCentralDb(dataRoot: string, apply = false): {
     linkSync(paths.databaseFile, backupPath);
     renameSync(compactPath, paths.databaseFile);
     compactPath = null;
-    const directoryFd = openSync(dirname(paths.databaseFile), "r");
-    try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
+    // Node cannot open and flush directory handles on Windows. The file is
+    // flushed before replacement; POSIX also flushes the directory entry.
+    if (process.platform !== "win32") {
+      const directoryFd = openSync(dirname(paths.databaseFile), "r");
+      try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
+    }
     return { before_bytes: beforeBytes, after_bytes: afterBytes, free_pages: freePages, backup: backupPath };
   } finally {
     try { source.close(); } catch { /* already closed */ }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cp, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -436,7 +436,11 @@ test("published tarball contents typecheck and run outside the monorepo", async 
     for (const relative of ["common/craft-common-store-local", "common/craft-common-base", "common/craft-common-log",
       "capability/craft-knowledge", "capability/craft-memory", "capability/craft-experience", "capability/craft-codebase"]) {
       const sourceDir = join(root, relative);
-      const packed = spawnSync("npm", ["pack", `./${relative}`, "--offline", "--ignore-scripts", "--pack-destination", dir, "--json"], {
+      const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+      const npmCommand = process.platform === "win32" ? process.execPath : "npm";
+      const npmPrefix = process.platform === "win32" ? [npmCli] : [];
+      if (process.platform === "win32") assert.ok(existsSync(npmCli), "Node distribution must include the npm CLI");
+      const packed = spawnSync(npmCommand, [...npmPrefix, "pack", `./${relative}`, "--offline", "--ignore-scripts", "--pack-destination", dir, "--json"], {
         cwd: root, env: { ...process.env, NPM_CONFIG_CACHE: join(dir, "npm-cache") }, encoding: "utf8",
       });
       assert.equal(packed.status, 0, packed.stderr);

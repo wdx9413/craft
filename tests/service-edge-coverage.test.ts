@@ -22,7 +22,11 @@ test("service facades exercise defaults, compatibility views, and model validati
 
     const memory = service.workbenchMemorySave({ content: "temporary context", kind: "working" });
     assert.equal((memory.candidate as JsonObject).status, "candidate");
-    const claim = service.workbenchKnowledgeClaimSave({ kind: "fact", content: "bounded fact" });
+    const evidenceBeforeMissingScope = store.count("evidence");
+    assert.throws(() => service.workbenchKnowledgeClaimSave({ kind: "fact", content: "bounded fact" }), /scope/u);
+    assert.throws(() => service.workbenchKnowledgeCompatSave({ content: "bounded fact" }), /scope/u);
+    assert.equal(store.count("evidence"), evidenceBeforeMissingScope, "missing scope must be rejected before Evidence is written");
+    const claim = service.workbenchKnowledgeClaimSave({ kind: "fact", content: "bounded fact", scope: "global" });
     assert.equal((claim.claim as JsonObject).status, "candidate");
     assert.equal((service.knowledgeClaimReview({ claim_id: (claim.claim as JsonObject).id, status: "disputed", reviewer: "r", reason: "source changed" }).claim as JsonObject).status, "disputed");
     service.scopeAliasBind({ scope_kind: "project", scope_id: "studio", alias_kind: "path", alias: root });
@@ -30,7 +34,7 @@ test("service facades exercise defaults, compatibility views, and model validati
     const studioId = String(studioIdentity.id);
     const reviewSource = service.knowledgeSourceRegister({ source_id: "studio-review-source", kind: "custom", label: "studio review", scope_kind: "project", scope_id: studioId, locator: "offline://studio", content_digest: "sha256:studio", trust: "bounded", access: "read_only" }).source as JsonObject;
     const explicitEvidence = store.create("evidence", "studio-evidence", { source_id: reviewSource.id, source_type: "human", confidence: "bounded", claim: "checked" });
-    assert.equal((service.workbenchKnowledgeClaimSave({ kind: "fact", content: "evidence bound", evidence_ids: [explicitEvidence.id] }).claim as JsonObject).status, "candidate");
+    assert.equal((service.workbenchKnowledgeClaimSave({ kind: "fact", content: "evidence bound", scope: "global", evidence_ids: [explicitEvidence.id] }).claim as JsonObject).status, "candidate");
     const workflow = service.workbenchWorkflowSave({ name: "placeholder" });
     assert.equal((workflow.workflow as JsonObject).lifecycle, "draft");
     const workflowFromSteps = service.workbenchWorkflowSave({ name: "steps", steps: [{ id: "s" }] });
@@ -52,7 +56,7 @@ test("service facades exercise defaults, compatibility views, and model validati
     const task = service.taskOpen({ title: "No model", goal: "exercise defaults" }).task as JsonObject;
     assert.equal(task.model_id, null);
     await assert.rejects(service.taskMessageSend({ task_id: task.id, content: "hello" }), /no selected model/);
-    const unsupportedClaim = store.create("knowledge_claim", "unsupported-claim", { kind: "fact", content: "unverified", evidence_ids: [], status: "candidate" });
+    const unsupportedClaim = store.create("knowledge_claim", "unsupported-claim", { kind: "fact", content: "unverified", scope: "global", evidence_ids: [], status: "candidate" });
     assert.throws(() => service.knowledgeClaimReview({ claim_id: unsupportedClaim.id, status: "reviewed", reviewer: "r", reason: "r" }), /managed Host review/u);
     assert.throws(() => service.workflowSave({ name: "invalid", steps: "bad" }), /steps must be an array/);
     assert.equal((service.workflowSave({ name: "empty" }) as JsonObject).lifecycle, "draft");
@@ -60,8 +64,8 @@ test("service facades exercise defaults, compatibility views, and model validati
     const expiring = attachVerifiedPromotionFixture(store, store.create("knowledge_claim", "expiring", { kind: "fact", content: "old", scope: "global", evidence_ids: [explicitEvidence.id], status: "candidate", valid_until: "2000-01-01T00:00:00.000Z" }));
     assert.equal((service.knowledgeClaimGet({ claim_id: expiring.id, version: expiring.version }).claim as JsonObject).id, expiring.id);
     assert.equal((service.knowledgeClaimReview({ claim_id: unsupportedClaim.id, status: "disputed", reviewer: "r", reason: "conflict" }).claim as JsonObject).status, "disputed");
-    store.create("knowledge_source", "history-source-old", { status: "active", trust: "verified" });
-    store.create("knowledge_source", "history-source-new", { status: "active", trust: "verified" });
+    service.knowledgeSourceRegister({ source_id: "history-source-old", kind: "custom", label: "old history source", scope_kind: "global", scope_id: "global", locator: "offline://history-old", content_digest: "sha256:history-old", trust: "verified" });
+    service.knowledgeSourceRegister({ source_id: "history-source-new", kind: "custom", label: "new history source", scope_kind: "global", scope_id: "global", locator: "offline://history-new", content_digest: "sha256:history-new", trust: "verified" });
     const historical = store.create("knowledge_claim", "historical-scope", { kind: "fact", content: "source changed", source_id: "history-source-old", scope: "global", evidence_ids: [explicitEvidence.id], status: "candidate" });
     store.save("knowledge_claim", String(historical.id), { ...historical, source_id: "history-source-new" });
     const oldSource = store.get("knowledge_source", "history-source-old");
@@ -69,7 +73,7 @@ test("service facades exercise defaults, compatibility views, and model validati
     assert.throws(() => service.knowledgeClaimGet({ claim_id: historical.id, version: historical.version }), /historical scope/u);
     assert.equal((service.knowledgeExpirySweep({ now: "2030-01-01T00:00:00.000Z" }).expired as JsonObject[]).some((item) => item.id === expiring.id), true);
     assert.throws(() => service.knowledgeExpirySweep({ now: "invalid" }), /ISO/);
-    store.create("knowledge_claim", "legacy-expiring-global", { kind: "fact", content: "legacy", source_id: "builtin.evidence-wiki", scope: null, evidence_ids: [], status: "reviewed", valid_until: "2000-01-01T00:00:00.000Z" });
+    store.create("knowledge_claim", "legacy-expiring-global", { kind: "fact", content: "legacy", source_id: "builtin.evidence-wiki", scope: "global", evidence_ids: [], status: "reviewed", valid_until: "2000-01-01T00:00:00.000Z" });
     assert.equal((service.knowledgeExpirySweep({ now: "2030-01-01T00:00:00.000Z" }).expired as JsonObject[]).some(item => item.id === "legacy-expiring-global"), true);
     const conflict = store.create("knowledge_claim", "conflict-claim", { source_id: reviewSource.id, kind: "fact", content: "conflict", evidence_ids: [explicitEvidence.id], status: "candidate" });
     assert.throws(() => service.knowledgeConflictResolve({ claim_id: conflict.id, decision: "reviewed", reviewer: "reviewer", reason: "checked" }), /managed Host review/u);

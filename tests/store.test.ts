@@ -58,6 +58,46 @@ test("Knowledge records reject malformed unqualified string scopes", async () =>
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("Knowledge storage validates explicit custody, legacy partitions, and repair of an unpartitioned row", async () => {
+  const { root, store } = await fixture();
+  try {
+    const legacyProject = store.create("legacy_knowledge_migration_candidate", "legacy-project-scope", {
+      scope: "project", project: "fixture", migration_id: "migration-project", status: "candidate",
+    });
+    const legacyShared = store.create("legacy_knowledge_migration_candidate", "legacy-shared-scope", {
+      scope: "shared", project: null, migration_id: "migration-shared", status: "candidate",
+    });
+    assert.equal(legacyProject.migration_id, "migration-project");
+    assert.equal(legacyShared.migration_id, "migration-shared");
+
+    const task = store.create("knowledge_claim", "task-scope", { scope: "task", task_id: "task-1", content: "task scoped" });
+    const workspace = store.create("knowledge_claim", "workspace-legacy-scope", { scope: "workspace", content: "legacy workspace scope" });
+    assert.equal(task.scope, "task");
+    assert.equal(workspace.scope, "workspace");
+    assert.throws(() => store.create("knowledge_claim", "malformed-object-scope", { scope: { kind: "project" } }), /storage scope is malformed/u);
+    assert.throws(() => store.create("knowledge_claim", "malformed-array-scope", { scope: [] }), /storage scope is malformed/u);
+    assert.throws(() => store.create("knowledge_claim", "unsupported-object-scope", { scope: { kind: "unsupported", id: "fixture" } }), /storage scope is malformed/u);
+
+    store.create("knowledge_source", "user-source", { scope: "user:principal" });
+    const matchingUserClaim = store.create("knowledge_claim", "matching-user-claim", { scope: "user:principal", source_id: "user-source", content: "same custody" });
+    assert.equal(matchingUserClaim.content, "same custody");
+    assert.throws(() => store.create("knowledge_claim", "mismatched-user-claim", { scope: "user:other", source_id: "user-source" }), /different storage scopes/u);
+    assert.throws(() => store.create("knowledge_claim", "unscoped-user-claim", { source_id: "user-source" }), /storage scope is unavailable/u);
+
+    store.create("knowledge_source", "global-source", { scope: "global" });
+    const inheritedDocument = store.create("knowledge_document", "global-source-document", { source_id: "global-source", path: "README.md" });
+    assert.equal(inheritedDocument.path, "README.md");
+    assert.throws(() => store.create("knowledge_claim", "unscoped-global-claim", { source_id: "global-source" }), /storage scope is unavailable/u);
+
+    const now = new Date().toISOString();
+    store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("knowledge_claim", "unpartitioned-legacy-claim", 1,
+        JSON.stringify({ scope: "global", source_id: "global-source", content: "legacy row" }), now, now);
+    const repaired = store.save("knowledge_claim", "unpartitioned-legacy-claim", { scope: "global", source_id: "global-source", content: "repaired row" });
+    assert.equal(repaired.content, "repaired row");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("version history remains bounded and excludes the current version", async () => {
   const { root, store } = await fixture();
   try {

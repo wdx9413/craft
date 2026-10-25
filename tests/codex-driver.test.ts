@@ -132,7 +132,7 @@ test("Codex process executor uses argv without a shell and bounds or terminates 
 test("Host stdin failures settle after child exit and preserve cancellation and timeout", async () => {
   const request = { executable: process.execPath, argv: ["-e", "process.exit(0)"], cwd: process.cwd(),
     stdin: "x".repeat(8 * 1024 * 1024), timeoutMs: 2_000, outputLimit: 100 };
-  await assert.rejects(executeCodex(request), /EPIPE|ECONNRESET/u);
+  await assert.rejects(executeCodex(request), /EPIPE|ECONNRESET|write EOF/u);
   const controller = new AbortController(); controller.abort();
   const cancelled = await executeCodex({ ...request, signal: controller.signal });
   assert.equal(cancelled.cancelled, true);

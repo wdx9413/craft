@@ -131,7 +131,7 @@ test("legacy project partition remains readable while new writes use shared proj
   try {
     store.create("scope_alias", "project", { scope: { kind: "project", id: "project:legacy" }, alias_kind: "path", alias: project, status: "active" });
     store.create("memory_ledger", "old-memory", { scope: { kind: "project", id: "project:legacy" }, status: "active", content: "old body" });
-    store.create("knowledge_source", "old-md-source", { status: "active", trust: "verified" });
+    store.create("knowledge_source", "old-md-source", { scope: "project:legacy", status: "active", trust: "verified" });
     new MemoryLedgerKernel(store).remember({ memory_id: "old-md", source_id: "old-md-source", kind: "preference",
       scope_kind: "project", scope_id: "project:legacy", content: "old Markdown body" });
     store.close();
@@ -390,7 +390,7 @@ test("Memory Markdown bodies follow the same project or session boundary as thei
   const store = await new CraftStore(craftPaths(join(root, "global-data"))).open();
   try {
     store.create("scope_alias", "project-content", { scope: { kind: "project", id: "project-content" }, alias_kind: "path", alias: projectRoot, status: "active" });
-    store.create("knowledge_source", "memory-source", { status: "active", trust: "verified" });
+    store.create("knowledge_source", "memory-source", { scope: "project:project-content", status: "active", trust: "verified" });
     const ledger = new MemoryLedgerKernel(store);
     const project = ledger.remember({ memory_id: "project-content-memory", source_id: "memory-source", kind: "preference",
       scope_kind: "project", scope_id: "project-content", content: "project-only body" }).memory as JsonObject;
@@ -420,7 +420,7 @@ test("opening a legacy store backs it up and moves scoped Memory versions out of
     const base = { scope: { kind: "project", id: "legacy-project" }, status: "candidate", content: "legacy private candidate" };
     insert.run(1, JSON.stringify(base), "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
     insert.run(2, JSON.stringify({ ...base, status: "approved" }), "2026-01-02T00:00:00.000Z", "2026-01-02T00:00:00.000Z");
-    store.create("knowledge_source", "legacy-source", { status: "active", trust: "verified" });
+    store.create("knowledge_source", "legacy-source", { scope: "project:legacy-project", status: "active", trust: "verified" });
     const legacyRef = new MarkdownContentStore(paths).writeSync({ kind: "memory", record_id: "legacy-ledger", version: 1, scope: "project:legacy-project", status: "active",
       sensitivity: "internal", source_id: "legacy-source", body: "legacy ledger body" });
     store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('memory_ledger','legacy-ledger',1,?,?,?)")

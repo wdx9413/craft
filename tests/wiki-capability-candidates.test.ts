@@ -14,7 +14,7 @@ test("Wiki-derived capability candidates remain proposal-only", async () => {
   try {
     const make = (id: string, verified = true) => {
       const evidence = service.evidenceRecord({ evidence_id: `evidence-${id}`, source_type: "program", claim: `Observed ${id}.`, confidence: "bounded" });
-      const claim = service.knowledgeClaimSave({ claim_id: id, kind: "rule", content: id, evidence_ids: [evidence.id] }).claim as JsonObject;
+      const claim = service.knowledgeClaimSave({ claim_id: id, kind: "rule", content: id, scope: "global", evidence_ids: [evidence.id] }).claim as JsonObject;
       return verified ? attachVerifiedPromotionFixture(store, claim) : claim;
     };
     const a = make("a"); const b = make("b"); const pending = make("pending", false); const forged = make("forged", false);

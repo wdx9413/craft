@@ -435,8 +435,10 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     if (sourceRetry < 1) return ensureRepositoryAttempt(service, args, sourceRetry + 1);
     throw new Error("Repository selection policy changed during index analysis");
   }
-  // Serialize cache/checkpoint publication across processes sharing this data space.
-  const publish = () => service.store.transaction(() => {
+  // Only workspace/checkpoint metadata preparation owns the shared writer lock.
+  // Immutable graph files and rebuildable analysis caches are published outside it.
+  const publish = () => {
+    const prepared = service.store.transaction(() => {
     const activation = service.store.find("codebase_activation", `codebase_activation_${workspaceId}`);
     if (activation?.status === "disabled") return { ...base, status: "disabled", reason: "project_opt_out" };
     if (selected.state === "disabled") return { ...base, status: "disabled", reason: "project_opt_out" };
@@ -463,14 +465,21 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
       const checkpointDigests = new Map((checkpoint.entries as JsonObject[]).map(entry => [String(entry.path), String(entry.digest)]));
       if (workspaceContextFiles.some(file => checkpointDigests.get(file.path) !== file.digest)) throw new Error("Go workspace context changed during snapshot analysis");
     }
+    const active = service.store.get("codebase_activation", `codebase_activation_${workspaceId}`);
+    return { workspace, checkpointId, activationVersion: Number(active.version) };
+    });
+    const preparedIndex = prepared as JsonObject & { workspace?: JsonObject; checkpointId?: string; activationVersion?: number };
+    if (!preparedIndex.workspace || !preparedIndex.checkpointId || preparedIndex.activationVersion === undefined) return prepared as JsonObject;
+    const { workspace, checkpointId, activationVersion } = preparedIndex as JsonObject & { workspace: JsonObject; checkpointId: string; activationVersion: number };
     const stateId = `${workspaceId}_${depth}`;
     // Restoring a checkpoint must not revive the stale index previously attached to it.
     const indexId = `repository_index_${stableDigest({ workspaceId, depth, checkpointId, state_revision: workspace.state_revision,
       policy: REPOSITORY_INDEX_POLICY, adapter_config: lspConfig.digest,
       ...(typeof priorState?.semantic_retry_after === "string" ? { semantic_retry_after: priorState.semantic_retry_after } : {}),
       ...(hasSemanticAdapterFailure(priorState) && typeof priorState?.index_id === "string" ? { previous_index_id: priorState.index_id } : {}) }).slice(-24)}`;
-    const built = analysis ? service.codebaseAnalysisImport({ workspace_id: workspaceId, checkpoint_id: checkpointId, index_id: indexId, analysis })
-      : service.codebaseIndexBuild({ workspace_id: workspaceId, index_id: indexId, analyzer: "heuristic" });
+    const publication_guard = { workspace_version: workspace.version, checkpoint_id: checkpointId, activation_version: activationVersion };
+    const built = analysis ? service.codebaseAnalysisImport({ workspace_id: workspaceId, checkpoint_id: checkpointId, index_id: indexId, analysis, publication_guard })
+      : service.codebaseIndexBuild({ workspace_id: workspaceId, index_id: indexId, analyzer: "heuristic", publication_guard });
     const index = built.index as JsonObject;
     const details = index.analysis as JsonObject;
     const rawDiagnostics = analysis?.diagnostics ?? index.diagnostics;
@@ -478,10 +487,18 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     if (!analysis) diagnostics.push(...degraded);
     const summary = { analyzer: details.analyzer, certainty: details.certainty, supported_file_count: details.supported_file_count, unsupported_file_count: details.unsupported_file_count,
       omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language, diagnostic_count: diagnostics.length, diagnostics: diagnostics.slice(0, 10) };
-    service.store.save("codebase_repository_state", stateId, { workspace_id: workspaceId, checkpoint_id: checkpointId, policy_version: REPOSITORY_INDEX_POLICY,
+    service.store.transaction(() => {
+      const current = service.store.get("workspace", workspaceId);
+      if (current.version !== workspace.version || current.latest_checkpoint_id !== checkpointId)
+        throw new Error("Repository snapshot changed before state publication");
+      const active = service.store.get("codebase_activation", `codebase_activation_${workspaceId}`);
+      if (active.status !== "active" || Number(active.version) !== activationVersion)
+        throw new Error("Codebase activation changed before state publication");
+      service.store.save("codebase_repository_state", stateId, { workspace_id: workspaceId, checkpoint_id: checkpointId, policy_version: REPOSITORY_INDEX_POLICY,
       adapter_config_digest: lspConfig.digest, repository_policy_digest: currentPolicyDigest, index_id: index.id, summary,
       ...(semanticAdapterFailed ? { semantic_retry_after: new Date(Date.now() + SEMANTIC_RETRY_DELAY_MS).toISOString() } : {}),
       ...(depth === "semantic" ? { typescript_path_set_digest: typeScriptPathSetDigest } : {}) });
+    });
     if (depth === "semantic" && semanticFileUnits.length === semanticFiles.length) {
       const cacheableUnits = semanticFileUnits.filter(unit => unit.budget_limited === false);
       const livePaths = new Set(cacheableUnits.map(unit => unit.path));
@@ -538,7 +555,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     }
     return { ...base, status: "ready", index_id: index.id, checkpoint_id: checkpointId, index_depth: depth, reused: false, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language,
       summary };
-  });
+  };
   try { return publish(); }
   catch (error) {
     const message = error instanceof Error ? error.message : "";

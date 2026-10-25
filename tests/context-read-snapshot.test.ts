@@ -95,7 +95,7 @@ test("all read-fence batches share a short publication lock and later reads reje
 test("scope-stack aliases pin the version actually used before the read fence is constructed", async t => {
   const f = await fixture(1);
   try {
-    f.store.create("knowledge_source", "source", { status: "active", trust: "verified" });
+    f.store.create("knowledge_source", "source", { scope: "global", status: "active", trust: "verified" });
     f.store.save("memory_ledger", "m000", { scope: { kind: "project", id: "p" }, source_id: "source", status: "active", kind: "preference", sensitivity: "internal", content: "alpha", content_digest: "d" });
     const kernel = new ContextResolutionKernel(f.store);
     const alias = kernel.scopes.bindAlias({ scope_kind: "project", scope_id: "p", alias_kind: "path", alias: "path" }).alias as JsonObject;

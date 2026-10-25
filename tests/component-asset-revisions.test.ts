@@ -149,6 +149,7 @@ test("ingestion failures expose bounded path/reason, and all component tools are
 test("explanations remain bounded, hide privileged selections, preserve restored document provenance and paginate immutable metadata", async () => {
   const f = await fixture();
   try {
+    f.store.create("knowledge_document", "doc", { source_id: "source", path: "restored.md" });
     const claim = f.store.create("knowledge_claim", "k", { scope: "project:assets", source_id: "source", kind: "fact", content: "Body", status: "candidate", document_id: "doc", document_digest: "digest", fragment_id: "fragment", source_revision_id: "revision" });
     assert.throws(() => f.restore("knowledge", claim), /evidence_ids/);
     const supported = f.store.save("knowledge_claim", "k", { ...payload(claim), evidence_ids: ["e"] });

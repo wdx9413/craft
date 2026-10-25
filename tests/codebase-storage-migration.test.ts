@@ -80,9 +80,11 @@ test("snapshot migration refuses invalid trees and portable path escapes before 
   const link = join(f.source, "link"); symlinkSync(f.file, link);
   assert.equal((await migrateCodebaseSnapshots(f.store, [f.entry], options)).blocked[0]!.reason, "source_snapshot_unsafe");
   rmSync(link);
-  const fifo = join(f.source, "pipe"); execFileSync("mkfifo", [fifo]);
-  assert.equal((await migrateCodebaseSnapshots(f.store, [f.entry], options)).blocked[0]!.reason, "source_snapshot_unsafe");
-  rmSync(fifo);
+  if (process.platform !== "win32") {
+    const fifo = join(f.source, "pipe"); execFileSync("mkfifo", [fifo]);
+    assert.equal((await migrateCodebaseSnapshots(f.store, [f.entry], options)).blocked[0]!.reason, "source_snapshot_unsafe");
+    rmSync(fifo);
+  }
   for (const [path, reason] of [["..\\escape.ts", "Codebase snapshot entry path is unsafe"],
     ["ordinary\\file.ts", "Codebase snapshot entry is not a regular file"]]) {
     const raw = join(f.source, path!); writeFileSync(raw, f.content);

@@ -32,11 +32,11 @@ test("tracked paths obey ignore rules before source reads and invalidate a previ
     assert.notEqual(after.checkpoint_id, before.checkpoint_id);
     assert.throws(() => f.service.codebaseSymbolFind({ ...before, query: "indexedBeforeIgnore" }), /stale/);
     assert.equal(f.service.codebaseRepositoryEnsure({ project_root: root }).index_id, after.index_id);
-    const badGit = join(f.root, "bin"); mkdirSync(badGit);
-    writeFileSync(join(badGit, "git"), '#!/bin/sh\ncase "$*" in *check-ignore*) exit 2;; esac\nexec /usr/bin/git "$@"\n', { mode: 0o700 });
-    const previousPath = process.env.PATH;
-    try { process.env.PATH = `${badGit}:${previousPath}`; assert.throws(() => repositoryFiles(root), /Command failed/); }
-    finally { process.env.PATH = previousPath; }
+    const failIgnore = (repository: string, args: string[], input?: string) => {
+      if (args[0] === "check-ignore") throw Object.assign(new Error("Command failed"), { status: 2 });
+      return execFileSync("git", ["-C", repository, ...args], { encoding: "utf8", input, stdio: ["pipe", "pipe", "ignore"] });
+    };
+    assert.throws(() => repositoryFiles(root, "", failIgnore), /Command failed/);
   } finally { await f.close(); }
 });
 

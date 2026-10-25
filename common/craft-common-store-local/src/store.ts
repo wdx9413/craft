@@ -8,6 +8,7 @@ import { canonicalCandidatePath, craftPaths, ensureLayout, ensureProjectStorageD
 import { MarkdownContentStore, type ContentKind, type ContentRef } from "./content-store.ts";
 import { TraceShardStore, TRACE_KINDS } from "./trace-shards.ts";
 import { CodebaseShardStore, CODEBASE_GRAPH_KINDS } from "./codebase-shards.ts";
+import { sqliteBusyTimeoutMs } from "./sqlite-busy-timeout.ts";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { SCHEMA_VERSION } from "./store-schema.ts";
@@ -141,7 +142,7 @@ export class CraftStore {
     const database = new DatabaseSync(this.paths.databaseFile);
     try {
       // Concurrent Hosts must wait before the journal-mode change takes a lock.
-      database.exec("PRAGMA busy_timeout=15000; PRAGMA foreign_keys=ON;");
+      database.exec(`PRAGMA busy_timeout=${sqliteBusyTimeoutMs()}; PRAGMA foreign_keys=ON;`);
       ensureJournalMode(database);
       // Preserve an exact pre-migration copy before changing an existing
       // database. Future-schema databases are not touched and fail closed.
@@ -286,7 +287,7 @@ export class CraftStore {
     for (const [path, domain] of entries) {
       const index = new DatabaseSync(path);
       try {
-        index.exec("PRAGMA busy_timeout=15000;");
+        index.exec(`PRAGMA busy_timeout=${sqliteBusyTimeoutMs()};`);
         ensureJournalMode(index);
         const expected = references[domain].map((row) => [row.kind, row.id, row.version, row.content_ref, row.updated_at] as const)
           .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
@@ -465,7 +466,8 @@ export class CraftStore {
 
   save(kind: string, id: string, payload: JsonObject, version?: number): JsonObject {
     this.assertPartitionDomain(kind, id, payload);
-    if (this.memoryScope(kind, { ...payload, id })) return this.writeMemory(kind, id, payload, "save", undefined, version);
+    const existingPointer = this.partitionPointer(kind, id);
+    if (this.memoryScope(kind, { ...payload, id }, true, Boolean(existingPointer))) return this.writeMemory(kind, id, payload, "save", undefined, version);
     if (TRACE_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) return this.traceShards.save(kind, id, payload, version);
     if (CODEBASE_GRAPH_KINDS.has(kind) && this.codebaseShards.raw(kind, id)
       && !this.database.prepare("SELECT 1 FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id))
@@ -600,14 +602,14 @@ export class CraftStore {
     if (pointer && pointer.domain !== this.partitionDomain(kind, payload)) throw new Error("Record cannot change capability storage owner");
   }
 
-  private knowledgeScope(kind: string, payload: JsonObject): unknown {
+  private knowledgeScope(kind: string, payload: JsonObject, allowMissingParents = false): MemoryScope | undefined {
     const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata as JsonObject : {};
-    if (metadata.scope !== undefined) return metadata.scope;
-    if (typeof payload.project_scope_id === "string") return payload.project_scope_id;
-    if (typeof metadata.project_scope_id === "string") return metadata.project_scope_id;
+    let declared: unknown = payload.scope ?? metadata.scope;
+    if (declared === undefined && typeof payload.project_scope_id === "string") declared = payload.project_scope_id;
+    if (declared === undefined && typeof metadata.project_scope_id === "string") declared = metadata.project_scope_id;
     const contentRef = payload.content_ref as JsonObject | undefined;
-    if (contentRef?.kind === "knowledge" && typeof contentRef.scope === "string") return contentRef.scope;
-    if (typeof payload.project_id === "string") return { kind: "project", id: payload.project_id };
+    if (declared === undefined && contentRef?.kind === "knowledge" && typeof contentRef.scope === "string") declared = contentRef.scope;
+    if (declared === undefined && typeof payload.project_id === "string") declared = { kind: "project", id: payload.project_id };
     const refs: Array<[string, string]> = [];
     const ref = (parentKind: string, id: unknown) => { if (typeof id === "string" && id) refs.push([parentKind, id]); };
     if (kind !== "knowledge_claim") ref("knowledge_claim", payload.claim_id);
@@ -615,8 +617,15 @@ export class CraftStore {
     if (kind !== "knowledge_document") ref("knowledge_document", payload.document_id);
     if (kind.startsWith("wiki_candidate_")) ref("wiki_skill_candidate", payload.candidate_id);
     for (const id of Array.isArray(payload.case_ids) ? payload.case_ids : []) ref("knowledge_evaluation_case", id);
+    for (const id of Array.isArray(payload.expected_claim_ids) ? payload.expected_claim_ids : []) ref("knowledge_claim", id);
+    for (const item of Array.isArray(payload.candidate_claim_refs) ? payload.candidate_claim_refs as JsonObject[] : []) ref("knowledge_claim", item.claim_id ?? item.id);
     for (const id of Array.isArray(payload.claim_ids) ? payload.claim_ids : []) ref("knowledge_claim", id);
     for (const item of Array.isArray(payload.claim_refs) ? payload.claim_refs as JsonObject[] : []) ref("knowledge_claim", item.claim_id ?? item.id);
+    ref("knowledge_claim", payload.from_claim_id);
+    ref("knowledge_claim", payload.to_claim_id);
+    for (const id of Array.isArray(payload.evidence_ids) ? payload.evidence_ids : []) ref("evidence", id);
+    for (const id of Array.isArray(payload.source_evidence_ids) ? payload.source_evidence_ids : []) ref("evidence", id);
+    ref("evidence", payload.evidence_id);
     for (const endpoint of [payload.source, payload.target]) {
       if (endpoint && typeof endpoint === "object" && !Array.isArray(endpoint)) {
         const item = endpoint as JsonObject;
@@ -625,16 +634,73 @@ export class CraftStore {
     }
     const scopes = refs.map(([parentKind, id]) => {
       const parent = this.find(parentKind, id, undefined, false);
-      if (!parent) throw new Error("Knowledge storage parent is unavailable");
-      return this.memoryScope(parentKind, parent, false) ?? { kind: "global", id: "global" };
-    });
+      // This fixed built-in descriptor is a per-install catalogue for the
+      // central Knowledge root. Its `user:local` applicability is not custody
+      // for derived project/global facts.
+      if (parentKind === "knowledge_source" && id === "builtin.evidence-wiki") return [{ kind: "global" as const, id: "global" }];
+      if (parentKind === "knowledge_source" && id === "builtin.serena-project-knowledge"
+        && parent?.kind === "serena" && parent.locator === ".serena/memories") {
+        const templateScope = this.memoryScope(parentKind, parent, false);
+        return [templateScope!];
+      }
+      if (!parent) {
+        if (allowMissingParents) return [];
+        throw new Error(`Knowledge storage parent is unavailable: ${parentKind}/${id}`);
+      }
+      const pointer = this.partitionPointer(parentKind, id);
+      const scope = pointer?.domain === "knowledge" ? pointer.scope : this.memoryScope(parentKind, parent, false);
+      return scope ? [scope] : [];
+    }).flat();
+    let declaredScope: MemoryScope | undefined;
+    if (declared !== undefined && declared !== null) {
+      if (typeof declared === "string") {
+        if (declared === "global") declaredScope = { kind: "global", id: "global" };
+        else {
+          const separator = declared.indexOf(":");
+          if (separator > 0) declaredScope = { kind: declared.slice(0, separator) as MemoryScope["kind"], id: declared.slice(separator + 1) };
+          else if (["user", "task", "workspace"].includes(declared)) {
+            const id = payload[`${declared}_id`];
+            declaredScope = { kind: declared as MemoryScope["kind"], id: typeof id === "string" && id.trim() ? id : "legacy" };
+          } else throw new Error("Memory storage scope is malformed");
+        }
+      } else if (typeof declared === "object" && !Array.isArray(declared)) {
+        const candidate = declared as Record<string, unknown>;
+        if (typeof candidate.kind !== "string" || typeof candidate.id !== "string" || !candidate.id.trim()) throw new Error("Memory storage scope is malformed");
+        declaredScope = { kind: candidate.kind as MemoryScope["kind"], id: candidate.id };
+      } else throw new Error("Memory storage scope is malformed");
+      if (!(["global", "user", "project", "workspace", "task", "session", "team", "organization", "legacy"] as string[]).includes(declaredScope.kind)) {
+        throw new Error("Memory storage scope is malformed");
+      }
+    }
     const specific = scopes.filter(scope => scope.kind !== "global" && scope.kind !== "user");
     const unique = new Map(specific.map(scope => [JSON.stringify(scope), scope]));
     if (unique.size > 1) throw new Error("Knowledge record cannot combine different storage scopes");
-    return [...unique.values()][0] ?? { kind: "global", id: "global" };
+    if (unique.size === 1 && scopes.some(scope => scope.kind === "user")) {
+      throw new Error("Knowledge record cannot combine different storage scopes");
+    }
+    if (unique.size === 1) {
+      const inherited = [...unique.values()][0]!;
+      if (declaredScope && JSON.stringify(declaredScope) !== JSON.stringify(inherited)
+        && inherited.kind !== "global" && inherited.kind !== "user") throw new Error("Knowledge record cannot combine different storage scopes");
+      return declaredScope ?? inherited;
+    }
+    // Global and user-local sources/evidence may support a narrower derived
+    // record, but they do not establish that record's scope when it is omitted.
+    const neutral = new Map(scopes.map(scope => [JSON.stringify(scope), scope]));
+    if (neutral.size === 1) {
+      const inherited = [...neutral.values()][0]!;
+      if (declaredScope && inherited.kind === "user" && declaredScope.kind === "user"
+        && JSON.stringify(declaredScope) !== JSON.stringify(inherited)) throw new Error("Knowledge record cannot combine different storage scopes");
+      if (declaredScope) return declaredScope;
+      const mayInheritNeutralParent = refs.some(([parentKind]) => ["knowledge_claim", "knowledge_evaluation_case", "wiki_skill_candidate"].includes(parentKind))
+        || kind !== "knowledge_claim" && refs.some(([parentKind]) => parentKind === "knowledge_source");
+      return mayInheritNeutralParent ? inherited : undefined;
+    }
+    if (neutral.size > 1) throw new Error("Knowledge record cannot combine different storage scopes");
+    return declaredScope;
   }
 
-  private memoryScope(kind: string, payload: JsonObject, storage = true): MemoryScope | null {
+  private memoryScope(kind: string, payload: JsonObject, storage = true, allowMissingKnowledgeParents = false): MemoryScope | null {
     const domain = this.partitionDomain(kind, payload);
     if (!domain) return null;
     let value = payload.scope;
@@ -650,7 +716,10 @@ export class CraftStore {
       const metadata = payload.metadata as JsonObject;
       value = metadata.scope ?? metadata.project_scope_id;
     }
-    if (domain === "knowledge" && value === undefined) value = this.knowledgeScope(kind, payload);
+    if (domain === "knowledge") {
+      value = this.knowledgeScope(kind, payload, allowMissingKnowledgeParents);
+      if (value === undefined || value === null) throw new Error("Knowledge storage scope is unavailable");
+    }
     if (domain === "experience" && (value === undefined || value === null) && payload.source && typeof payload.source === "object") {
       value = (payload.source as JsonObject).scope;
     }
@@ -888,7 +957,7 @@ export class CraftStore {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const database = new DatabaseSync(file);
     try {
-      database.exec("PRAGMA busy_timeout=15000; PRAGMA foreign_keys=ON;");
+      database.exec(`PRAGMA busy_timeout=${sqliteBusyTimeoutMs()}; PRAGMA foreign_keys=ON;`);
       ensureJournalMode(database);
       ensureCurrentSchema(database);
       if (!tableExists(database, "content_index")) database.exec("CREATE TABLE content_index (kind TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL, content_ref TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(kind,id,version))");
@@ -927,7 +996,7 @@ export class CraftStore {
       throw error;
     }
     const database = new DatabaseSync(file, { readOnly: true });
-    try { database.exec("PRAGMA busy_timeout=15000; PRAGMA query_only=ON;"); }
+    try { database.exec(`PRAGMA busy_timeout=${sqliteBusyTimeoutMs()}; PRAGMA query_only=ON;`); }
     catch (error) { database.close(); throw error; }
     this.#memoryReadDatabases.set(file, database);
     return { database, file };
@@ -1234,10 +1303,11 @@ export class CraftStore {
 
   private writeMemory(kind: string, id: string, payload: JsonObject, mode: "create" | "save", expectedVersion?: number, version?: number): JsonObject {
     const domain = this.partitionDomain(kind, payload)!;
-    const scope = this.memoryScope(kind, { ...payload, id })!;
     const current = this.find(kind, id, undefined, false);
+    const currentPointer = mode === "save" && current ? this.partitionPointer(kind, id) : null;
+    const scope = this.memoryScope(kind, { ...payload, id }, true, Boolean(currentPointer))!;
     if (mode === "create" && current) throw new Error(`${kind} already exists: ${id}`);
-    if (mode === "save" && current && JSON.stringify(this.memoryScope(kind, current)) !== JSON.stringify(scope)) {
+    if (mode === "save" && current && JSON.stringify(currentPointer?.scope ?? this.memoryScope(kind, current)) !== JSON.stringify(scope)) {
       throw new Error("Memory record cannot change storage scope");
     }
     // A normal save is optimistic too: bind it to the version observed before

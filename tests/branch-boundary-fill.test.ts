@@ -283,7 +283,7 @@ test("service compatibility facades cover default, review and rollback branches"
     service.workbenchWorkflowSave({ workflow_id: "studio-placeholder", name: "Placeholder", steps: [] });
     assert.throws(() => service.knowledgeExpirySweep({ now: "bad" }), /ISO/);
     assert.equal((service.knowledgeExpirySweep({}).expired as JsonObject[]).length, 0);
-    f.store.create("knowledge_claim", "claim", { status: "candidate", evidence_ids: [] });
+    f.store.create("knowledge_claim", "claim", { scope: "global", status: "candidate", evidence_ids: [] });
     assert.throws(() => service.knowledgeConflictResolve({ claim_id: "claim", decision: "reviewed", reviewer: "r", reason: "r" }), /Evidence/);
     f.store.create("evidence", "evidence-service", { confidence: "bounded", claim: "fact" });
     const page = await service.wikiPageSave({ title: "Page", body: "Body" });

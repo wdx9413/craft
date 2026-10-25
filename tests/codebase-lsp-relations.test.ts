@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { collectLspRelations, selectLspRelationSymbols } from "../capability/craft-codebase/lsp-relations.ts";
+import { collectLspRelations, isCheckpointRelativePath, selectLspRelationSymbols } from "../capability/craft-codebase/lsp-relations.ts";
 
 const cwd = "/workspace", path = "src/a.js", uri = pathToFileURL(`${cwd}/${path}`).href;
 const content = "function target() {}\nfunction caller(){ target(); }\n";
@@ -19,6 +20,10 @@ const call = { symbol_id: "target", incoming_calls: [{ from: { name: "caller", u
 const base = (): JsonObject => ({ cwd, documents: [{ path, content, uri, symbols }], nodes: [target, caller, inner], references: [{ symbol_id: "target", locations: [{ uri, range }] }], calls: [call] });
 
 test("LSP relation budget rotates across files before selecting later symbols", () => {
+  assert.equal(isCheckpointRelativePath("src\\file.ts"), true);
+  assert.equal(isCheckpointRelativePath("../outside.ts"), false);
+  assert.equal(isCheckpointRelativePath("C:\\outside.ts"), false);
+  assert.equal(isCheckpointRelativePath("/outside.ts"), false);
   const input = [
     { id: "a1", path: "a.go", symbol_kind: 5 }, { id: "a2", path: "a.go", symbol_kind: 12 }, { id: "a3", path: "a.go", symbol_kind: 6 },
     { id: "b1", path: "b.go", symbol_kind: 12 }, { id: "b2", path: "b.go", symbol_kind: 5 },
@@ -59,6 +64,30 @@ test("LSP locations and call hierarchy map to exact checkpoint symbols and UTF-1
   assert.deepEqual(relations[0]!.to, { path, start_offset: target.span.start_offset });
   assert.deepEqual(relations[1]!.source_span, { start_offset: 40, end_offset: 46 });
   assert.equal(result.omitted_relation_count, 0);
+});
+
+test("LSP relation mapping normalizes Windows checkpoint separators", () => {
+  const input = base();
+  const windowsPath = "src\\a.js", windowsUri = pathToFileURL(join(process.cwd(), "src", "a.js")).href;
+  input.cwd = process.cwd();
+  (input.documents as JsonObject[])[0]!.path = windowsPath;
+  (input.documents as JsonObject[])[0]!.uri = windowsUri;
+  input.nodes = (input.nodes as JsonObject[]).map(node => ({ ...node, path: windowsPath }));
+  input.references = [{ symbol_id: "target", locations: [{ uri: windowsUri, range }] }];
+  input.calls = [{ symbol_id: "target", incoming_calls: [{ from: { name: "caller", uri: windowsUri, selectionRange: symbols[1]!.selectionRange }, fromRanges: [range] }] }];
+  const result = collectLspRelations(input), edges = result.relations as JsonObject[];
+  assert.deepEqual(edges.map(edge => edge.kind), ["references", "calls"]);
+  assert.deepEqual(edges.map(edge => (edge.from as JsonObject).path), [windowsPath, windowsPath]);
+  assert.equal(result.omitted_relation_count, 0);
+});
+
+test("LSP relation mapping rejects file URIs outside the checkpoint on every platform", () => {
+  const input = base();
+  input.references = [{ symbol_id: "target", locations: [{ uri: pathToFileURL("/outside/checkpoint.js").href, range }] }];
+  input.calls = [];
+  const result = collectLspRelations(input);
+  assert.deepEqual(result.relations, []);
+  assert.equal(result.omitted_relation_count, 1);
 });
 
 test("LSP outgoing call hierarchy maps callers to callees and deduplicates incoming facts", () => {

@@ -215,6 +215,17 @@ test("component plugin manifests use public MCP products rather than internal su
   }
 });
 
+test("standalone Knowledge, Memory and Experience plugins do not register duplicate lifecycle Hooks", async () => {
+  for (const name of ["craft-knowledge", "craft-memory", "craft-experience"]) {
+    const codex = JSON.parse(await readFile(`plugins/${name}/.codex-plugin/plugin.json`, "utf8")) as { hooks?: string; mcpServers?: unknown };
+    const claude = JSON.parse(await readFile(`plugins/${name}/.claude-plugin/plugin.json`, "utf8")) as { hooks?: string; mcpServers?: unknown };
+    assert.equal(codex.hooks, undefined, `${name} must rely on the shared Context Hook`);
+    assert.equal(claude.hooks, undefined, `${name} must rely on the shared Context Hook`);
+    assert(codex.mcpServers, `${name} must retain its standalone Codex MCP`);
+    assert(claude.mcpServers, `${name} must retain its standalone Claude MCP`);
+  }
+});
+
 test("the complete context plugin declares one command-only lifecycle Hook for Codex and Claude", async () => {
   const expected = {
     "craft-context": { member: "context", events: ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"] },

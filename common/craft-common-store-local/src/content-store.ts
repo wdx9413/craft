@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonicalCandidatePath, ensureSessionStorageDirectory, isLegacySafeSessionId, sessionStorageDirectory, type CraftPaths } from "./paths.ts";
 
 export type ContentKind = "knowledge" | "memory" | "experience";
@@ -67,6 +67,12 @@ export interface ContentVerification { status: "verified" | "missing" | "drifted
 
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
 const SAFE_ID = /^[A-Za-z0-9._-]+$/u;
+
+function samePath(left: string, right: string): boolean { return relative(resolve(left), resolve(right)) === ""; }
+function isWithinPath(root: string, target: string): boolean {
+  const rel = relative(resolve(root), resolve(target));
+  return rel !== "" && !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+}
 
 function bodyDigest(body: string): string { return `sha256:${createHash("sha256").update(body, "utf8").digest("hex")}`; }
 export function validateContentBody(body: string): void {
@@ -198,8 +204,8 @@ export class MarkdownContentStore {
     const directory = resolve(this.directory(ref.kind, undefined, ref.scope));
     const target = resolve(ref.path);
     const inDirectory = ref.kind === "experience"
-      ? target.startsWith(`${directory}${sep}`)
-      : dirname(target) === directory;
+      ? isWithinPath(directory, target)
+      : samePath(dirname(target), directory);
     return inDirectory && target.endsWith(`.v${ref.version}.md`);
   }
 
@@ -322,16 +328,16 @@ export class MarkdownContentStore {
     const globalDirectory = canonicalCandidatePath(this.directory(ref.kind));
     const target = canonicalCandidatePath(scopedRef.path);
     const isLegacySharedProjectRef = (scopedRef.kind === "knowledge" || scopedRef.kind === "memory" || scopedRef.kind === "experience") && scopedRef.scope?.startsWith("project:")
-      && (target === globalDirectory || target.startsWith(`${globalDirectory}${sep}`));
+      && (samePath(target, globalDirectory) || isWithinPath(globalDirectory, target));
     const compatibilityDirectory = canonicalCandidatePath(this.directory(scopedRef.kind, undefined, scopedRef.scope, undefined, scopedRef.path, false));
     const canonicalDirectory = canonicalCandidatePath(this.directory(scopedRef.kind, undefined, scopedRef.scope));
     const withinScopedLegacyDirectory = scopedRef.kind === "experience"
-      ? target.startsWith(`${compatibilityDirectory}${sep}`)
-      : dirname(target) === compatibilityDirectory;
+      ? isWithinPath(compatibilityDirectory, target)
+      : samePath(dirname(target), compatibilityDirectory);
     const isScopedLegacyRef = scopedRef.scope?.startsWith("project:") || scopedRef.kind === "memory" && scopedRef.scope?.startsWith("session:")
       ? compatibilityDirectory !== canonicalDirectory && withinScopedLegacyDirectory
       : false;
-    if (!isLegacySharedProjectRef && !isScopedLegacyRef && target !== canonicalCandidatePath(this.legacyPathFor(scopedRef.kind, scopedRef.record_id, scopedRef.version))) {
+    if (!isLegacySharedProjectRef && !isScopedLegacyRef && !samePath(target, canonicalCandidatePath(this.legacyPathFor(scopedRef.kind, scopedRef.record_id, scopedRef.version)))) {
       throw new Error("Content reference path is outside the canonical directory");
     }
     if (!lstatSync(scopedRef.path).isFile()) throw new Error("Legacy content path must use regular files and directories");

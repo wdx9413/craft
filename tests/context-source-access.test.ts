@@ -45,8 +45,8 @@ test("Source audience gates Knowledge independently of derivative purpose and fo
     assert.equal((await reader.contribute(request)).items.length, 0);
     assert(sourceAllows(f.store.get("knowledge_source", "public"), { ...owner, purpose: "preference" }));
     assert(!sourceAllows(f.store.get("knowledge_source", "public"), { principal_id: "owner", tenant_id: "other" }));
-    assert(sourceAllows({}, { purpose: "preference" }));
-    assert.throws(() => sourceAllows({ scope: "malformed" }, {}), /scope/);
+    assert.equal(sourceAllows({}, { purpose: "preference" }), false);
+    assert.equal(sourceAllows({ scope: "malformed" }, {}), false);
   } finally { await f.close(); }
 });
 
@@ -67,7 +67,9 @@ test("Knowledge exact and list reads enforce current and historical audience thr
     assert.equal((f.service.knowledgeClaimGet({ claim_id: current.id, ...owner, allow_restricted: true }).claim as JsonObject).version, restricted.version);
     f.store.save("knowledge_claim", String(current.id), { ...payload(current), source_id: null });
     assert.throws(() => f.service.knowledgeClaimGet({ claim_id: current.id, ...owner }), /denied/);
+    f.source("missing");
     f.store.save("knowledge_claim", String(current.id), { ...payload(current), source_id: "missing" });
+    f.store.remove("knowledge_source", "missing");
     assert.throws(() => f.service.knowledgeClaimGet({ claim_id: current.id, ...owner }), /denied/);
     f.store.save("knowledge_claim", String(current.id), payload(current));
     const mcp = new McpServer(f.service, "component-knowledge");

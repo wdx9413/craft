@@ -363,7 +363,21 @@ async function listSessionFiles(root: string): Promise<string[]> {
   let rootInfo;
   try { rootInfo = await lstat(root); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      let parent = dirname(root);
+      while (parent !== dirname(parent)) {
+        try {
+          const parentInfo = await lstat(parent);
+          if (parentInfo.isSymbolicLink() || !parentInfo.isDirectory()) throw new Error("Codex sessions root must be a regular directory");
+          break;
+        } catch (parentError) {
+          if ((parentError as NodeJS.ErrnoException).code !== "ENOENT") throw parentError;
+          parent = dirname(parent);
+        }
+      }
+      return [];
+    }
     throw error;
   }
   if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) throw new Error("Codex sessions root must be a regular directory");

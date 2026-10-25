@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -233,17 +234,20 @@ test("Knowledge SDK synchronizes expiration, source drift, documents and evidenc
     const sdk = new KnowledgeClaimGovernance(f.store);
     assert.throws(() => sdk.synchronize({ now: "bad" }), /timestamp/);
     const base = { source_id: "builtin.evidence-wiki", scope: "project:p", status: "reviewed", content: "fact" };
+    f.store.create("knowledge_source", "missing", { scope: "project:p", status: "active", trust: "verified" });
+    f.store.create("knowledge_document", "missing", { scope: "project:p", status: "current", content_digest: "old" });
     f.store.create("knowledge_claim", "expired", { ...base, valid_until: "2020-01-01" });
     f.store.create("knowledge_claim", "drift", { ...base, review: { source_digest: "old" } });
     f.store.create("knowledge_claim", "missing", { ...base, source_id: "missing" });
     f.store.create("knowledge_claim", "document", { ...base, document_id: "missing" });
     f.store.create("knowledge_claim", "a", base); f.store.create("knowledge_claim", "b", base); f.store.create("knowledge_claim", "healthy", base);
+    f.store.remove("knowledge_source", "missing"); f.store.remove("knowledge_document", "missing");
     f.store.create("knowledge_relation", "contradiction", { relation: "contradicts", valid_to: null, confidence: "bounded", source: { kind: "knowledge_claim", id: "a" }, target: { kind: "knowledge_claim", id: "b" } });
     const affected = sdk.synchronize({ now: "2026-10-09T00:00:00Z" }).affected as JsonObject[]; assert.equal(affected.length, 6);
     assert.equal(f.store.get("knowledge_claim", "expired").status, "expired"); assert.equal(f.store.get("knowledge_claim", "a").status, "disputed"); assert.equal(f.store.get("knowledge_claim", "healthy").status, "reviewed");
     assert.equal(sdk.synchronize().count, 0);
-    f.store.create("knowledge_document", "changed", { status: "changed", content_digest: "d" });
-    f.store.create("knowledge_document", "current", { status: "current", content_digest: "d" });
+    f.store.create("knowledge_document", "changed", { scope: "project:p", status: "changed", content_digest: "d" });
+    f.store.create("knowledge_document", "current", { scope: "project:p", status: "current", content_digest: "d" });
     f.store.create("knowledge_claim", "changed-document", { ...base, document_id: "changed", document_digest: "d", content_ref: { path: "notes/reviewed.md" } });
     f.store.create("knowledge_claim", "wrong-digest", { ...base, document_id: "current", document_digest: "old" });
     f.store.create("knowledge_claim", "matching-document", { ...base, document_id: "current", document_digest: "d" });
@@ -287,10 +291,11 @@ test("standalone Claim SDK preserves validation, legacy replay and current/histo
     f.store.create("evidence", "proof", { confidence: "confirmed" }); f.store.create("evidence", "weak", { confidence: "unverified" });
     const args = { claim_id: "claim", kind: "fact", scope, content: "retained fact", evidence_ids: ["proof"], tags: ["fact"], title: "fact", valid_until: "2030-01-01" };
     const original = sdk.knowledgeClaimSave(args).claim as JsonObject; assert.equal(sdk.knowledgeClaimSave(args).idempotent, true);
+    assert.throws(() => sdk.knowledgeClaimSave({ kind: "fact", content: "scope is required", evidence_ids: ["proof"] }), /scope/u);
     assert.throws(() => sdk.knowledgeClaimSave({ ...args, content: "different" }), /idempotency/);
     const variants = [{ kind: "bad" }, { content: "" }, { content: "token=secretvalue" }, { evidence_ids: undefined }, { evidence_ids: [] }, { evidence_ids: ["proof", "proof"] }, { tags: "bad" }, { tags: ["tag", "tag"] }, { valid_until: "bad" }, { title: "token=secretvalue" }];
     for (const variant of variants) assert.throws(() => sdk.knowledgeClaimSave({ ...args, ...variant }));
-    assert(sdk.knowledgeClaimSave({ kind: "fact", content: "global fact", evidence_ids: ["proof"] }).claim);
+    assert(sdk.knowledgeClaimSave({ kind: "fact", content: "global fact", scope: "global", evidence_ids: ["proof"] }).claim);
     const { createHash } = await import("node:crypto");
     const digest = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
     for (const older of [false, true]) {
@@ -305,11 +310,11 @@ test("standalone Claim SDK preserves validation, legacy replay and current/histo
     assert.throws(() => sdk.knowledgeClaimGet({ claim_id: original.id, version: 0 }), /integer/);
     assert((sdk.knowledgeClaimList({}).claims as unknown[]).length > 0); assert.equal((sdk.knowledgeClaimList({ query: "retained fact", limit: 1 }).claims as unknown[]).length, 1);
     for (const status of ["candidate", "unknown"]) assert.throws(() => sdk.knowledgeClaimReview({ claim_id: original.id, status, reviewer: "human", reason: "review" }), /unsupported/);
-    sdk.knowledgeClaimSave({ claim_id: "weak", kind: "fact", content: "weak", evidence_ids: ["weak"] });
+    sdk.knowledgeClaimSave({ claim_id: "weak", kind: "fact", content: "weak", scope: "global", evidence_ids: ["weak"] });
     assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "weak", status: "reviewed", reviewer: "human", reason: "review" }), /managed Host review and independent effectiveness evaluation/);
-    f.store.create("knowledge_claim", "no-evidence", { status: "candidate" });
+    f.store.create("knowledge_claim", "no-evidence", { scope: "global", status: "candidate" });
     assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "no-evidence", status: "reviewed", reviewer: "human", reason: "review" }), /managed Host review and independent effectiveness evaluation/);
-    f.store.create("knowledge_claim", "no-source", { evidence_ids: ["proof"], status: "candidate" });
+    f.store.create("knowledge_claim", "no-source", { scope: "global", evidence_ids: ["proof"], status: "candidate" });
     assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "no-source", status: "reviewed", reviewer: "human", reason: "review" }), /managed Host review and independent effectiveness evaluation/);
     f.service.knowledgeSourceRegister({ source_id: "source-to-delete", kind: "custom", label: "Temporary source",
       scope_kind: "project", scope_id: "p", locator: join(f.root, "temporary.md"), content_digest: "temporary-source-digest", trust: "bounded", access: "read_only" });
@@ -323,6 +328,51 @@ test("standalone Claim SDK preserves validation, legacy replay and current/histo
     f.store.save("evidence", "weak", { confidence: "bounded" });
     f.store.database.prepare("DELETE FROM records WHERE kind='knowledge_source' AND id='builtin.evidence-wiki'").run();
     assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "weak", status: "reviewed", reviewer: "human", reason: "now bounded" }), /managed Host review and independent effectiveness evaluation/);
+  } finally { f.close(); }
+});
+
+test("Knowledge claim governance rejects historical scope drift and repairs legacy scenario projections", async () => {
+  const f = await fixture();
+  try {
+    const sdk = new KnowledgeClaimGovernance(f.store);
+    f.store.create("evidence", "scope-proof", { confidence: "confirmed" });
+    f.service.knowledgeSourceRegister({ source_id: "legacy-project-source", kind: "custom", label: "Legacy project source",
+      scope_kind: "project", scope_id: "p", locator: join(f.root, "legacy-source.md"), content_digest: "legacy-project-source-digest", trust: "bounded", access: "read_only" });
+    const claim = sdk.knowledgeClaimSave({ claim_id: "scope-drift", kind: "fact", scope: "project:p", content: "scoped fact", evidence_ids: ["scope-proof"] }).claim as JsonObject;
+    sdk.knowledgeClaimReview({ claim_id: "scope-drift", status: "disputed", reviewer: "fixture", reason: "revision boundary" });
+    const pointer = JSON.parse(String((f.store.database.prepare("SELECT payload_json FROM records WHERE kind='knowledge_claim' AND id=?").get("scope-drift") as { payload_json: string }).payload_json)) as JsonObject;
+    const partition = pointer._knowledge_partition as JsonObject;
+    const database = new DatabaseSync(String(partition.file));
+    try {
+      const row = database.prepare("SELECT payload_json FROM records WHERE kind='knowledge_claim' AND id=? AND version=1").get("scope-drift") as { payload_json: string };
+      const historical = JSON.parse(row.payload_json) as JsonObject;
+      const envelope = historical.scope_envelope as JsonObject;
+      database.prepare("UPDATE records SET payload_json=? WHERE kind='knowledge_claim' AND id=? AND version=1")
+        .run(JSON.stringify({ ...historical, scope: "project:other", scope_envelope: { ...envelope, applicability: { kind: "project", id: "other" } } }), "scope-drift");
+    } finally { database.close(); }
+    assert.throws(() => sdk.knowledgeClaimGet({ claim_id: "scope-drift", version: 1 }), /historical scope or audience denied/);
+
+    const insertLegacy = (id: string, payload: JsonObject) => {
+      const now = new Date().toISOString();
+      f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        .run("knowledge_claim", id, 1, JSON.stringify(payload), now, now);
+    };
+    insertLegacy("legacy-review", { status: "candidate", source_id: "legacy-project-source", evidence_ids: [] });
+    const legacyReview = sdk.knowledgeClaimReview({ claim_id: "legacy-review", status: "disputed", reviewer: "fixture", reason: "legacy scope absent" });
+    assert.equal((legacyReview.claim as JsonObject).status, "disputed");
+    assert.equal(legacyReview.scenario_catalog, undefined);
+
+    const referencePath = join(f.root, "legacy-knowledge.md");
+    f.store.create("knowledge_claim", "scenario-review", { scope: "global", status: "candidate", scenario_key: "legacy.review",
+      source_id: "builtin.evidence-wiki", evidence_ids: [], content_ref: { kind: "knowledge", path: referencePath } });
+    assert.equal(f.store.get("knowledge_claim", "scenario-review").scenario_key, "legacy.review");
+    const scenarioReview = sdk.knowledgeClaimReview({ claim_id: "scenario-review", status: "disputed", reviewer: "fixture", reason: "scenario deactivation" });
+    assert.equal((scenarioReview.scenario_catalog as JsonObject).scenario_key, "legacy.review");
+
+    insertLegacy("legacy-expired-scene", { status: "reviewed", source_id: "legacy-project-source", evidence_ids: [],
+      valid_until: "2000-01-01T00:00:00.000Z", scenario_key: "legacy.expired", content_ref: { kind: "knowledge", path: referencePath } });
+    const synchronized = sdk.synchronize({ now: "2026-10-25T00:00:00.000Z" });
+    assert((synchronized.affected as JsonObject[]).some(item => item.id === "legacy-expired-scene" && item.status === "expired"));
   } finally { f.close(); }
 });
 

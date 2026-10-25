@@ -129,7 +129,7 @@ test("Maintenance expires existing Knowledge and Memory records", async () => {
     f.service.knowledgeMemoryInstallBuiltins();
     const source = f.service.knowledgeSourceRegister({ source_id: "source", kind: "custom", label: "test", scope_kind: "project", scope_id: "p", locator: "memory://test", content_digest: "sha256:source", trust: "bounded", access: "proposal_only" }).source as JsonObject;
     const evidence = f.service.evidenceRecord({ evidence_id: "ev", source_type: "test", claim: "checked", confidence: "bounded" });
-    const claim = f.service.knowledgeClaimSave({ claim_id: "claim", kind: "fact", content: "temporary", evidence_ids: [evidence.id], valid_until: "2020-01-01T00:00:00.000Z" }).claim as JsonObject;
+    const claim = f.service.knowledgeClaimSave({ claim_id: "claim", kind: "fact", content: "temporary", scope: "global", evidence_ids: [evidence.id], valid_until: "2020-01-01T00:00:00.000Z" }).claim as JsonObject;
     attachVerifiedPromotionFixture(f.store, claim);
     f.service.memoryCandidatePropose({ candidate_id: "memory", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "p", content: "temporary", valid_until: "2020-01-01T00:00:00.000Z" });
     const tick = new MaintenanceKernel(f.service).tick({ now: "2030-01-01T00:00:00.000Z" });

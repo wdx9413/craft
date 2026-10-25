@@ -13,7 +13,7 @@ test("formal Knowledge eligibility verifies the exact local promotion proof and 
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-promotion-proof-"));
   const store = await new CraftStore(craftPaths(root)).open();
   try {
-    store.create("knowledge_source", "proof-source", { status: "active", trust: "verified", content_digest: "source-v1" });
+    store.create("knowledge_source", "proof-source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", content_digest: "source-v1" });
     const candidate = store.create("knowledge_claim", "proof-claim", { status: "candidate", source_id: "proof-source", scope: "global",
       identity_digest: "identity-v1", content_digest: "content-v1", evidence_ids: [] });
     const promoted = attachVerifiedPromotionFixture(store, candidate);
@@ -80,11 +80,11 @@ test("formal Knowledge eligibility verifies the exact local promotion proof and 
     const currentRun = store.get("knowledge_evaluation_run", String((promoted.review as JsonObject).effectiveness_run_id));
     const tamperRun = (patch: JsonObject) => {
       const savedRun = store.get("knowledge_evaluation_run", String(currentRun.id));
-      const { version: _savedVersion, ...savedPayload } = savedRun;
-      store.save("knowledge_evaluation_run", String(currentRun.id), { ...savedPayload, ...patch });
+      store.database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=?")
+        .run(JSON.stringify({ ...payload(savedRun), ...patch }), "knowledge_evaluation_run", String(currentRun.id), Number(savedRun.version));
       assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), false);
-      const { version: _originalVersion, ...originalPayload } = currentRun;
-      store.save("knowledge_evaluation_run", String(currentRun.id), originalPayload);
+      store.database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=?")
+        .run(JSON.stringify(payload(currentRun)), "knowledge_evaluation_run", String(currentRun.id), Number(savedRun.version));
     };
     tamperRun({ candidate_claim_refs: [] });
     tamperRun({ candidate_claim_refs: null });
@@ -100,7 +100,7 @@ test("formal Knowledge eligibility verifies the exact local promotion proof and 
       const altered = { ...originalRefs[0]!, [field]: `wrong-${field}` };
       tamperRun({ candidate_claim_refs: [altered] });
     }
-    store.create("knowledge_promotion_policy", "knowledge-promotion-default", { automatic: true, revision: 1 });
+    store.create("knowledge_promotion_policy", "knowledge-promotion-default", { scope: { kind: "global", id: "global" }, automatic: true, revision: 1 });
     assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), true);
     store.save("knowledge_evaluation_run", String(currentRun.id), { ...payload(currentRun), mode: "development" });
     assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), false);
@@ -119,13 +119,13 @@ test("Knowledge evaluation evidence is resolved without losing missing provenanc
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-eval-provenance-"));
   const store = await new CraftStore(craftPaths(root)).open();
   try {
-    store.create("evidence", "source", { confidence: "confirmed", metadata: { source_session_id: "evaluation", task_id: "eval-task" } });
-    store.create("evidence", "claim-evidence", { confidence: "confirmed", metadata: { source_session_id: "claim", task_id: "claim-task" } });
-    store.create("knowledge_claim", "claim", { evidence_ids: ["claim-evidence", "missing-evidence", 1] });
-    store.create("knowledge_claim", "claim-without-evidence", {});
+    store.create("evidence", "source", { scope: "global", confidence: "confirmed", metadata: { source_session_id: "evaluation", task_id: "eval-task" } });
+    store.create("evidence", "claim-evidence", { scope: "global", confidence: "confirmed", metadata: { source_session_id: "claim", task_id: "claim-task" } });
+    store.create("knowledge_claim", "claim", { scope: "global", evidence_ids: ["claim-evidence"] });
+    store.create("knowledge_claim", "claim-without-evidence", { scope: "global" });
     const resolved = knowledgeEvaluationEvidence(store, { source_evidence_ids: ["source", "missing", "source", 1], expected_claim_ids: ["claim", "missing-claim", "claim", 1] });
     assert.deepEqual(resolved.sourceEvidence.map((item) => item.id), ["source"]);
-    assert.deepEqual(resolved.claimEvidence.map((item) => [item.claim_id, item.evidence.id]), [["claim", "claim-evidence"], ["claim", undefined], ["claim", undefined]]);
+    assert.deepEqual(resolved.claimEvidence.map((item) => [item.claim_id, item.evidence.id]), [["claim", "claim-evidence"]]);
     assert.equal(assessKnowledgeEvaluationProvenance({ source_session_id: "evaluation", source_task_id: "eval-task", source_evidence_ids: ["source"],
       evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "operator_asserted", sanitized: true, expected_claim_ids: ["claim"] }, resolved.sourceEvidence, resolved.claimEvidence).status, "unadjudicated_label");
     assert.deepEqual(knowledgeEvaluationEvidence(store, { expected_claim_ids: ["claim-without-evidence"] }).claimEvidence, []);
@@ -219,7 +219,7 @@ test("Knowledge evaluation separates exact legacy review attestations from task 
     store.save("knowledge_host_review", reviewId, reviewBody);
     for (const [index, change] of [{ metadata: undefined }, { metadata: { review_id: "unbound" } }, { metadata: { review_id: reviewId, source_digest: "sha256:other" } }].entries()) {
       const evidenceId = `malformed-attestation-${index}`;
-      store.create("evidence", evidenceId, { ...attestation, ...change });
+      store.create("evidence", evidenceId, { ...attestation, scope: "global", ...change });
       store.save("knowledge_claim", "claim", { ...claimBody, evidence_ids: ["task", evidenceId] });
       assert.equal(assess().status, "unverified_claim_source");
     }

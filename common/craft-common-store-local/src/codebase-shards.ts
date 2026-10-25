@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { sqliteBusyTimeoutMs } from "./sqlite-busy-timeout.ts";
 import type { JsonObject } from "./store.ts";
 
 export const CODEBASE_GRAPH_KINDS = new Set(["codebase_index_shard", "codebase_index_edge_route"]);
@@ -41,7 +42,7 @@ export class CodebaseShardStore {
     }
     const database = new DatabaseSync(file);
     try {
-      database.exec("PRAGMA busy_timeout=15000");
+      database.exec(`PRAGMA busy_timeout=${sqliteBusyTimeoutMs()}`);
       if (create && String((database.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toLowerCase() !== "wal")
         database.exec("PRAGMA journal_mode=WAL");
       if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get()) database.exec(`CREATE TABLE records(

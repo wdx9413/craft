@@ -16,7 +16,7 @@ test("portable Knowledge import preserves source review as history but removes l
   try {
     source.create("scope_alias", "source-root", { status: "active", scope: { kind: "project", id: "project:bundle" }, alias_kind: "path", alias: sourceRoot, alias_digest: stableDigest(sourceRoot) });
     target.create("scope_alias", "target-root", { status: "active", scope: { kind: "project", id: "project:bundle" }, alias_kind: "path", alias: targetRoot, alias_digest: stableDigest(targetRoot) });
-    source.create("knowledge_source", "source", { status: "active", trust: "verified", content_digest: "source-v1" });
+    source.create("knowledge_source", "source", { scope: { kind: "project", id: "bundle" }, status: "active", trust: "verified", content_digest: "source-v1" });
     source.create("evidence", "evidence", { confidence: "confirmed", source_type: "receipt", claim: "Verified locally." });
     const content_ref = source.contentStore.writeSync({ kind: "knowledge", record_id: "reviewed", version: 1, scope: "project:bundle",
       status: "reviewed", sensitivity: "internal", source_id: "source", body: "portable reviewed claim" });

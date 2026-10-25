@@ -16,7 +16,7 @@ async function fixture() {
   const projectRoot = join(root, "project"); mkdirSync(projectRoot);
   store.create("scope_alias", "project-p", { scope: { kind: "project", id: "p" }, alias_kind: "path", alias: projectRoot, status: "active" });
   const ledger = new MemoryLedgerKernel(store), governance = new MemoryGovernanceKernel(store, ledger);
-  store.create("knowledge_source", "s", { status: "active", trust: "verified" });
+  store.create("knowledge_source", "s", { scope: { kind: "project", id: "p" }, status: "active", trust: "verified" });
   store.create("evidence", "e", { source_type: "human", confidence: "confirmed" });
   function candidate(id = "c", extra: JsonObject = {}) { return store.create("memory_candidate", id, { status: "approved", source_id: "s", kind: "preference", scope: { kind: "project", id: "p" }, content: "Use Python", sensitivity: "internal", confidence: "confirmed", evidence_ids: ["e"], observed_at: "2020-01-01T00:00:00.000Z", effective_from: "2020-01-01T00:00:00.000Z", ...extra }); }
   return { root, projectRoot, store, ledger, governance, candidate, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
@@ -35,7 +35,7 @@ test("approved candidate commits once; replay does not resurrect revoked memory"
     f.candidate("denied", { status: "candidate" });
     assert.throws(() => f.governance.remember({ candidate_id: "denied" }), /Only approved/);
     f.candidate("explicit"); assert.equal((f.governance.remember({ candidate_id: "explicit", memory_id: "named" }).memory as JsonObject).id, "named");
-    f.store.save("knowledge_source", "s", { status: "revoked", trust: "verified" });
+    f.store.save("knowledge_source", "s", { scope: { kind: "project", id: "p" }, status: "revoked", trust: "verified" });
     assert.throws(() => f.governance.remember({ candidate_id: "c" }), /not active/);
   } finally { f.close(); }
 });

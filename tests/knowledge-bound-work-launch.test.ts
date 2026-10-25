@@ -94,13 +94,16 @@ test("Knowledge binding validator rejects malformed or no-longer-safe receipts",
     service.scopeAliasBind({ scope_kind: "project", scope_id: "project:a", alias_kind: "path", alias: root });
     service.scopeAliasBind({ scope_kind: "project", scope_id: "project:b", alias_kind: "path", alias: root });
     store.create("evidence", "e", { claim: "Observed." });
-    const add = (id: string, claim: JsonObject = {}, bundle: JsonObject = {}) => {
+    const add = (id: string, claim: JsonObject = {}, bundle: JsonObject = {}, persistBundle = true) => {
       const content = String(claim.content ?? "Fact."); const evidenceIds = (claim.evidence_ids ?? ["e"]) as string[];
       const saved = store.create("knowledge_claim", id, { status: "candidate", scope: "project:a", content, evidence_ids: evidenceIds, ...claim });
       const promoted = claim.status === "candidate" || evidenceIds.length === 0 ? saved : attachVerifiedPromotionFixture(store, saved);
       const currentEvidenceIds = Array.isArray(promoted.evidence_ids) ? promoted.evidence_ids.map(String) : evidenceIds;
       const context = `[Knowledge ${id}]\n${content}\nEvidence: ${currentEvidenceIds.join(", ")}\n`;
-      store.create("wiki_context_bundle", `b-${id}`, { scope: "project:a", max_chars: 500, used_chars: context.length, claim_refs: [{ claim_id: id, claim_version: promoted.version }], context_digest: contextDigest(context), ...bundle });
+      if (persistBundle) store.create("wiki_context_bundle", `b-${id}`, { scope: "project:a", max_chars: 500, used_chars: context.length, claim_refs: [{ claim_id: id, claim_version: promoted.version }], context_digest: contextDigest(context), ...bundle });
+      else store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        .run("wiki_context_bundle", `b-${id}`, 1, JSON.stringify({ scope: "project:a", max_chars: 500, used_chars: context.length,
+          claim_refs: [{ claim_id: id, claim_version: promoted.version }], context_digest: contextDigest(context), ...bundle }), new Date().toISOString(), new Date().toISOString());
       return `b-${id}`;
     };
     const normal = add("normal"); const binding = kernel.bind({ bundle_id: normal }); assert.equal(kernel.revalidate(binding).bundle_id, normal); assert.throws(() => kernel.prompt({ ...binding, context: " " }, "Prompt"), /context/);
@@ -108,7 +111,7 @@ test("Knowledge binding validator rejects malformed or no-longer-safe receipts",
     const duplicate = add("duplicate", {}, { claim_refs: [{ claim_id: "duplicate", claim_version: 1 }, { claim_id: "duplicate", claim_version: 1 }] }); assert.throws(() => kernel.bind({ bundle_id: duplicate }), /unique/);
     const candidate = add("candidate", { status: "candidate" }); assert.throws(() => kernel.bind({ bundle_id: candidate }), /verified formal promotion evidence/);
     const global = add("global", { scope: "global", valid_until: null }); assert.equal(kernel.bind({ bundle_id: global }).scope, "project:a");
-    const foreign = add("foreign", { scope: "project:b", valid_until: null }); assert.throws(() => kernel.bind({ bundle_id: foreign }), /scope/);
+    const foreign = add("foreign", { scope: "project:b", valid_until: null }, {}, false); assert.throws(() => kernel.bind({ bundle_id: foreign }), /scope/);
     const malformedExpiry = add("bad-expiry", { valid_until: "bad" }); assert.throws(() => kernel.bind({ bundle_id: malformedExpiry }), /ISO/);
     const noEvidence = add("no-evidence", { evidence_ids: [] }); assert.throws(() => kernel.bind({ bundle_id: noEvidence }), /verified formal promotion evidence/);
     const tooSmall = add("too-small", {}, { max_chars: 1 }); assert.throws(() => kernel.bind({ bundle_id: tooSmall }), /character budget/);

@@ -33,6 +33,26 @@ const ACCESS = new Set(["read_only", "proposal_only"]);
 const TRANSITIONS = new Set(["disabled", "revoked"]);
 const INGESTIBLE = new Set([".md", ".mdx", ".txt"]);
 function digest(value: string): string { return `sha256:${createHash("sha256").update(value).digest("hex")}`; }
+function knowledgeScenarioScope(record: JsonObject): string | undefined {
+  const contentRef = record.content_ref && typeof record.content_ref === "object" && !Array.isArray(record.content_ref)
+    ? record.content_ref as JsonObject
+    : {};
+  const scope = record.scope ?? (contentRef.kind === "knowledge" ? contentRef.scope : undefined);
+  try {
+    const parsed = typeof scope === "string"
+      ? scope === "global" ? { kind: "global", id: "global" } : (() => {
+        const separator = scope.indexOf(":");
+        if (separator <= 0 || separator === scope.length - 1) throw new Error("Knowledge scenario scope is malformed");
+        return parseScope({ scope_kind: scope.slice(0, separator), scope_id: scope.slice(separator + 1) });
+      })()
+      : scope && typeof scope === "object" && !Array.isArray(scope)
+        ? parseScope({ scope_kind: (scope as JsonObject).kind, scope_id: (scope as JsonObject).id })
+        : undefined;
+    if (parsed?.kind === "global" && parsed.id === "global") return "global";
+    if (parsed?.kind === "project" && /^(?:project:)?[A-Za-z0-9_-]{1,96}$/u.test(parsed.id)) return `project:${parsed.id}`;
+  } catch { return undefined; }
+  return undefined;
+}
 function within(root: string, candidate: string): boolean {
   const value = relative(root, candidate);
   return value === "" || (!value.startsWith(`..${sep}`) && value !== ".." && !value.split(sep).includes(".."));
@@ -194,14 +214,14 @@ export class KnowledgeSourceRegistry {
   }
 
   private updateStaleScenarioClaim(claim: JsonObject, source: JsonObject): void {
-    if (typeof claim.scenario_key !== "string") return;
-    const scope = String(claim.scope ?? "global");
+    const scope = knowledgeScenarioScope(claim);
+    if (typeof claim.scenario_key !== "string" || !scope) return;
     const contentPath = (claim.content_ref as JsonObject | undefined)?.path;
     const projectRoot = projectRootForKnowledgeSource(source);
     updateKnowledgeScenarioClaim(knowledgeDirectoryForScope(this.store, scope, {
       ...(typeof contentPath === "string" ? { reference_path: contentPath } : {}),
       ...(projectRoot ? { project_root: projectRoot } : {}),
-    }), claim, "inactive");
+    }), { ...claim, scope }, "inactive");
   }
 
   sourceRegister(args: JsonObject): JsonObject {
@@ -249,9 +269,11 @@ export class KnowledgeSourceRegistry {
     for (const claim of this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && typeof item.scenario_key === "string", false, { source_ids: [String(source.id)], document_ids: [] })) {
       // Transitions only disable or revoke a Source. Every scenario claim that
       // depends on it must leave the active catalog in either case.
-      updateKnowledgeScenarioClaim(knowledgeDirectoryForScope(this.store, String(claim.scope ?? "global"), {
+      const scope = knowledgeScenarioScope(claim);
+      if (!scope) continue;
+      updateKnowledgeScenarioClaim(knowledgeDirectoryForScope(this.store, scope, {
         ...((claim.content_ref as JsonObject | undefined)?.path ? { reference_path: String((claim.content_ref as JsonObject).path) } : {}),
-      }), claim, "inactive");
+      }), { ...claim, scope }, "inactive");
     }
     return { source: saved };
   }
@@ -267,7 +289,8 @@ export class KnowledgeSourceRegistry {
     try {
       const result = this.ingest(args);
       const receipt = this.store.create("knowledge_ingest_receipt", id, { source_id: source.id, source_version: source.version, status: result.status, reason: result.reason ?? null,
-        processed_files: result.processed_files ?? 0, total_files: result.total_files ?? null, has_more: result.has_more ?? false, invalidated_documents: result.invalidated_documents ?? 0 });
+        processed_files: result.processed_files ?? 0, total_files: result.total_files ?? null, has_more: result.has_more ?? false,
+        invalidated_documents: result.invalidated_documents ?? 0, unscoped_claims_skipped: result.unscoped_claims_skipped ?? 0 });
       return { ...result, ingestion_receipt: receipt };
     } catch (error) {
       this.store.create("knowledge_ingest_receipt", id, { source_id: source.id, source_version: source.version, status: "failed", reason: "ingest_validation_or_read_failed", error_digest: stableDigest(String(error)) });
@@ -323,6 +346,7 @@ export class KnowledgeSourceRegistry {
       const manifest = new Map(documents.map(doc => [doc.id, doc]));
       // Invalidate changes/deletions before serving any page. Unchanged documents retain review.
       const invalid = new Set<string>();
+      let unscopedClaimsSkipped = 0;
       for (const prior of this.store.list("knowledge_document", 10_001, doc => doc.source_id === source.id && doc.root_digest === stableDigest(root))) {
         const current = manifest.get(String(prior.id));
         if (!current || current.digest !== prior.content_digest) {
@@ -333,6 +357,10 @@ export class KnowledgeSourceRegistry {
       for (const claim of this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && Boolean(item.source_revision_id), false, { source_ids: [String(source.id)], document_ids: [] })) {
         const obsolete = claim.document_id ? invalid.has(String(claim.document_id)) : claim.source_revision_id !== revision.id;
         if (obsolete && ["reviewed", "candidate"].includes(String(claim.status))) {
+          if (!knowledgeScenarioScope(claim)) {
+            unscopedClaimsSkipped++;
+            continue;
+          }
           const stale = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "stale", revalidation_required: true, stale_since_revision: revision.id });
           this.updateStaleScenarioClaim(stale, source);
         }
@@ -393,7 +421,7 @@ export class KnowledgeSourceRegistry {
       const hasMore = nextOffset < documents.length;
       return { status: hasMore ? "partial" : "completed", source, revision, fragments, candidates, raw_content_stored: false,
         has_more: hasMore, next_cursor: hasMore ? Buffer.from(JSON.stringify({ digest: revisionDigest, offset: nextOffset })).toString("base64url") : null,
-        processed_files: selected.length, total_files: documents.length, invalidated_documents: invalid.size };
+        processed_files: selected.length, total_files: documents.length, invalidated_documents: invalid.size, unscoped_claims_skipped: unscopedClaimsSkipped };
     });
   }
 }

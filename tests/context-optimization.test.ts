@@ -19,6 +19,7 @@ async function fixture() {
   const service = new CraftService(store);
   service.scopeAliasBind({ scope_kind: "project", scope_id: "project:p", alias_kind: "path", alias: root });
   service.knowledgeSourceRegister({ source_id: "source", kind: "custom", label: "source", scope_kind: "project", scope_id: "p", locator: root, content_digest: "source", trust: "verified", access: "read_only" });
+  service.knowledgeSourceRegister({ source_id: "other", kind: "custom", label: "other", scope_kind: "project", scope_id: "p", locator: root, content_digest: "other", trust: "verified", access: "read_only" });
   return { root, store, writer, service, async close() { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 for (const mutation of ["claim", "source", "document", "alias", "delete"] as const) {
@@ -26,7 +27,7 @@ for (const mutation of ["claim", "source", "document", "alias", "delete"] as con
     const f = await fixture();
     try {
       const envelope = { audience: { mode: "private", principal_ids: ["owner"] } };
-      f.store.create("knowledge_document", "doc", { status: "current", content_digest: "document" });
+      f.store.create("knowledge_document", "doc", { scope: "project:p", status: "current", content_digest: "document" });
       f.store.create("scope_alias", "alias", { scope: { kind: "project", id: "p" }, alias: "/repo", status: "active" });
       const claim = f.store.create("knowledge_claim", "claim", { source_id: "source", document_id: "doc", document_digest: "document", scope: "project:p", status: "candidate", scope_envelope: envelope, content: "alpha", content_digest: "body", evidence_ids: [] });
       attachVerifiedPromotionFixture(f.store, claim);
@@ -99,7 +100,7 @@ test("shared projection budget and batched explicit read fence", async () => {
     const guard = new ContextReadGuard(f.store, refs);
     for (const ref of refs) guard.track(ref.kind, ref.id);
     guard.assertCurrent();
-    f.writer.create("knowledge_claim", "missing500", {});
+    f.writer.create("knowledge_claim", "missing500", { scope: "global" });
     assert.throws(() => guard.assertCurrent(), /changed/);
   } finally { await f.close(); }
 });
@@ -142,9 +143,9 @@ test("Knowledge revalidation selects reverse Source/Document dependencies withou
   try {
     const { KnowledgeClaimGovernance } = await import("../capability/craft-knowledge/claim-governance.ts");
     const sdk = new KnowledgeClaimGovernance(f.store);
+    f.store.create("knowledge_document", "doc", { source_id: "source", scope: "project:p", status: "changed", content_digest: "new" });
     f.store.create("knowledge_claim", "target", { source_id: "source", document_id: "doc", document_digest: "d", scope: "project:p", status: "reviewed", content: "target" });
     f.store.create("knowledge_claim", "unrelated", { source_id: "other", scope: "project:p", status: "reviewed", content: "unrelated" });
-    f.store.create("knowledge_document", "doc", { status: "changed", content_digest: "new" });
     assert.equal(sdk.synchronize({ source_ids: ["source"], document_ids: ["doc"] }).count, 1);
     assert.equal(f.store.get("knowledge_claim", "unrelated").status, "reviewed");
     assert.equal(sdk.synchronize({ source_ids: ["absent"] }).count, 0);

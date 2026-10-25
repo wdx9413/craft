@@ -744,7 +744,7 @@ test("stdio LSP handles empty symbols and rejects malformed response, timeout an
     assert.equal(((stderr.diagnostics as JsonObject).stderr_bytes_observed), Buffer.byteLength("fixture diagnostic\n"));
     assert.equal((await analyzeLspSnapshot(base(root, "shutdown-fast"))).analyzer, "stdio-fixture");
     const { args: _args, ...withoutArgs } = base(root);
-    await assert.rejects(analyzeLspSnapshot({ ...withoutArgs, command: "/usr/bin/true" }), /exited before completion/);
+    await assert.rejects(analyzeLspSnapshot({ ...withoutArgs, command: process.execPath, args: ["-e", "process.exit(4)"] }), /exited before completion/);
     await assert.rejects(analyzeLspSnapshot(base(root, "hang-after-shutdown"), 500), /did not exit after shutdown/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -753,6 +753,8 @@ test("stdio LSP validates executable arguments, budgets, paths and snapshot dige
   const root = mkdtempSync(join(tmpdir(), "craft-lsp-validation-"));
   try {
     const valid = base(root);
+    const { args: _args, ...withoutArgs } = valid;
+    await assert.rejects(analyzeLspSnapshot(withoutArgs, 50), /timed out|exited before completion|Malformed/u);
     for (const input of [
       { ...valid, command: " " }, { ...valid, args: [1] }, { ...valid, cwd: "relative" }, { ...valid, analyzer: "" },
       { ...valid, analyzer_version: "" }, { ...valid, documents: [] }, { ...valid, documents: Array(1001).fill(document) },

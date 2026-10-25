@@ -527,7 +527,10 @@ test("handles stale roots, unterminated records and records larger than one scan
   try {
     const rootFile = join(f.root, "not-a-directory");
     await writeFile(rootFile, "file");
-    await assert.rejects(runCodexSessionCollectionOnce({ sessions_root: join(rootFile, "sessions"), state_file: f.state }), /ENOTDIR/u);
+    await assert.rejects(runCodexSessionCollectionOnce({ sessions_root: join(rootFile, "sessions"), state_file: f.state }), /sessions root must be a regular directory/u);
+    const missingParent = await runCodexSessionCollectionOnce({ sessions_root: join(f.root, "missing-parent", "sessions"), state_file: f.state });
+    assert.equal(missingParent.status, "source_unavailable");
+    await assert.rejects(runCodexSessionCollectionOnce({ sessions_root: "invalid\0sessions", state_file: f.state }), /path|argument|NUL/iu);
 
     await writeFile(f.file, JSON.stringify({ type: "unknown", payload: {} }));
     const unterminated = await runCodexSessionCollectionOnce({ sessions_root: f.sessions, state_file: f.state });

@@ -57,7 +57,7 @@ test("Craft Workbench projects model, project, connector and source reads over t
   assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory").body) as { items: unknown[] }).items.length, 2);
   assert.equal(post("/api/workbench/memory/studio-memory/retire", {}).status, 200);
   assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory").body) as { items: unknown[] }).items.length, 1);
-  assert.equal(post("/api/workbench/knowledge/claims", { kind: "rule", content: "Review external plugins before use" }).status, 201);
+  assert.equal(post("/api/workbench/knowledge/claims", { kind: "rule", content: "Review external plugins before use", scope: "global" }).status, 201);
   assert.equal(post("/api/workbench/workflows", { name: "Local review", description: "Review a local change", inputs: [], steps: [] }).status, 201);
 
   const models = JSON.parse(get("/api/models").body) as { count: number; providers: Array<Record<string, unknown>> };
@@ -182,7 +182,7 @@ test("Studio compatibility facades still route every write through governed kern
     const retired = service.workbenchMemoryRetire({ memory_id: "studio-retire-memory" });
     assert.equal((retired.memory as Record<string, unknown>).status, "expired");
 
-    const claim = service.workbenchKnowledgeClaimSave({ kind: "fact", content: "Studio writes are candidate-first" });
+    const claim = service.workbenchKnowledgeClaimSave({ kind: "fact", content: "Studio writes are candidate-first", scope: "global" });
     assert.equal((claim.claim as Record<string, unknown>).status, "candidate");
     const workflow = service.workbenchWorkflowSave({ workflow_id: "studio-compat-workflow", name: "Compat", steps: [{ id: "inspect", type: "action", side_effect: "read_only", action: "inspect" }] });
     assert.equal((workflow.workflow as Record<string, unknown>).lifecycle, "draft");
@@ -190,7 +190,12 @@ test("Studio compatibility facades still route every write through governed kern
 
     const legacy = service.workbenchMemoryCompatSave({ kind: "fact", scope: "user", content: "Legacy facade" });
     assert.equal((legacy.memory as Record<string, unknown>).status, "active");
-    assert.equal((service.workbenchKnowledgeCompatSave({ content: "Legacy knowledge facade" }).claim as Record<string, unknown>).status, "candidate");
+    const compatClaim = service.workbenchKnowledgeCompatSave({ content: "Legacy knowledge facade", scope: "global" }).claim as Record<string, unknown>;
+    assert.equal(compatClaim.status, "candidate");
+    const compatEvidenceId = (compatClaim.evidence_ids as string[])[0]!;
+    const compatEvidenceHeader = JSON.parse(String(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='evidence' AND id=?").get(compatEvidenceId)!.payload_json)) as Record<string, unknown>;
+    assert.deepEqual((compatEvidenceHeader._knowledge_partition as Record<string, unknown>).scope, { kind: "global", id: "global" });
+    assert.equal((compatEvidenceHeader._knowledge_partition as Record<string, unknown>).file, f.store.paths.knowledgeDatabaseFile);
     assert.equal((service.workbenchWorkflowCompatSave({ workflow_id: "studio-legacy-workflow", name: "Legacy", steps: [] }) as Record<string, unknown>).lifecycle, "draft");
     f.store.create("memory_item", "compat-previous", { kind: "preference", scope: "user", task_id: "task", workspace_id: "workspace", applies_to: ["old"], content: "Old preference", status: "active" });
     const superseded = service.workbenchMemoryCompatSave({ memory_id: "compat-previous", content: "Updated preference", applies_to: ["new"] });

@@ -67,8 +67,8 @@ test("component diagnosis filters execution receipts by component, session and r
       f.store.create("activation_proof_receipt", id, { component: "experience", session_id: id, plugin_release: CRAFT_RELEASE_VERSION, observation_written });
       assert.equal((kernel.diagnose({ component: "experience", session_id: id }).execution_proof as JsonObject).verified_observation_written, observation_written);
     }
-    f.store.create("knowledge_claim", "same-a", { status: "candidate" });
-    f.store.create("knowledge_claim", "same-b", { status: "candidate" });
+    f.store.create("knowledge_claim", "same-a", { scope: "global", status: "candidate" });
+    f.store.create("knowledge_claim", "same-b", { scope: "global", status: "candidate" });
     assert.equal(((kernel.diagnose({ component: "knowledge" }).counts as JsonObject).claims as JsonObject).candidate, 2);
 
     f.service.knowledgeMemoryInstallBuiltins();
@@ -172,7 +172,7 @@ test("standalone readiness reflects automatic memory commitment and the coding e
     });
     assert.throws(() => f.service.componentReadinessGet({ component: "all" }), /component must be knowledge/u);
     await knowledge.handlers.craft_knowledge_bootstrap_install({});
-    f.store.create("knowledge_claim", "statusless", {});
+    f.store.create("knowledge_claim", "statusless", { scope: "global" });
     assert.equal((await knowledge.handlers.craft_component_readiness_get({ component: "knowledge" })).state, "evidence_review_pending");
     const evidence = f.store.create("evidence", "coding-evidence", { confidence: "bounded", source: "fixture", summary: "observed test result" });
     await memory.handlers.craft_memory_candidate_propose({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "coding", content: "Run focused tests before a full suite.", evidence_ids: [evidence.id] });
@@ -211,7 +211,7 @@ test("standalone readiness reflects automatic memory commitment and the coding e
     const experienceReady = await experience.handlers.craft_component_readiness_get({ component: "experience" }) as JsonObject;
     assert.equal(experienceReady.state, "draft_proposal_available");
     assert.equal(experienceReady.model_effect_proven, false);
-    f.store.create("knowledge_claim", "reviewed", { status: "reviewed" });
+    f.store.create("knowledge_claim", "reviewed", { scope: "global", status: "reviewed" });
     f.store.create("memory_ledger", "active", { status: "active" });
     f.store.create("workflow_evolution_request", "readiness-draft-request", { scope: { kind: "project", id: "coding" }, scenario_key: "readiness", lifecycle: "awaiting_model" });
     f.store.create("workflow_evolution_proposal", "draft", { request_id: "readiness-draft-request", status: "draft" });

@@ -24,7 +24,7 @@ async function fixture(): Promise<{ root: string; store: CraftStore; service: Cr
 
 async function claim(service: CraftService, id: string, content: string): Promise<string> {
   const evidence = service.evidenceRecord({ evidence_id: `${id}-evidence`, source_type: "program", claim: content, confidence: "confirmed" });
-  const saved = service.knowledgeClaimSave({ claim_id: id, kind: "fact", content, evidence_ids: [evidence.id] }).claim as JsonObject;
+  const saved = service.knowledgeClaimSave({ claim_id: id, kind: "fact", content, scope: "global", evidence_ids: [evidence.id] }).claim as JsonObject;
   return String(saved.id);
 }
 

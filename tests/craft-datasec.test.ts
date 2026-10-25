@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import test, { mock } from "node:test";
+import test, { before, mock } from "node:test";
 import { DEFAULT_RULES, Sanitizer, type Json } from "../capability/craft-datasec/rules.ts";
 import { TokenVault } from "../capability/craft-datasec/vault.ts";
 import { blank, blankResult, FAILURE, handleHook, type Event, type HookInput, type Host } from "../capability/craft-datasec/hook.ts";
@@ -18,7 +18,9 @@ const phone = ["138", "1234", "5678"].join("");
 const identity = ["110105", "19900307", "6754"].join("");
 const bank = ["622202", "1234567890123"].join("");
 const project = resolve(import.meta.dirname, "..");
-await import("../capability/craft-datasec/build.ts");
+// Build after test discovery: a top-level async build can cancel earlier files
+// while Node loads the suite with --test-isolation=none.
+before(async () => { await import("../capability/craft-datasec/build.ts"); });
 
 test("Datasec CLI validates events, uses configured rules, and emits closed failure responses", () => {
   const f = fixture();

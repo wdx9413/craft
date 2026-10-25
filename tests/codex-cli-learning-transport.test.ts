@@ -52,7 +52,7 @@ test("Codex CLI transport supplies a bounded output schema through a private tem
   });
   const withSchema = { ...request, body: { ...request.body, codex_output_schema: schema } };
   await transport.complete(provider, withSchema);
-  assert.match(schemaPath, /craft-learning-schema-[^/]+\/output-schema\.json$/u);
+  assert.match(schemaPath.replaceAll("\\", "/"), /craft-learning-schema-[^/]+\/output-schema\.json$/u);
   await assert.rejects(readFile(schemaPath, "utf8"));
 });
 

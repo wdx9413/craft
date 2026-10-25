@@ -50,7 +50,8 @@ test("scope envelopes preserve legacy access but bind audience, tenant and purpo
   assert.equal(scopeAllows(scopeEnvelope(undefined, { kind: "global", id: "global" }), {}), true);
   assert.deepEqual(scopeEnvelopeReceipt(restricted), { applicability: project, custody: { kind: "team", id: "t" }, audience: { mode: "private", principal_count: 1 }, purpose: "procedure", retention: "archival", tenant_bound: true });
   assert.equal(sourceAllows({ scope: project, scope_envelope: restricted }, { tenant_id: "tenant", principal_id: "alice", purpose: "fact" }), true);
-  assert.equal(sourceAllows({}, {}), true);
+  assert.equal(sourceAllows({}, {}), false);
+  assert.equal(sourceAllows({ scope: "invalid" }, {}), false);
 });
 
 test("capability hook outcomes name an owner only when one was registered", async () => {

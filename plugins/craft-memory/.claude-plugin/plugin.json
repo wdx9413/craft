@@ -6,7 +6,6 @@
     "name": "wdx9413"
   },
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "craft-memory": {
       "command": "node",

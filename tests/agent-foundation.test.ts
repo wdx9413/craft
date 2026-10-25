@@ -42,7 +42,7 @@ test("memory governance is candidate-first, conflict-aware and expiring", async 
     const expired = service.memoryExpirySweep({ now: "2035-01-01T00:00:00.000Z" });
     assert.equal(Number(expired.count) >= 0, true);
     const claimEvidence = service.evidenceRecord({ evidence_id: "claim-expiry-evidence", source_type: "test", claim: "claim", confidence: "bounded" });
-    const expiringClaim = service.knowledgeClaimSave({ claim_id: "expiring-claim", kind: "fact", content: "temporary claim", evidence_ids: [claimEvidence.id], valid_until: "2020-01-01T00:00:00.000Z" }).claim as JsonObject;
+  const expiringClaim = service.knowledgeClaimSave({ claim_id: "expiring-claim", kind: "fact", content: "temporary claim", scope: "global", evidence_ids: [claimEvidence.id], valid_until: "2020-01-01T00:00:00.000Z" }).claim as JsonObject;
     assert.throws(() => service.knowledgeClaimReview({ claim_id: expiringClaim.id, status: "reviewed", reviewer: "human", reason: "checked" }),
       /managed Host review and independent effectiveness evaluation/u);
     assert.equal((service.knowledgeExpirySweep({ now: "2035-01-01T00:00:00.000Z" }).expired as JsonObject[]).some((item) => item.id === expiringClaim.id), false,

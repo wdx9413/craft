@@ -63,14 +63,14 @@ test("orchestration delegates completed slots to the campaign grader without cla
 });
 
 test("execution and adapter CLIs are runnable and keep unavailable providers unmeasured", async () => {
-  const { execFileSync } = await import("node:child_process"); const { writeFileSync } = await import("node:fs"); const { join } = await import("node:path");
+  const { execFileSync } = await import("node:child_process"); const { writeFileSync } = await import("node:fs"); const { join } = await import("node:path"); const { fileURLToPath } = await import("node:url");
   const f = await fixture();
   try {
-    const script = new URL("../scripts/eval/run-component-ablation.ts", import.meta.url).pathname;
+    const script = fileURLToPath(new URL("../scripts/eval/run-component-ablation.ts", import.meta.url));
     assert.throws(() => execFileSync(process.execPath, [script], { stdio: "pipe" }));
     const path = join(f.root, "ablation.json"); writeFileSync(path, JSON.stringify({ ...manifest, host_adapter: { argv: [process.execPath, "-e", 'console.log(JSON.stringify({ready:false}))'] } }));
     assert.equal(JSON.parse(execFileSync(process.execPath, [script, join(f.root, "cli-data"), path], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).status, "blocked");
-    const probes = new URL("../scripts/codebase/adapter-preflight.ts", import.meta.url).pathname;
+    const probes = fileURLToPath(new URL("../scripts/codebase/adapter-preflight.ts", import.meta.url));
     assert.equal(JSON.parse(execFileSync(process.execPath, [probes], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })).production_verified, false);
   } finally { await f.close(); }
 });

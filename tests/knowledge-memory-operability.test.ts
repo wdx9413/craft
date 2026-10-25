@@ -203,6 +203,7 @@ test("scenario metadata can be added to a reviewed source-ingested Claim without
       audience: { mode: "scoped", principal_ids: [] }, purpose: "fact", retention: "long_term", tenant_id: null };
     f.service.knowledgeSourceRegister({ source_id: "ingested-notes", kind: "project_note", label: "Ingested notes", trust: "verified",
       scope_kind: "project", scope_id: "project:canonical", locator: "notes.md", content_digest: `sha256:${"d".repeat(64)}`, scope_envelope: scopeEnvelope });
+    f.store.create("knowledge_document", "document-1", { scope, source_id: "ingested-notes", status: "current", content_digest: `sha256:${"e".repeat(64)}` });
     const evidence = f.service.evidenceRecord({ claim: "Retained ingest evidence", source_type: "observation", confidence: "confirmed" });
     const content = "Use pnpm for project scripts.";
     const identity = { source_id: "ingested-notes", source_revision_id: "revision-1", document_id: "document-1", document_digest: `sha256:${"e".repeat(64)}`,
@@ -215,7 +216,7 @@ test("scenario metadata can be added to a reviewed source-ingested Claim without
     t.mock.method(f.store.contentStore, "readCompatSync", function (ref: Parameters<typeof f.store.contentStore.readCompatSync>[0], expectedScope?: string) {
       bodyReads += 1; return readContent(ref, expectedScope);
     });
-    f.store.create("knowledge_claim", "ingested-reviewed", { ...identity, identity_digest: stableDigest(identity), status: "candidate", review: null,
+    f.store.create("knowledge_claim", "ingested-reviewed", { ...identity, scope, identity_digest: stableDigest(identity), status: "candidate", review: null,
       content_ref: contentRef, ingest_generated: true, publication_allowed: false });
     attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", "ingested-reviewed"));
     const classified = f.service.knowledgeClaimSave({ claim_id: "ingested-reviewed", kind: "fact", content, scope, scope_envelope: scopeEnvelope,
@@ -296,6 +297,7 @@ test("model classified project Knowledge advances with trusted Source reviews an
     const listed = await knowledgeMcp.handle({ jsonrpc: "2.0", id: "tools", method: "tools/list" });
     const tools = ((listed?.result as JsonObject).tools as JsonObject[]);
     const saveSchema = tools.find(item => item.name === "craft_knowledge_claim_save")!.inputSchema as JsonObject;
+    assert(((saveSchema.required as string[] | undefined) ?? []).includes("scope"), "Knowledge writes must declare scope explicitly");
     assert.equal(((saveSchema.properties as JsonObject).scenario_key as JsonObject).type, "string");
     assert.equal(((saveSchema.properties as JsonObject).coarse_scenario_key as JsonObject).type, "string");
     const searchSchema = tools.find(item => item.name === "craft_knowledge_search")!.inputSchema as JsonObject;
