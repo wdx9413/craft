@@ -138,6 +138,22 @@ test("Knowledge refuses to infer global storage when neither the record nor its 
   } finally { cleanup(f); }
 });
 
+test("existing Knowledge can be withdrawn after its source is removed", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("knowledge_source", "withdrawal-source", { scope: "project:demo", status: "active" });
+    f.store.create("knowledge_claim", "withdrawal-claim", {
+      scope: "project:demo", source_id: "withdrawal-source", status: "active", content: "retire after source removal",
+    });
+    f.store.remove("knowledge_source", "withdrawal-source");
+    const withdrawn = f.store.save("knowledge_claim", "withdrawal-claim", {
+      scope: "project:demo", source_id: "withdrawal-source", status: "withdrawn", content: "retire after source removal",
+    });
+    assert.equal(withdrawn.status, "withdrawn");
+    assert.equal(f.store.get("knowledge_claim", "withdrawal-claim").version, 2);
+  } finally { cleanup(f); }
+});
+
 test("Knowledge migration is bounded, repeatable and leaves unavailable projects explicit", async () => {
   const f = await fixture();
   try {

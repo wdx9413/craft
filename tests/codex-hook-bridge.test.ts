@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { activeProcedure } from "../capability/craft-experience/procedure-release.ts";
 import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -57,6 +58,179 @@ test("session-only Hook events join one generated turn and stop cannot finalize 
     assert.equal((f.store.list("codex_hook_turn", 10)[0]!.signals as JsonObject[]).length, 2);
     assert.deepEqual(f.store.get("context_hook_session", String(session.id)).pending_turn_ids, []);
   } finally { await dispose(f); }
+});
+
+test("Hook-mode PostToolUse persists its journal signal without a per-event SQLite Trace", async () => {
+  const f = await fixture();
+  const prior = process.env.CRAFT_HOOK_MODE;
+  try {
+    process.env.CRAFT_HOOK_MODE = "1";
+    const bridge = new CodexHookBridge(f.service), input = { cwd: f.root, session_id: "runtime-ledger", turn_id: "runtime-ledger-turn" };
+    await bridge.handle("context", { ...input, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "runtime-ledger-edit" });
+    assert.equal(f.store.list("trace_event", 100, event => event.operation_id === "handle.context.PostToolUse").length, 0);
+    assert.equal(f.store.list("codex_hook_signal", 10, item => item.session_id === input.session_id && item.turn_id === input.turn_id).length, 1);
+    const journal = bridge.journal.find({ ...input, hook_event_name: "PostToolUse" })!;
+    assert.equal((journal.signals as JsonObject[]).length, 1);
+    assert.equal((journal.signals as JsonObject[])[0]!.kind, "edit");
+  } finally {
+    if (prior === undefined) delete process.env.CRAFT_HOOK_MODE;
+    else process.env.CRAFT_HOOK_MODE = prior;
+    await dispose(f);
+  }
+});
+
+test("Hook signal rows merge with a legacy journal, deduplicate retries and retain scenario ordering", async () => {
+  const f = await fixture();
+  const prior = process.env.CRAFT_HOOK_MODE;
+  try {
+    const bridge = new CodexHookBridge(f.service), input = { cwd: f.root, session_id: "mixed-hook-journal", turn_id: "mixed-turn" };
+    const edit = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "mixed-edit" });
+    assert(edit);
+    bridge.journal.record(input, edit);
+    process.env.CRAFT_HOOK_MODE = "1";
+    const rawVerification = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "mixed-verify",
+      tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    assert(rawVerification);
+    const verification = { ...rawVerification, scenario_key: "coding.test", coarse_scenario_key: "coding" } as never;
+    bridge.journal.record(input, verification);
+    bridge.journal.record(input, verification);
+    const journal = bridge.journal.find(input, true)!;
+    assert.equal((journal.signals as JsonObject[]).length, 2);
+    assert.equal((journal.verification_receipts as JsonObject[]).length, 1);
+    assert.equal(journal.verification_outcome, "passed");
+    assert.equal(journal.scenario_key, "coding.test");
+    assert.equal(journal.coarse_scenario_key, "coding");
+  } finally {
+    if (prior === undefined) delete process.env.CRAFT_HOOK_MODE;
+    else process.env.CRAFT_HOOK_MODE = prior;
+    await dispose(f);
+  }
+});
+
+test("Hook signal journal safely handles a sessionless verification without a preceding journal", async () => {
+  const f = await fixture();
+  const prior = process.env.CRAFT_HOOK_MODE;
+  try {
+    process.env.CRAFT_HOOK_MODE = "1";
+    const bridge = new CodexHookBridge(f.service);
+    const input = { cwd: f.root, turn_id: "sessionless-verify" };
+    const raw = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "sessionless-check",
+      tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    assert(raw);
+    bridge.journal.record(input, { ...raw, scenario_key: "coding.test" } as never);
+    const journal = bridge.journal.find(input, true)!;
+    assert.equal(journal.session_id, "unknown");
+    assert.equal(journal.has_edit, false);
+    assert.equal(journal.verification_outcome, "passed");
+    assert.equal(journal.scenario_key, null);
+    assert.equal((journal.verification_receipts as JsonObject[])[0]!.edit_revision, null);
+    const unknownInput = { cwd: f.root, turn_id: "sessionless-unknown" };
+    const unknownSignal = bridge.signals.signal({ ...unknownInput, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "sessionless-unknown-check",
+      tool_input: { command: "npm test" }, tool_response: {} });
+    assert(unknownSignal);
+    const explicitUnknown = { ...unknownSignal, kind: "verification", verifier: "npm test", outcome: "unknown" } as never;
+    bridge.journal.record(unknownInput, explicitUnknown);
+    const unknownJournal = bridge.journal.find(unknownInput, true)!;
+    assert.equal((unknownJournal.signals as JsonObject[])[0]!.kind, "verification");
+    assert.equal((unknownJournal.signals as JsonObject[])[0]!.outcome, "unknown");
+    assert.equal((unknownJournal.verification_receipts as JsonObject[]).length, 1);
+    assert.equal(unknownJournal.verification_outcome, null);
+    const failedInput = { cwd: f.root, turn_id: "sessionless-failed" };
+    const failedSignal = bridge.signals.signal({ ...failedInput, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "sessionless-failed-check",
+      tool_input: { command: "npm test" }, tool_response: { exit_code: 1 } });
+    assert(failedSignal);
+    bridge.journal.record(failedInput, { ...failedSignal, kind: "verification", verifier: "npm test", outcome: "failed" } as never);
+    assert.equal(bridge.journal.find(failedInput, true)?.verification_outcome, "failed");
+  } finally {
+    if (prior === undefined) delete process.env.CRAFT_HOOK_MODE;
+    else process.env.CRAFT_HOOK_MODE = prior;
+    await dispose(f);
+  }
+});
+
+test("Hook signal journal rejects late signals after its canonical turn has closed", async () => {
+  const f = await fixture();
+  const prior = process.env.CRAFT_HOOK_MODE;
+  try {
+    process.env.CRAFT_HOOK_MODE = "1";
+    const bridge = new CodexHookBridge(f.service), input = { cwd: f.root, session_id: "closed-signal", turn_id: "closed-signal-turn" };
+    const raw = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "closed-signal-edit" });
+    assert(raw);
+    bridge.journal.record(input, raw);
+    bridge.journal.close(input);
+    const late = { ...raw, id: "closed-signal-late" };
+    const result = bridge.journal.record(input, late);
+    assert.equal(result?.closed_at !== undefined, true);
+    assert.equal(bridge.journal.find(input, true)?.signals && (bridge.journal.find(input, true)!.signals as JsonObject[]).length, 1);
+  } finally {
+    if (prior === undefined) delete process.env.CRAFT_HOOK_MODE;
+    else process.env.CRAFT_HOOK_MODE = prior;
+    await dispose(f);
+  }
+});
+
+test("PostToolUse journals a verified edit without waiting for the global SQLite writer", async () => {
+  const f = await fixture();
+  const writer = new DatabaseSync(f.store.paths.databaseFile);
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "read-only-correlation" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "edit and verify" });
+    writer.exec("PRAGMA busy_timeout=0; BEGIN IMMEDIATE;");
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_input: { file_path: join(f.root, "file.ts") } });
+    const events = f.store.list("trace_event", 100).filter(event => event.operation_id === "handle.context.PostToolUse");
+    assert(events.some(event => event.status === "completed"));
+    assert(!events.some(event => event.error_class === "STORAGE_BUSY"));
+    assert.equal(f.store.database.prepare("SELECT count(*) n FROM records WHERE kind='codex_hook_turn'").get()?.n, 0);
+    assert.equal((f.store.list("codex_hook_turn", 10)[0]!.signals as JsonObject[])[0]!.kind, "edit");
+  } finally {
+    try { writer.exec("ROLLBACK;"); } catch { /* rollback only when the writer transaction started */ }
+    writer.close();
+    await dispose(f);
+  }
+});
+
+test("a pre-existing current-format Hook journal keeps its legacy central write path", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), scope = codexProjectScope(f.root)!;
+    const session_id = "legacy-current-session", turn_id = "legacy-current-turn";
+    const id = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope, session_id, turn: turn_id })).digest("hex").slice(-20)}`;
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("codex_hook_turn", id, 1, JSON.stringify({ scope, session_id, turn_id, signals: [], has_edit: false,
+        verification_outcome: null, content_stored: false }), new Date().toISOString(), new Date().toISOString());
+    await bridge.handle("experience", { cwd: f.root, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    const journal = f.store.get("codex_hook_turn", id);
+    assert.equal((journal.signals as JsonObject[])[0]!.kind, "edit");
+    assert.equal(f.store.database.prepare("SELECT count(*) n FROM records WHERE kind='codex_hook_turn' AND id=?").get(id)?.n, 2);
+    assert.equal(f.store.traceShards.count("codex_hook_turn"), 0);
+  } finally { await dispose(f); }
+});
+
+test("an explicit scenario is persisted when the verified Hook journal has no scenario yet", async () => {
+  const f = await fixture();
+  const originalFinalize = f.service.learningCycleFinalize;
+  try {
+    const bridge = new CodexHookBridge(f.service), input = { cwd: f.root, session_id: "explicit-scenario-session", turn_id: "explicit-scenario-turn" };
+    const edit = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    const verification = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Bash",
+      tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+    assert(edit); assert(verification);
+    bridge.journal.record(input, edit);
+    bridge.journal.record(input, verification);
+    bridge.journal.bindContextReceipt(input, { id: "scenario-context-receipt" });
+    const legacyJournal = bridge.journal.find(input)!;
+    const { trace_id: _traceId, ...legacyPayload } = legacyJournal;
+    const timestamp = new Date().toISOString();
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("codex_hook_turn", String(legacyJournal.id), 1, JSON.stringify(legacyPayload), timestamp, timestamp);
+    f.service.learningCycleFinalize = (() => ({ status: "observed" })) as typeof f.service.learningCycleFinalize;
+    const result = bridge.learning.finalize({ ...input, scenario_key: "coding.explicit-verification" });
+    assert.equal(result?.status, "observed");
+    assert.equal(bridge.journal.find(input)?.scenario_key, "coding.explicit-verification");
+  } finally {
+    f.service.learningCycleFinalize = originalFinalize;
+    await dispose(f);
+  }
 });
 
 test("Hook traces identify the bounded lifecycle event without recording prompt text", async () => {
@@ -186,7 +360,8 @@ test("Hook Memory output projects promotion summaries and legacy journals defaul
 
     const turn = "legacy-unknown-session", scope = codexProjectScope(f.root)!;
     const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope, turn })).digest("hex").slice(-20)}`;
-    f.store.create("codex_hook_turn", legacyId, { turn_id: turn });
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("codex_hook_turn", legacyId, 1, JSON.stringify({ turn_id: turn }), new Date().toISOString(), new Date().toISOString());
     assert.equal(bridge.journal.find({ cwd: f.root, turn_id: turn })?.id, legacyId);
   } finally {
     f.service.memoryCaptureObservedFact = originalCapture;
@@ -681,7 +856,8 @@ test("Hook scenario catalog rejects malformed, linked and oversized metadata bef
     assert.equal(bridge.journal.find(turn)?.context_receipt_id, "context-receipt");
     for (const [turn_id, session_id] of [["legacy-match", "legacy-session"], ["legacy-mismatch", "different-session"]] as const) {
       const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope: codexProjectScope(f.root), turn: turn_id })).digest("hex").slice(-20)}`;
-      f.store.create("codex_hook_turn", legacyId, { session_id, turn_id });
+      f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        .run("codex_hook_turn", legacyId, 1, JSON.stringify({ session_id, turn_id }), new Date().toISOString(), new Date().toISOString());
     }
     assert.equal(bridge.journal.find({ cwd: f.root, session_id: "legacy-session", turn_id: "legacy-match" })?.turn_id, "legacy-match");
     assert.equal(bridge.journal.find({ cwd: f.root, session_id: "other-session", turn_id: "legacy-mismatch" }), null);
@@ -898,7 +1074,7 @@ test("Stop Hook does not count an MCP-classified completion twice for the same H
       scenario_key: "engineering.feature-verification", scenario_definition: { summary: "实现并验证功能", applies_when: "项目功能代码发生变化并通过目标验证", excludes: "只读咨询或纯文档变更" } });
     assert.equal(classified.status, "observed");
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
-    await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
+    await bridge.handle("experience", { ...base, hook_event_name: "Stop", scenario_key: "engineering.feature-verification" });
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
     assert.equal(f.store.list("workflow_evolution_request", 10).length, 0);
     const observation = f.store.list("workflow_evolution_observation", 10)[0]!;
@@ -1435,7 +1611,9 @@ test("reused native turn IDs remain distinct across sessions and legacy journals
     const scope = codexProjectScope(f.root)!;
     const turn = "legacy-turn";
     const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope, turn })).digest("hex").slice(-20)}`;
-    f.store.create("codex_hook_turn", legacyId, { scope, turn_id: turn, session_id: "legacy-session", signals: [], content_stored: false });
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("codex_hook_turn", legacyId, 1, JSON.stringify({ scope, turn_id: turn, session_id: "legacy-session", signals: [], content_stored: false }),
+        new Date().toISOString(), new Date().toISOString());
     assert.equal(bridge.journal.find({ ...base, turn_id: turn, session_id: "legacy-session" })?.id, legacyId);
     assert.equal(bridge.journal.find({ ...base, turn_id: turn, session_id: "foreign-session" }), null);
     await bridge.handle("experience", { ...base, turn_id: turn, session_id: "legacy-session", hook_event_name: "Stop" });

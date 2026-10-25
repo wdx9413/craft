@@ -6,8 +6,17 @@ export type HookRuntimeEvent = "SessionStart" | "UserPromptSubmit" | "PostToolUs
 export type HookRuntimeMember = "context" | "knowledge" | "memory" | "experience";
 
 export interface HookRuntimeTiming {
+  readonly process_elapsed_ms?: number;
+  readonly input_read_ms?: number;
+  readonly input_parse_ms?: number;
   readonly store_open_ms?: number;
+  readonly runtime_import_ms?: number;
+  readonly service_open_ms?: number;
   readonly handler_ms?: number;
+  readonly output_write_ms?: number;
+  readonly store_close_ms?: number;
+  readonly outcome?: "completed" | "failed" | "skipped";
+  readonly error_code?: string;
   readonly error_type?: string;
 }
 
@@ -69,8 +78,17 @@ export function beginHookRuntimeDiagnostic(args: {
     finished = true;
     const duration = now() - started;
     appendLine(path, { ...base, phase: "finished", finished_at: wallClock(), duration_ms: Math.max(0, Math.round(duration)),
+      ...(timing.process_elapsed_ms === undefined ? {} : { process_elapsed_ms: Math.max(0, Math.round(timing.process_elapsed_ms)) }),
+      ...(timing.input_read_ms === undefined ? {} : { input_read_ms: Math.max(0, Math.round(timing.input_read_ms)) }),
+      ...(timing.input_parse_ms === undefined ? {} : { input_parse_ms: Math.max(0, Math.round(timing.input_parse_ms)) }),
       ...(timing.store_open_ms === undefined ? {} : { store_open_ms: Math.max(0, Math.round(timing.store_open_ms)) }),
+      ...(timing.runtime_import_ms === undefined ? {} : { runtime_import_ms: Math.max(0, Math.round(timing.runtime_import_ms)) }),
+      ...(timing.service_open_ms === undefined ? {} : { service_open_ms: Math.max(0, Math.round(timing.service_open_ms)) }),
       ...(timing.handler_ms === undefined ? {} : { handler_ms: Math.max(0, Math.round(timing.handler_ms)) }),
+      ...(timing.output_write_ms === undefined ? {} : { output_write_ms: Math.max(0, Math.round(timing.output_write_ms)) }),
+      ...(timing.store_close_ms === undefined ? {} : { store_close_ms: Math.max(0, Math.round(timing.store_close_ms)) }),
+      ...(timing.outcome ? { outcome: timing.outcome } : {}),
+      ...(timing.error_code ? { error_code: timing.error_code.slice(0, 80) } : {}),
       ...(timing.error_type ? { error_type: timing.error_type.slice(0, 80) } : {}) });
   } };
 }

@@ -73,6 +73,7 @@ export function codebaseStoragePreflight(paths: CraftPaths, args: { max_records?
       const root = existing[0]!;
       const target = join(projectStorageDirectory(paths, root), "codebase", "snapshots", workspaceId, row.id);
       const candidates = [target, join(root, ".craft_data", "codebase", "snapshots", workspaceId, row.id),
+        join(root, ".craft_data", "codebase", "runtime", "workspaces", workspaceId, "snapshots", row.id),
         join(paths.runtimeDir, "workspaces", workspaceId, "snapshots", row.id)];
       let position: number;
       try { position = candidates.findIndex(path => canonicalCandidatePath(path) === canonicalCandidatePath(source)); }

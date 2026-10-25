@@ -62,17 +62,7 @@ function snapshotTree(root: string): { directories: string[]; files: Set<string>
 }
 
 async function verifiedPeer(database: DatabaseSync, paths: CraftPaths, projectRoot: string,
-  workspaceId: string, checkpointId: string, file: SnapshotFile): Promise<{ path: string; checkpoint_id: string } | null> {
-  const workspaceRows = database.prepare("SELECT payload_json FROM records WHERE kind='workspace' AND id=?")
-    .all(workspaceId) as Array<{ payload_json: string }>;
-  const revisions = new Set<number>();
-  for (const row of workspaceRows) {
-    try {
-      const item = JSON.parse(row.payload_json) as Record<string, unknown>;
-      if (typeof item.root_path === "string" && realpathSync(item.root_path) === projectRoot
-        && Number.isSafeInteger(item.state_revision)) revisions.add(Number(item.state_revision));
-    } catch { /* unavailable historical roots cannot support recovery */ }
-  }
+  checkpointId: string, file: SnapshotFile): Promise<{ path: string; checkpoint_id: string } | null> {
   const rows = database.prepare("SELECT id,payload_json FROM records WHERE kind='workspace_checkpoint' AND id<>? ORDER BY id")
     .all(checkpointId) as Array<{ id: string; payload_json: string }>;
   for (const row of rows) {
@@ -80,16 +70,29 @@ async function verifiedPeer(database: DatabaseSync, paths: CraftPaths, projectRo
     let payload: Record<string, unknown>;
     try { payload = JSON.parse(row.payload_json) as Record<string, unknown>; }
     catch { continue; }
-    if (payload.workspace_id !== workspaceId || !revisions.has(Number(payload.state_revision)) || !Array.isArray(payload.entries)
+    const peerWorkspaceId = typeof payload.workspace_id === "string" ? payload.workspace_id : "";
+    if (!/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u.test(peerWorkspaceId) || !Number.isSafeInteger(payload.state_revision)
+      || !Array.isArray(payload.entries)
       || !payload.entries.some(value => {
         if (!value || typeof value !== "object") return false;
         const item = value as Partial<SnapshotFile>;
         return item.path === file.path && item.digest === file.digest && item.size_bytes === file.size_bytes;
       })) continue;
+    const workspaceRows = database.prepare("SELECT payload_json FROM records WHERE kind='workspace' AND id=?")
+      .all(peerWorkspaceId) as Array<{ payload_json: string }>;
+    const workspaceOwnsProject = workspaceRows.some(value => {
+      try {
+        const item = JSON.parse(value.payload_json) as Record<string, unknown>;
+        return item.state_revision === payload.state_revision && typeof item.root_path === "string"
+          && realpathSync(item.root_path) === projectRoot;
+      } catch { return false; }
+    });
+    if (!workspaceOwnsProject) continue;
     if (typeof payload.snapshot_root !== "string") continue;
-    const expected = [join(projectStorageDirectory(paths, projectRoot), "codebase", "snapshots", workspaceId, row.id),
-      join(projectRoot, ".craft_data", "codebase", "snapshots", workspaceId, row.id),
-      join(paths.runtimeDir, "workspaces", workspaceId, "snapshots", row.id)];
+    const expected = [join(projectStorageDirectory(paths, projectRoot), "codebase", "snapshots", peerWorkspaceId, row.id),
+      join(projectRoot, ".craft_data", "codebase", "snapshots", peerWorkspaceId, row.id),
+      join(projectRoot, ".craft_data", "codebase", "runtime", "workspaces", peerWorkspaceId, "snapshots", row.id),
+      join(paths.runtimeDir, "workspaces", peerWorkspaceId, "snapshots", row.id)];
     try {
       if (!expected.some(path => canonicalCandidatePath(path) === canonicalCandidatePath(payload.snapshot_root as string))) continue;
       const path = checkedFile(payload.snapshot_root, file.path);
@@ -247,6 +250,7 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
         throw new Error("project_mapping_changed");
       }
       const allowedSources = [join(root, ".craft_data", "codebase", "snapshots", entry.workspace_id, entry.id),
+        join(root, ".craft_data", "codebase", "runtime", "workspaces", entry.workspace_id, "snapshots", entry.id),
         join(store.paths.runtimeDir, "workspaces", entry.workspace_id, "snapshots", entry.id)];
       if (!allowedSources.some(source => canonicalCandidatePath(source) === canonicalCandidatePath(entry.source_root))) {
         throw new Error("source_snapshot_out_of_scope");
@@ -272,7 +276,7 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
         const sourceSizeMatches = lstatSync(sourceFile).size === file.size_bytes;
         if (!sourceSizeMatches && !options.recover_verified_peer) throw new Error("source_size_changed");
         if (options.recover_verified_peer && (!sourceSizeMatches || await fileDigest(sourceFile) !== file.digest)) {
-          const peer = await verifiedPeer(store.database, store.paths, root, entry.workspace_id, entry.id, file);
+          const peer = await verifiedPeer(store.database, store.paths, root, entry.id, file);
           const git = peer ? null : await verifiedGitHistory(root, file, backupDirectory);
           if (!peer && !git) throw new Error("verified_source_unavailable");
           copySource = (peer ?? git)!.path;

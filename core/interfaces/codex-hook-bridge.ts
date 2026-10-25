@@ -10,8 +10,8 @@ import { contextAssetMatches, contextAssetRef } from "../../common/craft-common-
  * scoped Context, bounded Memory capture, and content-free Experience signals.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { lstatSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { projectIdentityFromRoot } from "../scope-identity.ts";
 import type { CraftService } from "../application/craft-service.ts";
 import type { JsonObject } from "../infrastructure/store.ts";
@@ -22,10 +22,13 @@ import { projectExperienceDirectory } from "../project-experience-directory.ts";
 import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGoal } from "../experience-task-goals.ts";
 import { sanitizeCodexTaskGoal } from "../codex-task-prose.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
+import { HookSignalSanitizer, nestedText, type HookSignal } from "./codex-hook-signal-sanitizer.ts";
+export { HookSignalSanitizer } from "./codex-hook-signal-sanitizer.ts";
 
 type ComponentHookMember = "knowledge" | "memory" | "experience";
 export type CodexHookMember = "context" | ComponentHookMember;
 const HOOK_ADDITIONAL_CONTEXT_BUDGET: Record<CodexHookMember, number> = { context: 400, knowledge: 150, memory: 150, experience: 150 };
+const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
 interface HookCandidate { member: string; item: JsonObject; output: JsonObject }
 interface HookEmissionCandidate { candidate: HookCandidate; ref: JsonObject | null }
 
@@ -75,27 +78,12 @@ type HookInput = JsonObject & {
   stop_hook_active?: boolean;
 };
 
-const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
-const VERIFY = /^(?:(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?test(?::[\w-]+)?|pytest|(?:python3?\s+-m\s+pytest)|(?:mvn|gradle|gradlew|\.\/gradlew)\s+(?:test|verify)|go\s+test|cargo\s+test|node\s+--test)(?:\s|$)/u;
-const EDIT = /(?:^|[;&|\s])(?:apply_patch|git\s+apply|sed\s+-i|perl\s+-pi)\b/iu;
-
 function digest(value: unknown): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function nestedText(value: unknown, names: readonly string[]): string | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const object = value as JsonObject;
-  for (const name of names) {
-    const raw = object[name];
-    const found = text(typeof raw === "number" ? String(raw) : raw);
-    if (found) return found;
-  }
-  return null;
 }
 
 function hookHost(input: HookInput): "codex" | "claude" {
@@ -142,19 +130,7 @@ function experienceTaskGoalArgs(service: CraftService, input: HookInput) {
   return { experience_dir: projectExperienceDirectory(service.store, scope.id, root, true), scope: scope.id, session_id: sessionId, turn_id: turnId };
 }
 
-type Signal = { readonly id: string; readonly tool: string; readonly kind: "edit" | "verification" | "other"; readonly outcome: "passed" | "failed" | "unknown"; readonly digest: string; readonly verifier: string | null; readonly scenario_key?: string; readonly coarse_scenario_key?: string; readonly observed_path?: string };
-
-const SENSITIVE_PATH = /(?:secret|token|credential|password|private|\.env)/iu;
-function observedProjectPath(value: unknown, projectRoot: unknown): string | null {
-  if (typeof value !== "string" || typeof projectRoot !== "string" || !value.trim() || value.length > 512 || value.includes("\\") || value.includes("\0")) return null;
-  try {
-    const root = realpathSync(projectRoot), absolute = resolve(root, value.trim()), target = realpathSync(absolute);
-    const path = relative(root, target), parts = path.split(sep);
-    if (!path || path.startsWith(`..${sep}`) || path === ".." || resolve(target) !== absolute || parts.some(part => !part || part.startsWith(".") || SENSITIVE_PATH.test(part))
-      || path.length > 256 || lstatSync(absolute).isSymbolicLink() || !lstatSync(target).isFile()) return null;
-    return path.split(sep).join("/");
-  } catch { return null; }
-}
+type Signal = HookSignal;
 
 type ProjectScenario = { scenario_key: string; coarse_scenario_key?: string };
 
@@ -213,23 +189,6 @@ function projectScenarioKey(input: HookInput, signal: Signal, service: CraftServ
   }
 }
 
-export class HookSignalSanitizer {
-  signal(input: HookInput): Signal | null {
-    const tool = text(input.tool_name) ?? text(input.toolName) ?? nestedText(input.tool, ["name"]) ?? "unknown";
-    const toolInput = (input.tool_input ?? input.toolInput ?? input.input) as unknown;
-    const command = nestedText(toolInput, ["command", "cmd", "script"]);
-    const rawOutcome = nestedText(input.tool_response ?? input.toolResponse ?? input.output, ["exit_code", "exitCode", "status"]);
-    const outcome = rawOutcome === "0" || rawOutcome === "success" || rawOutcome === "passed" ? "passed"
-      : rawOutcome && (/^[1-9]\d*$/u.test(rawOutcome) || rawOutcome === "failed" || rawOutcome === "error") ? "failed" : "unknown";
-    const kind = /^(?:apply_patch|Edit|Write)$/iu.test(tool) || Boolean(command && EDIT.test(command)) ? "edit"
-      : Boolean(command && VERIFY.test(command.trim()) && !/[;&|`$\n]/u.test(command)) ? "verification" : "other";
-    if (kind === "other") return null;
-    const path = kind === "edit" ? observedProjectPath(nestedText(toolInput, ["file_path", "filePath", "path", "filename"]), input.cwd) : null;
-    const stable = { tool, kind, outcome, command_digest: command ? digest(command) : null, path, tool_use_id: text(input.tool_use_id) ?? text(input.toolUseId) ?? randomUUID() };
-    return { id: `codex_hook_signal_${digest(stable).slice(-20)}`, tool, kind, outcome, digest: digest(stable), verifier: command ? digest(command) : null, ...(path ? { observed_path: path } : {}) };
-  }
-}
-
 /** Append-only, content-free session facts shared by PostToolUse and Stop. */
 export class HookTurnJournal {
   readonly service: CraftService;
@@ -238,9 +197,23 @@ export class HookTurnJournal {
   record(input: HookInput, signal: Signal): JsonObject | null {
     const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
     if (!scope || !turn) return null;
-    return this.service.store.transaction(() => {
+    const journalId = this.journalId(scope, turn, input);
+    const legacyRow = this.service.store.database.prepare("SELECT 1 FROM records WHERE kind='codex_hook_turn' AND id=? LIMIT 1")
+      .get(journalId) !== undefined;
+    if (process.env.CRAFT_HOOK_MODE === "1" && !legacyRow) {
+      const prior = this.find(input, false);
+      if (prior?.closed_at) return prior;
+      const signalId = signal.id;
+      return this.service.store.traceTransaction(signalId, () => {
+        const existing = this.service.store.traceShards.find("codex_hook_signal", signalId, undefined, signalId);
+        return existing ?? this.service.store.create("codex_hook_signal", signalId, { scope, session_id: text(input.session_id) ?? "unknown",
+          turn_id: turn, trace_id: signalId, signal: signal as unknown as JsonObject,
+          observed_at_ms: performance.timeOrigin + performance.now(), content_stored: false });
+      });
+    }
+    const write = () => {
       const existing = this.find(input);
-      const journalId = existing ? String(existing.id) : this.journalId(scope, turn, input);
+      const currentId = existing ? String(existing.id) : journalId;
       if (existing?.closed_at) return null;
       const priorSignals = Array.isArray(existing?.signals) ? existing.signals as JsonObject[] : [];
       if (priorSignals.some((item) => item.id === signal.id)) return existing!;
@@ -254,7 +227,7 @@ export class HookTurnJournal {
         && new Set(verifications.map(item => String(item.scenario_key))).size === 1 ? String(verifications[0]!.scenario_key) : null;
       const coarseScenarioKey = scenarioKey && verifications.every(item => (item.coarse_scenario_key ?? null) === (verifications[0]!.coarse_scenario_key ?? null))
         ? text(verifications[0]!.coarse_scenario_key) : null;
-      const next = { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals,
+      const next = { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, trace_id: currentId, signals,
         has_edit: signals.some((item) => item.kind === "edit"),
         verification_outcome: !outcomes.length || outcomes.includes("unknown") ? null : outcomes.includes("failed") ? "failed" : "passed",
         edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest,
@@ -262,27 +235,62 @@ export class HookTurnJournal {
         scenario_key: lastEdit >= 0 ? scenarioKey : null,
         coarse_scenario_key: lastEdit >= 0 ? coarseScenarioKey : null,
         content_stored: false, updated_at: new Date().toISOString() } satisfies JsonObject;
-      return existing ? this.service.store.save("codex_hook_turn", journalId, { ...payload(existing), ...next })
-        : this.service.store.create("codex_hook_turn", journalId, next);
-    });
+      return existing ? this.service.store.save("codex_hook_turn", currentId, { ...payload(existing), ...next })
+        : this.service.store.create("codex_hook_turn", currentId, next);
+    };
+    return legacyRow ? this.service.store.transaction(write) : this.service.store.traceTransaction(journalId, write);
   }
 
   bindContextReceipt(input: HookInput, receipt: JsonObject): void {
     const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
     if (!scope || !turn) return;
-    const existing = this.find(input);
+    const existing = this.find(input, false);
     const id = existing ? String(existing.id) : this.journalId(scope, turn, input);
-    const prior = existing ?? this.service.store.find("codex_hook_turn", id);
-    this.service.store.save("codex_hook_turn", id, { ...(prior ?? { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals: [], has_edit: false, verification_outcome: null, content_stored: false }), context_receipt_id: receipt.id, content_free: true });
+    const prior = existing ?? this.findById(id);
+    this.service.store.save("codex_hook_turn", id, { ...(prior ?? { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals: [], has_edit: false, verification_outcome: null, content_stored: false }), trace_id: String(prior?.trace_id ?? id), context_receipt_id: receipt.id, content_free: true });
   }
 
-  find(input: HookInput): JsonObject | null {
+  find(input: HookInput, includePendingSignals = process.env.CRAFT_HOOK_MODE === "1"): JsonObject | null {
     const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
     if (!scope || !turn) return null;
-    const current = this.service.store.find("codex_hook_turn", this.journalId(scope, turn, input));
-    if (current) return current;
-    const legacy = this.service.store.find("codex_hook_turn", `codex_hook_turn_${digest({ scope, turn }).slice(-20)}`);
-    return legacy && (legacy.session_id ?? "unknown") === (text(input.session_id) ?? "unknown") ? legacy : null;
+    const journalId = this.journalId(scope, turn, input);
+    const current = this.findById(journalId);
+    const legacy = current ? null : this.findById(`codex_hook_turn_${digest({ scope, turn }).slice(-20)}`);
+    const journal = current ?? (legacy && (legacy.session_id ?? "unknown") === (text(input.session_id) ?? "unknown") ? legacy : null);
+    const pending = includePendingSignals ? this.service.store.traceShards.hookSignalsForTurn(
+      scope.kind, scope.id, text(input.session_id) ?? "unknown", turn, 10_000) : [];
+    if (journal && pending.length === 0) return { ...payload(journal), id: String(journal.id),
+      signals: Array.isArray(journal.signals) ? journal.signals as JsonObject[] : [] };
+    const merged = new Map<string, JsonObject>();
+    for (const item of Array.isArray(journal?.signals) ? journal.signals as JsonObject[] : []) if (typeof item.id === "string") merged.set(item.id, item);
+    for (const record of pending) if (record.signal && typeof record.signal === "object" && !Array.isArray(record.signal)) {
+      const signal = record.signal as JsonObject;
+      if (typeof signal.id === "string") merged.set(signal.id, signal);
+    }
+    if (!journal && !merged.size) return null;
+    const signals = [...merged.values()];
+    const lastEdit = signals.findLastIndex(item => item.kind === "edit");
+    const checks = new Map<string, string>();
+    for (const item of signals.slice(lastEdit + 1)) if (item.kind === "verification") checks.set(String(item.verifier), String(item.outcome));
+    const outcomes = [...checks.values()];
+    const verifications = signals.slice(lastEdit + 1).filter(item => item.kind === "verification");
+    const scenarioKey = verifications.length > 0 && verifications.every(item => item.outcome !== "unknown" && typeof item.scenario_key === "string")
+      && new Set(verifications.map(item => String(item.scenario_key))).size === 1 ? String(verifications[0]!.scenario_key) : null;
+    const coarseScenarioKey = scenarioKey && verifications.every(item => (item.coarse_scenario_key ?? null) === (verifications[0]!.coarse_scenario_key ?? null))
+      ? text(verifications[0]!.coarse_scenario_key) : null;
+    return { ...(journal ? payload(journal) : { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, trace_id: journalId }),
+      id: String(journal?.id ?? journalId), signals, has_edit: signals.some(item => item.kind === "edit"),
+      verification_outcome: !outcomes.length || outcomes.includes("unknown") ? null : outcomes.includes("failed") ? "failed" : "passed",
+      edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest,
+      verification_receipts: [...checks].map(([verifier, outcome]) => ({ verifier, outcome, edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest })),
+      scenario_key: lastEdit >= 0 ? scenarioKey : null, coarse_scenario_key: lastEdit >= 0 ? coarseScenarioKey : null };
+  }
+
+  private findById(id: string): JsonObject | null {
+    const legacy = this.service.store.database.prepare("SELECT 1 FROM records WHERE kind='codex_hook_turn' AND id=? LIMIT 1")
+      .get(id) !== undefined;
+    return legacy ? this.service.store.find("codex_hook_turn", id)
+      : this.service.store.traceShards.find("codex_hook_turn", id, undefined, id);
   }
 
   close(input: HookInput): void {
@@ -292,7 +300,7 @@ export class HookTurnJournal {
     const journalId = existing ? String(existing.id) : this.journalId(scope, turn, input);
     if (existing?.closed_at) return;
     const next = { ...(existing ? payload(existing) : { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn,
-      signals: [], has_edit: false, verification_outcome: null, content_stored: false }), closed_at: new Date().toISOString() };
+      signals: [], has_edit: false, verification_outcome: null, content_stored: false }), trace_id: String(existing?.trace_id ?? journalId), closed_at: new Date().toISOString() };
     if (existing) this.service.store.save("codex_hook_turn", journalId, next);
     else this.service.store.create("codex_hook_turn", journalId, next);
   }
@@ -350,16 +358,16 @@ export class HookLearningCoordinator {
     if (suppliedScenario && !/^[a-z0-9][a-z0-9._/-]{0,95}$/u.test(suppliedScenario)) throw new Error("scenario_key must be a bounded stable identifier");
     if (suppliedScenario && journal.scenario_key && journal.scenario_key !== suppliedScenario) throw new Error("scenario_key conflicts with the turn's recorded scenario");
     if (suppliedScenario && !journal.scenario_key) {
-      const signals = Array.isArray(journal.signals) ? journal.signals as JsonObject[] : [];
+      const signals = journal.signals as JsonObject[];
       const lastEdit = signals.findLastIndex(item => item.kind === "edit");
       const alignedSignals = signals.map((signal, index) => index > lastEdit && signal.kind === "verification"
         ? { ...signal, scenario_key: suppliedScenario } : signal);
-      this.service.store.save("codex_hook_turn", String(journal.id), { ...payload(journal), scenario_key: suppliedScenario, signals: alignedSignals });
+      this.service.store.save("codex_hook_turn", String(journal.id), { ...payload(journal), trace_id: String(journal.trace_id ?? journal.id), scenario_key: suppliedScenario, signals: alignedSignals });
     }
     const scenario = suppliedScenario ?? text(journal.scenario_key);
     const taskGoalArgs = scenario ? null : experienceTaskGoalArgs(this.service, input);
     const taskGoal = taskGoalArgs ? readExperienceTaskGoal(taskGoalArgs) : null;
-    const signals = Array.isArray(journal.signals) ? journal.signals as JsonObject[] : [];
+    const signals = journal.signals as JsonObject[];
     const lastVerifier = [...signals].reverse().find(signal => signal.kind === "verification" && typeof signal.verifier === "string");
     const observedPaths = [...new Set(signals.filter(signal => signal.kind === "edit" && typeof signal.observed_path === "string")
       .map(signal => String(signal.observed_path)))].slice(0, 16);
@@ -387,6 +395,11 @@ export class CodexHookBridge {
   async handle(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
     const rawEvent = text(input.hook_event_name);
     const event = rawEvent && ["SessionStart", "SessionEnd", "UserPromptSubmit", "PostToolUse", "Stop"].includes(rawEvent) ? rawEvent : "unknown";
+    // PostToolUse fires for every tool. In the short-lived Host adapter the
+    // content-free hook-runtime ledger is the call receipt; avoid creating and
+    // finalizing a separate SQLite Trace for each signal. This removes four
+    // extra writer transactions from the highest-volume Hook event.
+    if (process.env.CRAFT_HOOK_MODE === "1" && event === "PostToolUse") return await this.dispatch(member, input);
     const captured = await new ComponentTraceKernel(this.service.trace, "hook").capture({ requestId: hookRequestId(), component: "craft-hook",
       operation: `handle.${member}.${event}`, input: { member, hook_event: event }, handler: () => this.dispatch(member, input) });
     if (!captured.ok) {
@@ -429,6 +442,15 @@ export class CodexHookBridge {
     const scope = codexProjectScope(input.cwd), sessionId = text(input.session_id);
     if (!scope || !sessionId) return input;
     const sessionKey = `context_hook_session_${stableDigest({ scope, session_id: sessionId }).slice(-24)}`;
+    // PostToolUse only reads the pending turn. Opening an IMMEDIATE transaction
+    // here made every edit/verification Hook compete for SQLite's single writer
+    // before HookTurnJournal.record opened its own write transaction.
+    if (event === "PostToolUse") {
+      const prior = this.service.store.find("context_hook_session", sessionKey);
+      const pending = Array.isArray(prior?.pending_turn_ids) ? prior.pending_turn_ids as string[] : [];
+      const turnId = text(input.turn_id) ?? (prior?.ambiguous !== true && pending.length === 1 ? pending[0] : undefined);
+      return turnId ? { ...input, turn_id: turnId } : input;
+    }
     return this.service.store.transaction(() => {
       const prior = this.service.store.find("context_hook_session", sessionKey);
       let pending = Array.isArray(prior?.pending_turn_ids) ? prior.pending_turn_ids as string[] : [];
@@ -440,7 +462,7 @@ export class CodexHookBridge {
         if (!pending.includes(turnId)) pending = [...pending, turnId];
         ambiguous ||= pending.length > 1;
         this.service.store.save("context_hook_session", sessionKey, { scope, session_id: sessionId, sequence, last_turn_id: turnId, pending_turn_ids: pending, ambiguous, content_free: true });
-      } else if (event === "PostToolUse" || event === "Stop") {
+      } else if (event === "Stop") {
         // Overlapping turns stay ambiguous until all are closed; a delayed event
         // must never be attributed to whichever turn happens to remain.
         if (!turnId && !ambiguous && pending.length === 1) turnId = pending[0]!;

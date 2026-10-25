@@ -31,13 +31,18 @@
       "name": "capability-storage-migration",
       "include": [
         "core/codebase-storage-migration.ts",
+        "core/codebase-storage-migration-command.ts",
         "core/codebase-storage-preflight.ts",
-        "core/storage-migration-preflight.ts"
+        "core/storage-migration-preflight.ts",
+        "core/legacy-repository-storage-preflight.ts"
       ],
       "tests": [
         "tests/codebase-storage-migration.test.ts",
+        "tests/codebase-storage-migration-command.test.ts",
         "tests/codebase-storage-preflight.test.ts",
-        "tests/storage-migration-preflight.test.ts"
+        "tests/storage-migration-preflight.test.ts",
+        "tests/storage-migration-apply.test.ts",
+        "tests/legacy-repository-storage-preflight.test.ts"
       ],
       "branches": true
     },
@@ -48,6 +53,28 @@
       ],
       "tests": [
         "tests/legacy-session-memory-preflight.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "legacy-session-memory-quarantine",
+      "include": [
+        "core/legacy-session-memory-quarantine.ts"
+      ],
+      "tests": [
+        "tests/legacy-session-memory-quarantine.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "legacy-repository-storage-migration",
+      "include": [
+        "core/legacy-repository-storage-migration.ts",
+        "core/legacy-repository-storage-migration-command.ts"
+      ],
+      "tests": [
+        "tests/legacy-repository-storage-migration.test.ts",
+        "tests/legacy-repository-storage-migration-command.test.ts"
       ],
       "branches": true
     },
@@ -895,7 +922,8 @@
     {
       "name": "codex-component-hook-bridge",
       "include": [
-        "core/interfaces/codex-hook-bridge.ts"
+        "core/interfaces/codex-hook-bridge.ts",
+        "core/interfaces/codex-hook-signal-sanitizer.ts"
       ],
       "tests": [
         "tests/codex-hook-bridge.test.ts",

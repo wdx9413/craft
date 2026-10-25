@@ -206,6 +206,8 @@ test("snapshot recovery ignores malformed and out-of-scope peers and verifies an
   raw("workspace_checkpoint", "../invalid-peer", 1, JSON.stringify(f.payload));
   raw("workspace_checkpoint", "A-invalid-json", 1, "{");
   raw("workspace_checkpoint", "B-no-root", 1, JSON.stringify({ ...f.payload, snapshot_root: 42 }));
+  raw("workspace_checkpoint", "B-invalid-workspace", 1, JSON.stringify({ ...f.payload, workspace_id: 42 }));
+  raw("workspace_checkpoint", "B-no-matching-entry", 1, JSON.stringify({ ...f.payload, entries: [] }));
   raw("workspace_checkpoint", "C-outside", 1, JSON.stringify({ ...f.payload, snapshot_root: f.project }));
   raw("workspace_checkpoint", "D-missing-file", 1, JSON.stringify({ ...f.payload,
     snapshot_root: join(projectStorageDirectory(f.paths, f.project), "codebase", "snapshots", "repo", "D-missing-file") }));

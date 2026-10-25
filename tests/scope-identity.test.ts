@@ -79,3 +79,55 @@ test("identity and aliases are idempotent and scope stacks remain explicit", asy
     }
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("Scope Alias creation rechecks a concurrent insert inside its transaction", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-scope-alias-race-"));
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const kernel = new ScopeIdentityKernel(store);
+    const identity = kernel.resolveProject({ project_root: root, project_id: "race-project" }).identity as JsonObject;
+    const scope = (identity.canonical_scope as JsonObject).id;
+    const insertDuringTransaction = (kind: string, id: string, row: JsonObject): void => {
+      const find = store.find.bind(store), transaction = store.transaction.bind(store);
+      let missed = false, inserted = false;
+      store.find = ((queryKind: string, recordId: string, version?: number, hydrate?: boolean) => {
+        if (!missed && queryKind === kind && recordId === id) { missed = true; return null; }
+        return find(queryKind, recordId, version, hydrate);
+      }) as typeof store.find;
+      store.transaction = ((operation: Parameters<typeof store.transaction>[0]) => {
+        if (!inserted) {
+          inserted = true;
+          store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+            .run(kind, id, 1, JSON.stringify(row), new Date().toISOString(), new Date().toISOString());
+          store.find = find as typeof store.find;
+        }
+        store.transaction = transaction as typeof store.transaction;
+        return transaction(operation);
+      }) as typeof store.transaction;
+    };
+    const identityId = String(identity.id);
+    const identityRow = store.database.prepare("SELECT payload_json FROM records WHERE kind='project_identity' AND id=?")
+      .get(identityId) as { payload_json: string };
+    store.database.prepare("DELETE FROM records WHERE kind='project_identity' AND id=?").run(identityId);
+    insertDuringTransaction("project_identity", identityId, JSON.parse(identityRow.payload_json) as JsonObject);
+    assert.equal(kernel.resolveProject({ project_root: root, project_id: "race-project" }).idempotent, true);
+
+    const args = { scope_kind: "project", scope_id: scope, alias_kind: "legacy", alias: "racing-alias" };
+    const original = kernel.bindAlias(args).alias as JsonObject;
+    const id = String(original.id);
+    store.database.prepare("DELETE FROM records WHERE kind='scope_alias' AND id=?").run(id);
+    const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...row } = original;
+    insertDuringTransaction("scope_alias", id, row);
+    const raced = kernel.bindAlias(args);
+    assert.equal(raced.idempotent, true);
+    assert.equal((raced.alias as JsonObject).id, id);
+
+    const conflictArgs = { ...args, alias: "racing-alias-conflict" };
+    const conflictAlias = kernel.bindAlias(conflictArgs).alias as JsonObject;
+    const conflictId = String(conflictAlias.id);
+    store.database.prepare("DELETE FROM records WHERE kind='scope_alias' AND id=?").run(conflictId);
+    const { id: _conflictId, version: _conflictVersion, created_at: _conflictCreated, updated_at: _conflictUpdated, ...conflictRow } = conflictAlias;
+    insertDuringTransaction("scope_alias", conflictId, { ...conflictRow, identity_digest: "raced-conflict" });
+    assert.throws(() => kernel.bindAlias(conflictArgs), /idempotency conflict/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

@@ -123,9 +123,17 @@ test("Knowledge evaluation evidence is resolved without losing missing provenanc
     store.create("evidence", "claim-evidence", { scope: "global", confidence: "confirmed", metadata: { source_session_id: "claim", task_id: "claim-task" } });
     store.create("knowledge_claim", "claim", { scope: "global", evidence_ids: ["claim-evidence"] });
     store.create("knowledge_claim", "claim-without-evidence", { scope: "global" });
+    const unavailableClaim = store.create("knowledge_claim", "claim-with-unavailable-evidence", { scope: "global", evidence_ids: [] });
+    store.database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=?")
+      .run(JSON.stringify({ ...payload(unavailableClaim), evidence_ids: ["missing-evidence", 1] }), "knowledge_claim",
+        String(unavailableClaim.id), Number(unavailableClaim.version));
     const resolved = knowledgeEvaluationEvidence(store, { source_evidence_ids: ["source", "missing", "source", 1], expected_claim_ids: ["claim", "missing-claim", "claim", 1] });
     assert.deepEqual(resolved.sourceEvidence.map((item) => item.id), ["source"]);
     assert.deepEqual(resolved.claimEvidence.map((item) => [item.claim_id, item.evidence.id]), [["claim", "claim-evidence"]]);
+    const unavailable = knowledgeEvaluationEvidence(store, { expected_claim_ids: ["claim-with-unavailable-evidence"] });
+    assert.deepEqual(unavailable.claimEvidence.map(item => [item.claim_id, item.evidence.status]), [
+      ["claim-with-unavailable-evidence", "unavailable_source_evidence"], ["claim-with-unavailable-evidence", "unavailable_source_evidence"],
+    ]);
     assert.equal(assessKnowledgeEvaluationProvenance({ source_session_id: "evaluation", source_task_id: "eval-task", source_evidence_ids: ["source"],
       evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "operator_asserted", sanitized: true, expected_claim_ids: ["claim"] }, resolved.sourceEvidence, resolved.claimEvidence).status, "unadjudicated_label");
     assert.deepEqual(knowledgeEvaluationEvidence(store, { expected_claim_ids: ["claim-without-evidence"] }).claimEvidence, []);

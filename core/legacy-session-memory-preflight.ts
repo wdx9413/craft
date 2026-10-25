@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { closeSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
+import { closeSync, lstatSync, openSync, readSync, readdirSync, realpathSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { basename, join } from "node:path";
 import { sessionStorageScopeId, sessionStorageDirectory, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
 
 type Status = "legacy_ready" | "unbound_host" | "ambiguous_host" | "ambiguous_session" | "unidentified_session"
-  | "identity_mismatch" | "unscoped_entry" | "unsafe_path" | "binding_unavailable" | "source_unreadable" | "target_conflict";
+  | "identity_mismatch" | "unscoped_entry" | "unsafe_path" | "broken_symlink" | "binding_unavailable" | "source_unreadable" | "target_conflict";
 
 export interface LegacySessionMemoryEntry {
   source_digest: string;
@@ -105,7 +105,13 @@ function entryFor(paths: CraftPaths, source: string, sourceName: string, databas
   const base = { source_digest: `sha256:${sourceDigest}`, session_digest: null, host: null, target_directory: null,
     target_exists: false, file_count: 0, bytes: 0 };
   const stat = lstatSync(source);
-  if (stat.isSymbolicLink()) return { ...base, status: "unsafe_path" };
+  if (stat.isSymbolicLink()) {
+    try { realpathSync(source); return { ...base, status: "unsafe_path" }; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ...base, status: "broken_symlink" };
+      return { ...base, status: "unsafe_path" };
+    }
+  }
   if (!stat.isDirectory()) return { ...base, status: "unscoped_entry", file_count: 1, bytes: stat.size };
   let tree: ReturnType<typeof regularTreeStats>;
   try { tree = regularTreeStats(source); } catch { return { ...base, status: "unsafe_path" }; }

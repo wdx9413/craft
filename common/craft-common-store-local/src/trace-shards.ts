@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { sqliteBusyTimeoutMs } from "./sqlite-busy-timeout.ts";
+import { sqliteTraceBusyTimeoutMs } from "./sqlite-busy-timeout.ts";
 import type { JsonObject } from "./store.ts";
 
 export const TRACE_KINDS = new Set(["trace", "trace_event", "trace_feedback", "telemetry_event", "trace_archive"]);
+/** High-volume turn journals share Trace shard locking without Trace retention semantics. */
+export const TRACE_SHARDED_KINDS = new Set([...TRACE_KINDS, "codex_hook_turn", "codex_hook_signal"]);
 export type TraceRecordRow = { kind: string; id: string; version: number; payload_json: string; created_at: string; updated_at: string };
 export type TraceEventRow = { stream: string; sequence: number; event_type: string; payload_json: string; created_at: string };
 const SHARD_COUNT = 16;
@@ -51,7 +53,7 @@ export class TraceShardStore {
     }
     const database = new DatabaseSync(file);
     try {
-      database.exec(`PRAGMA busy_timeout=${sqliteBusyTimeoutMs()}; PRAGMA foreign_keys=ON;`);
+      database.exec(`PRAGMA busy_timeout=${sqliteTraceBusyTimeoutMs()}; PRAGMA foreign_keys=ON;`);
       if (create && String((database.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toLowerCase() !== "wal")
         database.exec("PRAGMA journal_mode=WAL;");
       if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get()) database.exec(`BEGIN IMMEDIATE;
@@ -64,6 +66,21 @@ export class TraceShardStore {
       CREATE TABLE IF NOT EXISTS events(stream TEXT NOT NULL,sequence INTEGER NOT NULL,event_type TEXT NOT NULL,
         payload_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(stream,sequence));
       COMMIT;`);
+      if (create) {
+        const lookupExisted = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='hook_signal_lookup'").get() !== undefined;
+        database.exec(`CREATE TABLE IF NOT EXISTS hook_signal_lookup(
+          id TEXT PRIMARY KEY,version INTEGER NOT NULL,scope_kind TEXT NOT NULL,scope_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,turn_id TEXT NOT NULL,observed_at_ms REAL);
+          CREATE INDEX IF NOT EXISTS hook_signal_lookup_turn
+            ON hook_signal_lookup(scope_kind,scope_id,session_id,turn_id,observed_at_ms,id);`);
+        if (!lookupExisted) database.exec(`INSERT OR REPLACE INTO hook_signal_lookup
+          SELECT r.id,r.version,json_extract(r.payload_json,'$.scope.kind'),json_extract(r.payload_json,'$.scope.id'),
+            json_extract(r.payload_json,'$.session_id'),json_extract(r.payload_json,'$.turn_id'),json_extract(r.payload_json,'$.observed_at_ms')
+          FROM records r WHERE r.kind='codex_hook_signal'
+            AND r.version=(SELECT MAX(latest.version) FROM records latest WHERE latest.kind=r.kind AND latest.id=r.id)
+            AND json_extract(r.payload_json,'$.scope.kind') IS NOT NULL AND json_extract(r.payload_json,'$.scope.id') IS NOT NULL
+            AND json_extract(r.payload_json,'$.session_id') IS NOT NULL AND json_extract(r.payload_json,'$.turn_id') IS NOT NULL`);
+      }
     } catch (error) { database.close(); throw error; }
     this.#databases.set(shard, database);
     return database;
@@ -121,6 +138,14 @@ export class TraceShardStore {
       .get(kind, id) as { version: number }).version);
     database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run(kind, id, next, JSON.stringify(payload), now, now);
+    if (kind === "codex_hook_signal" && payload.scope && typeof payload.scope === "object" && !Array.isArray(payload.scope)
+      && typeof (payload.scope as JsonObject).kind === "string" && typeof (payload.scope as JsonObject).id === "string"
+      && typeof payload.session_id === "string" && typeof payload.turn_id === "string") {
+      const scope = payload.scope as JsonObject;
+      database.prepare(`INSERT OR REPLACE INTO hook_signal_lookup(id,version,scope_kind,scope_id,session_id,turn_id,observed_at_ms)
+        VALUES(?,?,?,?,?,?,?)`).run(id, next, scope.kind as string, scope.id as string,
+        payload.session_id, payload.turn_id, typeof payload.observed_at_ms === "number" ? payload.observed_at_ms : null);
+    }
     return { ...payload, id, version: next, created_at: now, updated_at: now };
   }
 
@@ -150,6 +175,22 @@ export class TraceShardStore {
       }
     }
     return records.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)) || String(b.id).localeCompare(String(a.id))).slice(0, limit);
+  }
+
+  /** Read only the signals for one Host turn; avoid decoding every Hook signal in every shard. */
+  hookSignalsForTurn(scopeKind: string, scopeId: string, sessionId: string, turnId: string, limit: number): JsonObject[] {
+    if (!scopeKind || !scopeId || !sessionId || !turnId || !Number.isSafeInteger(limit) || limit <= 0) return [];
+    const records: JsonObject[] = [];
+    for (const [, database] of this.existing()) {
+      if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='hook_signal_lookup'").get()) continue;
+      const rows = database.prepare(`SELECT r.* FROM hook_signal_lookup l JOIN records r
+        ON r.kind='codex_hook_signal' AND r.id=l.id AND r.version=l.version
+        WHERE l.scope_kind=? AND l.scope_id=? AND l.session_id=? AND l.turn_id=? LIMIT ?`)
+        .all(scopeKind, scopeId, sessionId, turnId, limit) as Array<Record<string, unknown>>;
+      records.push(...rows.map(record));
+    }
+    return records.sort((a, b) => Number(a.observed_at_ms ?? Date.parse(String(a.created_at)))
+      - Number(b.observed_at_ms ?? Date.parse(String(b.created_at))) || String(a.id).localeCompare(String(b.id))).slice(0, limit);
   }
 
   count(kind: string): number {

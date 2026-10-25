@@ -119,6 +119,8 @@ test("legacy session Memory inventory fails closed on missing, linked, malformed
 
     const legacy = join(root, "legacy"); mkdirSync(legacy);
     const linkedEntry = join(legacy, "linked-entry"); symlinkSync(target, linkedEntry);
+    const brokenLink = join(legacy, "broken-link"); symlinkSync(join(root, "missing-target"), brokenLink);
+    const loopingLink = join(legacy, "looping-link"); symlinkSync("looping-link", loopingLink);
     const nestedLink = join(legacy, "nested-link"); mkdirSync(nestedLink); symlinkSync(target, join(nestedLink, "linked"));
     const malformed = join(legacy, "malformed"); mkdirSync(malformed); writeFileSync(join(malformed, "memory.db"), "not sqlite");
     const id = "no-central-binding";
@@ -131,6 +133,7 @@ test("legacy session Memory inventory fails closed on missing, linked, malformed
     const result = legacySessionMemoryPreflight(paths, { legacy_root: legacy });
     assert.equal(result.root_status, "ready");
     assert(result.entries.some(item => item.status === "unsafe_path"));
+    assert(result.entries.some(item => item.status === "broken_symlink"));
     assert(result.entries.some(item => item.status === "unbound_host"));
     assert(result.entries.some(item => item.status === "source_unreadable"));
     const withoutCentral = craftPaths(join(root, "absent-data"));

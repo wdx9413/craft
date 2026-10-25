@@ -1,3 +1,11 @@
+## v0.12.110（修复存量路径识别并完成安全归档）
+
+- 对无 Git 根但已有精确路径哈希登记的项目，预检只读验证既有 project.json 后即可安全绑定；无登记、歧义和路径校验失败仍关闭。
+- 将 21 个已定位项目的旧 .craft_data 按项目范围校验归档到 ~/.craft_data，逐文件 SHA-256 验证并保留旧源。
+- 高频 Context Hook 将无信号判断拆到轻量模块，并延后加载完整服务图；隔离实测空操作 P50 从 211ms 降到 141ms。
+- 诊断增加运行依赖加载与 CraftService 构造耗时，区分模块启动、存储打开、服务初始化和事件处理。
+- 降低高频 Context Hook 的写锁等待与不必要 Store 初始化，保留完整事件回执和超时起始留痕。
+
 ## v0.12.109（降低 Hook 生命周期写入）
 
 - SessionStart 保留会话恢复清理，但移除三个能力重复写入的 readiness/activation 记录；SessionEnd 只执行 Memory 归档，Stop 只执行 Experience 收尾并记录一次 Context 使用反馈。

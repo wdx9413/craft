@@ -388,3 +388,110 @@ Experience 范围修复：新写入子记录缺父项且无可确定范围时失
 - 该最小 Host 调用报告总输入 25,555 tokens（12,544 cached）；该值包含 Host/system/plugin 全部输入，不能归因于 Craft Context 注入。仍需单独测量 Context 实际发出与模型实际使用 token。
 - 本轮 `.109` 优化去掉 SessionStart 三个 readiness/activation 写入，SessionEnd 只留 Memory 归档，Stop 只留 Experience 最终化与一次 Context 使用反馈；相关行为测试 57/57 通过，桥接模块覆盖行/分支/函数均 100%。`.109` 的远端发布和新 Host P95/并发验证仍待完成。
 - `.109` 打包 Hook 在隔离数据根按事件各运行 20 次：SessionStart P50/P95/最大值 397/433/504 ms，UserPromptSubmit 498/609/662 ms，PostToolUse 404/470/486 ms，Stop 498/648/749 ms，SessionEnd 502/619/648 ms。样本是单进程串行子进程，不含正式 6.1 GB 数据库负载和并发；发布后的 Host 复测仍是性能验收条件。
+
+### 2026-10-25 Hook 与存量会话记忆预检复核
+
+- 当前 Codex 插件清单读回 Craft Context `0.12.109`。过去 24 小时 `~/.craft_data/trace/hook-runtime/v1/` 有 65 个 Hook 请求，全部存在 finished 记录；没有未完成的 started 记录。该诊断在 Store 打开前写入。PostToolUse P95 约 1.75 秒、最高 1.90 秒。它不包含 DCC Hook 日志，也不能排除 Node 启动到诊断器运行前被 Host 终止。
+- Hook 包进程回归 6/6 通过；在 SQLite writer lock 注入下，Hook 约 2.28 秒返回并留下 `STORAGE_BUSY` Trace。`sqliteBusyTimeoutMs` 与打包进程回归门分别通过；锁等待函数经 `c8` 行/分支/函数均为 100%。
+- 正式数据根的存储 dry-run 是只读：22,242 个物理分区指针均为 `current`，可迁移数 0。Codebase 为 400 个 `current`、49 个 `missing_root`；Knowledge 仍有 299 个未分区版本。
+- `/tmp/.craft_data/memory` 共 98 个目录项：4 个 `unbound_host`、5 个 `unidentified_session`、89 个断开的符号链接。此前预检把断链也计为 `unsafe_path`；现新增 `broken_symlink` 状态，仅识别、不删除。9 个普通目录含约 13.6 MB 文件，身份缺失或不明，不能猜测迁移或归档。
+- `legacy-session-memory-preflight` 严格覆盖组测试 2/2、模块行/分支/函数覆盖均 100%；全项目 `tsc --noEmit` 与 `git diff --check` 通过。此项改进只修正预检分类，不等于临时记忆已迁移或清理。改动仍未提交发布。
+
+### 2026-10-25 旧会话隔离迁移与项目内存储全量盘点
+
+- 正式数据根 `/Users/didi/.craft_data` 的迁移预检：22,249 个物理分区指针均为 `current`，0 个待迁移。`/tmp/.craft_data/memory` 的 98 个条目已逐项隔离：9 个身份缺失/不明的普通目录复制到 `~/.craft_data/quarantine/legacy-session-memory/v1/`，89 个断链的原始目标字符串写入受限权限清单；隔离区 98/98 条目经独立 SHA-256 复算，9 份载荷共 176 个文件、13,562,032 字节，0 项校验失败。旧 Memory 目录现在为空；复跑迁移预检的待处理目录数为 0。隔离内容不参与任何记忆检索或晋升。
+- 发现仓库内仍有 5 个 `.craft_data` 根：工作区父目录 8 个文件/3,727 字节；`craft` 仓库约 3.96 GB/112,099 文件；`craft-marketplace` 302,178 字节/148 文件；`net-route` 13,359,673 字节/1,750 文件；`craft-workbench` 6,022,687 字节/377 文件。`craft` 仓库内最大部分是 `codebase/indexes` 约 1.55 GB、`codebase/db` 约 1.34 GB、`codebase/snapshots` 约 814 MB、`codebase/runtime` 约 247 MB。以上只是文件系统盘点，没有读取正文、合并或删除这些数据。
+- 同一正式库的 Codebase checkpoint 预检为 401 个 `current`、49 个 `missing_root`、0 个 `legacy_ready`。本地代码库数据涉及多个能力与分析缓存，不能用“复制整个 `.craft_data` 到一个项目目录”的方式迁移；49 个 checkpoint 缺少可核验项目根，仍需逐项映射或隔离。项目目录迁移尚未完成；后续只读复核中源 DB 的修改时间较旧，检查时没有打开句柄，但这只是单次采样，不能证明旧路径不会被其他启动器重新写入。
+- 本轮 `craft_context_open` 对当前工作树耗时约 15.9 秒，响应标记 `partial`，包含 Codebase 预算耗尽及查询截断，返回 1 个文件引用。此为单次 MCP 调用证据，未区分冷/热启动、索引与存储阶段；说明当前 Codebase 自动准备路径仍有明显延迟，不足以给出性能分位数。
+- Codex Hook 普通 Bash 无信号快速返回已加入本地源码和打包进程回归；Hook 进程测试 7/7、全局类型检查通过。新 case 单次约 414 ms，属于隔离进程基准；尚未进入远端 main/Marketplace，也未做新 Host 并发复测。
+- 迁移命令第一次在沙箱内写隔离区失败并将 98 项报告为阻塞，源数据保持原样；获得沙箱外执行权限后再次运行成功，迁移后独立校验及 dry-run 均确认源目录为空、目标副本完整。这个失败结果暴露了当前迁移器不输出逐项阻塞原因的问题，后续应改善可观测性。
+- `.craft_data` 项目存量迁移、49 个缺根 checkpoint、正式 Host 延迟分位数、增量覆盖 100% 总门、发布 main、远端 URL 更新及真实独立效果评测仍未完成。本节记录的是实际迁移与盘点结果，不代表自进化闭环通过。
+
+### 2026-10-25 Hook SQLite 写竞争复核
+
+- 重新统计 `~/.craft_data/trace/hook-runtime/v1/` 最近 24 小时记录：308 个已结束 Hook，`PostToolUse` 282 次，P95 1,824 ms、最大 1,939 ms；`Stop` 最大 2,008 ms。另有 3 个未闭合的 Context `PostToolUse` started 标记，和 3 秒 Hook 门限相符，但单凭缺少 finished 不能排除进程被其他原因终止。
+- 对齐正式 Trace 数据库的 Hook 调用后，最近窗口发现 125 条 `handle.context.*` 明确以 `error_class=STORAGE_BUSY` 失败，其中绝大多数是 `PostToolUse`。此前 runtime 诊断只写 `error_type=Error`，不能单独判断根因；组件 Trace 将锁竞争分类为 `STORAGE_BUSY`，现已确认真实故障为 SQLite 写锁争用。
+- 调用链检查发现 `CodexHookBridge.correlateTurn()` 对每次 `PostToolUse` 都开启 `BEGIN IMMEDIATE`，但该阶段只读取会话待处理 turn；随后 `HookTurnJournal.record()` 才进行实际写入。这使每个有效编辑/验证 Hook 在持久化前多争一次全局 Store 写锁。
+- 当前未发布源码改为 PostToolUse 关联走只读 Store 读取，其余确需修改会话待处理状态的事件仍走事务。隔离并发回归在另一 SQLite 连接持有 `BEGIN IMMEDIATE` 时成功执行，耗时约 106 ms，组件 Trace 没有 `STORAGE_BUSY`。Hook bridge 59 项回归通过；该模块行、分支和函数覆盖均 100%；打包 Hook 进程测试 7/7、全仓 TypeScript 检查通过。
+- 修复尚未进入远端 main、Marketplace 包或新 Host。`HookTurnJournal.record()` 仍需要写入 Store；其它 Hook/Worker/MCP 写入也可能持有锁。因此不能据此宣称写竞争整体消失。安装包仍需在真实 Host 并发负载下验证 `STORAGE_BUSY`、未闭合 Trace、延迟分位数和信号不丢失率。
+- 旧会话 Memory 隔离器补齐目标目录异常、非标准文件节点、清单冲突、复制哈希错误及复制期间源/目标变化路径；11 项隔离测试通过，模块行/分支/函数均 100%，并加入 `coverage-gates.json` 独立门。全仓 TypeScript 检查通过。全仓 coverage inventory 当前仍返回 `status=incomplete`、`coverage_proven=false`，故不能据此声称全仓覆盖门或迁移目标完成。
+
+### 2026-10-25 Hook 写入锁竞争优化续验
+
+- Hook 运行诊断与旧版 `.109` 包的正式 Trace 显示 PostToolUse P95 约 1.8 秒，近 24 小时存在 125 条 `STORAGE_BUSY`。根因不只是关联 turn 的事务：Scope Identity 对已存在项目/别名仍开写事务，且 `codex_hook_turn` 日志与 Trace 共用中央 SQLite 写锁。
+- 本地源码对已有项目身份和别名先读后写、事务内复查竞争插入；新建 Hook turn 按 Trace ID 写入独立 Trace 分片，旧中央格式记录保留中央读写兼容，且 Hook turn 不继承 Trace 清理策略。正式 Trace 事件仍独立保留。
+- 新增真实打包 Hook 进程回归：中央数据库被另一连接持有写锁时，PostToolUse 编辑仍完成并留下正式完成 Trace 与编辑信号，单次耗时约 906 ms；打包进程测试 8/8 通过。原 UserPromptSubmit 锁测试仍通过，约 2.04 秒返回并留下 `STORAGE_BUSY`，说明未重构的路径仍可能争锁。
+- Scope Identity、Hook Bridge 和 Trace 分片覆盖运行中 63/63 测试通过。首次覆盖为 99.88% 分支；补充旧版中央 journal 缺少 `trace_id` 的显式场景回归后重跑，63/63 测试及纳管文件行、分支、函数覆盖均为 100%。全局 TypeScript 检查通过。
+- 这仅是本地未发布构建上的隔离负载回归，不是 Host 安装后实测；906 ms 是单次测试样本，不代表 P95。旧运行时日志无法证明新源码的线上延迟或锁失败已下降。仍需覆盖门通过、构建发布、远端安装和真实 Host 并发复测。
+
+### 2026-10-25 Hook 快速路径与迁移失败可观测性
+
+- Codex `PostToolUse` 的普通 Bash 命令若无法生成学习信号，现在会在打开 SQLite 前返回 `{}`；诊断记录仍保留 started/finished，但 `store_open_ms=0`、`handler_ms=0`。打包进程回归确认该路径不产生能力 Trace，也不创建 Store 连接。
+- 有效编辑 Hook 在中央数据库被另一连接持有写事务时，打包进程回归仍能在 3 秒 Host 门限内写出完成 Trace 与编辑信号。该测试是隔离数据库、单次并发情形，不能代替正式 Host P95/P99 或多 Hook 并发数据。
+- Hook turn journal 的新格式按 Trace 分片保存；兼容旧中央数据库记录，且没有进入 Trace 保留/清理集合。回归覆盖新旧格式、批量原子更新、重开读取和保留策略。
+- 存储迁移 `--apply` 遇到无法解析的旧分区指针时，现在输出逐项 kind/id/version/status 并返回阻塞码，不会静默跳过或修改记录。会话 Memory 隔离器仅清理同主机、已退出进程留下的精确命名临时目录；活动进程、其他主机及无关路径保持不动。
+- 本轮新增定向运行：Trace 分片与存储 apply 共 12 项通过；相关隔离器测试 13 项通过，行/分支/函数覆盖 100%。全仓增量覆盖后来因单组长时间无输出而中断，见下文；该运行没有最终总门结果。
+- 后续 Hook 专项覆盖已完成：Hook Bridge、Trace 分片和打包进程共 68 项通过，Bridge 纳管代码行/分支/函数覆盖 100%；独立存储包覆盖门也已通过，纳管文件行/分支/函数覆盖均 100%。新增 Knowledge 退出用例覆盖“来源被撤销后仍可撤回既有 Claim”的缺失分支。
+- 全仓增量覆盖聚合脚本因单组长时间无输出而被中断；不能视为全仓门通过。源码类型检查、Hook 专项和 common-store 包级门通过，不改变其他未覆盖组和发布门的状态。
+
+### 2026-10-25 Repository-local Craft data inventory refresh
+
+- The new read-only repository preflight found 12 `.craft_data` roots totaling 4,247,566,957 readable bytes (about 3.96 GiB) and 160,326 readable files: `craft` 3,964,691,722 bytes/112,101 files; `craft-marketplace` 302,178/148; workspace parent 3,727/8; `net-route` 13,359,673/1,750; `craft-workbench` 6,022,687/377; `skill-up` 58,212,456/16,981; `dforge-fe` 40,246,489/5,654; `mock_center` 28,055,810/2,926; `omni-bench` 73,472,276/16,766; `dforge-product-design` 14,632/3; `eval-all` parent 43,124/70; `d-simu` 63,142,183/3,542. Ten roots map to their exact Git root; two parent roots have no Git identity and remain unbound. One scan error (`EACCES` on `net-route/data/runtime`) means discovery is partial and could have missed a nested data root; no source files were copied, deleted, or modified.
+- The `craft` root contains its own central database (about 4 MB, 366 records), a Codebase database (about 1.34 GB, 51,414 records across 17 kinds), separate Knowledge/Memory/Experience databases, and large Codebase snapshots/indexes. The legacy Codebase database has 23 workspace checkpoints, 51 indexes, 6,590 edge routes, and 2,312 semantic file analyses. It also includes 16,561 Trace, 11,840 Trace Event, and 9,480 telemetry rows.
+- A fresh read-only comparison with `~/.craft_data/db/craft.db` confirms that the legacy Codebase database cannot be merged wholesale: all 28 `workspace` keys and all 26 `codebase_repository_state` keys overlap with different payloads; 2,261 of 2,710 `codebase_index_shard` keys overlap with identical payloads; only 3 edge-route keys overlap and those payloads match. Legacy workspace checkpoints, indexes, semantic analyses, query receipts, Trace, Trace Events and telemetry have no same-version key overlap in the current central DB. This is a key-level comparison, not proof that referenced snapshot bodies match.
+- The canonical project directory is `~/.craft_data/projects/craft--673a7e69b8c49e242277cbdb7a5937d49ebaaed60d2ee6e7da3d82bbb8c3d1dc/`; previous inventory measured it at about 2.2 GB. The current migration commands do not import the old local Codebase DB, indexes, caches and snapshots as one crash-safe operation. Two parent `.craft_data` roots have no Git root and therefore must remain unbound until an explicit owner is established. This inventory is evidence of unfinished migration, not authorization to guess ownership or delete old roots.
+- The latest global pointer preflight sees 22,481 current physical pointers, zero migratable legacy pointers and no pointer blockers; its separate temporary-session scan still sees 7 broken symlink directories. Codebase checkpoint preflight sees 401 current and 49 `missing_root` checkpoints. Neither command scans the 12 repository-local physical roots above, so their green/empty migration counts do not prove filesystem-wide migration. The new inventory API and its migration coverage group pass at 100% line/branch/function coverage; it is a preflight only and does not migrate any files.
+- The current Memory Skill and Context/Memory module guide had instructed new session/project projections to `/tmp/.craft_data` and `<project-root>/.craft_data`. They now describe the configured global `~/.craft_data/sessions/<host--session-hash>/...` and `projects/<readable-name--path-hash>/...` layout. Historical research entries remain unchanged and must be read as historical behavior.
+- TypeScript typecheck and documentation link/ADR audit passed after the wording correction. Full incremental coverage rerun is still in progress; one Knowledge evaluation provenance group reported 99.04% branch coverage despite all 27 tests passing, so the aggregate gate has not yet passed.
+
+### 2026-10-25 Hook 超时归属与阶段计时
+
+- Host 的 `hook timed out after 3s/10s` 文案没有包含 Hook 名称。当前 Codex 配置中，Craft Context 的 `SessionStart`、`PostToolUse`、`SessionEnd` 门限为 3 秒、`Stop` 为 10 秒、`UserPromptSubmit` 为 20 秒；全局 DCC Hook 的 `UserPromptSubmit` 为 10 秒，`SessionStart`/`Stop` 为 3 秒。因此 10 秒报错可能来自全局 DCC `UserPromptSubmit` 或 Craft `Stop`；3 秒报错可能来自全局 DCC `SessionStart`/`Stop` 或 Craft 的三个 3 秒事件。没有 Host 逐命令日志时不能仅凭超时数字唯一归属。
+- 最近 24 小时 Craft Hook 正式 Trace 中，`handle.context.PostToolUse` 有 270 条 `STORAGE_BUSY` 失败和 415 条完成事件；其他 Context 事件也有锁失败。这个窗口证明 Craft Hook 确实有 SQLite 写争用，但 Host 超时提示与这些失败是否为同一批调用，仍需关联 request/Trace ID 才能确认。
+- 同期 Hook runtime 诊断记录的 `PostToolUse` P95 约 1.85 秒、最大约 2.09 秒；可见诊断中有 3 个未完成的 `context.PostToolUse`。该时长从 JSON 解析后的诊断器启动才开始，可能遗漏 Node 模块启动和输入解析，不能据此排除 Host 侧总耗时超过 3 秒。
+- 本地源码为 Hook 诊断加入内容无关的 `process_elapsed_ms`、stdin 读取、JSON 解析、Store 打开、处理器、stdout 写入和 Store 关闭耗时。未记录 stdin 内容、提示词、工具输入或原始会话 ID。新版打包进程回归 8/8、诊断器回归 5/5；诊断器纳管代码行/分支/函数覆盖均 100%，`tsc --noEmit` 通过。
+- 当前 Host 仍读到 Craft Context `.109`，以上阶段计时改动和锁路径改动尚未发布。最新诊断只能说明存在 Craft `PostToolUse` 写失败风险；不能把没有 Hook 名称的 `3s/10s` 提示确定归因给 Craft，也不能证明本地修复已经降低线上错误率。
+- 后续 16 个并发同会话 Hook 进程回归，在每次 `PostToolUse` 都生成组件 Trace 时复现 `STORAGE_BUSY` 和信号丢失。最终实现改为用 started/finished 运行回执记录调用、把学习信号按信号 ID 分散写入 Trace 分片；中央 Store 与 Trace 分片的 Hook busy timeout 都保持 750 ms，没有通过延长 SQLite 锁等待解决争用。16/16 信号全部保留，每个进程低于 3 秒。全局提高等待时间的尝试曾使中央库锁回归达到约 3.49 秒，已撤销。
+- 最终隔离进程验证：中央 Store 被写锁占用时，UserPromptSubmit 和 PostToolUse 均在 Host 的 3 秒门限内完成；16 个同会话并发 PostToolUse 全部保留信号。最新打包进程样本 P50 1.73 秒、P95/最大值 2.01 秒，距离 3 秒门限仍约 1 秒余量。Bridge、Trace shard 和 Hook timeout helper 的定向覆盖行/分支/函数均为 100%。这是本地隔离数据，不代表 Host 更新后的线上分位数。
+- `HookTurnJournal.find` 原先每次都解码最多 10,000 条 `codex_hook_signal` 再按项目/会话/轮次过滤。现改为每个 Trace 分片维护窄的 `hook_signal_lookup` 表，索引复合范围键；信号行与定位行在同一 Trace 写事务内更新，查询只回取命中轮次的记录。首次遇到旧分片时只建空小表，并只从已有 `codex_hook_signal` 类型索引回填，不扫描其他 Trace 正文。分片查询 12 项通过，Trace shard 行/分支/函数覆盖 100%；Bridge+Hookless 65 项通过，Bridge 覆盖 100%。
+- 最新打包回归已在此信号定位实现之后完成：Hook 进程 9/9 通过，16 并发 PostToolUse P50 1.73 秒、P95/最大值 2.01 秒；`tsc --noEmit` 和 `git diff --check` 通过。数据仍来自本地隔离测试，没有更新当前 Host `.109`，没有真实 Host 的线上 P95/P99。
+- 本次再次只读统计当前安装版 `.109` 最近 24 小时：Craft `context.PostToolUse` 诊断有 850 个 started、847 个 finished、3 个未闭合；已完成耗时 P50 261 ms、P95 1,844 ms、最大 2,085 ms。`Stop` 最大 2,008 ms。`.109` 诊断没有 `process_elapsed_ms` 阶段字段，因而无法拆出模块启动、stdin、Store 和处理器各自耗时。
+- 同一 24 小时正式 Trace 的最新版本事件统计：`handle.context.PostToolUse` 507 次 completed、346 次 `STORAGE_BUSY` failed；`SessionStart` 12 次 started 中 5 次 `STORAGE_BUSY`，`SessionEnd` 10 次 started 中 3 次，`Stop` 13 次 started 中 5 次，`UserPromptSubmit` 5 次 started 中 1 次。Runtime 诊断与正式 Trace 尚不能按同一 Hook request ID 一一关联，因此它们证明当前版本有持续写锁争用，但不能直接证明这些失败就是界面上的 3 秒/10 秒超时。
+- 当前 10 秒提示仍可能来自全局 DCC `UserPromptSubmit` 或 Craft `Stop`；3 秒提示可能来自 Craft 的 3 秒事件或全局 DCC `SessionStart`/`Stop`。当前 Craft `Stop` 的已完成诊断最高约 2.01 秒，10 秒报错更像其他全局 Hook 或未闭合调用，但没有 Host 带 Hook 名称的逐命令日志，不能唯一归属。
+- 2026-10-25 复查最近 24 小时滚动窗口：Craft runtime 回执约有 894 个 `PostToolUse started`、891 个 `finished`；已完成样本 P50 256 ms、P95 1,849 ms、最大 2,085 ms。阶段计时显示 Store 打开 P95 4 ms、处理器 P95 426 ms、最大 1,788 ms；这说明主要延迟在 Hook 处理路径，单看 SQLite 打开不是慢点。旧 `.109` 回执记录的 `error_type=Error` 不能还原具体错误正文，也没有覆盖 Node 模块加载前时间；三个未闭合请求可能是 Host 超时或其它进程终止，不能视为三次已证实超时。
+- 同期正式 Trace 最近版本仍记录大量 `STORAGE_BUSY`；runtime 回执与组件 Trace 缺少共同 request ID，无法逐条证明两者对应。故障既可能造成 Hook 失败，也会增加处理延迟；但界面显示的 `3s/10s` 仍不能仅据时长归因给 Craft。当前 Host 仍运行 `.109`，本地分片索引、低锁等待与更细阶段诊断尚未进入该 Host，性能修复需要发布后复测才算生效。
+- 全仓增量覆盖门运行 161/163 组通过；失败项为 Codebase LSP stdio 客户端函数覆盖 98.53%，以及 `local-supervisor` 组 19 项测试中 15 项失败。它们不是 Hook 改动的专项门；因此总门仍未通过。以上 Hook 优化仍只存在于未发布源码，真实 Host 仍需更新后复测。
+
+### 2026-10-25 Hook 超时复核与 Codebase 旧快照恢复
+
+- 更正上一轮关于 10 秒提示的判断：当前 Craft Context `Stop` 本身也配置 10 秒，全局 DCC `UserPromptSubmit` 同样为 10 秒；单凭数字不能把 10 秒提示排除为 Craft。3 秒也同时覆盖 Craft 和 DCC 的不同事件，必须结合 Host 的具体事件日志判断。
+- 当前 `.109` Hook Runtime 诊断近期开出 1,008 次 `context.PostToolUse`，P50 311 ms、P95 1,873 ms、最大 2,085 ms；404 条记录只有通用 `Error`，另有 3 条 PostToolUse `started` 无 `finished`。这些记录证明 Craft Hook 有失败和被中断风险，但不能单独证明它们就是界面上的超时。已安装包的阶段信息不足；当前未发布源码会记录更多阶段，并对无信号 PostToolUse 在 SQLite 打开前返回。
+- Context `SessionStart` 在桥接器内不执行实际能力操作。本地 Hook 加入直接返回并保留 `hook-runtime` 回执的快路径；重建后的隔离打包进程用例 9/9 通过，其中该事件约 336 ms 返回，且诊断为 `outcome=skipped`、`store_open_ms=0`。Host 缓存仍是 `.109`，此变更尚未对真实会话生效。
+- Codebase 旧库迁移备份 `quick_check=ok`，23/23 检查点记录键与源库匹配。14 个已迁移检查点的 12,484 个目标文件逐个按大小和 SHA-256 验证通过；剩余 9 个旧快照有 171 个文件与检查点的大小不一致，未发现缺失或多余源文件。目标侧另有 630 个未被数据库指针引用的部分复制文件，源文件和旧指针仍保留。
+- 恢复策略现允许从同一规范项目的其他 Workspace 检查点寻找路径、大小和 SHA-256 全匹配的 Peer，并拒绝跨项目 Peer。31 项迁移覆盖组全通过，`codebase-storage-migration.ts` 行/函数/分支覆盖均为 100%；真实重试仍未找到剩余 171 个文件的精确来源，状态保持 14 `current`、9 `legacy_ready`。全局正式库的项目检查点也未发现这些文件的精确副本，因此不能安全晋升这 9 个旧快照。
+- 扩大到 `Documents/work`、`project`、`Codex`、`simple` 四个已知树的只读扫描，发现 21 个项目内 `.craft_data` 根、198,122 个文件、4,690,753,382 字节；18 个绑定到明确 Git 根，3 个未绑定，另有 1 个 `EACCES` 导致发现结果不完整。此扫描没有复制、删除或改写源数据；3 个未绑定目录不得猜测归属，访问失败范围也仍需处理。
+- 全部迁移数据仍保留在源目录与既有备份中。旧数据总体迁移、统一路径切换、当前 Host Hook 效果、全仓覆盖门和真实自进化效果仍未完成。
+
+### 2026-10-25 旧仓库数据归档迁移执行结果
+
+- 对已绑定到精确 Git 根的 18 个仓库执行只复制归档：198,024 个文件、4,690,725,394 字节。源文件保留；每个目标文件由迁移器校验大小与 SHA-256，并写入项目级及全局备份收据。
+- 独立复核再次遍历全部 198,024 个目标文件，确认文件仍存在且大小匹配、源文件仍保留、18 份双位置收据一致；另对每个项目抽样复算一个目标文件 SHA-256。迁移代码本身已逐文件校验哈希。归档不代表能力运行时已切换到这些目录，也不代表旧数据已转换成可直接读取的正式资产。
+- 仍有 3 个 `.craft_data` 根无法绑定 Git 项目身份，另有 `net-route/data/runtime` 因 `EACCES` 未能完整扫描。未绑定数据未复制；访问失败意味着发现清单仍可能不完整。Codebase 的 9 个旧检查点仍因 171 个文件与快照清单大小不符而不能恢复。
+- Hook 性能修复当前仅在工作区：PostToolUse 的 Hook SQLite 等锁等待由 750ms 降至 100ms、无学习信号事件跳过 Store 初始化、SessionStart 走无 Store 快路径，并将 Hook 写入收据分片。隔离进程与定向测试不能替代发布后 Host 实测；当前 Host 缓存仍为 `.109`。
+
+### 2026-10-26 Hook 超时归属与冷启动优化复核
+
+- Codex UI 的 `hook timed out after 10s/3s` 不包含命令名。当前配置中 Craft Context 的 Stop 为 10 秒、PostToolUse/SessionStart/SessionEnd 为 3 秒；全局 DCC 的 UserPromptSubmit 为 10 秒，SessionStart/Stop 为 3 秒。因此两条提示都不能只凭时长归属给 Craft。正式 Craft 留痕也没有 Host 超时 request ID，尚不能把具体 UI 提示与某条 Craft 运行记录一一对应。
+- 只读统计 `~/.craft_data/trace/hook-runtime/v1/`：1,376 条完成记录含 PostToolUse 1,321 次（P50 257ms、P95 1,876ms、最大 2,210ms）、Stop 21 次（最大 2,008ms）；5 个未完成的 started 事件均为 PostToolUse。记录中有 512 条旧版通用 `Error`，诊断字段不足以判定每条原因。可见 Craft PostToolUse 距 3 秒门限较近；没有 Craft Stop 跑到 10 秒的证据。该日志最新时间为 2026-10-25，早于本次改动，不能代表新包 Host 表现。
+- 新版 Hook 将纯信号分类拆至轻量模块，并延后加载 Store、CraftService 和完整 Hook Bridge；同时诊断记录增加模块加载及 CraftService 构造耗时。隔离进程空操作对比 `.109` 缓存包 P50 211ms / 最大 266ms，本地新包 P50 141ms / 最大 147ms；6 次有效编辑 Hook 全部完成，端到端 253–437ms，16 路并发 PostToolUse 最大约 1,003ms，信号均保留。
+- Hook Bridge、信号分类器、Hook 诊断及进程测试共 67 项通过；相关增量行/分支/函数覆盖均 100%。全量覆盖脚本在沙箱中 163/164 组通过；剩余 `local-supervisor` 因 loopback 权限失败，随后在获批的本机 loopback 下 19/19 通过且覆盖 100%。类型检查、插件打包与 Context/三能力/Codebase MCP smoke 通过。
+- 插件 smoke 另测得首次大仓 `craft_context_open`：basic 约 8.1 秒，semantic 约 49.0 秒。这是 Codebase 首次语义索引路径，不是 Hook；本次未优化该索引阶段，也不应把 Hook 的空操作加速误报为完整 Context 性能达标。
+- 上述优化仍只在未发布 `.110` 工作区；安装 Host 仍为 `.109`。发布后须用新 Host 回读版本，并把 Hook request ID 与 Host 级超时记录关联，才能判断两类超时是否消失。另需独立优化并测量大仓首次语义索引。
+- 全量增量覆盖门最终以允许本地 loopback 集成测试的运行环境完成：164/164 组通过，所有纳管文件行、分支、函数覆盖均为 100%。此前沙箱内的 `local-supervisor` 组因随机 loopback `listen` 被拒绝而失败；提权单组复跑 19/19、三项覆盖均 100%。迁移组在全量运行启动前的旧覆盖结果已过时，使用当前代码单组复跑 12/12、三项覆盖均 100%。
+
+### 2026-10-25 无 Git 根但已有精确项目登记的数据
+
+- 发现旧仓库预检把“必须是 Git 根”当成项目身份前提，超出了项目存储契约。项目身份以规范路径为准，不要求 Git；但无 Git 路径只有在 `~/.craft_data/projects/<name--sha256>/project.json` 已存在且 canonical path、完整 SHA-256 和目录名全部精确匹配时才可绑定。预检只读验证，不会创建或猜测映射；无映射或映射不符仍标为 `unbound`。
+- 为上述条件新增预检与失败关闭回归，`legacy-repository-storage-preflight` 组行/分支/函数覆盖均为 100%。复扫后 `eval-all`、`worksheet-system`、`my-craft` 三个既有登记路径转为 ready，各自仍绑定原路径，没有合并子仓库身份。
+- 对这三处执行只复制归档：70、22、8 个文件，共 100 个文件、60,756 字节。源文件保留；独立复核全部目标文件的大小与 SHA-256、源文件存在性和项目级/全局收据一致性，全部通过。
+- 仍有 `net-route/data/runtime` 因 `EACCES` 未完整扫描；需要再次以可读权限核实此路径下是否隐藏额外 `.craft_data` 根。历史 Codebase 9 个快照问题也未改变。运行时读写切换和 Host `.109` 的发布后实测仍未完成。

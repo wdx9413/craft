@@ -6,7 +6,7 @@ import { canonicalCandidatePath, craftPaths, ensureLayout, ensureProjectStorageD
   ensureSessionStorageDirectory, ensureSessionStorageDirectoryForScopeId, isLegacySafeSessionId, parseSessionStorageScopeId, sessionStorageDirectory,
   sessionStorageDirectoryForScopeId, sessionStorageScopeId, type CraftPaths } from "./paths.ts";
 import { MarkdownContentStore, type ContentKind, type ContentRef } from "./content-store.ts";
-import { TraceShardStore, TRACE_KINDS } from "./trace-shards.ts";
+import { TraceShardStore, TRACE_SHARDED_KINDS } from "./trace-shards.ts";
 import { CodebaseShardStore, CODEBASE_GRAPH_KINDS } from "./codebase-shards.ts";
 import { sqliteBusyTimeoutMs } from "./sqlite-busy-timeout.ts";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
@@ -468,7 +468,7 @@ export class CraftStore {
     this.assertPartitionDomain(kind, id, payload);
     const existingPointer = this.partitionPointer(kind, id);
     if (this.memoryScope(kind, { ...payload, id }, true, Boolean(existingPointer))) return this.writeMemory(kind, id, payload, "save", undefined, version);
-    if (TRACE_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) return this.traceShards.save(kind, id, payload, version);
+    if (TRACE_SHARDED_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) return this.traceShards.save(kind, id, payload, version);
     if (CODEBASE_GRAPH_KINDS.has(kind) && this.codebaseShards.raw(kind, id)
       && !this.database.prepare("SELECT 1 FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id))
       return this.codebaseShards.save(kind, id, payload, version);
@@ -480,7 +480,7 @@ export class CraftStore {
 
   create(kind: string, id: string, payload: JsonObject): JsonObject {
     if (this.memoryScope(kind, { ...payload, id })) return this.writeMemory(kind, id, payload, "create");
-    if (TRACE_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) return this.traceShards.create(kind, id, payload);
+    if (TRACE_SHARDED_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) return this.traceShards.create(kind, id, payload);
     if (CODEBASE_GRAPH_KINDS.has(kind) && this.codebaseShards.raw(kind, id)) throw new Error(`${kind} already exists: ${id}`);
     return this.transaction((database) => {
       const existing = database.prepare("SELECT 1 present FROM records WHERE kind=? AND id=? LIMIT 1")
@@ -534,8 +534,8 @@ export class CraftStore {
   }
 
   private traceBatchId(entries: readonly SaveEntry[]): string | null {
-    if (!entries.some(entry => TRACE_KINDS.has(entry.kind))) return null;
-    const ids = entries.map(entry => TRACE_KINDS.has(entry.kind)
+    if (!entries.some(entry => TRACE_SHARDED_KINDS.has(entry.kind))) return null;
+    const ids = entries.map(entry => TRACE_SHARDED_KINDS.has(entry.kind)
       ? entry.kind === "trace" || entry.kind === "trace_archive" ? entry.id : entry.payload.trace_id
       : null);
     if (ids.some(id => typeof id !== "string" || !id) || new Set(ids).size !== 1)
@@ -546,7 +546,7 @@ export class CraftStore {
   updateIfVersion(kind: string, id: string, expectedVersion: number, payload: JsonObject): JsonObject {
     this.assertPartitionDomain(kind, id, payload);
     if (this.memoryScope(kind, { ...payload, id })) return this.writeMemory(kind, id, payload, "save", expectedVersion);
-    if (TRACE_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) {
+    if (TRACE_SHARDED_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) {
       const traceId = kind === "trace" || kind === "trace_archive" ? id : String(payload.trace_id ?? "");
       return this.traceShards.transaction(traceId, () => {
         const current = this.traceShards.find(kind, id, undefined, traceId);
@@ -1418,7 +1418,7 @@ export class CraftStore {
       : this.database.prepare(
         "SELECT * FROM records WHERE kind=? AND id=? AND version=?",
       ).get(kind, id, version);
-    if (!row) return TRACE_KINDS.has(kind) ? this.traceShards.find(kind, id, version)
+    if (!row) return TRACE_SHARDED_KINDS.has(kind) ? this.traceShards.find(kind, id, version)
       : CODEBASE_GRAPH_KINDS.has(kind) ? this.codebaseShards.find(kind, id, version) : null;
     const raw = row as Record<string, unknown>;
     const partition = this.partitionPointerFromPayload(JSON.parse(String(raw.payload_json)) as JsonObject);
@@ -1446,7 +1446,7 @@ export class CraftStore {
     if (typeof kind !== "string" || !kind.trim()) throw new Error("kind must not be empty");
     if (!Array.isArray(ids) || ids.length > 10_000 || ids.some(id => typeof id !== "string" || !id.trim())) throw new Error("record ids exceed read bounds");
     const unique = [...new Set(ids)];
-    if (TRACE_KINDS.has(kind) || CODEBASE_GRAPH_KINDS.has(kind)) return unique.flatMap(id => {
+    if (TRACE_SHARDED_KINDS.has(kind) || CODEBASE_GRAPH_KINDS.has(kind)) return unique.flatMap(id => {
       const found = this.find(kind, id, undefined, hydrate);
       return found ? [found] : [];
     });
@@ -1484,9 +1484,9 @@ export class CraftStore {
       records.push(record);
       if (records.length === bounded) break;
     }
-    if (!TRACE_KINDS.has(kind) && !CODEBASE_GRAPH_KINDS.has(kind)) return records;
+    if (!TRACE_SHARDED_KINDS.has(kind) && !CODEBASE_GRAPH_KINDS.has(kind)) return records;
     const merged = new Map<string, JsonObject>();
-    for (const item of TRACE_KINDS.has(kind) ? this.traceShards.list(kind, bounded, predicate)
+    for (const item of TRACE_SHARDED_KINDS.has(kind) ? this.traceShards.list(kind, bounded, predicate)
       : this.codebaseShards.list(kind, bounded, predicate)) merged.set(String(item.id), item);
     for (const item of records) merged.set(String(item.id), item); // Legacy rows win until migrated.
     return [...merged.values()].sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)) || String(b.id).localeCompare(String(a.id))).slice(0, bounded);
@@ -1581,7 +1581,7 @@ export class CraftStore {
       SELECT id,MAX(version) version FROM records WHERE kind=? GROUP BY id
       ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind=?`)
       .get(kind, kind) as { count: number }).count);
-    return central + (TRACE_KINDS.has(kind) ? this.traceShards.count(kind)
+    return central + (TRACE_SHARDED_KINDS.has(kind) ? this.traceShards.count(kind)
       : CODEBASE_GRAPH_KINDS.has(kind) ? this.codebaseShards.count(kind) : 0);
   }
 
@@ -1599,7 +1599,7 @@ export class CraftStore {
       ) latest GROUP BY kind`).all(JSON.stringify(unique)) as Array<{ kind: string; count: number }>;
     for (const row of rows) counts[row.kind] = Number(row.count);
     for (const kind of unique) {
-      if (TRACE_KINDS.has(kind)) counts[kind] += this.traceShards.count(kind);
+      if (TRACE_SHARDED_KINDS.has(kind)) counts[kind] += this.traceShards.count(kind);
       else if (CODEBASE_GRAPH_KINDS.has(kind)) counts[kind] += this.codebaseShards.count(kind);
     }
     return counts;

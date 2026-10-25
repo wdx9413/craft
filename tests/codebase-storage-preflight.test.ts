@@ -79,6 +79,35 @@ test("Codebase preflight pages current, old project and missing Workspace revisi
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("Codebase preflight and migration accept only the exact repository-local runtime snapshot path", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-codebase-local-runtime-migration-"));
+  const paths = craftPaths(join(root, "data")), project = join(root, "project");
+  mkdirSync(project); writeFileSync(join(project, "a.ts"), "export const a = 1;\n");
+  const store = await new CraftStore(paths).open();
+  try {
+    const workspace = new WorkspaceState(store, paths);
+    workspace.open({ workspace_id: "repo", name: "repo", root_path: project, include_paths: ["a.ts"] });
+    workspace.checkpoint({ workspace_id: "repo", checkpoint_id: "local-runtime", label: "legacy" });
+    const legacy = join(project, ".craft_data", "codebase", "runtime", "workspaces", "repo", "snapshots", "local-runtime");
+    mkdirSync(dirname(legacy), { recursive: true });
+    renameSync(join(projectStorageDirectory(paths, project), "codebase", "snapshots", "repo", "local-runtime"), legacy);
+    const row = store.database.prepare("SELECT payload_json FROM records WHERE kind='workspace_checkpoint' AND id='local-runtime'")
+      .get() as { payload_json: string };
+    store.database.prepare("UPDATE records SET payload_json=? WHERE kind='workspace_checkpoint' AND id='local-runtime'")
+      .run(JSON.stringify({ ...JSON.parse(row.payload_json), snapshot_root: legacy }));
+    const preflight = codebaseStoragePreflight(paths, { max_records: 10 }).entries.find(item => item.id === "local-runtime")!;
+    assert.equal(preflight.status, "legacy_ready");
+    assert.equal(preflight.source_root, legacy);
+    const result = await migrateCodebaseSnapshots(store, [preflight]);
+    assert.equal(result.migrated, 1);
+    assert.deepEqual(result.blocked, []);
+    const current = codebaseStoragePreflight(paths, { max_records: 10 }).entries.find(item => item.id === "local-runtime")!;
+    assert.equal(current.status, "current");
+    assert.equal(readFileSync(join(String(current.target_root), "a.ts"), "utf8"), "export const a = 1;\n");
+    assert.equal(existsSync(legacy), true);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("Codebase preflight fails closed for missing, ambiguous and unsafe historical bindings", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-preflight-blocked-"));
   const paths = craftPaths(join(root, "data")), a = join(root, "a"), b = join(root, "b");
@@ -134,6 +163,66 @@ test("Codebase preflight rejects malformed records, non-directory roots and link
     assert.deepEqual(statuses, { "../escape": "invalid_checkpoint", "bad-path": "source_out_of_scope", "file-root": "missing_root",
       "invalid-json": "invalid_checkpoint", "invalid-shape": "invalid_checkpoint", linked: "missing_snapshot" });
     assert.throws(() => codebaseStoragePreflight(paths, { cursor: Buffer.from("{").toString("base64url") }), /cursor is invalid/u);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codebase migration recovers from an exact peer file in another Workspace of the same project", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-codebase-cross-workspace-recovery-"));
+  const paths = craftPaths(join(root, "data")), project = join(root, "project");
+  mkdirSync(project); writeFileSync(join(project, "a.ts"), "export const a = 1;\n");
+  const store = await new CraftStore(paths).open();
+  try {
+    const workspace = new WorkspaceState(store, paths);
+    workspace.open({ workspace_id: "peer-repo", name: "peer", root_path: project, include_paths: ["a.ts"] });
+    workspace.checkpoint({ workspace_id: "peer-repo", checkpoint_id: "peer-checkpoint", label: "peer" });
+    workspace.open({ workspace_id: "old-repo", name: "old", root_path: project, include_paths: ["a.ts"] });
+    workspace.checkpoint({ workspace_id: "old-repo", checkpoint_id: "old-checkpoint", label: "old" });
+    const legacy = join(project, ".craft_data", "codebase", "runtime", "workspaces", "old-repo", "snapshots", "old-checkpoint");
+    mkdirSync(dirname(legacy), { recursive: true });
+    renameSync(join(projectStorageDirectory(paths, project), "codebase", "snapshots", "old-repo", "old-checkpoint"), legacy);
+    const row = store.database.prepare("SELECT payload_json FROM records WHERE kind='workspace_checkpoint' AND id='old-checkpoint'")
+      .get() as { payload_json: string };
+    const original = JSON.parse(row.payload_json) as Record<string, unknown>;
+    store.database.prepare("UPDATE records SET payload_json=? WHERE kind='workspace_checkpoint' AND id='old-checkpoint'")
+      .run(JSON.stringify({ ...original, snapshot_root: legacy }));
+    writeFileSync(join(legacy, "a.ts"), "changed-size\n");
+    const entry = codebaseStoragePreflight(paths, { max_records: 10 }).entries.find(item => item.id === "old-checkpoint")!;
+    const result = await migrateCodebaseSnapshots(store, [entry], { recover_verified_peer: true });
+    assert.equal(result.migrated, 1);
+    assert.deepEqual(result.blocked, []);
+    assert.deepEqual(result.recovered.map(item => item.from_checkpoint_id), ["peer-checkpoint"]);
+    assert.equal(result.recovered[0]!.from_git_commit, null);
+    assert.equal(readFileSync(join(String(entry.target_root), "a.ts"), "utf8"), "export const a = 1;\n");
+    assert.equal(readFileSync(join(legacy, "a.ts"), "utf8"), "changed-size\n");
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codebase migration never recovers a digest-matching peer from another project", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-codebase-cross-project-recovery-"));
+  const paths = craftPaths(join(root, "data")), project = join(root, "project"), foreign = join(root, "foreign-project");
+  mkdirSync(project); mkdirSync(foreign);
+  for (const candidate of [project, foreign]) writeFileSync(join(candidate, "a.ts"), "export const a = 1;\n");
+  const store = await new CraftStore(paths).open();
+  try {
+    const workspace = new WorkspaceState(store, paths);
+    workspace.open({ workspace_id: "foreign-repo", name: "foreign", root_path: foreign, include_paths: ["a.ts"] });
+    workspace.checkpoint({ workspace_id: "foreign-repo", checkpoint_id: "foreign-checkpoint", label: "foreign" });
+    workspace.open({ workspace_id: "old-repo", name: "old", root_path: project, include_paths: ["a.ts"] });
+    workspace.checkpoint({ workspace_id: "old-repo", checkpoint_id: "old-checkpoint", label: "old" });
+    const legacy = join(project, ".craft_data", "codebase", "runtime", "workspaces", "old-repo", "snapshots", "old-checkpoint");
+    mkdirSync(dirname(legacy), { recursive: true });
+    renameSync(join(projectStorageDirectory(paths, project), "codebase", "snapshots", "old-repo", "old-checkpoint"), legacy);
+    const row = store.database.prepare("SELECT payload_json FROM records WHERE kind='workspace_checkpoint' AND id='old-checkpoint'")
+      .get() as { payload_json: string };
+    const original = JSON.parse(row.payload_json) as Record<string, unknown>;
+    store.database.prepare("UPDATE records SET payload_json=? WHERE kind='workspace_checkpoint' AND id='old-checkpoint'")
+      .run(JSON.stringify({ ...original, snapshot_root: legacy }));
+    writeFileSync(join(legacy, "a.ts"), "changed-size\n");
+    const entry = codebaseStoragePreflight(paths, { max_records: 10 }).entries.find(item => item.id === "old-checkpoint")!;
+    const result = await migrateCodebaseSnapshots(store, [entry], { recover_verified_peer: true });
+    assert.equal(result.migrated, 0);
+    assert.deepEqual(result.blocked.map(item => item.reason), ["verified_source_unavailable"]);
+    assert.equal(codebaseStoragePreflight(paths, { max_records: 10 }).entries.find(item => item.id === "old-checkpoint")?.status, "legacy_ready");
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 

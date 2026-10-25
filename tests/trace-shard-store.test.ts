@@ -29,6 +29,78 @@ test("new Trace writes stay outside the central database and remain readable aft
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("Codex Hook turn journals share Trace shard writes without entering Trace retention", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-hook-turn-shards-"));
+  const paths = craftPaths(root);
+  let store = await new CraftStore(paths).open();
+  try {
+    const turn = store.create("codex_hook_turn", "hook-turn-shard-a", {
+      trace_id: "hook-turn-shard-a", session_id: "session-a", turn_id: "turn-a", signals: [], content_stored: false,
+    });
+    assert.equal(store.database.prepare("SELECT count(*) n FROM records WHERE kind='codex_hook_turn'").get()?.n, 0);
+    assert.equal(store.find("codex_hook_turn", String(turn.id))?.turn_id, "turn-a");
+    assert.equal(store.count("codex_hook_turn"), 1);
+    store.save("codex_hook_turn", String(turn.id), { ...turn, trace_id: String(turn.trace_id), signals: [{ kind: "edit" }] });
+    assert.equal((store.list("codex_hook_turn", 10)[0]!.signals as unknown[]).length, 1);
+    assert.throws(() => store.createBatch([{ kind: "codex_hook_turn", id: "invalid-hook-turn", payload: { signals: [] } }]), /one Trace/u);
+    assert.deepEqual(store.createBatch([
+      { kind: "codex_hook_turn", id: "batch-hook-turn", payload: { trace_id: "batch-hook-trace", session_id: "session-batch", signals: [] } },
+      { kind: "trace_event", id: "batch-hook-event", payload: { trace_id: "batch-hook-trace", event_kind: "hook.test" } },
+    ]).map(item => item.version), [1, 1]);
+    assert.deepEqual(store.saveBatch([
+      { kind: "codex_hook_turn", id: "batch-hook-turn", payload: { trace_id: "batch-hook-trace", session_id: "session-batch", signals: [{ kind: "edit" }] } },
+      { kind: "trace_event", id: "batch-hook-event", payload: { trace_id: "batch-hook-trace", event_kind: "hook.updated" } },
+    ]).map(item => item.version), [2, 2]);
+    store.close();
+    store = await new CraftStore(paths).open();
+    assert.equal(store.get("codex_hook_turn", String(turn.id)).turn_id, "turn-a");
+    assert.equal((store.get("codex_hook_turn", "batch-hook-turn").signals as unknown[]).length, 1);
+    assert.equal(store.listTraceRetentionCandidates("9999-01-01T00:00:00.000Z", 10).length, 0);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Hook signal turn lookup uses scoped indexed rows across shards and orders only the requested turn", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-hook-signal-lookup-"));
+  const shards = new TraceShardStore(root);
+  try {
+    assert.deepEqual(shards.hookSignalsForTurn("project", "p1", "s1", "t1", 100), []);
+    for (let index = 0; index < 40; index++) {
+      const id = `hook-signal-${index}`;
+      const sameTurn = index % 2 === 0;
+      const observed = 40 - index;
+      shards.create("codex_hook_signal", id, { trace_id: id, scope: { kind: "project", id: "p1" },
+        session_id: sameTurn ? "s1" : "s2", turn_id: sameTurn ? "t1" : "t2", observed_at_ms: observed,
+        signal: { id, kind: "edit" }, content_stored: false });
+    }
+    const rows = shards.hookSignalsForTurn("project", "p1", "s1", "t1", 100);
+    assert.equal(rows.length, 20);
+    assert(rows.every(row => row.session_id === "s1" && row.turn_id === "t1"));
+    assert.deepEqual(rows.map(row => row.observed_at_ms), [...rows.map(row => row.observed_at_ms)].sort((a, b) => Number(a) - Number(b)));
+    shards.create("codex_hook_signal", "hook-signal-no-time", { trace_id: "hook-signal-no-time", scope: { kind: "project", id: "p1" },
+      session_id: "s1", turn_id: "t1", signal: { id: "hook-signal-no-time", kind: "edit" }, content_stored: false });
+    assert.equal(shards.hookSignalsForTurn("project", "p1", "s1", "t1", 100).at(-1)?.id, "hook-signal-no-time");
+    for (const id of ["hook-signal-tie-b", "hook-signal-tie-a"]) shards.create("codex_hook_signal", id, {
+      trace_id: id, scope: { kind: "project", id: "p1" }, session_id: "s1", turn_id: "t1", observed_at_ms: 50,
+      signal: { id, kind: "edit" }, content_stored: false,
+    });
+    const tied = shards.hookSignalsForTurn("project", "p1", "s1", "t1", 100).filter(row => row.observed_at_ms === 50);
+    assert.deepEqual(tied.map(row => row.id), ["hook-signal-tie-a", "hook-signal-tie-b"]);
+    assert.deepEqual(shards.hookSignalsForTurn("project", "p2", "s1", "t1", 100), []);
+    assert.equal(shards.hookSignalsForTurn("project", "p1", "s1", "t1", 3).length, 3);
+    assert.deepEqual(shards.hookSignalsForTurn("project", "p1", "s1", "t1", 0), []);
+    const legacyRoot = await mkdtemp(join(tmpdir(), "craft-hook-signal-legacy-shard-"));
+    const legacyDirectory = join(legacyRoot, "trace", "v1");
+    await mkdir(legacyDirectory, { recursive: true });
+    const legacyDb = new DatabaseSync(join(legacyDirectory, "00.db"));
+    legacyDb.exec("CREATE TABLE records(kind TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(kind,id,version))");
+    legacyDb.close();
+    const legacyShards = new TraceShardStore(legacyRoot);
+    assert.deepEqual(legacyShards.hookSignalsForTurn("project", "p1", "s1", "t1", 10), []);
+    legacyShards.close();
+    await rm(legacyRoot, { recursive: true, force: true });
+  } finally { shards.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("legacy central Traces keep their existing write path", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-trace-legacy-"));
   const store = await new CraftStore(craftPaths(root)).open();

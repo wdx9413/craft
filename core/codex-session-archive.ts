@@ -134,7 +134,8 @@ function messageText(value: unknown): string {
 
 /** Keep only bounded task prose; never return code, paths, credentials, or opaque identifiers. */
 function sanitizedTaskProse(value: string, maximum: number): string | null {
-  const result = value.replace(/(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/giu, "[已脱敏]")
+  const result = value.replace(/\bbearer\s+[^\s,，;；。！？]+/giu, "[已脱敏]")
+    .replace(/(?:api[_ -]?key|authorization|cookie|password|secret|access[_ -]?token|token|ticket|账号|账户|帐号|密钥|密码|口令|令牌|凭证|票据)\s*(?::|=|：|＝|\bis\b|\bare\b|是|为)\s*["'“‘]?[^\s,，;；。！？]+/giu, "[已脱敏]")
     .replace(/```[\s\S]*?```/gu, " ").replace(/`[^`]*`/gu, " ")
     .replace(/https?:\/\/\S+/giu, " ").replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/gu, " ")
     .replace(/(?:\/[\w.-]+){2,}|[A-Za-z]:\\(?:[^\\\s]+\\)*[^\\\s]*/gu, " ")

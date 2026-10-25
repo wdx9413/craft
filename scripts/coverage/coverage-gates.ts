@@ -70,6 +70,11 @@ for (const group of manifest.groups) {
     console.log(`NOTE  ${group.name}: branch gate skipped on ${process.platform}${group.branchesNote ? ` -- ${group.branchesNote}` : ""}`);
   }
 
+  // A group may contain repository and semantic-index integration tests that
+  // take minutes. spawnSync captures child output until exit, so announce the
+  // active group before blocking; otherwise a healthy long group looks stuck.
+  process.stdout.write(`RUN   ${group.name} (${group.tests.length} test files)\n`);
+
   // A spawn can fail in two ways: some sandboxes return a result carrying `error`,
   // others fail the call outright. Both mean the group never ran, so both are
   // handled here rather than crashing the script on the first group and hiding the

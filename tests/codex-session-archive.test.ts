@@ -191,6 +191,31 @@ test("indexes digest-only evidence from completed Codex shell test commands for 
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("sanitizes Chinese and English credential labels before returning task excerpts", async () => {
+  const f = await fixture();
+  try {
+    const goal = "检查接口账号是synthetic-account 密钥是synthetic-secret-value 并确认权限";
+    const finalText = "复核通过：密码为synthetic-password-value，令牌是synthetic-token-value。";
+    const turn = f.turn("credential-turn", goal, finalText);
+    turn.splice(turn.length - 1, 0, f.event({ type: "item_completed", turn_id: "credential-turn", item: {
+      type: "CommandExecution", id: "credential-test", command: ["/bin/zsh", "-lc", `cd '${f.project}' && pnpm test`],
+      aggregated_output: [{ type: "text", text: "Tests 3 passed (3)" }], exit_code: 0, status: "completed",
+    } }));
+    await f.writeSession(turn);
+    const env = { CRAFT_DATA_DIR: join(f.root, "data") } as NodeJS.ProcessEnv;
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options, env);
+    const state = JSON.parse(await readFile(f.state, "utf8")) as { tasks: Record<string, CodexSessionTaskIndex> };
+    const task = Object.values(state.tasks)[0]!;
+    const excerpt = await readCodexSessionTaskExcerpt(task.task_id,
+      { ...options, expected_partition: task.dataset_partition }, env);
+    assert.equal(excerpt.status, "ready");
+    assert.match(String(excerpt.task_goal), /\[已脱敏\]/u);
+    assert.match(String(excerpt.task_result), /\[已脱敏\]/u);
+    assert.doesNotMatch(JSON.stringify(excerpt), /synthetic-account|synthetic-secret-value|synthetic-password-value|synthetic-token-value/u);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("backfills transcript evidence from unchanged indexed sessions without losing Context verification", async () => {
   const f = await fixture();
   try {
