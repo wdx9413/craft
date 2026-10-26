@@ -124,26 +124,26 @@ export function sanitizedExperienceTaskGoal(value: unknown): string | null {
   return sanitizeCodexTaskGoal(value);
 }
 
-function experienceTaskGoalArgs(service: CraftService, input: HookInput) {
-  const root = text(input.cwd), sessionId = text(input.session_id), turnId = text(input.turn_id), scope = codexProjectScope(root);
+function experienceTaskGoalArgs(service: CraftService, input: HookInput, scope: HookProjectScope | null) {
+  const root = text(input.cwd), sessionId = text(input.session_id), turnId = text(input.turn_id);
   if (!root || !sessionId || !turnId || !scope) return null;
   return { experience_dir: projectExperienceDirectory(service.store, scope.id, root, true), scope: scope.id, session_id: sessionId, turn_id: turnId };
 }
 
 type Signal = HookSignal;
+type HookProjectScope = { kind: "project"; id: string };
 
 type ProjectScenario = { scenario_key: string; coarse_scenario_key?: string };
 
 /** A verifier can resolve a project-owned fine scene, but cannot define semantic task identity by itself. */
-function projectScenarioKey(input: HookInput, signal: Signal, service: CraftService): ProjectScenario | null {
+function projectScenarioKey(input: HookInput, signal: Signal, service: CraftService, projectScope: HookProjectScope): ProjectScenario | null {
   if (signal.kind !== "verification" || signal.outcome === "unknown") return null;
-  const root = text(input.cwd);
-  if (!root) return null;
+  const root = text(input.cwd) as string;
   // This helper is called only for a sanitized verification Signal; the same
   // command extraction above therefore always produced its verifier command.
   const command = nestedText(input.tool_input ?? input.toolInput ?? input.input, ["command", "cmd", "script"])!;
   try {
-    const scope = codexProjectScope(root)!;
+    const scope = projectScope;
     const directory = projectExperienceDirectory(service.store, scope.id, root);
     const path = join(directory, "experience-scenarios.json");
     for (const entry of [directory, path]) {
@@ -194,14 +194,14 @@ export class HookTurnJournal {
   readonly service: CraftService;
   constructor(service: CraftService) { this.service = service; }
 
-  record(input: HookInput, signal: Signal): JsonObject | null {
-    const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
+  record(input: HookInput, signal: Signal, projectScope?: HookProjectScope | null): JsonObject | null {
+    const scope = projectScope === undefined ? codexProjectScope(input.cwd) : projectScope; const turn = this.turn(input);
     if (!scope || !turn) return null;
     const journalId = this.journalId(scope, turn, input);
     const legacyRow = this.service.store.database.prepare("SELECT 1 FROM records WHERE kind='codex_hook_turn' AND id=? LIMIT 1")
       .get(journalId) !== undefined;
     if (process.env.CRAFT_HOOK_MODE === "1" && !legacyRow) {
-      const prior = this.find(input, false);
+      const prior = this.find(input, false, scope);
       if (prior?.closed_at) return prior;
       const signalId = signal.id;
       return this.service.store.traceTransaction(signalId, () => {
@@ -212,7 +212,7 @@ export class HookTurnJournal {
       });
     }
     const write = () => {
-      const existing = this.find(input);
+      const existing = this.find(input, undefined, scope);
       const currentId = existing ? String(existing.id) : journalId;
       if (existing?.closed_at) return null;
       const priorSignals = Array.isArray(existing?.signals) ? existing.signals as JsonObject[] : [];
@@ -241,17 +241,17 @@ export class HookTurnJournal {
     return legacyRow ? this.service.store.transaction(write) : this.service.store.traceTransaction(journalId, write);
   }
 
-  bindContextReceipt(input: HookInput, receipt: JsonObject): void {
-    const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
+  bindContextReceipt(input: HookInput, receipt: JsonObject, projectScope?: HookProjectScope | null): void {
+    const scope = projectScope === undefined ? codexProjectScope(input.cwd) : projectScope; const turn = this.turn(input);
     if (!scope || !turn) return;
-    const existing = this.find(input, false);
+    const existing = this.find(input, false, scope);
     const id = existing ? String(existing.id) : this.journalId(scope, turn, input);
     const prior = existing ?? this.findById(id);
     this.service.store.save("codex_hook_turn", id, { ...(prior ?? { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals: [], has_edit: false, verification_outcome: null, content_stored: false }), trace_id: String(prior?.trace_id ?? id), context_receipt_id: receipt.id, content_free: true });
   }
 
-  find(input: HookInput, includePendingSignals = process.env.CRAFT_HOOK_MODE === "1"): JsonObject | null {
-    const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
+  find(input: HookInput, includePendingSignals = process.env.CRAFT_HOOK_MODE === "1", projectScope?: HookProjectScope | null): JsonObject | null {
+    const scope = projectScope === undefined ? codexProjectScope(input.cwd) : projectScope; const turn = this.turn(input);
     if (!scope || !turn) return null;
     const journalId = this.journalId(scope, turn, input);
     const current = this.findById(journalId);
@@ -293,10 +293,10 @@ export class HookTurnJournal {
       : this.service.store.traceShards.find("codex_hook_turn", id, undefined, id);
   }
 
-  close(input: HookInput): void {
-    const scope = codexProjectScope(input.cwd), turn = this.turn(input);
+  close(input: HookInput, projectScope?: HookProjectScope | null): void {
+    const scope = projectScope === undefined ? codexProjectScope(input.cwd) : projectScope, turn = this.turn(input);
     if (!scope || !turn) return;
-    const existing = this.find(input);
+    const existing = this.find(input, undefined, scope);
     const journalId = existing ? String(existing.id) : this.journalId(scope, turn, input);
     if (existing?.closed_at) return;
     const next = { ...(existing ? payload(existing) : { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn,
@@ -337,17 +337,18 @@ export class HookLearningCoordinator {
     })[0] ?? null;
   }
 
-  finalize(input: HookInput): JsonObject | null {
-    const journal = this.journal.find(input);
+  finalize(input: HookInput, projectScope?: HookProjectScope | null): JsonObject | null {
+    const resolvedProjectScope = projectScope === undefined && typeof input.cwd === "string"
+      ? (this.service.scopeIdentityResolveProject({ project_root: input.cwd }).identity as JsonObject).canonical_scope as HookProjectScope
+      : projectScope;
+    const journal = this.journal.find(input, undefined, resolvedProjectScope);
     if (!journal || journal.has_edit !== true || !["passed", "failed"].includes(String(journal.verification_outcome))) return null;
     if (typeof journal.context_receipt_id !== "string") return null;
     const projectRoot = text(input.cwd);
-    if (projectRoot) {
-      const resolved = this.service.scopeIdentityResolveProject({ project_root: projectRoot }).identity as JsonObject;
+    if (projectRoot && resolvedProjectScope) {
       const receipt = this.service.store.find("context_resolution_receipt", String(journal.context_receipt_id));
       const receiptScope = receipt?.scope as JsonObject | undefined;
-      if (receiptScope?.kind === "project" && resolved.canonical_scope
-        && stableDigest(resolved.canonical_scope) !== stableDigest(receiptScope)) throw new Error("Hook project root does not match the Context receipt scope");
+      if (receiptScope?.kind === "project" && stableDigest(resolvedProjectScope) !== stableDigest(receiptScope)) throw new Error("Hook project root does not match the Context receipt scope");
     }
     const prior = this.finalizedTurn(input, journal);
     if (prior) {
@@ -365,7 +366,7 @@ export class HookLearningCoordinator {
       this.service.store.save("codex_hook_turn", String(journal.id), { ...payload(journal), trace_id: String(journal.trace_id ?? journal.id), scenario_key: suppliedScenario, signals: alignedSignals });
     }
     const scenario = suppliedScenario ?? text(journal.scenario_key);
-    const taskGoalArgs = scenario ? null : experienceTaskGoalArgs(this.service, input);
+    const taskGoalArgs = scenario ? null : experienceTaskGoalArgs(this.service, input, resolvedProjectScope as HookProjectScope);
     const taskGoal = taskGoalArgs ? readExperienceTaskGoal(taskGoalArgs) : null;
     const signals = journal.signals as JsonObject[];
     const lastVerifier = [...signals].reverse().find(signal => signal.kind === "verification" && typeof signal.verifier === "string");
@@ -395,13 +396,19 @@ export class CodexHookBridge {
   async handle(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
     const rawEvent = text(input.hook_event_name);
     const event = rawEvent && ["SessionStart", "SessionEnd", "UserPromptSubmit", "PostToolUse", "Stop"].includes(rawEvent) ? rawEvent : "unknown";
+    // Resolve and bind the Git project identity once per Hook request. The old
+    // path repeated synchronous `git config` calls in turn correlation,
+    // retrieval, scenario classification, and journal persistence.
+    const projectScope = typeof input.cwd === "string"
+      ? (this.service.scopeIdentityResolveProject({ project_root: input.cwd }).identity as JsonObject).canonical_scope as HookProjectScope
+      : null;
     // PostToolUse fires for every tool. In the short-lived Host adapter the
     // content-free hook-runtime ledger is the call receipt; avoid creating and
     // finalizing a separate SQLite Trace for each signal. This removes four
     // extra writer transactions from the highest-volume Hook event.
-    if (process.env.CRAFT_HOOK_MODE === "1" && event === "PostToolUse") return await this.dispatch(member, input);
+    if (process.env.CRAFT_HOOK_MODE === "1" && event === "PostToolUse") return await this.dispatch(member, input, projectScope);
     const captured = await new ComponentTraceKernel(this.service.trace, "hook").capture({ requestId: hookRequestId(), component: "craft-hook",
-      operation: `handle.${member}.${event}`, input: { member, hook_event: event }, handler: () => this.dispatch(member, input) });
+      operation: `handle.${member}.${event}`, input: { member, hook_event: event }, handler: () => this.dispatch(member, input, projectScope) });
     if (!captured.ok) {
       this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, error_type: captured.error instanceof Error ? captured.error.name : "unknown" });
       return {};
@@ -409,9 +416,9 @@ export class CodexHookBridge {
     return captured.result ?? {};
   }
 
-  private async dispatch(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
+  private async dispatch(member: CodexHookMember, input: HookInput, projectScope: HookProjectScope | null): Promise<JsonObject> {
       const event = text(input.hook_event_name) as HookEvent | null;
-      input = this.correlateTurn(input, event);
+      input = this.correlateTurn(input, event, projectScope);
       if (member === "context") {
         if (event === "SessionStart") return {};
         if (event === "SessionEnd") {
@@ -421,25 +428,25 @@ export class CodexHookBridge {
           this.lifecycle("memory", event, input);
           return {};
         }
-        if (event === "UserPromptSubmit") return await this.prompt(member, input);
-        if (event === "PostToolUse") return this.tool(input);
+        if (event === "UserPromptSubmit") return await this.prompt(member, input, projectScope);
+        if (event === "PostToolUse") return this.tool(input, projectScope);
         if (event === "Stop") {
           // Experience owns task finalization. It also records the one Context
           // usage receipt, so invoking the other two no-op stop handlers only
           // duplicates feedback, activation proofs, and lifecycle writes.
-          this.stop("experience", input);
+          this.stop("experience", input, projectScope);
         }
         return {};
       }
       if (event === "SessionStart" || event === "SessionEnd") return this.lifecycle(member, event, input);
-      if (event === "UserPromptSubmit") return await this.prompt(member, input);
-      if (event === "PostToolUse" && member === "experience") return this.tool(input);
-      if (event === "Stop") return this.stop(member, input);
+      if (event === "UserPromptSubmit") return await this.prompt(member, input, projectScope);
+      if (event === "PostToolUse" && member === "experience") return this.tool(input, projectScope);
+      if (event === "Stop") return this.stop(member, input, projectScope);
       return {};
   }
 
-  private correlateTurn(input: HookInput, event: HookEvent | null): HookInput {
-    const scope = codexProjectScope(input.cwd), sessionId = text(input.session_id);
+  private correlateTurn(input: HookInput, event: HookEvent | null, scope: HookProjectScope | null): HookInput {
+    const sessionId = text(input.session_id);
     if (!scope || !sessionId) return input;
     const sessionKey = `context_hook_session_${stableDigest({ scope, session_id: sessionId }).slice(-24)}`;
     // PostToolUse only reads the pending turn. Opening an IMMEDIATE transaction
@@ -477,18 +484,17 @@ export class CodexHookBridge {
     });
   }
 
-  private async prompt(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
-    const scope = codexProjectScope(input.cwd); const prompt = text(input.prompt) ?? text(input.user_prompt);
+  private async prompt(member: CodexHookMember, input: HookInput, scope: HookProjectScope | null): Promise<JsonObject> {
+    const prompt = text(input.prompt) ?? text(input.user_prompt);
     if (!scope || !prompt) return {};
     const members = member === "context" ? CONTEXT_MEMBERS : [member];
     // Persist the current checkout only as an alias. The receipt still names the
     // canonical Git identity, so it is portable and does not leak the path.
-    if (typeof input.cwd === "string") this.service.scopeIdentityResolveProject({ project_root: input.cwd });
     if (members.includes("experience")) {
       const taskGoal = sanitizedExperienceTaskGoal(prompt);
       if (taskGoal) {
         try {
-          const args = experienceTaskGoalArgs(this.service, input);
+          const args = experienceTaskGoalArgs(this.service, input, scope);
           if (args) storeExperienceTaskGoal({ ...args, task_goal: taskGoal });
         }
         catch { this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "experience", event: "UserPromptSubmit", error_type: "storage_unavailable" }); }
@@ -537,7 +543,7 @@ export class CodexHookBridge {
         .filter(entry => resolvedRefs.some(ref => contextAssetMatches(ref, entry.ref)))
       : null;
     const receipt = resolved.receipt as JsonObject | null;
-    if (receipt) this.journal.bindContextReceipt(input, receipt);
+    if (receipt) this.journal.bindContextReceipt(input, receipt, scope);
     return this.service.store.transaction(() => {
       assertContextReadCurrent(this.service.store, receipt);
       let available: HookEmissionCandidate[] = candidateRefs ?? candidates.map(candidate => ({ candidate, ref: null }));
@@ -577,26 +583,24 @@ export class CodexHookBridge {
     });
   }
 
-  private tool(input: HookInput): JsonObject {
+  private tool(input: HookInput, projectScope: HookProjectScope | null): JsonObject {
     const captured = this.signals.signal(input); if (!captured) return {};
-    const root = text(input.cwd);
-    if (root) this.service.scopeIdentityResolveProject({ project_root: root });
-    const scenario = projectScenarioKey(input, captured, this.service);
+    const scenario = projectScope ? projectScenarioKey(input, captured, this.service, projectScope) : null;
     this.journal.record(input, scenario ? { ...captured, scenario_key: scenario.scenario_key,
-      ...(scenario.coarse_scenario_key ? { coarse_scenario_key: scenario.coarse_scenario_key } : {}) } : captured);
+      ...(scenario.coarse_scenario_key ? { coarse_scenario_key: scenario.coarse_scenario_key } : {}) } : captured, projectScope);
     return {};
   }
 
-  private stop(member: ComponentHookMember, input: HookInput): JsonObject {
+  private stop(member: ComponentHookMember, input: HookInput, projectScope: HookProjectScope | null): JsonObject {
     const finalized = member === "experience" ? this.service.store.transaction(() => {
-      const result = this.learning.finalize(input);
-      const goalArgs = experienceTaskGoalArgs(this.service, input);
+      const result = this.learning.finalize(input, projectScope);
+      const goalArgs = experienceTaskGoalArgs(this.service, input, projectScope);
       if (goalArgs) deleteExperienceTaskGoal(goalArgs);
-      this.recordObservedContextUse(input);
-      this.journal.close(input);
+      this.recordObservedContextUse(input, projectScope);
+      this.journal.close(input, projectScope);
       return result;
     }) : null;
-    if (member !== "experience") this.recordObservedContextUse(input);
+    if (member !== "experience") this.recordObservedContextUse(input, projectScope);
     this.service.activationProofRecord({ host: hookHost(input), component: member, event: "Stop", session_id: text(input.session_id) ?? "unknown",
       turn_id: text(input.turn_id), memory_written: false, observation_written: finalized !== null,
       plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
@@ -605,8 +609,8 @@ export class CodexHookBridge {
   }
 
   /** Record that exact Context assets were shown and the turn's observed outcome, without calling them helpful. */
-  private recordObservedContextUse(input: HookInput): void {
-    const journal = this.journal.find(input);
+  private recordObservedContextUse(input: HookInput, projectScope?: HookProjectScope | null): void {
+    const journal = this.journal.find(input, undefined, projectScope);
     if (!journal || typeof journal.context_receipt_id !== "string" || typeof journal.turn_id !== "string") return;
     const turnOutcome = journal.verification_outcome === "passed" || journal.verification_outcome === "failed"
       ? String(journal.verification_outcome) : "unverified";
