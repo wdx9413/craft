@@ -336,30 +336,34 @@ export class CodebaseIndexKernel {
   }
 
   private projectContext(args: JsonObject): JsonObject {
-    return this.store.transaction(() => {
-      const { index, workspace } = this.readyIndex(args);
-      const query = text(args.query, "query"), limit = bounded(args.limit, "limit", 100);
-      if (args.required_refs !== undefined && !Array.isArray(args.required_refs)) throw new Error("required_refs must be an array");
-      const required = ((args.required_refs ?? []) as unknown[]).map(requiredContextRef).filter(ref => ref.member === "codebase");
-      const scope = args.scope as JsonObject | undefined ?? { kind: "workspace", id: workspace.id };
-      const normalize = (node: JsonObject): JsonObject => ({ node_id: node.id, path: node.path, name: node.name, kind: node.kind, language: node.language, selection_reason: node.selection_reason, span: node.span, source_digest: node.source_digest, version: index.version, index_id: index.id, checkpoint_id: index.checkpoint_id });
-      const graph = this.loadGraph(index);
-      const found = codeContextCandidates({ ...graph }, query, limit);
-      const candidates = [...found.symbols as JsonObject[]];
-      for (const node of graph.nodes) if (required.some(ref => contextAssetMatches(ref, contextAssetRef("codebase", normalize(node), scope))) && !candidates.some(candidate => candidate.id === node.id)) candidates.unshift(node);
-      const references = candidates.map(normalize);
-      for (const ref of required) if (!references.some(item => contextAssetMatches(ref, contextAssetRef("codebase", item, scope)))) throw new Error("Required Codebase reference is unavailable");
-      const activation = this.store.get("codebase_activation", String(args.activation_id ?? `codebase_activation_${workspace.id}`));
-      const checkpoint = this.store.get("workspace_checkpoint", String(index.checkpoint_id));
-      const readRefs: ContextReadRef[] = [
-        { kind: "codebase_index", id: String(index.id), version: Number(index.version) },
-        { kind: "workspace", id: String(workspace.id), version: Number(workspace.version) },
-        { kind: "workspace_checkpoint", id: String(checkpoint.id), version: Number(checkpoint.version) },
-        { kind: "codebase_activation", id: String(activation.id), version: Number(activation.version) },
-      ];
-      return { workspace_id: workspace.id, index_id: index.id, checkpoint_id: index.checkpoint_id, activation_id: activation.id,
-        candidates: references, query_omitted_count: found.omitted_count, read_refs: readRefs, configuration_digest: this.repositoryConfigurationDigest(workspace), candidate_only: true };
-    });
+    const { index, workspace } = this.readyIndex(args);
+    const query = text(args.query, "query"), limit = bounded(args.limit, "limit", 100);
+    if (args.required_refs !== undefined && !Array.isArray(args.required_refs)) throw new Error("required_refs must be an array");
+    const required = ((args.required_refs ?? []) as unknown[]).map(requiredContextRef).filter(ref => ref.member === "codebase");
+    const scope = args.scope as JsonObject | undefined ?? { kind: "workspace", id: workspace.id };
+    const normalize = (node: JsonObject): JsonObject => ({ node_id: node.id, path: node.path, name: node.name, kind: node.kind, language: node.language, selection_reason: node.selection_reason, span: node.span, source_digest: node.source_digest, version: index.version, index_id: index.id, checkpoint_id: index.checkpoint_id });
+    const configurationDigest = this.repositoryConfigurationDigest(workspace);
+    // Graph files are immutable and this operation only reads. Do not hold the
+    // shared SQLite writer while loading/ranking a repository-sized graph.
+    const graph = this.loadGraph(index);
+    const found = codeContextCandidates({ ...graph }, query, limit);
+    const candidates = [...found.symbols as JsonObject[]];
+    for (const node of graph.nodes) if (required.some(ref => contextAssetMatches(ref, contextAssetRef("codebase", normalize(node), scope))) && !candidates.some(candidate => candidate.id === node.id)) candidates.unshift(node);
+    const references = candidates.map(normalize);
+    for (const ref of required) if (!references.some(item => contextAssetMatches(ref, contextAssetRef("codebase", item, scope)))) throw new Error("Required Codebase reference is unavailable");
+    const activation = this.store.get("codebase_activation", String(args.activation_id ?? `codebase_activation_${workspace.id}`));
+    const checkpoint = this.store.get("workspace_checkpoint", String(index.checkpoint_id));
+    const readRefs: ContextReadRef[] = [
+      { kind: "codebase_index", id: String(index.id), version: Number(index.version) },
+      { kind: "workspace", id: String(workspace.id), version: Number(workspace.version) },
+      { kind: "workspace_checkpoint", id: String(checkpoint.id), version: Number(checkpoint.version) },
+      { kind: "codebase_activation", id: String(activation.id), version: Number(activation.version) },
+    ];
+    const projection = { workspace_id: workspace.id, index_id: index.id, checkpoint_id: index.checkpoint_id, activation_id: activation.id,
+      candidates: references, query_omitted_count: found.omitted_count, read_refs: readRefs, configuration_digest: configurationDigest, candidate_only: true };
+    assertContextReadCurrent(this.store, projection);
+    if (this.repositoryConfigurationDigest(workspace) !== configurationDigest) throw new Error("Codebase repository configuration changed during projection");
+    return projection;
   }
 
   /** Revalidate the exact index/activation and selected file digests after shared Context awaits. */

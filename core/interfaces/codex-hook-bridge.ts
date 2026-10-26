@@ -400,7 +400,12 @@ export class CodexHookBridge {
     // path repeated synchronous `git config` calls in turn correlation,
     // retrieval, scenario classification, and journal persistence.
     const projectScope = typeof input.cwd === "string"
-      ? (this.service.scopeIdentityResolveProject({ project_root: input.cwd }).identity as JsonObject).canonical_scope as HookProjectScope
+      ? process.env.CRAFT_HOOK_MODE === "1" && event === "PostToolUse"
+        // High-volume signal writes only need the deterministic canonical ID.
+        // Registering the same local alias on every edit/verification adds a
+        // database read and can open a writer transaction on the Hook path.
+        ? codexProjectScope(input.cwd)
+        : (this.service.scopeIdentityResolveProject({ project_root: input.cwd }).identity as JsonObject).canonical_scope as HookProjectScope
       : null;
     // PostToolUse fires for every tool. In the short-lived Host adapter the
     // content-free hook-runtime ledger is the call receipt; avoid creating and

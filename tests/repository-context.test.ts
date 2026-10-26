@@ -8,7 +8,7 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
-import { repositoryRoot, repositoryFiles, repositoryPolicyDigest } from "../capability/craft-codebase/repository-files.ts";
+import { repositoryRoot, repositoryFiles, repositoryPolicyDigest, repositoryPolicySnapshot, repositoryPolicySnapshotCurrent } from "../capability/craft-codebase/repository-files.ts";
 import { basicAnalysis } from "../capability/craft-codebase/basic-analysis.ts";
 import { CodebaseIndexKernel } from "../capability/craft-codebase/codebase-index.ts";
 import { ensureRepository } from "../capability/craft-codebase/repository-onboarding.ts";
@@ -1646,29 +1646,63 @@ test("repository source discovery never indexes project Craft data even when Git
 
 test("repository policy digest detects same-path ignore and Codebase config edits", async () => {
   const f = await fixture();
-  const oldXdg = process.env.XDG_CONFIG_HOME, oldGlobalConfig = process.env.GIT_CONFIG_GLOBAL, oldNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
+  const oldXdg = process.env.XDG_CONFIG_HOME, oldGlobalConfig = process.env.GIT_CONFIG_GLOBAL, oldNoSystem = process.env.GIT_CONFIG_NOSYSTEM, oldAutoIndex = process.env.CRAFT_CODEBASE_AUTO_INDEX;
   try {
     process.env.XDG_CONFIG_HOME = join(f.root, "empty-xdg");
     process.env.GIT_CONFIG_GLOBAL = join(f.root, "empty-git-config");
     process.env.GIT_CONFIG_NOSYSTEM = "1";
     writeFileSync(process.env.GIT_CONFIG_GLOBAL, "");
+    const noConfiguredExclude = (root: string, args: string[], input?: string) => {
+      if (args[0] === "config") throw Object.assign(new Error("No configured global exclude"), { status: 1 });
+      return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", input, stdio: ["pipe", "pipe", "ignore"] });
+    };
+    const noExcludeSnapshot = repositoryPolicySnapshot(f.repo, noConfiguredExclude);
+    assert.equal(repositoryPolicySnapshotCurrent(noExcludeSnapshot, noConfiguredExclude), true);
+    const configCommandFailure = (root: string, args: string[], input?: string) => {
+      if (args[0] === "config") throw Object.assign(new Error("Git config failed"), { status: 2 });
+      return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", input, stdio: ["pipe", "pipe", "ignore"] });
+    };
+    assert.throws(() => repositoryPolicySnapshotCurrent(noExcludeSnapshot, configCommandFailure), /Git config failed/u);
+    const configuredXdg = process.env.XDG_CONFIG_HOME;
+    delete process.env.XDG_CONFIG_HOME;
+    const homeDefaultSnapshot = repositoryPolicySnapshot(f.repo, noConfiguredExclude);
+    assert.equal(repositoryPolicySnapshotCurrent(homeDefaultSnapshot, noConfiguredExclude), true);
+    process.env.XDG_CONFIG_HOME = configuredXdg;
     const initial = repositoryPolicyDigest(f.repo);
     f.write(".gitignore", "first.ts\n");
     const firstIgnore = repositoryPolicyDigest(f.repo);
     assert.notEqual(firstIgnore, initial);
+    const snapshot = repositoryPolicySnapshot(f.repo);
+    assert.equal(repositoryPolicySnapshotCurrent(snapshot), true);
     f.write(".gitignore", "second.ts\n");
+    assert.equal(repositoryPolicySnapshotCurrent(snapshot), false);
     assert.notEqual(repositoryPolicyDigest(f.repo), firstIgnore);
+    mkdirSync(join(f.root, "empty-xdg", "git"), { recursive: true });
+    const temporaryIgnore = join(f.root, "empty-xdg", "git", "ignore");
+    writeFileSync(temporaryIgnore, "temporary-ignore.ts\n");
+    const ignoreSnapshot = repositoryPolicySnapshot(f.repo);
+    unlinkSync(temporaryIgnore);
+    assert.equal(repositoryPolicySnapshotCurrent(ignoreSnapshot), false);
+    mkdirSync(temporaryIgnore);
+    assert.throws(() => repositoryPolicySnapshotCurrent(ignoreSnapshot), /EISDIR|illegal operation on a directory/u);
+    rmSync(temporaryIgnore, { recursive: true, force: true });
+    rmSync(join(f.root, "empty-xdg", "git"), { recursive: true, force: true });
     f.write(".craft-codebase.json", JSON.stringify({ exclude_paths: ["generated"] }));
     const firstConfig = repositoryPolicyDigest(f.repo);
+    const configSnapshot = repositoryPolicySnapshot(f.repo);
+    assert.equal(repositoryPolicySnapshotCurrent(configSnapshot), true);
     f.write(".craft-codebase.json", JSON.stringify({ exclude_paths: ["fixtures"] }));
+    assert.equal(repositoryPolicySnapshotCurrent(configSnapshot), false);
     assert.notEqual(repositoryPolicyDigest(f.repo), firstConfig);
     unlinkSync(join(f.repo, ".craft-codebase.json"));
     writeFileSync(join(f.root, "outside-config.json"), "{}");
     symlinkSync(join(f.root, "outside-config.json"), join(f.repo, ".craft-codebase.json"));
     assert.throws(() => repositoryPolicyDigest(f.repo), /regular file/u);
+    assert.throws(() => repositoryPolicySnapshotCurrent(configSnapshot), /regular file/u);
     unlinkSync(join(f.repo, ".craft-codebase.json"));
     mkdirSync(join(f.repo, ".craft-codebase.json"));
     assert.throws(() => repositoryPolicyDigest(f.repo), /regular file/u);
+    assert.throws(() => repositoryPolicySnapshotCurrent(configSnapshot), /regular file/u);
     rmSync(join(f.repo, ".craft-codebase.json"), { recursive: true });
     f.write(".git/info/exclude", "local-ignore.ts\n");
     const localExclude = repositoryPolicyDigest(f.repo);
@@ -1677,6 +1711,13 @@ test("repository policy digest detects same-path ignore and Codebase config edit
     const globalIgnore = join(f.root, "global-ignore");
     writeFileSync(globalIgnore, "first-global-ignore.ts\n");
     f.git("config", "core.excludesfile", globalIgnore);
+    const configuredSnapshot = repositoryPolicySnapshot(f.repo);
+    assert.equal(repositoryPolicySnapshotCurrent(configuredSnapshot), true);
+    f.git("config", "core.excludesfile", join(f.root, "different-global-ignore"));
+    assert.equal(repositoryPolicySnapshotCurrent(configuredSnapshot), false);
+    f.git("config", "core.excludesfile", globalIgnore);
+    process.env.CRAFT_CODEBASE_AUTO_INDEX = oldAutoIndex === "0" ? "1" : "0";
+    assert.equal(repositoryPolicySnapshotCurrent(configuredSnapshot), false);
     const firstGlobal = repositoryPolicyDigest(f.repo);
     writeFileSync(globalIgnore, "second-global-ignore.ts\n");
     assert.notEqual(repositoryPolicyDigest(f.repo), firstGlobal);
@@ -1692,6 +1733,7 @@ test("repository policy digest detects same-path ignore and Codebase config edit
     if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = oldXdg;
     if (oldGlobalConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = oldGlobalConfig;
     if (oldNoSystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM; else process.env.GIT_CONFIG_NOSYSTEM = oldNoSystem;
+    if (oldAutoIndex === undefined) delete process.env.CRAFT_CODEBASE_AUTO_INDEX; else process.env.CRAFT_CODEBASE_AUTO_INDEX = oldAutoIndex;
     f.close();
   }
 });

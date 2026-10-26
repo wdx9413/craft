@@ -33,8 +33,20 @@ const git: RepositoryGitRunner = (root, args, input) => execFileSync("git", ["-C
 const fileVersion = (stat: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }): string =>
   [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
 
-/** Digest only repository selection policy, without reading source bodies. */
-export function repositoryPolicyDigest(root: string, runGit: RepositoryGitRunner = git): string {
+export interface RepositoryPolicySnapshot {
+  readonly root: string;
+  readonly digest: string;
+  readonly config_path: string;
+  readonly config_digest: string;
+  readonly ignore_files: readonly (readonly [string, string])[];
+  readonly info_exclude_path: string;
+  readonly configured_excludes: readonly string[];
+  readonly default_exclude_path: string;
+  readonly auto_index: string | null;
+}
+
+/** Digest repository selection policy once and retain cheap inputs for fast-path revalidation. */
+export function repositoryPolicySnapshot(root: string, runGit: RepositoryGitRunner = git): RepositoryPolicySnapshot {
   root = realpathSync(root);
   const configPath = join(root, ".craft-codebase.json");
   let config = "missing";
@@ -56,8 +68,44 @@ export function repositoryPolicyDigest(root: string, runGit: RepositoryGitRunner
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing"; throw error; }
   };
   const ignores = [...new Set([...policyFiles.map(path => join(root, path)), infoExclude, ...configured.map(path => resolve(root, path)), defaultExclude])]
-    .sort().map(path => [path, fileDigest(path)]);
-  return createHash("sha256").update(JSON.stringify({ config, ignores, auto_index: process.env.CRAFT_CODEBASE_AUTO_INDEX ?? null })).digest("hex");
+    .sort().map(path => [path, fileDigest(path)] as const);
+  const autoIndex = process.env.CRAFT_CODEBASE_AUTO_INDEX ?? null;
+  return { root, digest: createHash("sha256").update(JSON.stringify({ config, ignores, auto_index: autoIndex })).digest("hex"),
+    config_path: configPath, config_digest: config, ignore_files: ignores, info_exclude_path: infoExclude,
+    configured_excludes: configured.map(path => resolve(root, path)).sort(), default_exclude_path: defaultExclude, auto_index: autoIndex };
+}
+
+/** Revalidate a previously captured policy without enumerating every repository path again. */
+export function repositoryPolicySnapshotCurrent(snapshot: RepositoryPolicySnapshot, runGit: RepositoryGitRunner = git): boolean {
+  const root = realpathSync(snapshot.root);
+  if (root !== snapshot.root || (process.env.CRAFT_CODEBASE_AUTO_INDEX ?? null) !== snapshot.auto_index) return false;
+  let config = "missing";
+  if (existsSync(snapshot.config_path)) {
+    const stat = lstatSync(snapshot.config_path);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Repository config must be a regular file");
+    config = createHash("sha256").update(readFileSync(snapshot.config_path)).digest("hex");
+  }
+  if (config !== snapshot.config_digest) return false;
+  const infoExclude = resolve(root, runGit(root, ["rev-parse", "--git-path", "info/exclude"]).trim());
+  const configured = (() => {
+    try { return runGit(root, ["config", "--path", "--get-all", "core.excludesfile"]).split(/\r?\n/u).filter(Boolean).map(path => resolve(root, path)).sort(); }
+    catch (error) { if ((error as { status?: number }).status === 1) return []; throw error; }
+  })();
+  const defaultExclude = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "git", "ignore");
+  if (infoExclude !== snapshot.info_exclude_path || JSON.stringify(configured) !== JSON.stringify(snapshot.configured_excludes)
+    || defaultExclude !== snapshot.default_exclude_path) return false;
+  for (const [path, expectedDigest] of snapshot.ignore_files) {
+    let currentDigest: string;
+    try { currentDigest = createHash("sha256").update(readFileSync(path)).digest("hex"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") currentDigest = "missing"; else throw error; }
+    if (currentDigest !== expectedDigest) return false;
+  }
+  return true;
+}
+
+/** Digest only repository selection policy, without reading source bodies. */
+export function repositoryPolicyDigest(root: string, runGit: RepositoryGitRunner = git): string {
+  return repositoryPolicySnapshot(root, runGit).digest;
 }
 
 function hasSymlinkPath(root: string, path: string): boolean {

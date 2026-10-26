@@ -249,7 +249,7 @@ test("Hook traces identify the bounded lifecycle event without recording prompt 
   } finally { await dispose(f); }
 });
 
-test("a Hook request resolves and binds its project identity once", async () => {
+test("PostToolUse resolves the canonical project scope without rebinding its alias", async () => {
   const f = await fixture();
   const prior = process.env.CRAFT_HOOK_MODE;
   let resolutions = 0;
@@ -262,7 +262,9 @@ test("a Hook request resolves and binds its project identity once", async () => 
     assert.equal(resolutions, 1);
     resolutions = 0;
     await bridge.handle("context", { hook_event_name: "PostToolUse", cwd: f.root, session_id: "single-project-resolution", turn_id: "single-resolution-turn", tool_name: "Edit", tool_use_id: "single-resolution-edit" });
-    assert.equal(resolutions, 1);
+    assert.equal(resolutions, 0);
+    const signal = f.store.list("codex_hook_signal", 10, row => row.session_id === "single-project-resolution")[0];
+    assert.deepEqual(signal?.scope, codexProjectScope(f.root));
   } finally {
     if (prior === undefined) delete process.env.CRAFT_HOOK_MODE;
     else process.env.CRAFT_HOOK_MODE = prior;

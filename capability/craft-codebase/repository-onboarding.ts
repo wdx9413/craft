@@ -1,6 +1,6 @@
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { payload, stableDigest } from "../../common/craft-common-base/src/digest.ts";
-import { repositoryFiles, repositoryPolicyDigest, repositoryRoot } from "./repository-files.ts";
+import { repositoryFiles, repositoryPolicyDigest, repositoryPolicySnapshot, repositoryPolicySnapshotCurrent, repositoryRoot } from "./repository-files.ts";
 import { basicAnalysis } from "./basic-analysis.ts";
 import { analyzeTypeScript, TYPESCRIPT_ANALYZER_VERSION, type TypeScriptFileUnit } from "./typescript-analysis.ts";
 import { planTypeScriptIncremental } from "./typescript-incremental.ts";
@@ -165,7 +165,8 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
   const depth = args.index_depth ?? "basic";
   const stateId = `${workspaceId}_${depth}`;
   const priorState = service.store.find("codebase_repository_state", stateId);
-  const currentPolicyDigest = repositoryPolicyDigest(root);
+  const policySnapshot = repositoryPolicySnapshot(root);
+  const currentPolicyDigest = policySnapshot.digest;
   const warmWorkspace = service.store.find("workspace", workspaceId);
   const priorIndex = priorState ? service.store.find("codebase_index", String(priorState.index_id)) : undefined;
   const priorCheckpointId = String(warmWorkspace?.latest_checkpoint_id || priorState?.checkpoint_id || priorIndex?.checkpoint_id || "");
@@ -178,7 +179,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     && warmWorkspace?.snapshot_storage === "project_codebase" && priorCheckpoint?.snapshot_root === expectedSnapshotRoot
     && priorIndex?.status === "ready" && repositoryStateReusable(priorState)
     && service.workspace.freshness({ workspace_id: workspaceId }).status === "current"
-    && repositoryPolicyDigest(root) === currentPolicyDigest) {
+    && repositoryPolicySnapshotCurrent(policySnapshot)) {
     const summary = priorState.summary as JsonObject;
     if (!priorState.checkpoint_id) service.store.save("codebase_repository_state", stateId, { ...priorState, checkpoint_id: priorCheckpointId });
     return { ...base, status: "ready", index_id: priorState.index_id, checkpoint_id: priorCheckpointId, index_depth: depth,
@@ -210,7 +211,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     const cachedIndex = prior ? service.store.find("codebase_index", String(prior.index_id)) : undefined;
     if (prior?.checkpoint_id === checkpointId && prior.policy_version === REPOSITORY_INDEX_POLICY && prior.adapter_config_digest === lspConfig.digest
       && prior.repository_policy_digest === currentPolicyDigest
-      && cachedIndex?.status === "ready" && repositoryStateReusable(prior) && repositoryPolicyDigest(root) === currentPolicyDigest) {
+      && cachedIndex?.status === "ready" && repositoryStateReusable(prior) && repositoryPolicySnapshotCurrent(policySnapshot)) {
       service.store.save("codebase_repository_state", stateId, { ...prior, repository_policy_digest: currentPolicyDigest });
       return { ...base, status: "ready", index_id: prior.index_id, checkpoint_id: checkpointId, index_depth: depth, reused: true, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language, summary: prior.summary };
     }

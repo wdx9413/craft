@@ -338,8 +338,30 @@ export class KnowledgeSourceRegistry {
       offset = Number(cursor.offset);
     }
     const selected = documents.slice(offset, offset + maxFiles), nextOffset = offset + selected.length;
+    const revisionId = String(args.revision_id ?? `knowledge_source_revision_${String(source.id)}_${revisionDigest.slice(-16)}`);
+    const rootDigest = stableDigest(root);
+    const scopeKey = `${(source.scope as JsonObject).kind}:${(source.scope as JsonObject).id}`;
+    const observationKey = `knowledge-source:${String(source.id)}`;
+    // Collection scans and candidate/support grouping are read work. Keep them
+    // outside BEGIN IMMEDIATE so a large source cannot reserve SQLite's single
+    // writer while it walks historical Knowledge records.
+    const priorDocuments = this.store.list("knowledge_document", 10_001, doc => doc.source_id === source.id && doc.root_digest === rootDigest);
+    const priorClaims = this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && Boolean(item.source_revision_id), false,
+      { source_ids: [String(source.id)], document_ids: [] });
+    const sharedClaims = this.store.list("knowledge_claim", 100_000, item => item.status === "candidate" && item.scope === scopeKey);
+    const sourceSupports = this.store.list("knowledge_claim_support", 10_000, item => item.observation_key === observationKey);
+    const priorRevisions = this.store.list("knowledge_source_revision", 10_000,
+      item => item.source_id === source.id && item.id !== revisionId && item.locator_digest === rootDigest && item.status === "current");
+    const sharedClaimsByDigest = new Map<string, Map<string, JsonObject>>();
+    for (const claim of sharedClaims) {
+      const key = String(claim.content_digest ?? "");
+      let rows = sharedClaimsByDigest.get(key);
+      if (!rows) { rows = new Map(); sharedClaimsByDigest.set(key, rows); }
+      rows.set(String(claim.id), claim);
+    }
+    const sourceSupportsByClaim = new Map<string, JsonObject>();
+    for (const support of sourceSupports) sourceSupportsByClaim.set(String(support.claim_id), support);
     return this.store.transaction(() => {
-      const revisionId = String(args.revision_id ?? `knowledge_source_revision_${String(source.id)}_${revisionDigest.slice(-16)}`);
       const existing = this.store.find("knowledge_source_revision", revisionId);
       if (existing && existing.source_revision_digest !== revisionDigest) throw new Error("Knowledge revision identity conflict");
       const revision = existing ?? this.store.create("knowledge_source_revision", revisionId, { source_id: source.id, source_version: source.version, source_revision_digest: revisionDigest, locator_digest: stableDigest(root), file_count: documents.length, status: "current", immutable: true });
@@ -347,21 +369,25 @@ export class KnowledgeSourceRegistry {
       // Invalidate changes/deletions before serving any page. Unchanged documents retain review.
       const invalid = new Set<string>();
       let unscopedClaimsSkipped = 0;
-      for (const prior of this.store.list("knowledge_document", 10_001, doc => doc.source_id === source.id && doc.root_digest === stableDigest(root))) {
+      for (const prior of priorDocuments) {
         const current = manifest.get(String(prior.id));
         if (!current || current.digest !== prior.content_digest) {
           invalid.add(String(prior.id));
-          this.store.save("knowledge_document", String(prior.id), { ...payload(prior), status: current ? "changed" : "deleted" });
+          const latest = this.store.find("knowledge_document", String(prior.id));
+          if (latest && latest.version !== prior.version) throw new Error(`Concurrent update detected for knowledge_document: ${prior.id}`);
+          if (latest) this.store.updateIfVersion("knowledge_document", String(prior.id), Number(prior.version), { ...payload(prior), status: current ? "changed" : "deleted" });
         }
       }
-      for (const claim of this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && Boolean(item.source_revision_id), false, { source_ids: [String(source.id)], document_ids: [] })) {
+      for (const claim of priorClaims) {
         const obsolete = claim.document_id ? invalid.has(String(claim.document_id)) : claim.source_revision_id !== revision.id;
         if (obsolete && ["reviewed", "candidate"].includes(String(claim.status))) {
           if (!knowledgeScenarioScope(claim)) {
             unscopedClaimsSkipped++;
             continue;
           }
-          const stale = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "stale", revalidation_required: true, stale_since_revision: revision.id });
+          const latest = this.store.find("knowledge_claim", String(claim.id));
+          if (!latest || latest.version !== claim.version) throw new Error(`Concurrent update detected for knowledge_claim: ${claim.id}`);
+          const stale = this.store.updateIfVersion("knowledge_claim", String(claim.id), Number(claim.version), { ...payload(claim), status: "stale", revalidation_required: true, stale_since_revision: revision.id });
           this.updateStaleScenarioClaim(stale, source);
         }
       }
@@ -395,29 +421,47 @@ export class KnowledgeSourceRegistry {
           // Exact current text in the same scope shares one candidate across
           // source revisions, duplicate files, and independent Sources. Legacy
           // or stale Claims are never reused by this path.
-          const shared = this.store.list("knowledge_claim", 100_000, item => item.status === "candidate" && item.content_digest === fragment.content_digest && item.scope === identity.scope && item.id !== claimId)[0];
+          const shared = [...(sharedClaimsByDigest.get(String(fragment.content_digest))?.values() ?? [])]
+            .find(item => item.id !== claimId && item.status === "candidate" && item.scope === identity.scope);
           let claim = this.store.find("knowledge_claim", claimId);
           if (!claim && shared) {
-            const sharedEvidenceIds = (Array.isArray(shared.evidence_ids) ? shared.evidence_ids as unknown[] : []).map(String);
-            claim = sharedEvidenceIds.includes(String(evidence.id)) ? shared
-              : this.store.save("knowledge_claim", String(shared.id), { ...payload(shared), evidence_ids: [...new Set([...sharedEvidenceIds, String(evidence.id)])].sort() });
+            const latest = this.store.find("knowledge_claim", String(shared.id));
+            if (!latest || latest.status !== "candidate" || latest.scope !== identity.scope || latest.content_digest !== fragment.content_digest) {
+              sharedClaimsByDigest.get(String(fragment.content_digest))?.delete(String(shared.id));
+            } else {
+              const sharedEvidenceIds = (Array.isArray(latest.evidence_ids) ? latest.evidence_ids as unknown[] : []).map(String);
+              claim = sharedEvidenceIds.includes(String(evidence.id)) ? latest
+                : this.store.updateIfVersion("knowledge_claim", String(latest.id), Number(latest.version),
+                  { ...payload(latest), evidence_ids: [...new Set([...sharedEvidenceIds, String(evidence.id)])].sort() });
+              sharedClaimsByDigest.get(String(fragment.content_digest))?.set(String(claim.id), claim);
+            }
           }
-          if (!claim) claim = this.store.create("knowledge_claim", claimId, { ...identity, content_ref: fragment.content_ref, identity_digest: stableDigest(identity), status: "candidate", review: null, ingest_generated: true, publication_allowed: false });
+          if (!claim) {
+            claim = this.store.create("knowledge_claim", claimId, { ...identity, content_ref: fragment.content_ref, identity_digest: stableDigest(identity), status: "candidate", review: null, ingest_generated: true, publication_allowed: false });
+            let rows = sharedClaimsByDigest.get(String(fragment.content_digest));
+            if (!rows) { rows = new Map(); sharedClaimsByDigest.set(String(fragment.content_digest), rows); }
+            rows.set(String(claim.id), claim);
+          }
           if (source.trust === "verified" && ["bounded", "confirmed"].includes(String(evidence.confidence))) {
             // A revision or a copied file inside one registered Source is not
             // independent corroboration. Count that Source once for this Claim.
-            const observationKey = `knowledge-source:${String(source.id)}`;
             const supportIdentity = { claim_id: claim.id, claim_version: claim.version, evidence_id: evidence.id, observation_key: observationKey, scope: identity.scope };
             const supportId = `knowledge_support_${stableDigest(supportIdentity).slice(-24)}`;
-            const sourceSupport = this.store.list("knowledge_claim_support", 10_000, item => item.claim_id === claim.id && item.observation_key === observationKey)[0];
-            if (!sourceSupport && !this.store.find("knowledge_claim_support", supportId)) this.store.create("knowledge_claim_support", supportId, { ...supportIdentity, identity_digest: stableDigest(supportIdentity), recorded_at: new Date().toISOString(), source_type: evidence.source_type, confidence: evidence.confidence });
+            if (!sourceSupportsByClaim.has(String(claim.id)) && !this.store.find("knowledge_claim_support", supportId)) {
+              const support = this.store.create("knowledge_claim_support", supportId, { ...supportIdentity, identity_digest: stableDigest(supportIdentity), recorded_at: new Date().toISOString(), source_type: evidence.source_type, confidence: evidence.confidence });
+              sourceSupportsByClaim.set(String(claim.id), support);
+            }
           }
           const candidateId = `knowledge_ingest_candidate_${fragmentId}`;
           const candidate = this.store.find("knowledge_ingest_candidate", candidateId) ?? this.store.create("knowledge_ingest_candidate", candidateId, { source_id: source.id, source_revision_id: fragment.source_revision_id, fragment_id: fragment.id, claim_id: claim.id, evidence_id: evidence.id, scope: identity.scope, status: "candidate", structural_review: "pending", semantic_review: "pending", publication_allowed: false });
           fragments.push(fragment); candidates.push(candidate);
         }
       }
-      for (const prior of this.store.list("knowledge_source_revision", 10_000, item => item.source_id === source.id && item.id !== revision.id && item.locator_digest === stableDigest(root) && item.status === "current")) this.store.save("knowledge_source_revision", String(prior.id), { ...payload(prior), status: "superseded", superseded_by: revision.id });
+      for (const prior of priorRevisions) {
+        const latest = this.store.find("knowledge_source_revision", String(prior.id));
+        if (!latest || latest.version !== prior.version || latest.status !== "current") throw new Error(`Concurrent update detected for knowledge_source_revision: ${prior.id}`);
+        this.store.updateIfVersion("knowledge_source_revision", String(prior.id), Number(prior.version), { ...payload(prior), status: "superseded", superseded_by: revision.id });
+      }
       const hasMore = nextOffset < documents.length;
       return { status: hasMore ? "partial" : "completed", source, revision, fragments, candidates, raw_content_stored: false,
         has_more: hasMore, next_cursor: hasMore ? Buffer.from(JSON.stringify({ digest: revisionDigest, offset: nextOffset })).toString("base64url") : null,

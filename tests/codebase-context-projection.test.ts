@@ -104,3 +104,19 @@ test("projection pins repository configuration without following links", async (
     assert.throws(() => f.sdk.contextProjection(f.args), /regular|symlink/);
   } finally { f.close(); }
 });
+
+test("projection rejects repository configuration drift during its unlocked read", async t => {
+  const f = await fixture();
+  try {
+    const path = join(f.repo, ".craft-codebase.json");
+    const sdk = f.sdk as unknown as { repositoryConfigurationDigest(workspace: JsonObject): string | null };
+    const original = sdk.repositoryConfigurationDigest.bind(f.sdk);
+    let calls = 0;
+    t.mock.method(sdk, "repositoryConfigurationDigest", (workspace: JsonObject) => {
+      const digest = original(workspace);
+      if (++calls === 1) writeFileSync(path, '{"enabled":true}');
+      return digest;
+    });
+    assert.throws(() => f.sdk.contextProjection(f.args), /repository configuration changed during projection/u);
+  } finally { f.close(); }
+});

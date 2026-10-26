@@ -358,6 +358,21 @@ export class CraftStore {
     return result;
   }
 
+  /** Run a bounded read on one SQLite snapshot without reserving the writer. */
+  readSnapshot<T>(operation: (database: DatabaseSync) => T): T {
+    const database = this.database;
+    if (this.#transactionDepth > 0) return operation(database);
+    database.exec("BEGIN DEFERRED");
+    try {
+      const result = operation(database);
+      database.exec("COMMIT");
+      return result;
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   /** Keep all writes for one Trace on its own WAL writer, while old Traces stay on the legacy database. */
   traceTransaction<T>(traceId: string, operation: () => T): T {
     return this.legacyTrace(traceId) ? this.transaction(() => operation()) : this.traceShards.transaction(traceId, operation);
@@ -1479,7 +1494,10 @@ export class CraftStore {
     const records: JsonObject[] = [];
     for (const row of rows) {
       const header = row as Record<string, unknown>;
-      const record = this.find(kind, String(header.id), Number(header.version), hydrate)!;
+      // The ordered query already contains the exact latest version. Re-reading
+      // every row through find() turns a bounded list into N additional SQLite
+      // queries (and N latest-version lookups against the shared WAL database).
+      const record = this.recordFromSnapshot(header, hydrate);
       if (predicate && !predicate(record)) continue;
       records.push(record);
       if (records.length === bounded) break;

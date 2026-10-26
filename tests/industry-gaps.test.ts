@@ -3,7 +3,7 @@ import test from "node:test";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { prepareAblations } from "../scripts/eval/component-ablation.ts";
-import { mkdtemp, mkdir, readFile, writeFile, rm, unlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm, unlink, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -134,6 +134,197 @@ test("ingestion keeps unchanged review, invalidates edits/deletions, and exposes
   } finally { await f.close(); }
 });
 
+test("Knowledge ingestion reads source-wide collections before acquiring the write transaction", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "source"); await mkdir(root);
+    await writeFile(join(root, "a.md"), "A bounded Knowledge source with enough text to make one fragment.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    sources.sourceRegister({ source_id: "short-write-source", kind: "readme", label: "Short write fixture", ...f.scope,
+      locator: root, content_digest: "initial", trust: "bounded", access: "read_only" });
+    const watched = new Set(["knowledge_document", "knowledge_claim", "knowledge_claim_support", "knowledge_source_revision"]);
+    const scannedUnderWriter: string[] = [];
+    let transactionDepth = 0;
+    const transaction = f.store.transaction.bind(f.store);
+    const list = f.store.list.bind(f.store);
+    f.store.transaction = ((operation) => transaction(database => {
+      transactionDepth++;
+      try { return operation(database); } finally { transactionDepth--; }
+    })) as typeof f.store.transaction;
+    f.store.list = ((kind, ...args) => {
+      if (transactionDepth > 0 && watched.has(kind)) scannedUnderWriter.push(kind);
+      return list(kind, ...args);
+    }) as typeof f.store.list;
+
+    const result = sources.sourceIngest({ source_id: "short-write-source" });
+
+    assert.equal(result.status, "completed");
+    assert.deepEqual(scannedUnderWriter, [], "wide source and candidate scans must not hold SQLite's shared writer lock");
+  } finally { await f.close(); }
+});
+
+test("Knowledge ingestion does not reuse a shared candidate that changed after the read snapshot", async () => {
+  const f = await fixture();
+  try {
+    const firstRoot = join(f.root, "first-source"), secondRoot = join(f.root, "second-source");
+    await mkdir(firstRoot); await mkdir(secondRoot);
+    const body = "A repeated fact that first appears as a candidate and is reviewed before the second ingest.";
+    await writeFile(join(firstRoot, "a.md"), body); await writeFile(join(secondRoot, "b.md"), body);
+    const sources = new KnowledgeSourceRegistry(f.store);
+    sources.sourceRegister({ source_id: "snapshot-source-one", kind: "readme", label: "First source", ...f.scope,
+      locator: firstRoot, content_digest: "first", trust: "bounded", access: "read_only" });
+    const first = sources.sourceIngest({ source_id: "snapshot-source-one" });
+    const initialClaimId = String((first.candidates as JsonObject[])[0]!.claim_id);
+    sources.sourceRegister({ source_id: "snapshot-source-two", kind: "readme", label: "Second source", ...f.scope,
+      locator: secondRoot, content_digest: "second", trust: "bounded", access: "read_only" });
+
+    const find = f.store.find.bind(f.store); let changed = false;
+    f.store.find = ((kind, id, ...args) => {
+      const current = find(kind, id, ...args);
+      if (!changed && kind === "knowledge_claim" && id === initialClaimId && current) {
+        changed = true;
+        return { ...current, status: "reviewed", version: Number(current.version) + 1 };
+      }
+      return current;
+    }) as typeof f.store.find;
+
+    const second = sources.sourceIngest({ source_id: "snapshot-source-two" });
+    const secondClaimId = String((second.candidates as JsonObject[])[0]!.claim_id);
+    assert.equal(changed, true);
+    assert.notEqual(secondClaimId, initialClaimId);
+    assert.equal(f.store.get("knowledge_claim", initialClaimId).status, "candidate");
+    assert.equal(f.store.get("knowledge_claim", secondClaimId).status, "candidate");
+  } finally { await f.close(); }
+});
+
+test("Knowledge ingestion merges a live shared candidate and skips whitespace-only fragments", async () => {
+  const f = await fixture();
+  try {
+    const firstRoot = join(f.root, "shared-first"), secondRoot = join(f.root, "shared-second"), blankRoot = join(f.root, "blank-source");
+    await mkdir(firstRoot); await mkdir(secondRoot); await mkdir(blankRoot);
+    const body = "A shared candidate is extended with the evidence from the second independent source.";
+    await writeFile(join(firstRoot, "a.md"), body); await writeFile(join(secondRoot, "b.md"), body); await writeFile(join(blankRoot, "blank.md"), "  \n  ");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    for (const [source_id, locator] of [["shared-live-one", firstRoot], ["shared-live-two", secondRoot]] as const)
+      sources.sourceRegister({ source_id, kind: "readme", label: source_id, ...f.scope, locator, content_digest: source_id, trust: "bounded", access: "read_only" });
+    sources.sourceRegister({ source_id: "whitespace-only-source", kind: "readme", label: "Whitespace only", ...f.scope,
+      locator: blankRoot, content_digest: "blank", trust: "bounded", access: "read_only" });
+
+    const first = sources.sourceIngest({ source_id: "shared-live-one" });
+    const firstClaimId = String((first.candidates as JsonObject[])[0]!.claim_id);
+    const second = sources.sourceIngest({ source_id: "shared-live-two" });
+    const secondClaimId = String((second.candidates as JsonObject[])[0]!.claim_id);
+    const blank = sources.sourceIngest({ source_id: "whitespace-only-source" });
+    const merged = f.store.get("knowledge_claim", firstClaimId);
+    assert.equal(secondClaimId, firstClaimId);
+    assert.equal((merged.evidence_ids as string[]).length, 2);
+    assert.equal((blank.fragments as JsonObject[]).length, 0);
+    assert.equal((blank.candidates as JsonObject[]).length, 0);
+  } finally { await f.close(); }
+});
+
+test("Knowledge ingestion rejects a source claim changed after the invalidation snapshot", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "claim-snapshot-source"); await mkdir(root);
+    await writeFile(join(root, "a.md"), "A source claim that will be invalidated after a document edit.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    sources.sourceRegister({ source_id: "claim-snapshot-source", kind: "readme", label: "Claim snapshot", ...f.scope,
+      locator: root, content_digest: "initial", trust: "bounded", access: "read_only" });
+    const first = sources.sourceIngest({ source_id: "claim-snapshot-source" });
+    const claimId = String((first.candidates as JsonObject[])[0]!.claim_id);
+    await writeFile(join(root, "a.md"), "The changed file makes the prior source claim obsolete.");
+
+    const list = f.store.list.bind(f.store); let changed = false;
+    f.store.list = ((kind, ...args) => {
+      const rows = list(kind, ...args);
+      if (!changed && kind === "knowledge_claim" && rows.some(row => row.id === claimId && row.status === "candidate")) {
+        const claim = f.store.get("knowledge_claim", claimId);
+        f.store.save("knowledge_claim", claimId, { ...payload(claim), status: "reviewed" });
+        changed = true;
+      }
+      return rows;
+    }) as typeof f.store.list;
+
+    assert.throws(() => sources.sourceIngest({ source_id: "claim-snapshot-source" }), /Concurrent update detected for knowledge_claim/u);
+    assert.equal(changed, true);
+    assert.equal(f.store.get("knowledge_claim", claimId).status, "reviewed");
+  } finally { await f.close(); }
+});
+
+test("Knowledge ingestion rejects a source document changed after the document snapshot", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "document-snapshot-source"); await mkdir(root);
+    await writeFile(join(root, "a.md"), "A document revision that will change after its source snapshot.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    sources.sourceRegister({ source_id: "document-snapshot-source", kind: "readme", label: "Document snapshot", ...f.scope,
+      locator: root, content_digest: "initial", trust: "bounded", access: "read_only" });
+    sources.sourceIngest({ source_id: "document-snapshot-source" });
+    await writeFile(join(root, "a.md"), "The source document is edited between the read snapshot and write transaction.");
+
+    const list = f.store.list.bind(f.store); let changed = false;
+    f.store.list = ((kind, ...args) => {
+      const rows = list(kind, ...args);
+      if (!changed && kind === "knowledge_document" && rows.some(row => row.source_id === "document-snapshot-source")) {
+        const doc = rows.find(row => row.source_id === "document-snapshot-source")!;
+        f.store.save("knowledge_document", String(doc.id), { ...payload(doc), status: "changed" });
+        changed = true;
+      }
+      return rows;
+    }) as typeof f.store.list;
+
+    assert.throws(() => sources.sourceIngest({ source_id: "document-snapshot-source" }), /Concurrent update detected for knowledge_document/u);
+    assert.equal(changed, true);
+  } finally { await f.close(); }
+});
+
+test("Knowledge ingestion rejects every invalid source file and fragment budget", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "invalid-budget-source"); await mkdir(root); await writeFile(join(root, "a.md"), "A bounded source body.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    sources.sourceRegister({ source_id: "invalid-budget-source", kind: "readme", label: "Invalid budgets", ...f.scope,
+      locator: root, content_digest: "initial", trust: "bounded", access: "read_only" });
+    for (const budget of [
+      { max_files: 0 }, { max_files: 501 }, { max_files: 1.5 },
+      { max_chars_per_fragment: 99 }, { max_chars_per_fragment: 20_001 }, { max_chars_per_fragment: 100.5 },
+    ]) assert.throws(() => sources.sourceIngest({ source_id: "invalid-budget-source", ...budget }), /Knowledge ingest budget is invalid/u);
+    f.store.create("knowledge_claim", "legacy-candidate-without-content-digest", { source_id: "invalid-budget-source", scope: "project:fixture", status: "candidate", evidence_ids: [] });
+    assert.equal(sources.sourceIngest({ source_id: "invalid-budget-source" }).status, "completed");
+  } finally { await f.close(); }
+});
+
+test("Knowledge ingestion rejects a prior revision changed after the revision snapshot", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "revision-snapshot-source"); await mkdir(root);
+    await writeFile(join(root, "a.md"), "The first source revision is current before the file changes.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    sources.sourceRegister({ source_id: "revision-snapshot-source", kind: "readme", label: "Revision snapshot", ...f.scope,
+      locator: root, content_digest: "initial", trust: "bounded", access: "read_only" });
+    const first = sources.sourceIngest({ source_id: "revision-snapshot-source" });
+    const oldRevisionId = String((first.revision as JsonObject).id);
+    await writeFile(join(root, "a.md"), "A second source revision supersedes the original only after snapshot validation.");
+
+    const list = f.store.list.bind(f.store); let changed = false;
+    f.store.list = ((kind, ...args) => {
+      const rows = list(kind, ...args);
+      if (!changed && kind === "knowledge_source_revision" && rows.some(row => row.id === oldRevisionId && row.status === "current")) {
+        const revision = f.store.get("knowledge_source_revision", oldRevisionId);
+        f.store.save("knowledge_source_revision", oldRevisionId, { ...payload(revision), status: "superseded" });
+        changed = true;
+      }
+      return rows;
+    }) as typeof f.store.list;
+
+    assert.throws(() => sources.sourceIngest({ source_id: "revision-snapshot-source" }), /Concurrent update detected for knowledge_source_revision/u);
+    assert.equal(changed, true);
+    assert.equal(f.store.list("knowledge_source_revision", 10).length, 1);
+    assert.equal(f.store.get("knowledge_source_revision", oldRevisionId).status, "superseded");
+  } finally { await f.close(); }
+});
+
 test("source revision invalidation preserves project scope for legacy content paths", async () => {
   for (const scenarioKey of [undefined, "legacy-source-scene"]) {
     const f = await fixture();
@@ -236,6 +427,8 @@ test("source transitions route valid string, object and content-reference scopes
       ["transition-string-scope", { scope: "global" }],
       ["transition-object-scope", { scope: { kind: "global", id: "global" } }],
       ["transition-content-ref-scope", { content_ref: { kind: "knowledge", scope: "global" } }],
+      ["transition-reference-path-scope", { scope: "project:fixture", content_ref: { kind: "knowledge", scope: "project:fixture",
+        path: join(projectStorageDirectory(f.store.paths, join(f.root, "projects", "fixture")), "knowledge", "md", "scenarios.json") } }],
       ["transition-malformed-scope", { scope: "project:" }],
       ["transition-array-scope", { scope: [] }],
       ["transition-unscoped", {}],
@@ -247,6 +440,39 @@ test("source transitions route valid string, object and content-reference scopes
 
     assert.equal((sources.sourceTransition({ source_id: source.id, status: "revoked", reason: "source retired" }).source as JsonObject).status, "revoked");
     for (const [id, scope] of records) assert.deepEqual(f.store.get("knowledge_claim", id).scope, scope.scope);
+  } finally { await f.close(); }
+});
+
+test("Knowledge source ingestion skips hidden, generated, linked and unsupported files and enforces source boundaries", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "bounded-source"), external = join(f.root, "external-source");
+    await mkdir(root); await mkdir(external); await mkdir(join(root, "docs"));
+    await mkdir(join(root, ".git")); await mkdir(join(root, "node_modules")); await mkdir(join(root, ".private"));
+    await writeFile(join(root, ".git", "ignored.md"), "must not ingest");
+    await writeFile(join(root, "node_modules", "ignored.md"), "must not ingest");
+    await writeFile(join(root, ".private", "ignored.md"), "must not ingest");
+    await writeFile(join(root, "ignored.json"), "unsupported");
+    const fifo = spawnSync("mkfifo", [join(root, "special.pipe")]);
+    assert.equal(fifo.status, 0, "fixture must include a non-regular filesystem entry");
+    await writeFile(join(external, "outside.md"), "outside source");
+    await symlink(external, join(root, "linked"));
+    await writeFile(join(root, "README.md"), "bounded source fact.");
+    await writeFile(join(root, "docs", "nested.md"), "Nested source fact.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    const source = sources.sourceRegister({ source_id: "bounded-source", kind: "custom", label: "Bounded source", ...f.scope,
+      locator: root, content_digest: "fixture", trust: "bounded", access: "read_only" }).source as JsonObject;
+    const ingested = sources.sourceIngest({ source_id: source.id });
+    const documents = f.store.list("knowledge_document", 10, item => item.source_id === source.id);
+    assert.equal(documents.some(item => item.path === "README.md"), true);
+    assert.equal(documents.some(item => item.path === join("docs", "nested.md")), true);
+    assert.equal(documents.some(item => String(item.path).includes("ignored") || String(item.path).includes("outside")), false);
+    assert.throws(() => sources.sourceIngest({ source_id: source.id, root: external }), /outside the registered Source locator/u);
+
+    const disabled = sources.sourceRegister({ source_id: "disabled-source", kind: "custom", label: "Disabled source", ...f.scope,
+      locator: root, content_digest: "fixture", trust: "bounded", access: "read_only" }).source as JsonObject;
+    sources.sourceTransition({ source_id: disabled.id, status: "disabled", reason: "fixture" });
+    assert.throws(() => sources.sourceIngest({ source_id: disabled.id }), /unavailable for read-only ingest/u);
   } finally { await f.close(); }
 });
 

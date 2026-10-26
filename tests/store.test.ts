@@ -20,12 +20,35 @@ test("latest-first ordering uses insertion order when timestamps tie", async () 
     store.create("ordering", "z-first", { value: 1 });
     store.create("ordering", "a-last", { value: 2 });
     store.database.prepare("UPDATE records SET updated_at=? WHERE kind=?").run("2026-01-01T00:00:00.000Z", "ordering");
+    const find = store.find.bind(store);
+    let pointLookups = 0;
+    store.find = ((...args: Parameters<CraftStore["find"]>) => { pointLookups += 1; return find(...args); }) as CraftStore["find"];
     assert.deepEqual(store.list("ordering").map((item) => item.id), ["a-last", "z-first"]);
+    assert.equal(pointLookups, 0, "a latest-first list must hydrate its selected snapshot rows without N+1 point reads");
     assert.deepEqual(store.list("ordering", 1, () => true).map((item) => item.id), ["a-last"]);
     store.save("ordering", "z-first", { value: 3 });
     store.database.prepare("UPDATE records SET updated_at=? WHERE kind=?").run("2026-01-01T00:00:00.000Z", "ordering");
     assert.equal(store.list("ordering", 1)[0].id, "z-first");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("read snapshots keep a consistent read while allowing another store to write", async () => {
+  const { root, store } = await fixture();
+  const writer = await new CraftStore(craftPaths(root)).open();
+  try {
+    store.create("snapshot", "before", { value: 1 });
+    const observed = store.readSnapshot((database) => {
+      const before = Number((database.prepare("SELECT COUNT(*) AS count FROM records WHERE kind=?").get("snapshot") as { count: number }).count);
+      writer.create("snapshot", "during", { value: 2 });
+      const during = Number((database.prepare("SELECT COUNT(*) AS count FROM records WHERE kind=?").get("snapshot") as { count: number }).count);
+      return { before, during };
+    });
+    assert.deepEqual(observed, { before: 1, during: 1 });
+    assert.equal(store.list("snapshot").length, 2);
+    assert.equal(store.transaction(() => store.readSnapshot(() => "nested")), "nested");
+    assert.throws(() => store.readSnapshot(() => { throw new Error("snapshot failed"); }), /snapshot failed/u);
+    assert.equal(store.readSnapshot((database) => Number((database.prepare("SELECT COUNT(*) AS count FROM records WHERE kind=?").get("snapshot") as { count: number }).count)), 2);
+  } finally { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("ID-ordered record pages resume after a stable cursor and include latest versions", async () => {

@@ -53,7 +53,7 @@ test("historical pages keep their initial revision watermark across cross-proces
   } finally { f.close(); }
 });
 
-test("all read-fence batches share a short publication lock and later reads reject a committed writer", async t => {
+test("read fences permit concurrent writers and reject a pinned change committed during the snapshot", async t => {
   const f = await fixture(251), attempting = join(f.root, "attempting"), committed = join(f.root, "committed");
   const code = `import {CraftStore} from './core/infrastructure/store.ts';import {craftPaths} from './core/infrastructure/paths.ts';import {writeFileSync} from 'node:fs';const store=await new CraftStore(craftPaths(process.argv[1])).open();process.stdout.write('READY');process.stdin.once('data',()=>{writeFileSync(process.argv[2],'attempting');store.save('memory_ledger','m000',{scope:{kind:'project',id:'p'},status:'revoked',content:'alpha'});writeFileSync(process.argv[3],'committed');store.close();process.exit(0);});process.stdin.resume();`;
   const writer = spawn(process.execPath, ["--input-type=module", "-e", code, f.root, attempting, committed], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] });
@@ -75,7 +75,7 @@ test("all read-fence batches share a short publication lock and later reads reje
             while (!existsSync(attempting) && Date.now() < deadline) Atomics.wait(sleeping, 0, 0, 5);
             assert(existsSync(attempting), "writer reached its update attempt");
             Atomics.wait(sleeping, 0, 0, 100);
-            assert(!existsSync(committed), "writer remains blocked between fence batches");
+            assert(existsSync(committed), "writer commits while the read snapshot is open");
           }
           return result;
         });
@@ -83,7 +83,7 @@ test("all read-fence batches share a short publication lock and later reads reje
       return statement;
     });
     const receipt: JsonObject = { read_refs: f.ids.map(id => ({ kind: "memory_ledger", id, version: 1 })) };
-    assertContextReadCurrent(f.store, receipt); assert.equal(queries, 2);
+    assert.throws(() => assertContextReadCurrent(f.store, receipt), ContextAccessChangedError); assert.equal(queries, 3);
     const [exitCode] = await exited; assert.equal(exitCode, 0, stderr);
     assert.equal(readFileSync(committed, "utf8"), "committed");
     assert.equal(f.store.get("memory_ledger", "m000").status, "revoked");

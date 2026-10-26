@@ -11,15 +11,23 @@ export class ContextAccessChangedError extends Error {
 export function assertContextReadCurrent(store: CraftStore, receipt: JsonObject | null | undefined): void {
   const refs = (receipt?.read_refs ?? []) as ContextReadRef[];
   if (!refs.length) return;
-  // All bounded batches share one publication point, including standalone SDK reads.
-  // Never retain this short lock across retrieval/provider awaits.
-  store.transaction(() => {
+  const verifySnapshot = (): void => store.readSnapshot(() => {
     for (let offset = 0; offset < refs.length; offset += 250) {
       const part = refs.slice(offset, offset + 250);
       const changed = store.database.prepare(`WITH pinned(kind,id,version) AS (VALUES ${part.map(() => "(?,?,?)").join(",")}) SELECT 1 FROM pinned p WHERE COALESCE((SELECT MAX(r.version) FROM records r WHERE r.kind=p.kind AND r.id=p.id),0)<>p.version LIMIT 1`).get(...part.flatMap(ref => [ref.kind, ref.id, ref.version]));
       if (changed) throw new ContextAccessChangedError();
     }
   });
+  const dataVersion = (): number => Number((store.database.prepare("PRAGMA data_version").get() as { data_version: number }).data_version);
+  // WAL readers do not reserve the writer. Detect commits racing the snapshot,
+  // then validate once more against the new state; stable reads pay one scan,
+  // and an unrelated commit does not invalidate an otherwise current receipt.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const before = dataVersion();
+    verifySnapshot();
+    if (before === dataVersion()) return;
+  }
+  throw new ContextAccessChangedError();
 }
 
 /** Read only revision headers; never hydrate unrelated bodies or hold a write lock across awaits. */
