@@ -34,7 +34,12 @@ test("Datasec CLI validates events, uses configured rules, and emits closed fail
     });
     assert.equal(result.exitCode, 0);
     assert.match(result.stdout!, /\[CRAFT_DATASEC_secret_/u);
-    assert.deepEqual(JSON.parse(runDataSecHookCli(["codex", "UserPromptSubmit"], "{}", {}).stdout!), {});
+    const promptTimings: Record<string, number> = {};
+    assert.deepEqual(JSON.parse(runDataSecHookCli(["codex", "UserPromptSubmit"], JSON.stringify({ hook_event_name: "UserPromptSubmit" }),
+      { CRAFT_DATASEC_RULES: join(f.temp, "missing.json") }, (stage, durationMs) => { promptTimings[stage] = durationMs; }).stdout!), {});
+    assert(promptTimings.rules_load_ms! < 1);
+    assert("input_parse_ms" in promptTimings);
+    assert("handler_ms" in promptTimings);
     assert.match(runDataSecHookCli(["claude", "PostToolUse"], "not json", { CRAFT_DATASEC_DIR: f.root }).stdout!, /"continue":false/u);
     assert.match(runDataSecHookCli(["claude", "PreToolUse"], "not json", {}).stdout!, /"permissionDecision":"deny"/u);
     assert.match(runDataSecHookCli(["codex", "PostToolUse"], "[]", { CRAFT_DATASEC_DIR: f.root }).stdout!, /"decision":"block"/u);
@@ -55,7 +60,7 @@ test("Datasec executable guard and output writer are deterministic", () => {
   assert.deepEqual(seen, ["warn\n", "ok\n"]);
   const built = JSON.parse(readFileSync(join(project, "plugins/craft-datasec/dist/build.json"), "utf8"));
   assert.equal(built.name, "craft-datasec");
-  assert.equal(built.version, "0.1.2");
+  assert.equal(built.version, "0.1.3");
 });
 test("independent Datasec is discoverable in release catalogs without joining the Context runtime", () => {
   assert.equal(releaseProduct("craft-datasec")!.surface, "standalone-hooks");
@@ -64,7 +69,7 @@ test("independent Datasec is discoverable in release catalogs without joining th
   assert.equal(allReleaseProducts().length, 3);
   assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context", "craft-datasec"]);
   const contract = externalDistributionContract();
-  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.1.2");
+  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.1.3");
   assert.equal(contract.products.find(product => product.name === "craft-context")!.hook_member, "context");
   assert(releaseManifest().plugins.some(product => product.name === "craft-datasec"));
 });
@@ -78,7 +83,7 @@ function run(host: Host, event: Event, input: HookInput, root: string, rules = D
 }
 function invoke(args: string[], raw: string, root?: string, config?: string, bundle = false) {
   return spawnSync(process.execPath, ["--experimental-strip-types", resolve(project, bundle ? "plugins/craft-datasec/dist/hook.mjs" : "bin/craft-datasec-hook.ts"), ...args], {
-    encoding: "utf8", env: { ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATASEC_DIR: root, CRAFT_DATASEC_RULES: config }, input: raw,
+    encoding: "utf8", env: { ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: root, CRAFT_DATASEC_DIR: root, CRAFT_DATASEC_RULES: config }, input: raw,
   });
 }
 
@@ -319,8 +324,19 @@ test("process entry validates events/configuration and never echoes bad input or
         assert.deepEqual(JSON.parse(passed.stdout), {});
       }
     }
-    const clean = invoke(["claude", "UserPromptSubmit"], JSON.stringify({ hook_event_name: "UserPromptSubmit" }));
+    const clean = invoke(["claude", "UserPromptSubmit"], JSON.stringify({ hook_event_name: "UserPromptSubmit" }), f.root);
     assert.deepEqual(JSON.parse(clean.stdout), {});
+    const diagnosticDir = join(f.root, "trace", "hook-runtime", "v1");
+    const diagnosticRecords = readdirSync(diagnosticDir).flatMap(file => readFileSync(join(diagnosticDir, file), "utf8").trim().split("\n")
+      .filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>));
+    const promptBytes = Buffer.byteLength(JSON.stringify({ hook_event_name: "UserPromptSubmit" }));
+    const promptRecord = diagnosticRecords.find(record => record.member === "datasec" && record.event === "UserPromptSubmit"
+      && record.phase === "finished" && record.input_bytes === promptBytes);
+    assert(promptRecord);
+    assert.equal(promptRecord.outcome, "completed");
+    assert.equal(promptRecord.input_bytes, promptBytes);
+    assert.equal(promptRecord.rules_load_ms, 0);
+    assert(!JSON.stringify(promptRecord).includes(phone));
   } finally { f.close(); }
 });
 
@@ -349,6 +365,7 @@ test("independent plugin builds and executes both packaged hook manifests withou
       const manifest = JSON.parse(readFileSync(join(directory, `.${host}-plugin/plugin.json`), "utf8"));
       assert.equal(manifest.name, "craft-datasec"); assert.equal(manifest.mcpServers, undefined);
       const hooks = JSON.parse(readFileSync(join(directory, manifest.hooks), "utf8")).hooks;
+      assert.deepEqual(Object.keys(hooks).sort(), ["PostToolUse", "PreToolUse"]);
       for (const [event, groups] of Object.entries(hooks)) {
         const handler = (groups as any)[0].hooks[0];
         assert(!handler.async); assert.equal(handler.timeout, 10);

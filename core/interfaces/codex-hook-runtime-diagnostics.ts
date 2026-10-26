@@ -2,13 +2,15 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, openSync, writeSync, closeSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-export type HookRuntimeEvent = "SessionStart" | "UserPromptSubmit" | "PostToolUse" | "Stop" | "SessionEnd";
-export type HookRuntimeMember = "context" | "knowledge" | "memory" | "experience";
+export type HookRuntimeEvent = "SessionStart" | "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "Stop" | "SessionEnd";
+export type HookRuntimeMember = "context" | "knowledge" | "memory" | "experience" | "datasec";
 
 export interface HookRuntimeTiming {
   readonly process_elapsed_ms?: number;
   readonly input_read_ms?: number;
   readonly input_parse_ms?: number;
+  readonly input_bytes?: number;
+  readonly rules_load_ms?: number;
   readonly store_open_ms?: number;
   readonly runtime_import_ms?: number;
   readonly service_open_ms?: number;
@@ -81,6 +83,8 @@ export function beginHookRuntimeDiagnostic(args: {
       ...(timing.process_elapsed_ms === undefined ? {} : { process_elapsed_ms: Math.max(0, Math.round(timing.process_elapsed_ms)) }),
       ...(timing.input_read_ms === undefined ? {} : { input_read_ms: Math.max(0, Math.round(timing.input_read_ms)) }),
       ...(timing.input_parse_ms === undefined ? {} : { input_parse_ms: Math.max(0, Math.round(timing.input_parse_ms)) }),
+      ...(timing.input_bytes === undefined ? {} : { input_bytes: Math.max(0, Math.round(timing.input_bytes)) }),
+      ...(timing.rules_load_ms === undefined ? {} : { rules_load_ms: Math.max(0, Math.round(timing.rules_load_ms)) }),
       ...(timing.store_open_ms === undefined ? {} : { store_open_ms: Math.max(0, Math.round(timing.store_open_ms)) }),
       ...(timing.runtime_import_ms === undefined ? {} : { runtime_import_ms: Math.max(0, Math.round(timing.runtime_import_ms)) }),
       ...(timing.service_open_ms === undefined ? {} : { service_open_ms: Math.max(0, Math.round(timing.service_open_ms)) }),

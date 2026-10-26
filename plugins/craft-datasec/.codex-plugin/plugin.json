@@ -1,6 +1,6 @@
 {
   "name": "craft-datasec",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "本地文本脱敏：独立的同步 hook，无 Context 或 MCP 依赖。",
   "author": { "name": "wdx9413" },
   "hooks": "./hooks/codex-hooks.json"
