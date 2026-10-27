@@ -329,6 +329,7 @@ export class EvolutionCycleKernel {
     }
     if (cycle.status !== "active") throw new Error("Evolution Cycle is terminal");
     if (Number(cycle.version) !== requestedVersion) throw new Error("Evolution Cycle version conflict; reread before advancing");
+    this.assertSessionForStage(cycle, stage);
     if (!NEXT[String(cycle.stage)]?.has(stage)) throw new Error(`Invalid Evolution Cycle transition: ${cycle.stage} -> ${stage}`);
     if (stage === "attribute") {
       const failedOutcome = cycle.outcome !== "passed";
@@ -395,6 +396,22 @@ export class EvolutionCycleKernel {
     const workspace = this.store.get("workspace", text(snapshot.workspace_id, "snapshot.workspace_id"));
     const freshness = this.workspaceState.freshness({ workspace_id: workspace.id });
     if (freshness.status !== "current") throw new Error("Project working tree changed after the Evolution Cycle started; replan and reevaluate the candidate");
+  }
+
+  private assertSessionForStage(cycle: JsonObject, stage: string): void {
+    const sessionId = text(cycle.session_id, "cycle.session_id");
+    const host = text(cycle.session_host, "cycle.session_host");
+    const session = this.store.get("host_session", sessionId);
+    const task = object(cycle.task_ref, "cycle.task_ref");
+    if (session.host_id !== host || session.task_id !== task.id
+      || session.identity_digest !== cycle.session_identity_digest || session.trace_id !== cycle.session_trace_id)
+      throw new Error("Evolution Cycle requires its original Host Session identity for new transitions");
+    // Learning consumes a completed task's evidence after the execution session
+    // terminates. Only another observation/retrieval/action requires a live Host.
+    if (session.status !== "running" && (session.status !== "terminal" || ["observe", "retrieve", "act"].includes(stage)))
+      throw new Error("Evolution Cycle requires its original live Host Session for execution transitions");
+    const trace = this.store.get("trace", text(session.trace_id, "host_session.trace_id"));
+    if (trace.task_id !== task.id) throw new Error("Evolution Cycle Host Session Trace belongs to another task");
   }
 
   private assertCheckpointCurrent(cycle: JsonObject): void {

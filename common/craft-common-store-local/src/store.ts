@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
+import { performance } from "node:perf_hooks";
 import { applyMigrations, backupDatabase } from "./store-migrations.ts";
 import { canonicalCandidatePath, craftPaths, ensureLayout, ensureProjectStorageDirectory, existingProjectStorageDirectory, projectStorageDirectory,
   ensureSessionStorageDirectory, ensureSessionStorageDirectoryForScopeId, isLegacySafeSessionId, parseSessionStorageScopeId, sessionStorageDirectory,
@@ -75,6 +76,35 @@ function blockedSummary(blocked: JsonObject[], summaryOnly: boolean): JsonObject
     : { blocked, blocked_count: blocked.length };
 }
 
+function knowledgeMigrationFailureKind(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  return /database is locked|SQLITE_BUSY/u.test(message) ? "write_lock"
+    : /Content reference path is outside the canonical directory/u.test(message) ? "content_path_out_of_scope"
+    : /collision/u.test(message) ? "version_collision"
+    : /no such file|ENOENT/u.test(message) ? "source_missing"
+    : /Project Knowledge storage root is not registered/u.test(message) ? "project_root_missing"
+    : /Project Knowledge storage root is ambiguous/u.test(message) ? "project_root_ambiguous"
+    : /scope/u.test(message) ? "scope_validation"
+    : /content|digest|manifest/u.test(message) ? "content_validation"
+    : "other";
+}
+
+function blockedFailureKinds(blocked: JsonObject[]): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const item of blocked) if (typeof item.failure_kind === "string") {
+    result[item.failure_kind] = (result[item.failure_kind] ?? 0) + 1;
+  }
+  return result;
+}
+
+function blockedFailurePhases(blocked: JsonObject[]): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const item of blocked) if (typeof item.failure_phase === "string") {
+    result[item.failure_phase] = (result[item.failure_phase] ?? 0) + 1;
+  }
+  return result;
+}
+
 function storedSchemaVersion(database: DatabaseSync): number {
   try {
     const row = database.prepare("SELECT value FROM meta WHERE key='schema_version'").get() as { value?: string } | undefined;
@@ -88,7 +118,7 @@ function tableExists(database: DatabaseSync, name: string): boolean {
   return database.prepare("SELECT 1 present FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name) !== undefined;
 }
 
-function storageFailure(error: unknown, database: DatabaseSync, role: string, phase: string): unknown {
+function storageFailure(error: unknown, database: DatabaseSync, role: string, phase: string, waitedMs?: number): unknown {
   if (!error || typeof error !== "object") return error;
   const value = error as { code?: unknown; errcode?: unknown; message?: unknown; stage?: unknown; safeDetails?: unknown };
   const busy = value.code === "ERR_SQLITE_ERROR" && [5, 6].includes(Number(value.errcode))
@@ -98,9 +128,9 @@ function storageFailure(error: unknown, database: DatabaseSync, role: string, ph
   try { busyTimeoutMs = Number(database.prepare("PRAGMA busy_timeout").get()!.timeout); } catch { /* Keep the diagnostic content-free if SQLite is already unusable. */ }
   Object.assign(value, {
     stage: typeof value.stage === "string" ? value.stage : "storage_lock",
-    safeDetails: value.safeDetails && typeof value.safeDetails === "object" ? value.safeDetails : {
-      database_role: role, phase, busy_timeout_ms: busyTimeoutMs, retryable: true,
-    },
+    safeDetails: { ...(value.safeDetails && typeof value.safeDetails === "object" ? value.safeDetails as Record<string, unknown>
+      : { database_role: role, phase, busy_timeout_ms: busyTimeoutMs, retryable: true }),
+    ...(waitedMs === undefined ? {} : { waited_ms: waitedMs }) },
   });
   return error;
 }
@@ -257,8 +287,7 @@ export class CraftStore {
 
   private writeLegacyPartitionBackup(domain: PartitionDomain, scope: MemoryScope, capabilityRoot: string,
     rows: Array<Record<string, unknown>>, fileOps: MigrationBackupFileOps, snapshots: ContentMigrationSnapshot[] = []): void {
-    const rootStat = lstatSync(capabilityRoot);
-    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error(`${domain} backup root must be a regular directory`);
+    this.ensureCapabilityDirectory(capabilityRoot, domain);
     const backupsDir = join(capabilityRoot, "backups");
     mkdirSync(backupsDir, { recursive: true, mode: 0o700 });
     const backupStat = lstatSync(backupsDir);
@@ -287,6 +316,27 @@ export class CraftStore {
         if (readFileSync(target, "utf8") === content) return;
       }
       throw error;
+    }
+  }
+
+  /** Create a capability directory beneath the data root without following symlinks. */
+  private ensureCapabilityDirectory(directory: string, domain: PartitionDomain): void {
+    const root = resolve(this.paths.root), target = resolve(directory);
+    if (target === root || !target.startsWith(`${root}${sep}`)) {
+      throw new Error("Capability directory must remain within the Craft data root");
+    }
+    const rootStat = lstatSync(root);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error("Craft data root must be a regular directory");
+    let current = root;
+    for (const part of target.slice(root.length + 1).split(sep)) {
+      current = join(current, part);
+      try {
+        const stat = lstatSync(current);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${domain} backup root must be a regular directory`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        mkdirSync(current, { mode: 0o700 });
+      }
     }
   }
 
@@ -357,8 +407,10 @@ export class CraftStore {
     const pendingStart = this.#pendingMemoryRows.length;
     const deletionStart = this.#pendingMemoryDeletes.length;
     const savepoint = `craft_atomic_${this.#transactionDepth}`;
-    try { database.exec(nested ? `SAVEPOINT ${savepoint}` : "BEGIN IMMEDIATE"); }
-    catch (error) { throw storageFailure(error, database, "primary", nested ? "savepoint_begin" : "transaction_begin"); }
+    const beginStartedAt = performance.now();
+    try { if (nested) database.exec(`SAVEPOINT ${savepoint}`); else this.beginImmediate(database, "primary"); }
+    catch (error) { throw storageFailure(error, database, "primary", nested ? "savepoint_begin" : "transaction_begin",
+      nested ? undefined : Math.max(0, Math.round(performance.now() - beginStartedAt))); }
     this.#transactionDepth += 1;
     let result: T;
     try {
@@ -1228,6 +1280,7 @@ export class CraftStore {
     if (!page.length) return this.retireLegacyKnowledgeContent("", limit, args.dry_run === true, summaryOnly);
     const blocked: JsonObject[] = [];
     const groups = new Map<string, { scope: MemoryScope; rows: Array<Record<string, unknown>> }>();
+    const pendingPublications: Array<{ row: Record<string, unknown>; header: JsonObject }> = [];
     let skipped = 0, migrated = 0;
     for (const row of page) {
       const payload = JSON.parse(String(row.payload_json)) as JsonObject;
@@ -1236,23 +1289,38 @@ export class CraftStore {
         const scope = this.memoryScope(String(row.kind), { ...payload, id: row.id })!;
         const file = this.partitionDatabaseFile("knowledge", scope, false);
         const group = groups.get(file) ?? { scope, rows: [] }; group.rows.push(row); groups.set(file, group);
-      } catch { blocked.push({ kind: row.kind, id: row.id, version: row.version, reason: "storage_scope_unavailable" }); }
+      } catch (error) {
+        blocked.push({ kind: row.kind, id: row.id, version: row.version, reason: "storage_scope_unavailable",
+          failure_kind: knowledgeMigrationFailureKind(error), failure_phase: "scope_resolution" });
+      }
+    }
+    if (args.dry_run === true) for (const group of groups.values()) {
+      const validRows: Array<Record<string, unknown>> = [];
+      for (const row of group.rows) {
+        try { this.knowledgeContentMigrationSnapshot(group.scope, row); validRows.push(row); }
+        catch (error) {
+          blocked.push({ kind: row.kind, id: row.id, version: row.version, reason: "partition_migration_failed",
+            failure_kind: knowledgeMigrationFailureKind(error), failure_phase: "content_preflight" });
+        }
+      }
+      group.rows = validRows;
     }
     const migrateGroup = (scope: MemoryScope, groupRows: Array<Record<string, unknown>>): void => {
+      let failure_phase = "partition_path";
       try {
         const file = this.partitionDatabaseFile("knowledge", scope);
         const snapshots = new Map<string, ContentMigrationSnapshot>();
+        failure_phase = "content_validation";
         if (scope.kind === "project") for (const row of groupRows) {
-          const ref = (JSON.parse(String(row.payload_json)) as JsonObject).content_ref as ContentRef | undefined;
-          if (ref?.kind === "knowledge" && resolve(ref.path).startsWith(resolve(this.paths.knowledgeContentDir) + sep)) {
-            const { manifest } = this.contentStore.readCompatSync(ref, `project:${scope.id}`);
-            if (manifest.scope !== `project:${scope.id}`) throw new Error("Knowledge migration content scope drifted");
-            snapshots.set(ref.path, this.legacyKnowledgeSnapshot(ref.path));
-          }
+          const snapshot = this.knowledgeContentMigrationSnapshot(scope, row);
+          if (snapshot) snapshots.set(snapshot.path, snapshot);
         }
+        failure_phase = "backup";
         this.writeLegacyPartitionBackup("knowledge", scope, dirname(file), groupRows,
           { write: writeFileSync, rename: renameSync, unlink: unlinkSync }, [...snapshots.values()]);
+        failure_phase = "partition_open";
         const partition = this.memoryDatabase(scope, "knowledge").database;
+        failure_phase = "partition_stage";
         const staged = this.transactionOn(partition, () => groupRows.map(row => {
           const kind = String(row.kind), id = String(row.id), version = Number(row.version);
           const payload = JSON.parse(String(row.payload_json)) as JsonObject;
@@ -1267,27 +1335,9 @@ export class CraftStore {
           this.updateMemoryContentIndex(partition, kind, id, version, migratedPayload, String(row.updated_at), "knowledge");
           return { row, header: this.memoryHeader(migratedPayload, scope, file, "knowledge") };
         }));
-        this.transaction(database => {
-          for (const { row, header } of staged) {
-            const encoded = JSON.stringify(header);
-            const changed = database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=? AND payload_json=?")
-              .run(encoded, String(row.kind), String(row.id), Number(row.version), String(row.payload_json));
-            if (Number(changed.changes) === 0) {
-              const current = database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=?").get(String(row.kind), String(row.id), Number(row.version)) as { payload_json: string } | undefined;
-              if (current?.payload_json !== encoded) throw new Error("Knowledge migration changed concurrently");
-            }
-          }
-        });
-        migrated += staged.length;
+        pendingPublications.push(...staged);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        const failure_kind = /database is locked|SQLITE_BUSY/u.test(message) ? "write_lock"
-          : /Content reference path is outside the canonical directory/u.test(message) ? "content_path_out_of_scope"
-          : /collision/u.test(message) ? "version_collision"
-          : /scope/u.test(message) ? "scope_validation"
-          : /content|digest|manifest/u.test(message) ? "content_validation"
-          : /no such file|ENOENT/u.test(message) ? "source_missing"
-          : "other";
+        const failure_kind = knowledgeMigrationFailureKind(error);
         if (groupRows.length > 1 && ["content_path_out_of_scope", "scope_validation", "content_validation", "source_missing"].includes(failure_kind)) {
           const middle = Math.floor(groupRows.length / 2);
           migrateGroup(scope, groupRows.slice(0, middle));
@@ -1295,16 +1345,52 @@ export class CraftStore {
           return;
         }
         for (const row of groupRows) blocked.push({ kind: row.kind, id: row.id, version: row.version,
-          reason: "partition_migration_failed", failure_kind });
+          reason: "partition_migration_failed", failure_kind, failure_phase });
       }
     };
-    if (args.dry_run !== true) for (const { scope, rows: groupRows } of groups.values()) migrateGroup(scope, groupRows);
+    if (args.dry_run !== true) {
+      for (const { scope, rows: groupRows } of groups.values()) migrateGroup(scope, groupRows);
+      if (pendingPublications.length) {
+        try {
+          this.transaction(database => {
+            for (const { row, header } of pendingPublications) {
+              const encoded = JSON.stringify(header);
+              const changed = database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=? AND payload_json=?")
+                .run(encoded, String(row.kind), String(row.id), Number(row.version), String(row.payload_json));
+              if (Number(changed.changes) === 0) {
+                const current = database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=?")
+                  .get(String(row.kind), String(row.id), Number(row.version)) as { payload_json: string } | undefined;
+                if (current?.payload_json !== encoded) throw new Error("Knowledge migration changed concurrently");
+              }
+            }
+          });
+          migrated += pendingPublications.length;
+        } catch (error) {
+          const failure_kind = knowledgeMigrationFailureKind(error);
+          for (const { row } of pendingPublications) blocked.push({ kind: row.kind, id: row.id, version: row.version,
+            reason: "partition_migration_failed", failure_kind, failure_phase: "central_publish" });
+        }
+      }
+    }
     const last = page.at(-1)!;
     const cursor = Buffer.from(JSON.stringify(hasMore ? [last.kind, last.id, last.version] : ["content_scan", "", 1])).toString("base64url");
     return { status: "partial", phase: "records", examined: page.length,
       migratable: [...groups.values()].reduce((total, group) => total + group.rows.length, 0), migrated, skipped,
-      ...blockedSummary(blocked, summaryOnly), summary_only: summaryOnly,
+      ...blockedSummary(blocked, summaryOnly), blocked_failure_kinds: blockedFailureKinds(blocked),
+      blocked_failure_phases: blockedFailurePhases(blocked), summary_only: summaryOnly,
       has_more: true, next_cursor: cursor, dry_run: args.dry_run === true, raw_content_stored: false };
+  }
+
+  private knowledgeContentMigrationSnapshot(scope: MemoryScope, row: Record<string, unknown>): ContentMigrationSnapshot | null {
+    if (scope.kind !== "project") return null;
+    const payload = JSON.parse(String(row.payload_json)) as JsonObject;
+    const ref = payload.content_ref as ContentRef | undefined;
+    if (ref?.kind !== "knowledge") return null;
+    const expectedScope = `project:${scope.id}`;
+    const { manifest } = this.contentStore.readCompatSync(ref, expectedScope);
+    if (manifest.scope !== expectedScope) throw new Error("Knowledge migration content scope drifted");
+    if (!resolve(ref.path).startsWith(`${resolve(this.paths.knowledgeContentDir)}${sep}`)) return null;
+    return this.legacyKnowledgeSnapshot(ref.path);
   }
 
   private memoryContentScopeMatches(value: string, scope: MemoryScope): boolean {
@@ -1505,11 +1591,33 @@ export class CraftStore {
       ? Number(database.prepare("PRAGMA busy_timeout").get()!.timeout) : undefined;
     if (previousTimeout !== undefined) database.exec("PRAGMA busy_timeout=0;");
     try {
-      try { database.exec("BEGIN IMMEDIATE"); }
-      catch (error) { throw storageFailure(error, database, database === this.#database ? "primary" : "capability_partition", "transaction_begin"); }
+      const role = database === this.#database ? "primary" : "capability_partition";
+      const beginStartedAt = performance.now();
+      try { this.beginImmediate(database, role); }
+      catch (error) { throw storageFailure(error, database, role, "transaction_begin",
+        Math.max(0, Math.round(performance.now() - beginStartedAt))); }
       try { const result = operation(); database.exec("COMMIT"); return result; }
       catch (error) { database.exec("ROLLBACK"); throw storageFailure(error, database, database === this.#database ? "primary" : "capability_partition", "transaction_operation"); }
     } finally { if (previousTimeout !== undefined) database.exec(`PRAGMA busy_timeout=${previousTimeout};`); }
+  }
+
+  private beginImmediate(database: DatabaseSync, role: string): void {
+    try { database.exec("BEGIN IMMEDIATE"); }
+    catch (error) {
+      const failure = storageFailure(error, database, role, "transaction_begin");
+      const details = failure && typeof failure === "object" ? (failure as { safeDetails?: Record<string, unknown> }).safeDetails : undefined;
+      // Hook processes share the central WAL with long-lived MCP servers. A
+      // single short retry absorbs a writer that releases just after the
+      // 100ms Hook busy window. Retry only BEGIN: replaying an operation
+      // after it starts could duplicate side effects. Keep partition writes
+      // fail-fast because their lock scope is already capability-local.
+      if (process.env.CRAFT_HOOK_MODE !== "1" || role !== "primary"
+        || details?.phase !== "transaction_begin" || details.retryable !== true) throw failure;
+      const wait = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+      Atomics.wait(wait, 0, 0, 25);
+      try { database.exec("BEGIN IMMEDIATE"); }
+      catch (retryError) { throw storageFailure(retryError, database, role, "transaction_begin"); }
+    }
   }
 
   private updateMemoryContentIndex(database: DatabaseSync, kind: string, id: string, version: number, payload: JsonObject, updatedAt: string, domain: PartitionDomain = "memory"): void {

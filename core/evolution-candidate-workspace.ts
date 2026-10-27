@@ -8,6 +8,7 @@ import { stableDigest } from "./digest.ts";
 type CandidateEntry = { path: string; digest: string; size_bytes?: number };
 type CandidateManifest = { schema: "craft.evolution-candidate.v1"; candidate_id: string; workspace_id: string; checkpoint_id: string;
   checkpoint_version: number; source_digest: string; entries: CandidateEntry[] };
+const MAX_CANDIDATE_CHANGED_PATHS = 100;
 
 function requireId(value: unknown, name: string): string {
   if (typeof value !== "string" || !/^[a-zA-Z0-9_-]{1,160}$/u.test(value)) throw new Error(`${name} is invalid`);
@@ -201,6 +202,8 @@ export class EvolutionCandidateWorkspace {
       if (!allowed.some(root => path === root || path.startsWith(`${root}/`)))
         throw new Error(`Candidate changed a path outside allowed_paths: ${path}`);
       changed.push(path);
+      if (changed.length > MAX_CANDIDATE_CHANGED_PATHS)
+        throw new Error(`Candidate exceeds the changed-path limit (${MAX_CANDIDATE_CHANGED_PATHS})`);
     }
     return { candidate_id: manifest.candidate_id, changed_paths: changed, candidate_digest: stableDigest([...files].sort(([left], [right]) => left.localeCompare(right))) };
   }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -173,9 +174,12 @@ test("Knowledge migration is bounded, repeatable and leaves unavailable projects
     assert.equal(f.store.get("knowledge_claim", "known").content, "private legacy known");
     const remaining = f.store.reconcileKnowledgeStorage({ cursor: String(moved.next_cursor), max_records: 1 });
     assert.equal(remaining.migrated, 0); assert.equal((remaining.blocked as JsonObject[])[0]?.reason, "storage_scope_unavailable");
+    assert.equal((remaining.blocked as JsonObject[])[0]?.failure_kind, "project_root_missing");
+    assert.equal((remaining.blocked as JsonObject[])[0]?.failure_phase, "scope_resolution");
     const compact = f.store.reconcileKnowledgeStorage({ max_records: 2, dry_run: true, summary_only: true });
     assert.equal(compact.blocked_count, 1); assert.deepEqual(compact.blocked, []);
     assert.deepEqual(compact.blocked_reasons, { storage_scope_unavailable: 1 });
+    assert.deepEqual(compact.blocked_failure_kinds, { project_root_missing: 1 });
     assert.equal(JSON.stringify(compact).includes("private legacy unknown"), false);
     const repeated = f.store.reconcileKnowledgeStorage();
     assert.equal(repeated.migrated, 0); assert.equal((repeated.blocked as JsonObject[]).length, 1);
@@ -398,6 +402,144 @@ test("Knowledge migration rejects partition collisions and lost compare-and-swap
   } finally { cleanup(f); }
 });
 
+test("Knowledge migration dry-run validates project bodies and reports concise failure classes", async () => {
+  const f = await fixture();
+  try {
+    const ref = legacyBody(f, "missing-content-claim"); legacyClaim(f, ref); rmSync(ref.path);
+    const preview = f.store.reconcileKnowledgeStorage({ max_records: 10, dry_run: true, summary_only: true });
+    assert.equal(preview.migratable, 0);
+    assert.equal(preview.blocked_count, 1);
+    assert.deepEqual(preview.blocked_reasons, { partition_migration_failed: 1 });
+    assert.deepEqual(preview.blocked_failure_kinds, { source_missing: 1 });
+    assert.deepEqual(preview.blocked, []);
+    assert.equal(f.store.find("knowledge_claim", ref.record_id)?.content_ref &&
+      (f.store.find("knowledge_claim", ref.record_id)!.content_ref as JsonObject).path, ref.path);
+    assert.equal(existsSync(join(projectStorageDirectory(f.paths, f.project), "knowledge", "knowledge.db")), false);
+  } finally { cleanup(f); }
+});
+
+test("Knowledge migration dry-run leaves non-project records on the scoped database path", async () => {
+  const f = await fixture();
+  try {
+    const now = new Date().toISOString();
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('knowledge_claim',?,1,?,?,?)")
+      .run("global-without-body", JSON.stringify({ scope: "global", status: "candidate" }), now, now);
+    const preview = f.store.reconcileKnowledgeStorage({ max_records: 10, dry_run: true });
+    assert.equal(preview.migratable, 1);
+    assert.equal(preview.blocked_count, 0);
+    assert.equal(preview.migrated, 0);
+  } finally { cleanup(f); }
+});
+
+test("Knowledge migration creates a regular capability path before writing a legacy-scope backup", async () => {
+  const f = await fixture();
+  try {
+    const now = new Date().toISOString();
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('knowledge_claim',?,1,?,?,?)")
+      .run("legacy-scope-claim", JSON.stringify({ scope: { kind: "legacy", id: "shared" }, status: "candidate" }), now, now);
+    const preview = f.store.reconcileKnowledgeStorage({ max_records: 10, dry_run: true });
+    assert.equal(preview.migratable, 1);
+    assert.equal(preview.blocked_count, 0);
+    const migrated = f.store.reconcileKnowledgeStorage({ max_records: 10 });
+    assert.equal(migrated.migrated, 1);
+    const record = f.store.get("knowledge_claim", "legacy-scope-claim");
+    assert.deepEqual(record.scope, { kind: "legacy", id: "shared" });
+    const partitionRoot = join(f.paths.knowledgeDir, "scopes", `legacy-${createHash("sha256").update("legacy:shared").digest("hex").slice(0, 24)}`);
+    assert.equal(existsSync(join(partitionRoot, "knowledge.db")), true);
+    assert.equal(readdirSync(join(partitionRoot, "backups")).some(name => name.startsWith("legacy-partition-")), true);
+  } finally { cleanup(f); }
+});
+
+test("Knowledge migration publishes all staged scopes in one central transaction", async () => {
+  const f = await fixture();
+  try {
+    const now = new Date().toISOString();
+    for (const id of ["shared-a", "shared-b"]) f.store.database.prepare(
+      "INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('knowledge_claim',?,1,?,?,?)")
+      .run(`batched-${id}`, JSON.stringify({ scope: { kind: "legacy", id }, status: "candidate" }), now, now);
+    const internals = f.store as unknown as { transaction: (operation: (database: DatabaseSync) => unknown) => unknown };
+    const transaction = internals.transaction.bind(f.store);
+    let transactionCalls = 0;
+    internals.transaction = operation => { transactionCalls++; return transaction(operation); };
+    try {
+      const result = f.store.reconcileKnowledgeStorage({ max_records: 10 });
+      assert.equal(result.migrated, 2);
+      assert.equal(transactionCalls, 1);
+      assert.equal(f.store.get("knowledge_claim", "batched-shared-a").status, "candidate");
+      assert.equal(f.store.get("knowledge_claim", "batched-shared-b").status, "candidate");
+    } finally { internals.transaction = transaction; }
+  } finally { cleanup(f); }
+});
+
+test("Knowledge migration backup paths cannot escape the Craft data root", async () => {
+  const f = await fixture();
+  try {
+    const internals = f.store as unknown as { writeLegacyPartitionBackup: (...args: unknown[]) => void };
+    const backup = (directory: string) => internals.writeLegacyPartitionBackup("knowledge", { kind: "global", id: "global" }, directory,
+      [], { write: writeFileSync, rename: renameSync, unlink: (path: string) => rmSync(path) });
+    assert.throws(() => backup(f.paths.root), /within the Craft data root/u);
+    assert.throws(() => backup(join(f.paths.root, "..")), /within the Craft data root/u);
+    assert.throws(() => backup(f.root), /within the Craft data root/u);
+  } finally { cleanup(f); }
+});
+
+test("Knowledge migration distinguishes an ambiguous project root from a missing one", async () => {
+  const f = await fixture();
+  try {
+    const roots = [join(f.root, "ambiguous-a"), join(f.root, "ambiguous-b")];
+    roots.forEach(root => mkdirSync(root));
+    roots.forEach((alias, index) => f.store.create("scope_alias", `ambiguous-${index}`, {
+      scope: { kind: "project", id: "ambiguous-project" }, alias_kind: "path", alias, status: "active",
+    }));
+    const now = new Date().toISOString();
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('knowledge_claim',?,1,?,?,?)")
+      .run("ambiguous-project-claim", JSON.stringify({ scope: "project:ambiguous-project", status: "candidate" }), now, now);
+    const preview = f.store.reconcileKnowledgeStorage({ max_records: 10, dry_run: true, summary_only: true });
+    assert.equal(preview.migratable, 0);
+    assert.equal(preview.blocked_count, 1);
+    assert.deepEqual(preview.blocked_failure_kinds, { project_root_ambiguous: 1 });
+    assert.deepEqual(preview.blocked_failure_phases, { scope_resolution: 1 });
+  } finally { cleanup(f); }
+});
+
+test("Knowledge migration refuses a linked Craft data root before creating backups", async () => {
+  const f = await fixture();
+  const moved = `${f.paths.root}.real`;
+  try {
+    f.store.close();
+    renameSync(f.paths.root, moved);
+    symlinkSync(f.project, f.paths.root);
+    const internals = f.store as unknown as { writeLegacyPartitionBackup: (...args: unknown[]) => void };
+    assert.throws(() => internals.writeLegacyPartitionBackup("knowledge", { kind: "global", id: "global" }, join(f.paths.root, "knowledge"),
+      [], { write: writeFileSync, rename: renameSync, unlink: (path: string) => rmSync(path) }), /Craft data root must be a regular directory/u);
+  } finally {
+    rmSync(f.paths.root, { recursive: true, force: true });
+    if (existsSync(moved)) renameSync(moved, f.paths.root);
+    cleanup(f);
+  }
+});
+
+test("Knowledge migration preflights and relocates content from the exact legacy project tree", async () => {
+  const f = await fixture();
+  try {
+    const shared = legacyBody(f, "legacy-project-content");
+    const legacyDirectory = join(f.project, ".craft_data", "knowledge", "md");
+    const legacyPath = join(legacyDirectory, "legacy-project-content.v1.md");
+    mkdirSync(legacyDirectory, { recursive: true });
+    writeFileSync(legacyPath, readFileSync(shared.path));
+    legacyClaim(f, { ...shared, path: legacyPath });
+
+    const preview = f.store.reconcileKnowledgeStorage({ max_records: 10, dry_run: true });
+    assert.equal(preview.migratable, 1);
+    assert.equal(preview.blocked_count, 0);
+    const result = f.store.reconcileKnowledgeStorage({ max_records: 10 });
+    assert.equal(result.migrated, 1);
+    const migrated = f.store.get("knowledge_claim", shared.record_id).content_ref as JsonObject;
+    assert.equal(String(migrated.path).startsWith(join(projectStorageDirectory(f.paths, f.project), "knowledge", "md") + "/"), true);
+    assert.equal(f.store.contentStore.readSync(migrated as never).body, "项目专属的可验证知识。");
+  } finally { cleanup(f); }
+});
+
 test("Knowledge migration classifies recoverable and unexpected backup failures", async t => {
   const cases: Array<{ error: unknown; failureKind: string }> = [
     { error: new Error("database is locked"), failureKind: "write_lock" },
@@ -405,7 +547,9 @@ test("Knowledge migration classifies recoverable and unexpected backup failures"
     { error: new Error("version collision"), failureKind: "version_collision" },
     { error: new Error("scope validation failed"), failureKind: "scope_validation" },
     { error: new Error("content manifest digest is invalid"), failureKind: "content_validation" },
-    { error: new Error("ENOENT: no such file"), failureKind: "source_missing" },
+    { error: new Error("Project Knowledge storage root is not registered"), failureKind: "project_root_missing" },
+    { error: new Error("Project Knowledge storage root is ambiguous"), failureKind: "project_root_ambiguous" },
+    { error: new Error("ENOENT: no such file, lstat '/tmp/knowledge/scopes/legacy'"), failureKind: "source_missing" },
     { error: new Error("unexpected filesystem failure"), failureKind: "other" },
     { error: "non-Error failure", failureKind: "other" },
   ];

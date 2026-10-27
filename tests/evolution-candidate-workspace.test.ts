@@ -146,6 +146,16 @@ test("Candidate workspace freezes only changes under the configured allowlist", 
   } finally { await f.close(); }
 });
 
+test("Candidate workspace rejects a diff larger than the automatic change budget", async () => {
+  const f = await fixture();
+  try {
+    const created = f.manager.create(f.args), candidateRoot = String(created.path), directory = join(candidateRoot, "bounded");
+    await mkdir(directory);
+    for (let index = 0; index < 101; index++) await writeFile(join(directory, String(index)), "candidate\n");
+    assert.throws(() => f.manager.validateChanges({ ...f.args, allowed_paths: ["bounded"] }), /changed-path limit \(100\)/u);
+  } finally { await f.close(); }
+});
+
 test("Candidate workspace bounds the number of files it inspects", async () => {
   const f = await fixture();
   try {

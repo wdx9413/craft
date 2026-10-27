@@ -121,6 +121,65 @@ test("Evolution Cycle binds a real project snapshot and records a safe append-on
   } finally { await f.close(); }
 });
 
+test("Evolution Cycle refuses new execution after its Host Session ends but keeps retries idempotent", async () => {
+  const f = await fixture();
+  try {
+    let cycle = f.service.evolutionCycleStart({ ...f.startArgs, cycle_id: "closed-session" }).cycle as JsonObject;
+    const retrieve = { cycle_id: cycle.id, expected_version: cycle.version, transition_id: "retrieve-before-close", stage: "retrieve" };
+    cycle = (f.service.evolutionCycleAdvance(retrieve).cycle as JsonObject);
+    const session = f.store.get("host_session", "session");
+    f.store.save("host_session", "session", { ...payload(session), status: "terminal" });
+
+    const retry = f.service.evolutionCycleAdvance(retrieve);
+    assert.equal(retry.idempotent, true);
+    assert.equal((retry.cycle as JsonObject).version, cycle.version);
+    assert.throws(() => f.service.evolutionCycleAdvance({ cycle_id: cycle.id, expected_version: cycle.version,
+      transition_id: "act-after-close", stage: "act" }), /original live Host Session/u);
+    const history = f.service.evolutionCycleGet({ cycle_id: cycle.id }).events as JsonObject[];
+    assert.equal(history.length, 2);
+    assert.equal((f.service.evolutionCycleGet({ cycle_id: cycle.id }).cycle as JsonObject).stage, "retrieve");
+  } finally { await f.close(); }
+});
+
+test("Evolution Cycle learns from a completed Host task without reopening execution", async () => {
+  const f = await fixture();
+  try {
+    let cycle = f.service.evolutionCycleStart(f.startArgs).cycle as JsonObject;
+    const advance = (stage: string, extra: JsonObject = {}) => {
+      cycle = f.service.evolutionCycleAdvance({ cycle_id: cycle.id, expected_version: cycle.version,
+        transition_id: `completed-${stage}`, stage, ...extra }).cycle as JsonObject;
+    };
+    advance("retrieve"); advance("act");
+    const session = f.store.get("host_session", "session");
+    f.store.save("host_session", "session", { ...payload(session), next_sequence: 0 });
+    f.service.hostSessionAppend({ session_id: "session", kind: "session.completed" });
+    const terminal = f.store.get("host_session", "session");
+    for (const patch of [{ host_id: "other" }, { task_id: "other" }, { identity_digest: "changed" }, { trace_id: "other" }]) {
+      f.store.save("host_session", "session", { ...payload(terminal), ...patch });
+      assert.throws(() => advance("feedback", { outcome: "passed" }), /original Host Session identity/u);
+    }
+    f.store.save("host_session", "session", { ...payload(terminal), status: "paused" });
+    assert.throws(() => advance("feedback", { outcome: "passed" }), /original live Host Session/u);
+    f.store.save("host_session", "session", payload(terminal));
+    advance("feedback", { outcome: "passed" }); advance("attribute"); advance("replan");
+    assert.equal(cycle.stage, "replan");
+    assert.throws(() => advance("observe"), /original live Host Session/u);
+    assert.equal(f.store.get("host_session", "session").status, "terminal");
+  } finally { await f.close(); }
+});
+
+test("Evolution Cycle refuses a Host Session whose Trace changes task ownership", async () => {
+  const f = await fixture();
+  try {
+    const cycle = f.service.evolutionCycleStart({ ...f.startArgs, cycle_id: "trace-task-change" }).cycle as JsonObject;
+    const trace = f.store.get("trace", "trace-session");
+    f.store.save("trace", "trace-session", { ...payload(trace), task_id: "held-out-task" });
+    assert.throws(() => f.service.evolutionCycleAdvance({ cycle_id: cycle.id, expected_version: cycle.version,
+      transition_id: "retrieve-invalid-trace", stage: "retrieve" }), /Trace belongs to another task/u);
+    assert.equal((f.service.evolutionCycleGet({ cycle_id: cycle.id }).events as JsonObject[]).length, 1);
+  } finally { await f.close(); }
+});
+
 test("Evolution Cycle defaults to no writable paths and reads older snapshots without an allowlist", async () => {
   const f = await fixture();
   try {

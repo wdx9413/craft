@@ -41,6 +41,22 @@ test("storage maintenance accepts bounded blocked-reason summaries and rejects i
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("storage maintenance retries a writer-locked page without advancing its persisted cursor", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-storage-lock-retry-")), path = join(root, "state.json");
+  try {
+    await runKnowledgeStorageReconcileOnce({ async call() { return page; } }, path);
+    const lockedPage = { ...page, examined: 2, migrated: 1, blocked: [], summary_only: true, blocked_count: 1,
+      blocked_reasons: { partition_migration_failed: 1 }, blocked_failure_kinds: { write_lock: 1 }, next_cursor: "bmV4dA" };
+    const retry = await runKnowledgeStorageReconcileOnce({ async call() { return lockedPage; } }, path);
+    assert.equal(retry.retryable_blocked, true);
+    assert.equal(JSON.parse(await readFile(path, "utf8")).cursor, page.next_cursor);
+    let usedCursor: unknown;
+    await runKnowledgeStorageReconcileOnce({ async call(_name, args) { usedCursor = args?.cursor; return { ...page, has_more: false, next_cursor: null }; } }, path);
+    assert.equal(usedCursor, page.next_cursor);
+    assert.equal(JSON.parse(await readFile(path, "utf8")).cursor, null);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("storage maintenance rejects corrupt state and invalid server pages before advancing", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-storage-invalid-")), path = join(root, "state.json");
   try {

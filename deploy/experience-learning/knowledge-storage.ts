@@ -39,13 +39,17 @@ export async function runKnowledgeStorageReconcileOnce(client: KnowledgeLearning
     || !summaryOnly && result.blocked.length !== blockedCount || result.dry_run === true
     || !result.has_more && result.next_cursor !== null
     || result.has_more && (typeof result.next_cursor !== "string" || !CURSOR.test(result.next_cursor) || result.next_cursor === cursor)) throw new Error("Knowledge storage migration returned an invalid page");
-  const next = result.has_more ? result.next_cursor as string : null;
+  const failureKinds = summaryOnly && result.blocked_failure_kinds && typeof result.blocked_failure_kinds === "object"
+    && !Array.isArray(result.blocked_failure_kinds) ? result.blocked_failure_kinds as JsonObject : {};
+  const retryableBlocked = Number(failureKinds.write_lock ?? 0) > 0;
+  const next = retryableBlocked ? cursor : result.has_more ? result.next_cursor as string : null;
   if (next !== cursor) {
     try { const parent = lstatSync(dirname(stateFile)); if (parent.isSymbolicLink() || !parent.isDirectory()) throw new Error("Knowledge storage state directory must be regular"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     await atomicPrivateJson(stateFile, { schema: SCHEMA, cursor: next, updated_at: new Date().toISOString() });
   }
   return { status: result.status, examined: result.examined, migrated: result.migrated, skipped: result.skipped,
+    ...(retryableBlocked ? { retryable_blocked: true } : {}),
     ...(result.phase !== undefined ? { phase: result.phase } : {}), ...(result.retired_content !== undefined ? { retired_content: result.retired_content } : {}),
     blocked_count: blockedCount, has_more: result.has_more, raw_content_stored: false };
 }

@@ -5,6 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { Worker } from "node:worker_threads";
 import test from "node:test";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
@@ -104,9 +105,11 @@ test("a held publication lock leaves no staged row and create succeeds after rel
     assert.throws(() => f.store.create("knowledge_claim", "blocked", { scope: "global", content: "pending" }), error => {
       assert.match((error as Error).message, /locked/u);
       assert.equal((error as { stage?: string }).stage, "storage_lock");
-      assert.deepEqual((error as { safeDetails?: Record<string, unknown> }).safeDetails, {
+      const details = (error as { safeDetails?: Record<string, unknown> }).safeDetails;
+      assert.deepEqual(Object.fromEntries(Object.entries(details ?? {}).filter(([key]) => key !== "waited_ms")), {
         database_role: "primary", phase: "transaction_begin", busy_timeout_ms: 1, retryable: true,
       });
+      assert.equal(typeof details?.waited_ms, "number");
       return true;
     });
     assert.equal(partitionCount(f.paths.knowledgeDatabaseFile, "knowledge_claim"), 1);
@@ -114,6 +117,56 @@ test("a held publication lock leaves no staged row and create succeeds after rel
     assert.equal(f.store.find("knowledge_claim", "blocked"), null);
     assert.equal(f.store.create("knowledge_claim", "blocked", { scope: "global", content: "pending" }).version, 1);
   } finally { writer?.close(); cleanup(f); }
+});
+
+test("Hook mode retries a transient primary writer lock without replaying the transaction body", async () => {
+  const priorMode = process.env.CRAFT_HOOK_MODE;
+  process.env.CRAFT_HOOK_MODE = "1";
+  const f = await fixture();
+  let writer: Worker | undefined;
+  let restoreExec: (() => void) | undefined;
+  try {
+    writer = new Worker(`
+      const { parentPort, workerData } = require("node:worker_threads");
+      const { DatabaseSync } = require("node:sqlite");
+      const database = new DatabaseSync(workerData);
+      database.exec("PRAGMA busy_timeout=100; BEGIN IMMEDIATE;");
+      parentPort.postMessage("locked");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 45);
+      database.exec("COMMIT;");
+      database.close();
+    `, { eval: true, workerData: f.paths.databaseFile });
+    let writerError: Error | undefined;
+    const writerExit = new Promise<number>(resolve => {
+      writer!.once("exit", resolve);
+      writer!.once("error", error => { writerError = error instanceof Error ? error : new Error(String(error)); resolve(-1); });
+    });
+    await new Promise<void>((resolve, reject) => {
+      writer!.once("message", () => resolve());
+      writer!.once("error", reject);
+    });
+    // Shorten only this test connection's busy window so the independent writer
+    // releases during the retry delay. Production Hook connections keep 100ms.
+    const database = f.store.database as DatabaseSync & { exec: (sql: string) => void };
+    const originalExec = database.exec.bind(database);
+    let begins = 0;
+    database.exec = sql => { if (sql === "BEGIN IMMEDIATE") begins++; originalExec(sql); };
+    restoreExec = () => { database.exec = originalExec; };
+    database.exec("PRAGMA busy_timeout=30;");
+    let operations = 0;
+    f.store.transaction(() => { operations++; });
+    const exitCode = await writerExit;
+    assert.equal(writerError, undefined);
+    assert.equal(exitCode, 0);
+    assert.equal(begins, 2);
+    assert.equal(operations, 1);
+  } finally {
+    restoreExec?.();
+    await writer?.terminate();
+    if (priorMode === undefined) delete process.env.CRAFT_HOOK_MODE;
+    else process.env.CRAFT_HOOK_MODE = priorMode;
+    cleanup(f);
+  }
 });
 
 test("storage lock annotation preserves an existing safe phase diagnostic", async () => {
@@ -163,6 +216,7 @@ test("storage lock annotation preserves an existing safe phase diagnostic", asyn
     assert.throws(() => run(f.store.database, () => {}), caught => {
       assert.equal((caught as { stage?: string }).stage, "storage_lock");
       assert.equal((caught as { safeDetails?: Record<string, unknown> }).safeDetails?.phase, "transaction_begin");
+      assert.equal(typeof (caught as { safeDetails?: Record<string, unknown> }).safeDetails?.waited_ms, "number");
       return true;
     });
     writer.exec("ROLLBACK"); writer.close(); writer = undefined; f.store.database.exec(`PRAGMA busy_timeout=${timeout}`);
@@ -185,9 +239,11 @@ test("storage lock annotation preserves an existing safe phase diagnostic", asyn
     partitionWriter.exec("PRAGMA busy_timeout=1; BEGIN IMMEDIATE");
     assert.throws(() => run(partition.database, () => {}), caught => {
       assert.equal((caught as { stage?: string }).stage, "storage_lock");
-      assert.deepEqual((caught as { safeDetails?: Record<string, unknown> }).safeDetails, {
+      const details = (caught as { safeDetails?: Record<string, unknown> }).safeDetails;
+      assert.deepEqual(Object.fromEntries(Object.entries(details ?? {}).filter(([key]) => key !== "waited_ms")), {
         database_role: "capability_partition", phase: "transaction_begin", busy_timeout_ms: 1, retryable: true,
       });
+      assert.equal(typeof details?.waited_ms, "number");
       return true;
     });
     partitionWriter.exec("ROLLBACK"); partitionWriter.close(); partitionWriter = undefined;
