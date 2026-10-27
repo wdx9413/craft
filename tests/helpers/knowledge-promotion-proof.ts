@@ -53,9 +53,16 @@ export function attachVerifiedPromotionFixture(store: CraftStore, claim: JsonObj
       candidate_claim_refs: [{ claim_id: claimId, claim_version: candidate.version, identity_digest: candidate.identity_digest ?? null,
       content_digest: candidate.content_digest ?? null }], metrics: { provenance_eligible: true } });
   const reviewId = `fixture-promotion-review-${suffix}`;
+  const supportRefs = [1, 2].map(index => {
+    const evidence = store.create("evidence", `fixture-support-evidence-${suffix}-${index}`, { confidence: "confirmed",
+      metadata: { source_session_id: `fixture-support-session-${suffix}-${index}`, task_id: `fixture-support-task-${index}` } });
+    const support = store.create("knowledge_claim_support", `fixture-support-${suffix}-${index}`, { claim_id: claimId,
+      scope: candidate.scope, evidence_id: evidence.id });
+    return { support_id: support.id, support_version: support.version, evidence_id: evidence.id, evidence_version: evidence.version };
+  });
   store.create("knowledge_auto_review", reviewId, { claim_id: claimId, claim_version: candidate.version,
     claim_identity_digest: candidate.identity_digest ?? null, verdict: "eligible", effectiveness_run_id: runId,
-    policy_id: "knowledge-promotion-default", policy_revision: 1 });
+    policy_id: "knowledge-promotion-default", policy_revision: 1, required_independent_support: 2, minimum_confidence: "bounded", support_refs: supportRefs });
   const evidenceIds = originalEvidenceIds.length ? originalEvidenceIds : [claimEvidenceId];
   /* keep every original Evidence ID stable; only the fixture's provenance metadata is enriched */
   const validEvidenceIds = [...new Set(evidenceIds.filter((id) => {

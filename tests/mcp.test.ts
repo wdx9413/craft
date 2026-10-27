@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { DatabaseSync } from "node:sqlite";
 import test, { mock } from "node:test";
 import { HookPlane } from "../core/hook-plane.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
@@ -53,6 +54,93 @@ test("MCP maps SQLite lock failures to a stable storage-busy diagnostic", async 
       arguments: { workflow_id: "workflow", target: "verified", reason: "test" } } });
     assert.equal(((otherSqliteError?.result as JsonObject).structuredContent as JsonObject).error_code, "ERR_SQLITE_ERROR");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Context MCP bounds primary writer contention without changing the connection timeout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-context-lock-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = await CraftService.open(store);
+  const writer = new DatabaseSync(store.paths.databaseFile);
+  try {
+    store.database.exec("PRAGMA busy_timeout=1200");
+    service.contextOpen = async () => store.transaction(() => ({ status: "ready" }));
+    writer.exec("BEGIN IMMEDIATE");
+    const server = new McpServer(service, "component-context-agent"), started = performance.now();
+    const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: root, query: "定位代码" } } });
+    const elapsed = performance.now() - started;
+    const result = response?.result as JsonObject, failure = result.structuredContent as JsonObject;
+    assert.equal(result.isError, true);
+    assert.equal(failure.error_code, "STORAGE_BUSY");
+    assert(elapsed < 900, `Context contention took ${elapsed.toFixed(0)}ms`);
+    assert.equal((failure.details as JsonObject).busy_timeout_ms, 250);
+    assert.equal((store.database.prepare("PRAGMA busy_timeout").get() as { timeout: number }).timeout, 1200);
+    const syscallStarted = performance.now();
+    const syscall = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_run",
+      arguments: { resource: "context", operation: "open", args: { project_root: root, query: "定位代码" } } } });
+    const syscallResult = syscall?.result as JsonObject;
+    assert.equal(syscallResult.isError, true);
+    assert.equal((syscallResult.structuredContent as JsonObject).error_code, "STORAGE_BUSY");
+    assert(performance.now() - syscallStarted < 900);
+    assert.equal((store.database.prepare("PRAGMA busy_timeout").get() as { timeout: number }).timeout, 1200);
+    store.database.exec("PRAGMA busy_timeout=25");
+    const short = await server.handle({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: root, query: "定位代码" } } });
+    assert.equal((((short?.result as JsonObject).structuredContent as JsonObject).details as JsonObject).busy_timeout_ms, 25);
+    assert.equal((store.database.prepare("PRAGMA busy_timeout").get() as { timeout: number }).timeout, 25);
+    writer.exec("ROLLBACK");
+    const success = await server.handle({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: root, query: "定位代码" } } });
+    assert.equal((success?.result as JsonObject).isError, false);
+  } finally {
+    try { writer.exec("ROLLBACK"); } catch { /* writer may not have started */ }
+    writer.close(); store.close(); await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Context bounds a contended legacy Trace write before dispatch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-context-legacy-trace-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = await CraftService.open(store);
+  const writer = new DatabaseSync(store.paths.databaseFile);
+  try {
+    const now = new Date().toISOString();
+    store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("trace", "legacy-context-trace", 1, JSON.stringify({ status: "running", task_id: "task" }), now, now);
+    store.database.exec("PRAGMA busy_timeout=1200");
+    service.contextOpen = async () => ({ status: "ready" });
+    writer.exec("BEGIN IMMEDIATE");
+    const server = new McpServer(service), started = performance.now();
+    const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: root, query: "定位代码", trace_id: "legacy-context-trace" } } });
+    const elapsed = performance.now() - started;
+    assert.equal((response?.result as JsonObject).isError, false);
+    assert.equal(((response?.result as JsonObject).structuredContent as JsonObject).telemetry_error, "Error");
+    assert(elapsed < 2200, `legacy Trace blocked Context for ${elapsed.toFixed(0)}ms`);
+    assert.equal(Number(store.database.prepare("PRAGMA busy_timeout").get()!.timeout), 1200);
+  } finally { try { writer.exec("ROLLBACK"); } finally { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); } }
+});
+
+test("real Context dispatch reports primary contention and recovers after release", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-context-real-lock-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = await CraftService.open(store);
+  const writer = new DatabaseSync(store.paths.databaseFile);
+  try {
+    store.database.exec("PRAGMA busy_timeout=1200");
+    writer.exec("BEGIN IMMEDIATE");
+    const server = new McpServer(service, "component-context-agent"), started = performance.now();
+    const request = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: root, query: "定位代码", include_codebase: false } } };
+    const response = await server.handle(request);
+    const result = response?.result as JsonObject;
+    assert.equal(result.isError, true);
+    assert.equal((result.structuredContent as JsonObject).error_code, "STORAGE_BUSY");
+    assert(performance.now() - started < 1200);
+    writer.exec("ROLLBACK");
+    const recovered = await server.handle({ ...request, id: 2 });
+    assert.equal((recovered?.result as JsonObject).isError, false);
+  } finally { try { writer.exec("ROLLBACK"); } catch { /* already released */ } writer.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("MCP negotiates protocols, lists tools, dispatches every handler, and reports errors", async () => {

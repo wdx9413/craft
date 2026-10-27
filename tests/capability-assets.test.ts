@@ -324,7 +324,8 @@ test("the internal host action whitelist is enforced by the facade", async () =>
     // Every permitted action is read-and-record only; widening the list is an explicit edit.
     await invoke("capability_search", { query: "nothing" });
     await invoke("task_checkpoint", { task_id: String(task.id), summary: "point" });
-    await invoke("evidence_record", { source_type: "program", confidence: "confirmed", claim: "ok" });
+    const assertion = await invoke("evidence_record", { source_type: "program", confidence: "confirmed", claim: "ok", record_origin: "managed" });
+    assert.equal(assertion.record_origin, "caller_asserted");
     await invoke("artifact_register", { artifact_id: "a1", kind: "note", name: "n", uri: "craft://a1" });
     // Two independent fail-closed gates: a governed verb is refused by the tier
     // gate, and an unknown action is refused by dispatch. Both stay "not permitted".

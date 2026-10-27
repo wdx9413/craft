@@ -26,6 +26,20 @@ test("records a sanitized project Knowledge Evidence fragment from one verified 
   assert.equal(JSON.stringify(calls[0]!.args).includes("The targeted check passed."), true);
   assert.equal(JSON.stringify(calls[0]!.args).includes("pnpm test"), false);
   assert.equal(result.id, "evidence-1");
+  assert.equal(result.transcript_check_status, "not_reported");
+});
+
+test("requests server-side archive comparison and preserves only recognized diagnostic statuses", async () => {
+  for (const [check, expected] of [[{ status: "transcript_matched" }, "transcript_matched"], [{ status: "unverified" }, "unverified"],
+    [{ status: "unavailable" }, "unavailable"], [{ status: "forged" }, "not_reported"], [[], "not_reported"], [null, "not_reported"]] as const) {
+    let request: JsonObject = {};
+    const client: ExperienceLearningClient = { async call(_name, args = {}) { request = args; return {
+      evidence: { id: "evidence-1", source_id: "source-1", fragment_id: "fragment-1" }, source_id: "source-1", fragment_id: "fragment-1",
+      sanitized_content_stored: true, raw_content_stored: false, transcript_check: check }; } };
+    const result = await recordSessionVerificationEvidence(client, { ...task, dataset_partition: "held_out" }, excerpt);
+    assert.equal(request.verify_against_archive, true); assert.equal(request.dataset_partition, "held_out");
+    assert.equal(result?.transcript_check_status, expected);
+  }
 });
 
 test("does not write Evidence when task provenance or verification artifacts are incomplete", async () => {

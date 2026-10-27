@@ -12,11 +12,24 @@
   },
   "groups": [
     {
+      "name": "skill-release-order",
+      "include": ["scripts/ci/skill-release-compatibility.ts"],
+      "tests": ["tests/skill-release-compatibility.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "session-evidence-repair-preflight",
+      "include": ["core/session-evidence-repair-preflight.ts"],
+      "tests": ["tests/knowledge-session-evidence.test.ts"],
+      "branches": true
+    },
+    {
       "name": "codex-task-evidence-verification",
       "include": [
         "core/codex-session-verification.ts",
         "core/codex-task-prose.ts",
-        "capability/craft-knowledge/session-evidence.ts"
+        "capability/craft-knowledge/session-evidence.ts",
+        "capability/craft-knowledge/session-evidence-repair.ts"
       ],
       "tests": [
         "tests/codex-session-verification.test.ts",
@@ -481,7 +494,8 @@
         "tests/store-partition-atomicity.test.ts",
         "tests/experience-graph-assets.test.ts",
         "tests/component-observability.test.ts",
-        "tests/evolution-cycle.test.ts"
+        "tests/evolution-cycle.test.ts",
+        "tests/knowledge-session-evidence.test.ts"
       ],
       "branches": true
     },
@@ -1363,7 +1377,8 @@
         "tests/knowledge-promotion-authority.test.ts",
         "tests/knowledge-memory-operability.test.ts",
         "tests/knowledge-promotion-policy.test.ts",
-        "tests/component-hookless.test.ts"
+        "tests/component-hookless.test.ts",
+        "tests/knowledge-session-evidence.test.ts"
       ],
       "branches": true
     },
@@ -1423,7 +1438,8 @@
         "tests/action-handlers.test.ts",
         "tests/mcp.test.ts",
         "tests/internal-tool-authorization.test.ts",
-        "tests/industry-gaps.test.ts"
+        "tests/industry-gaps.test.ts",
+        "tests/session-knowledge-candidates.test.ts"
       ],
       "branches": true
     },

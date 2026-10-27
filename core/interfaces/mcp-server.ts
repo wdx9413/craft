@@ -4,7 +4,7 @@ import { stableDigest } from "../digest.ts";
 import { CraftService, VERSION } from "../service.ts";
 import { classifyTool } from "../internal-tool-authorization.ts";
 import { HookPlane } from "../hook-plane.ts";
-import { type JsonObject } from "../infrastructure/store.ts";
+import { withContextLockBudget, type JsonObject } from "../infrastructure/store.ts";
 import { discoverResult, pingPolicy, readRequestMeta } from "../mcp-forward-compat.ts";
 import { negotiateProtocolVersion, MCP_PREFERRED_PROTOCOL_VERSION } from "../distribution-and-first-run.ts";
 import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS, buildRegistry, catalogOf, describeEntry, resolveEntry } from "../tool-plane.ts";
@@ -229,7 +229,9 @@ export class McpServer {
             () => observeOperation(this.service.store, "craft-mcp", name, { ...supplied as JsonObject, request_id: requestId }, dispatch),
             event => this.recordReadOperation(event)), correlation: null };
         } else if (traced) {
-          captured = await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: name, input: supplied as JsonObject, handler: dispatch });
+          const contextCall = name === "craft_context_open" || name === "craft_run" && (supplied as JsonObject).resource === "context" && (supplied as JsonObject).operation === "open";
+          const capture = () => this.componentTrace.capture({ requestId, component: "craft-mcp", operation: name, input: supplied as JsonObject, handler: dispatch });
+          captured = await (contextCall ? withContextLockBudget(capture) : capture());
         } else {
           captured = { ok: true, result: await dispatch(), correlation: null };
         }

@@ -6,8 +6,60 @@ import test from "node:test";
 import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationCaseBindingDigest, knowledgeEvaluationEvidence } from "../core/knowledge-evaluation-provenance.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
-import { payload } from "../core/digest.ts";
+import { payload, stableDigest } from "../core/digest.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+
+test("formal proof rechecks bound support versions, policy and source independence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-support-proof-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const candidate = store.create("knowledge_claim", "support-proof", { status: "candidate", scope: "global", evidence_ids: [] });
+    const promoted = attachVerifiedPromotionFixture(store, candidate);
+    const assessmentId = String((promoted.review as JsonObject).promotion_review_id);
+    const assessment = store.get("knowledge_auto_review", assessmentId), refs = assessment.support_refs as JsonObject[];
+    const support = store.get("knowledge_claim_support", String(refs[0]!.support_id));
+    const evidence = store.get("evidence", String(refs[0]!.evidence_id));
+    const find = store.find.bind(store);
+    const check = (kind: string, id: string, replacement: JsonObject | null) => {
+      store.find = ((k: string, key: string, version?: number, hydrate?: boolean) =>
+        k === kind && key === id ? replacement : find(k, key, version, hydrate)) as typeof store.find;
+      try { assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), false); } finally { store.find = find; }
+    };
+    for (const changes of [{ support_refs: null }, { required_independent_support: 0 }, { required_independent_support: 11 },
+      { minimum_confidence: "unverified" }, { minimum_confidence: "confirmed" }, { support_refs: [] },
+      { support_refs: [null, refs[1]] }, { support_refs: [{}, refs[1]] }, { support_refs: [refs[0], refs[0]] }])
+      check("knowledge_auto_review", assessmentId, { ...assessment, ...changes });
+    for (const changes of [{ version: 2 }, { claim_id: "other" }, { scope: "other" }, { evidence_id: "other" }])
+      check("knowledge_claim_support", String(support.id), { ...support, ...changes });
+    check("knowledge_claim_support", String(support.id), null);
+    for (const changes of [{ version: 2 }, { record_origin: "caller_asserted" }, { confidence: "unverified" },
+      { source_id: "missing" }, { metadata: {} }, { metadata: { source_session_id: (store.get("evidence", String(refs[1]!.evidence_id)).metadata as JsonObject).source_session_id } }])
+      check("evidence", String(evidence.id), { ...evidence, ...changes });
+    check("evidence", String(evidence.id), null);
+    const claimEvidenceId = String((promoted.evidence_ids as string[])[0]), claimEvidence = store.get("evidence", claimEvidenceId);
+    for (const changes of [{ record_origin: "caller_asserted" }, { confidence: "rejected" },
+      { metadata: { ...claimEvidence.metadata as JsonObject, provenance: "codex_session_program_verification" } }])
+      check("evidence", claimEvidenceId, { ...claimEvidence, ...changes });
+    const checkMultiple = (changes: Record<string, JsonObject | null>, expected: boolean) => {
+      store.find = ((k: string, key: string, version?: number, hydrate?: boolean) =>
+        Object.hasOwn(changes, `${k}:${key}`) ? changes[`${k}:${key}`] : find(k, key, version, hydrate)) as typeof store.find;
+      try { assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), expected); } finally { store.find = find; }
+    };
+    const evidenceKey = `evidence:${String(evidence.id)}`;
+    for (const source of [null, { status: "disabled", trust: "verified" }, { status: "active", trust: "untrusted" }])
+      checkMultiple({ [evidenceKey]: { ...evidence, source_id: "support-source" }, "knowledge_source:support-source": source }, false);
+    checkMultiple({ [evidenceKey]: { ...evidence, source_id: "support-source", metadata: null },
+      "knowledge_source:support-source": { status: "active", trust: "verified" } }, true);
+    const codexScope = "project:demo", codexSource = `knowledge_source_codex_session_${stableDigest(codexScope).slice(-24)}`;
+    checkMultiple({ [evidenceKey]: { ...evidence, source_id: codexSource, source_type: "program", metadata: {
+      provenance: "codex_session_program_verification", scope: codexScope, task_id: "task", source_session_id: "new-session" } },
+    [`knowledge_source:${codexSource}`]: { status: "active", trust: "verified" } }, false);
+    checkMultiple({ [evidenceKey]: { ...evidence, confidence: "bounded" },
+      [`knowledge_auto_review:${assessmentId}`]: { ...assessment, minimum_confidence: "confirmed" },
+      "knowledge_promotion_policy:knowledge-promotion-default": { automatic: true, revision: 1, minimum_confidence: "confirmed", minimum_independent_support: 2 } }, false);
+    assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), true);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 test("formal Knowledge eligibility verifies the exact local promotion proof and rejects drift", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-promotion-proof-"));
@@ -181,6 +233,12 @@ test("Only sanitized independent real-session held-out Knowledge cases are evalu
   assert.equal(assess({ ...base, source_evidence_ids: [1] }).status, "unverified_source_evidence");
   assert.equal(assess(base, []).status, "unverified_source_evidence");
   assert.equal(assess(base, [{ ...sourceEvidence[0]!, confidence: "unverified" }]).status, "unverified_source_evidence");
+  assert.deepEqual(assess(base, [{ ...sourceEvidence[0]!, metadata: { ...sourceEvidence[0]!.metadata as JsonObject,
+    provenance: "codex_session_program_verification" } }]), { status: "insufficient_outcome_evidence", evaluation_eligible: false });
+  const transcript = { ...sourceEvidence[0]!, id: "test-only", metadata: { ...sourceEvidence[0]!.metadata as JsonObject,
+    provenance: "codex_session_program_verification" } };
+  assert.deepEqual(assess({ ...base, source_evidence_ids: ["test-only", "eval-evidence"] }, [transcript, sourceEvidence[0]!]),
+    { status: "insufficient_outcome_evidence", evaluation_eligible: false });
   for (const metadata of [undefined, "invalid", [], { source_session_id: "other", task_id: "eval-task" }, { source_session_id: "eval-session" }])
     assert.equal(assess(base, [{ ...sourceEvidence[0]!, metadata }]).status, "unverified_source_evidence");
   assert.equal(assess({ ...base, expected_claim_ids: [] }).status, "missing_claim_evidence");

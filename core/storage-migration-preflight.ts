@@ -42,7 +42,7 @@ function regularFileSize(path: string): number | null {
   }
 }
 
-function projectAliases(database: DatabaseSync): Map<string, string[]> {
+export function projectAliases(database: DatabaseSync): Map<string, string[]> {
   const result = new Map<string, Set<string>>();
   for (const row of database.prepare("SELECT payload_json FROM records WHERE kind='scope_alias'").all() as Array<{ payload_json: string }>) {
     const item = JSON.parse(row.payload_json) as Record<string, unknown>;

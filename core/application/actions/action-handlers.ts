@@ -6,6 +6,7 @@ import { createRuntimeHandlers } from "./runtime-handlers.ts";
 import { createWorkHandlers } from "./work-handlers.ts";
 import { createEvaluationHandlers } from "./evaluation-handlers.ts";
 import { createWorkspaceHandlers } from "./workspace-handlers.ts";
+import { verifyCodexSessionEvidenceInput } from "../../codex-session-archive.ts";
 
 /** Caller identity is local; transport construction does not change internal dispatch. */
 export function createActionHandlers(service: CraftService, mountedComponent?: ComponentName): McpHandlerGroup {
@@ -236,7 +237,15 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_verified_iteration_get: (a) => service.verifiedIterationGet(a),
       craft_verified_iteration_assess: (a) => service.verifiedIterationAssess(a),
       craft_strategy_recommend: (a) => service.strategyRecommend(a),
-      craft_knowledge_claim_save: (a) => service.knowledgeClaimSave(a), craft_knowledge_session_evidence_record: (a) => service.knowledgeSessionEvidenceRecord(a), craft_knowledge_claim_get: (a) => service.knowledgeClaimGet(a), craft_knowledge_claim_list: (a) => service.knowledgeClaimList(a), craft_knowledge_claim_review: (a) => service.knowledgeClaimReview(a), craft_knowledge_scenario_list: (a) => service.knowledgeScenarioList(a), craft_knowledge_scenario_retire: (a) => service.knowledgeScenarioRetire(a), craft_knowledge_scenario_migration_propose: (a) => service.knowledgeScenarioMigrationPropose(a), craft_knowledge_promotion_policy_get: () => service.knowledgePromotionPolicyGet(), craft_knowledge_promotion_policy_save: (a) => service.knowledgePromotionPolicySave(a), craft_knowledge_support_record: (a) => service.knowledgeClaimSupportRecord(a), craft_knowledge_semantic_review_packet: (a) => service.knowledgeSemanticReviewPacket(a), craft_knowledge_semantic_provider_review: (a) => service.knowledgeSemanticProviderReview(a), craft_knowledge_host_review: (a) => service.knowledgeHostReview(a), craft_knowledge_auto_review: (a) => service.knowledgeAutoReview(a),
+      craft_knowledge_claim_save: (a) => service.knowledgeClaimSave(a), craft_knowledge_session_evidence_record: async (a) => {
+        if (a.verify_against_archive !== true) return service.knowledgeSessionEvidenceRecord(a);
+        if (a.dataset_partition !== "candidate_generation" && a.dataset_partition !== "held_out") throw new Error("dataset_partition is required for archive verification");
+        let transcriptCheck: JsonObject;
+        try { transcriptCheck = await verifyCodexSessionEvidenceInput(a, { expected_partition: a.dataset_partition },
+          { ...process.env, CRAFT_DATA_DIR: service.store.paths.root }); }
+        catch { transcriptCheck = { status: "unavailable", reason: "archive_read_failed", raw_content_stored: false }; }
+        return { ...service.knowledgeSessionEvidenceRecord(a), transcript_check: transcriptCheck };
+      }, craft_knowledge_claim_get: (a) => service.knowledgeClaimGet(a), craft_knowledge_claim_list: (a) => service.knowledgeClaimList(a), craft_knowledge_claim_review: (a) => service.knowledgeClaimReview(a), craft_knowledge_scenario_list: (a) => service.knowledgeScenarioList(a), craft_knowledge_scenario_retire: (a) => service.knowledgeScenarioRetire(a), craft_knowledge_scenario_migration_propose: (a) => service.knowledgeScenarioMigrationPropose(a), craft_knowledge_promotion_policy_get: () => service.knowledgePromotionPolicyGet(), craft_knowledge_promotion_policy_save: (a) => service.knowledgePromotionPolicySave(a), craft_knowledge_support_record: (a) => service.knowledgeClaimSupportRecord(a), craft_knowledge_semantic_review_packet: (a) => service.knowledgeSemanticReviewPacket(a), craft_knowledge_semantic_provider_review: (a) => service.knowledgeSemanticProviderReview(a), craft_knowledge_host_review: (a) => service.knowledgeHostReview(a), craft_knowledge_auto_review: (a) => service.knowledgeAutoReview(a),
       craft_knowledge_candidate_model_review: (a) => service.knowledgeCandidateModelReview(a),
       craft_content_status: () => service.contentStatus(), craft_content_verify: (a) => service.contentVerify(a), craft_content_migrate: (a) => service.contentMigrate(a),
       craft_wiki_page_save: (a) => service.wikiPageSave(a), craft_wiki_page_get: (a) => service.wikiPageGet(a), craft_wiki_page_list: (a) => service.wikiPageList(a), craft_wiki_page_refresh: (a) => service.wikiPageRefresh(a), craft_knowledge_relation_save: (a) => service.knowledgeRelationSave(a),
@@ -307,7 +316,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_artifact_register: (a) => service.artifactRegister(a),
       craft_artifact_get: (a) => service.get("artifact", "artifact_id", a),
       craft_artifact_list: (a) => service.list("artifact", "artifacts", a),
-      craft_evidence_record: (a) => service.evidenceRecord(a),
+      craft_evidence_record: (a) => service.evidenceRecord(a, true),
       craft_evidence_get: (a) => service.get("evidence", "evidence_id", a),
       craft_evidence_list: (a) => service.list("evidence", "evidence", a),
       craft_workflow_save: (a) => service.workflowSave(a),

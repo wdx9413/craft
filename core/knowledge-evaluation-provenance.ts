@@ -12,6 +12,7 @@ export type KnowledgeEvaluationProvenanceStatus =
   | "unsanitized"
   | "missing_source_evidence"
   | "unverified_source_evidence"
+  | "insufficient_outcome_evidence"
   | "missing_claim_evidence"
   | "unverified_claim_source"
   | "session_leak"
@@ -119,6 +120,32 @@ export function knowledgeClaimPromotionProofVerified(store: CraftStore, claim: J
     || assessment.policy_revision !== review.policy_revision
     || !run || run.mode !== "candidate_shadow" || run.status !== "eligible"
     || (run.metrics as JsonObject | undefined)?.provenance_eligible !== true) return false;
+  const supportRefs = assessment.support_refs;
+  const required = Number(assessment.required_independent_support), confidence = assessment.minimum_confidence;
+  if (!Array.isArray(supportRefs) || !Number.isSafeInteger(required) || required < 1 || required > 10
+    || supportRefs.length < required || supportRefs.length > 10_000 || !["bounded", "confirmed"].includes(String(confidence))
+    || required !== Number(activePolicy?.minimum_independent_support ?? 2) || confidence !== (activePolicy?.minimum_confidence ?? "bounded")) return false;
+  const supportIds = new Set<string>(), independence = new Set<string>();
+  for (const value of supportRefs) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const ref = value as JsonObject;
+    if (typeof ref.support_id !== "string" || typeof ref.evidence_id !== "string" || supportIds.has(ref.support_id)) return false;
+    const support = store.find("knowledge_claim_support", ref.support_id, undefined, false);
+    const evidence = store.find("evidence", ref.evidence_id, undefined, false);
+    if (!support || support.version !== ref.support_version || support.claim_id !== claim.id || support.scope !== claim.scope
+      || support.evidence_id !== ref.evidence_id || !evidence || evidence.version !== ref.evidence_version
+      || evidence.record_origin === "caller_asserted"
+      || (evidence.metadata as JsonObject | undefined)?.provenance === "codex_session_program_verification"
+      || !["bounded", "confirmed"].includes(String(evidence.confidence))
+      || confidence === "confirmed" && evidence.confidence !== "confirmed") return false;
+    const source = typeof evidence.source_id === "string" ? store.find("knowledge_source", evidence.source_id, undefined, false) : null;
+    if (typeof evidence.source_id === "string" && (!source || source.status !== "active" || source.trust === "untrusted")) return false;
+    const metadata = evidence.metadata && typeof evidence.metadata === "object" && !Array.isArray(evidence.metadata) ? evidence.metadata as JsonObject : {};
+    const session = typeof metadata.source_session_id === "string" && metadata.source_session_id.trim() ? metadata.source_session_id.trim() : null;
+    const key = source ? `source:${source.id}` : session ? `session:${session}` : null;
+    if (!key || independence.has(key)) return false;
+    supportIds.add(ref.support_id); independence.add(key);
+  }
   const refs = Array.isArray(run.candidate_claim_refs) ? run.candidate_claim_refs as JsonObject[] : [];
   if (!refs.some((ref) => ref.claim_id === claim.id && ref.claim_version === priorVersion
     && ref.identity_digest === (claim.identity_digest ?? null) && ref.content_digest === (claim.content_digest ?? null))) return false;
@@ -132,6 +159,9 @@ export function knowledgeClaimPromotionProofVerified(store: CraftStore, claim: J
     if (!item || item.version !== ref.case_version || item.identity_digest !== ref.identity_digest) return false;
     if (Array.isArray(item.expected_claim_ids) && item.expected_claim_ids.includes(claim.id)) positiveLabel = true;
     const evidence = knowledgeEvaluationEvidence(store, item);
+    if (evidence.claimEvidence.some(({ evidence: sourceEvidence }) => sourceEvidence.record_origin === "caller_asserted"
+      || !["bounded", "confirmed"].includes(String(sourceEvidence.confidence))
+      || (sourceEvidence.metadata as JsonObject | undefined)?.provenance === "codex_session_program_verification")) return false;
     if (!assessKnowledgeEvaluationProvenance(item, evidence.sourceEvidence, evidence.claimEvidence,
       knowledgeEvaluationAdjudicationVerified(store, item)).evaluation_eligible) return false;
   }
@@ -168,13 +198,20 @@ export function assessKnowledgeEvaluationProvenance(
     if (typeof evidenceId !== "string") return { status: "unverified_source_evidence", evaluation_eligible: false };
     const evidence = sourceEvidenceById.get(evidenceId);
     const metadata = evidence?.metadata;
-    if (!evidence || !["confirmed", "program"].includes(String(evidence.confidence))
+    if (!evidence || evidence.record_origin === "caller_asserted" || !["confirmed", "program"].includes(String(evidence.confidence))
       || !metadata || typeof metadata !== "object" || Array.isArray(metadata)
       || (metadata as JsonObject).source_session_id !== item.source_session_id
       || (metadata as JsonObject).task_id !== item.source_task_id) {
       return { status: "unverified_source_evidence", evaluation_eligible: false };
     }
   }
+  // A successful test command proves that command's result, not the outcome
+  // of the whole held-out task or any benefit from using this Claim. An extra
+  // caller-supplied confirmed record does not verify that missing linkage.
+  if (item.source_evidence_ids.some(id => {
+    const evidence = sourceEvidenceById.get(String(id));
+    return (evidence?.metadata as JsonObject | undefined)?.provenance === "codex_session_program_verification";
+  })) return { status: "insufficient_outcome_evidence", evaluation_eligible: false };
 
   const claimIds = Array.isArray(item.expected_claim_ids) ? item.expected_claim_ids : [];
   if (!claimIds.length) return { status: "missing_claim_evidence", evaluation_eligible: false };

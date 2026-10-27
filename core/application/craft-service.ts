@@ -264,7 +264,7 @@ export class CraftService extends ServiceFoundation {
       store, resourceCatalog: (args) => this.workbenchResourceCatalogView(args),
       registerSource: (args) => this.knowledgeSourceRegister(args),
       proposeMemory: (args) => this.memoryCandidatePropose(args),
-      recordEvidence: (args) => this.evidenceRecord(args), saveClaim: (args) => this.knowledgeClaimSave(args),
+      recordEvidence: (args) => this.evidenceRecord(args, true), saveClaim: (args) => this.knowledgeClaimSave(args),
     });
     const calls = new ComponentTraceKernel(this.trace, "sdk");
     observeMethods(this, store, name => {
@@ -385,7 +385,7 @@ export class CraftService extends ServiceFoundation {
       // The loop verifies its own guardrail but cannot author one.
       governance_pin_check: (input) => this.governancePinCheck(input),
       task_checkpoint: (input) => this.taskCheckpoint(input),
-      evidence_record: (input) => this.evidenceRecord(input),
+      evidence_record: (input) => this.evidenceRecord(input, true),
       artifact_register: (input) => this.artifactRegister(input),
       workspace_read: async (input) => {
         const prepared = this.actionGatewayPrepare({ action_id: `internal-read-${valueDigest(input).slice(7, 23)}`, task_id: text(input.task_id, "task_id"), workspace: text(input.workspace, "workspace"), operation: "workspace_read", effect: "read_only", input_digest: valueDigest(input) });
@@ -3933,12 +3933,13 @@ export class CraftService extends ServiceFoundation {
       producer_type: args.producer_type ?? null, producer_id: args.producer_id ?? null,
       metadata: args.metadata ?? {} });
   }
-  evidenceRecord(args: JsonObject): JsonObject {
+  evidenceRecord(args: JsonObject, callerAsserted = false): JsonObject {
     const confidence = String(args.confidence ?? "unverified");
     if (!CONFIDENCE.has(confidence)) throw new Error(`Unsupported confidence: ${confidence}`);
     if (args.artifact_id) this.store.get("artifact", String(args.artifact_id));
     return this.store.save("evidence", String(args.evidence_id ?? id("evidence")), {
       source_type: text(args.source_type, "source_type"), claim: text(args.claim, "claim"), confidence,
+      ...(callerAsserted ? { record_origin: "caller_asserted" } : {}),
       artifact_id: args.artifact_id ?? null, locator: args.locator ?? null,
       observed_at: args.observed_at ?? new Date().toISOString(), metadata: args.metadata ?? {},
       ...(args.source_id === undefined ? {} : { source_id: args.source_id }),

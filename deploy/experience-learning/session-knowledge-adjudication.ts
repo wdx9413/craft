@@ -107,6 +107,8 @@ export async function runSessionKnowledgeAdjudicationOnce(deps: DistillationDepe
       || metadata.source_session_id !== current.source_session_id || metadata.task_id !== current.source_task_id) {
       return withMetrics({ status: "waiting_for_verified_evidence", processed: 0, model_calls: 0, raw_content_stored: false });
     }
+    if (metadata.provenance === "codex_session_program_verification")
+      return withMetrics({ status: "waiting_for_outcome_evidence", processed: 0, model_calls: 0, raw_content_stored: false });
     evidence.push({ evidence_id: item.id, source_type: item.source_type, confidence: item.confidence,
       claim: typeof item.claim === "string" ? item.claim : "", source_session_id: metadata.source_session_id, task_id: metadata.task_id });
   }

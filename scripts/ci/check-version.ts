@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
+import { skillVersionNotAhead } from "./skill-release-compatibility.ts";
 
 /**
  * One release version, enforced.
@@ -62,14 +63,14 @@ for (const path of ["README.md", "README.en.md"]) {
   }
 }
 
-// The adapter Skill files quote the release they ship with, so they must move too.
+// An unchanged adapter Skill retains its own version; it cannot be newer than its Runtime.
 for (const path of ["adapters/workbuddy-expert/skills/craft-route/SKILL.md",
   "adapters/workbuddy-connector/skills/craft-route/SKILL.md",
   "adapters/trae-work/skills/craft-route/SKILL.md"]) {
   const skill = await readFile(resolve(root, path), "utf8");
   const quoted = skill.match(/(?:\bv|version:\s*)(\d+\.\d+\.\d+)\b/u);
-  if (quoted && quoted[1] !== packageVersion) {
-    throw new Error(`${path} quotes v${quoted[1]} but package.json is ${packageVersion}`);
+  if (quoted && !skillVersionNotAhead(quoted[1]!, packageVersion)) {
+    throw new Error(`${path} quotes a Skill version v${quoted[1]} outside Runtime ${packageVersion}`);
   }
 }
 

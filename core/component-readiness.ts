@@ -1,5 +1,7 @@
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { CRAFT_RELEASE_VERSION } from "./version.ts";
+import { lstatSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const COMPONENTS = new Set(["knowledge", "memory", "experience"]);
 
@@ -19,6 +21,24 @@ function countByStatus(store: CraftStore, kind: string): Record<string, number> 
     counts[status] = (counts[status] ?? 0) + 1;
   }
   return counts;
+}
+
+/** Read only the bounded, content-free projection of the last evaluation state. */
+function knowledgeEvaluationDiagnostic(directory: string): JsonObject {
+  try {
+    const parent = lstatSync(directory);
+    if (parent.isSymbolicLink() || !parent.isDirectory()) return { status: "unavailable" };
+    const path = join(directory, "session-evaluation-state.json"), stat = lstatSync(path);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 8 * 1024 * 1024) return { status: "unavailable" };
+    const value = JSON.parse(readFileSync(path, "utf8")) as JsonObject;
+    if (!value || value.schema !== "craft.knowledge-session-evaluation-state.v1" || value.legacy_unknown_outcomes === undefined)
+      return { status: "not_observed" };
+    if (!Number.isSafeInteger(value.legacy_unknown_outcomes) || Number(value.legacy_unknown_outcomes) < 0
+      || Number(value.legacy_unknown_outcomes) > 50_000 || typeof value.updated_at !== "string"
+      || value.updated_at.length > 64 || !Number.isFinite(Date.parse(value.updated_at))) return { status: "unavailable" };
+    return { status: "last_recorded", measurement_scope: "eligible_held_out_batch_only",
+      legacy_unknown_outcomes: value.legacy_unknown_outcomes, updated_at: value.updated_at };
+  } catch (error) { return { status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "not_observed" : "unavailable" }; }
 }
 
 /**
@@ -70,7 +90,7 @@ export class ComponentReadinessKernel {
       host_attachment: observed === null ? "this_mcp_process_replied; compare this release with the Host cache when another conversation cannot see it"
         : missing.length ? "bundle_or_surface_mismatch" : "surface_matches",
       execution_proof: execution,
-      observability: { data_root: this.store.paths.root, trace_retention: this.store.find("maintenance_component", "trace_retention") ?? { status: "not_observed" },
+      observability: { data_root: this.store.paths.root, ...(name === "knowledge" ? { learning_evaluation: knowledgeEvaluationDiagnostic(this.store.paths.knowledgeDir) } : {}), trace_retention: this.store.find("maintenance_component", "trace_retention") ?? { status: "not_observed" },
         telemetry_events: this.store.count("telemetry_event"), usage_records: this.store.count("usage_ledger"),
         usage_measurement: this.store.count("usage_ledger") === 0 ? "unavailable" : "recorded", full_content_logged: false },
       next_action: missing.length ? "reinstall_or_restart_the_host_then_compare_initialize_and_tools_list"

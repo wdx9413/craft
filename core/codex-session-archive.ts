@@ -5,6 +5,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { atomicPrivateJson, craftPaths, dataRoot } from "../common/craft-common-store-local/src/paths.ts";
 import { projectIdentityFromRoot } from "./scope-identity.ts";
 import { codexTaskGoalDigest } from "./codex-task-prose.ts";
+import { stableDigest } from "./digest.ts";
 import { extractCodexSessionVerificationArtifacts, type CodexTaskTranscriptRecord } from "./codex-session-verification.ts";
 import type { JsonObject } from "./infrastructure/store.ts";
 
@@ -586,7 +587,8 @@ export async function codexSessionTaskBatch(partition: "candidate_generation" | 
     const contextVerified = task.verification_status === "verified" && Boolean(task.verification_evidence_ids?.length);
     const transcriptVerified = typeof task.verification_artifact_digest === "string"
       && typeof task.verification_artifact_count === "number" && task.verification_artifact_count > 0;
-    const outcomePassed = task.verification_outcome === "passed" || transcriptVerified;
+    // A passing intermediate test cannot override a verified failed terminal task.
+    const outcomePassed = task.verification_outcome !== "failed" && (task.verification_outcome === "passed" || transcriptVerified);
     return task.dataset_partition === partition && task.status === "completed" && task.assistant_final_seen
       && (contextVerified || transcriptVerified) && (partition !== "candidate_generation" || outcomePassed);
   });
@@ -598,7 +600,7 @@ export async function codexSessionTaskBatch(partition: "candidate_generation" | 
   return { tasks: tasks.map(task => ({ task_id: task.task_id, session_id: task.session_id, turn_id: task.turn_id,
     project_scope_id: task.project_scope_id, dataset_partition: task.dataset_partition, dataset_split_version: task.dataset_split_version,
     task_goal_digest: task.task_goal_digest ?? null,
-    verification_evidence_ids: task.verification_evidence_ids ?? [], verification_outcome: task.verification_outcome ?? "passed",
+    verification_evidence_ids: task.verification_evidence_ids ?? [], verification_outcome: task.verification_outcome ?? null,
     verification_source: task.verification_status === "verified" && task.verification_evidence_ids?.length ? "context_receipt" : "session_test_log",
     verification_artifact_digest: task.verification_artifact_digest ?? null,
     verification_artifact_count: task.verification_artifact_count ?? 0,
@@ -660,8 +662,15 @@ export async function reconcileCodexSessionTaskEvidence(evidenceValue: unknown,
       const goalEvidence = evidenceByTaskGoal.get(`${task.session_id}\0${task.project_scope_id}\0${task.task_goal_digest}`) ?? [];
       if (sameGoalTasks.length === 1 && goalEvidence.length === 1) matches = goalEvidence;
     }
+    // A matching turn is not enough when the Host also supplied a conflicting
+    // project, goal, or terminal identity. Preserve legacy records without
+    // optional scope fields, but never attach a known mismatch to this task.
+    if (matches.some(item => (item.host !== undefined && item.host !== "codex" && item.host !== "codex-cli")
+      || (item.project_scope_id !== undefined && item.project_scope_id !== task.project_scope_id)
+      || (item.task_goal_digest !== undefined && item.task_goal_digest !== task.task_goal_digest))) continue;
     const outcomes = new Set(matches.map(item => item.verification_outcome));
-    if (matches.length === 0 || outcomes.size !== 1) continue;
+    const terminals = new Set(matches.map(item => item.terminal_identity_digest));
+    if (matches.length === 0 || outcomes.size !== 1 || terminals.size !== 1) continue;
     const selected = matches[0]!;
     state.tasks[task.task_id] = { ...task, verification_status: "verified", verification_evidence_ids: matches.map(item => String(item.evidence_id)).sort(),
       verification_outcome: selected.verification_outcome as "passed" | "failed", context_receipt_id: String(selected.context_receipt_id),
@@ -694,6 +703,8 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
     || task.dataset_partition !== options.expected_partition) {
     return { status: "ineligible", reason: "task_not_verified_or_partition_mismatch", raw_content_stored: false };
   }
+  if (options.expected_partition === "candidate_generation" && task.verification_outcome === "failed")
+    return { status: "ineligible", reason: "task_terminal_outcome_failed", raw_content_stored: false };
   if (task.task_goal_digest && task.project_scope_id && Object.values(state.tasks).some(other => other.task_id !== task.task_id
     && other.project_scope_id === task.project_scope_id && other.task_goal_digest === task.task_goal_digest
     && other.dataset_partition !== task.dataset_partition)) {
@@ -760,8 +771,25 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
   return { status: "ready", task_id: task.task_id, session_id: task.session_id, turn_id: task.turn_id,
     project_scope_id: task.project_scope_id, dataset_partition: task.dataset_partition, dataset_split_version: task.dataset_split_version,
     source_ref: task.source_ref, evidence_ids: task.verification_evidence_ids ?? [],
-    verification_outcome: task.verification_outcome ?? (transcriptVerified ? "passed" : undefined),
+    verification_outcome: task.verification_outcome ?? (transcriptVerified ? null : undefined),
     verification_source: contextVerified ? "context_receipt" : "session_test_log",
     task_goal: taskGoal, task_result: taskResult, verification_artifacts: verificationArtifacts,
     sanitized: true, content_stored: false, raw_content_stored: false };
+}
+
+/** Compare a caller's proposed test Evidence to the indexed, sanitized Host task.
+ * A matching test transcript is not proof of the terminal task outcome or benefit. */
+export async function verifyCodexSessionEvidenceInput(input: JsonObject, options: CodexSessionTaskExcerptOptions,
+  env: NodeJS.ProcessEnv = process.env): Promise<JsonObject> {
+  if (typeof input.task_id !== "string" || !input.task_id.trim()) return { status: "unverified", reason: "task_id_missing" };
+  const excerpt = await readCodexSessionTaskExcerpt(input.task_id, options, env);
+  if (excerpt.status !== "ready") return { status: "unverified", reason: "task_excerpt_unavailable" };
+  if (input.scope !== excerpt.project_scope_id || input.source_session_id !== excerpt.session_id || input.turn_id !== excerpt.turn_id
+    || input.source_ref !== excerpt.source_ref || input.task_goal !== excerpt.task_goal || input.task_result !== excerpt.task_result
+    || input.sanitized !== true || !Array.isArray(input.verification_artifacts)
+    || input.verification_artifacts.length === 0 || stableDigest(input.verification_artifacts) !== stableDigest(excerpt.verification_artifacts)) {
+    return { status: "unverified", reason: "task_evidence_mismatch" };
+  }
+  return { status: "transcript_matched", verification_outcome: excerpt.verification_outcome ?? null,
+    task_result_verified: false, claim_effect_proven: false, raw_content_stored: false };
 }

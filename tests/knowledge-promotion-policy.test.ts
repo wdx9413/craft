@@ -8,6 +8,7 @@ import { stableDigest } from "../core/digest.ts";
 import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { adjudicateKnowledgeCase } from "./helpers/knowledge-evaluation-adjudication.ts";
+import { createActionHandlers } from "../core/application/actions/action-handlers.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-promotion-"));
@@ -37,7 +38,7 @@ function evaluateCandidate(f: Awaited<ReturnType<typeof fixture>>, claim: JsonOb
     evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "model_candidate", sanitized: true,
     candidate_claim_refs: [{ claim_id: claim.id, claim_version: claim.version, identity_digest: claim.identity_digest, content_digest: claim.content_digest }] }).case as JsonObject;
   const adjudicated = adjudicateKnowledgeCase(f.service, caseRecord).case as JsonObject;
-  return f.service.knowledgeEvaluationRun({ run_id: `shadow-${claim.id}`, mode: "candidate_shadow", case_ids: [adjudicated.id],
+  return f.service.knowledgeEvaluationRun({ run_id: `shadow-${claim.id}-${caseId}`, mode: "candidate_shadow", case_ids: [adjudicated.id],
     candidate_claim_ids: [String(claim.id)], top_k: 5 }).run as JsonObject;
 }
 
@@ -73,6 +74,34 @@ test("automatic promotion requires independent evidence by default and records t
     assert.equal((f.store.get("knowledge_claim", String(claim.id)).review as JsonObject).reviewer, "automated-promotion-policy");
     assert.equal(((f.store.get("knowledge_claim", String(claim.id)).review as JsonObject).policy_revision), 1);
     assert.equal((f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!.verdict, "already_reviewed");
+  } finally { await close(f); }
+});
+
+test("quarantined legacy promotion cannot reuse old support and a fresh shadow run", async () => {
+  const f = await fixture();
+  try {
+    const { claim, first } = candidate(f.service, "legacy-repromotion");
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: first.id, observation_key: "first" });
+    const second = f.service.evidenceRecord({ evidence_id: "legacy-support-2", source_type: "program", confidence: "confirmed",
+      claim: "fixture support", metadata: { source_session_id: "legacy-session-2", task_id: "legacy-task-2" } });
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "second" });
+    assert.equal(evaluateCandidate(f, claim).status, "eligible");
+    const original = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id] }).assessments as JsonObject[])[0]!;
+    assert.equal(original.promoted, true);
+    const promoted = f.store.get("knowledge_claim", String(claim.id));
+    const reviewId = String((promoted.review as JsonObject).promotion_review_id);
+    const review = f.store.get("knowledge_auto_review", reviewId);
+    const { support_refs: _supportRefs, ...oldReview } = review;
+    f.store.save("knowledge_auto_review", reviewId, oldReview);
+    const firstPass = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id] }).assessments as JsonObject[])[0]!;
+    assert.equal(firstPass.promoted, false);
+    assert((firstPass.reasons as string[]).includes("independent_promotion_revalidation_required"));
+    const quarantined = f.store.get("knowledge_claim", String(claim.id));
+    assert.equal(quarantined.status, "candidate"); assert.equal(quarantined.promotion_revalidation_required, true);
+    assert.equal(evaluateCandidate(f, quarantined, "legacy-repromotion-new-case").status, "eligible");
+    const retry = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id] }).assessments as JsonObject[])[0]!;
+    assert.equal(retry.promoted, false);
+    assert((retry.reasons as string[]).includes("independent_promotion_revalidation_required"));
   } finally { await close(f); }
 });
 
@@ -219,17 +248,58 @@ test("independent support counts each source session once and ignores caller-inv
       metadata: { provenance: "codex_session_program_verification", scope: "project:demo", source_session_id: sessionId, task_id: taskId },
     });
     const firstSessionEvidence = sessionEvidence("verified-session-one", "session-one", "task-one");
-    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: firstSessionEvidence.id, observation_key: "caller-key-one" });
+    assert.throws(() => f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: firstSessionEvidence.id, observation_key: "caller-key-one" }), /bounded or confirmed/u);
     const duplicateSession = sessionEvidence("verified-session-one-second-task", "session-one", "task-one-b");
-    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: duplicateSession.id, observation_key: "caller-key-two" });
+    assert.throws(() => f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: duplicateSession.id, observation_key: "caller-key-two" }), /bounded or confirmed/u);
     const independentSession = sessionEvidence("verified-session-two", "session-two", "task-two");
-    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: independentSession.id, observation_key: "caller-key-three" });
+    assert.throws(() => f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: independentSession.id, observation_key: "caller-key-three" }), /bounded or confirmed/u);
     const unproven = f.service.evidenceRecord({ evidence_id: "same-session-unproven-evidence", source_type: "receipt", confidence: "confirmed", claim: "No source session." });
     f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: unproven.id, observation_key: "caller-key-four" });
     const assessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], auto_promote: false }).assessments as JsonObject[])[0]!;
-    assert.equal(assessment.independent_support, 2);
-    assert.equal((assessment.reasons as string[]).includes("independent_support_below_threshold"), false);
+    assert.equal(assessment.independent_support, 0);
+    assert.equal((assessment.reasons as string[]).includes("independent_support_below_threshold"), true);
     assert.equal(assessment.promoted, false);
+  } finally { await close(f); }
+});
+
+test("public Evidence assertions cannot count as independent Knowledge support", async () => {
+  const f = await fixture();
+  try {
+    const { claim } = candidate(f.service, "asserted-support");
+    assert.equal(evaluateCandidate(f, claim).status, "eligible");
+    f.service.registerCanonicalHandlers({});
+    const fallback = await (f.service as unknown as { invokeInternalAction(action: string, args: JsonObject): Promise<JsonObject> })
+      .invokeInternalAction("evidence_record", { evidence_id: "fallback-assertion", source_type: "program", confidence: "confirmed", claim: "caller assertion" });
+    assert.equal(fallback.record_origin, "caller_asserted");
+    const publicRecord = createActionHandlers(f.service).craft_evidence_record;
+    for (const n of [1, 2]) {
+      const evidence = await publicRecord({ evidence_id: `public-support-${n}`, source_type: "program", confidence: "confirmed",
+        claim: "caller assertion", record_origin: "managed", metadata: { source_session_id: `session-${n}`, task_id: `task-${n}` } });
+      f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: (evidence as JsonObject).id, observation_key: `observation-${n}` });
+    }
+    const assessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id] }).assessments as JsonObject[])[0]!;
+    assert.equal(assessment.independent_support, 0);
+    assert.equal(assessment.promoted, false);
+    assert((assessment.reasons as string[]).includes("independent_support_below_threshold"));
+    for (const n of [1, 2]) {
+      const sha = (digit: string) => `sha256:${digit.repeat(64)}`;
+      const result = f.service.knowledgeSessionEvidenceRecord({ scope: "project:demo", task_id: `claimed-task-${n}`,
+        source_session_id: `claimed-session-${n}`, turn_id: `claimed-turn-${n}`, source_ref: sha("a"),
+        task_goal: "验证任务", task_result: "测试通过", sanitized: true,
+        verification_artifacts: [{ runner: "javascript", command_digest: sha("b"), result_digest: sha("c"), call_digest: sha("d"),
+          exit_code: 0, summary_kind: "tests_passed", content_stored: false }] });
+      const evidence = result.evidence as JsonObject;
+      assert.equal(evidence.record_origin, "caller_asserted");
+      assert.throws(() => f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: evidence.id, observation_key: `session-observation-${n}` }), /bounded or confirmed/u);
+    }
+    const rechecked = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id] }).assessments as JsonObject[])[0]!;
+    assert.equal(rechecked.independent_support, 0); assert.equal(rechecked.promoted, false);
+    const assertedSource = await publicRecord({ evidence_id: "public-source", source_type: "program", confidence: "confirmed",
+      claim: "caller asserted fact", metadata: { source_session_id: "source-session", task_id: "source-task" } });
+    const sourced = f.service.knowledgeClaimSave({ claim_id: "asserted-source", kind: "fact", content: "A claimed fact.", scope: "project:demo",
+      source_id: "source", evidence_ids: [(assertedSource as JsonObject).id] }).claim as JsonObject;
+    const sourceAssessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [sourced.id] }).assessments as JsonObject[])[0]!;
+    assert((sourceAssessment.reasons as string[]).includes("credible_evidence_missing"));
   } finally { await close(f); }
 });
 

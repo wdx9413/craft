@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -79,6 +79,48 @@ test("component diagnosis filters execution receipts by component, session and r
     assert.equal(readyMemory.state, "ready");
     assert.equal(readyMemory.next_action, "resolve_only_the_current_scope_and_record_outcome_linked_usage");
     assert.equal((kernel.diagnose({ component: "memory" }).observability as JsonObject).usage_measurement, "recorded");
+  } finally { await dispose(f); }
+});
+
+test("Knowledge diagnosis reads only bounded content-free learning status", async () => {
+  const f = await fixture();
+  try {
+    await mkdir(f.store.paths.knowledgeDir, { recursive: true });
+    await writeFile(join(f.store.paths.knowledgeDir, "session-evaluation-state.json"), JSON.stringify({
+      schema: "craft.knowledge-session-evaluation-state.v1", legacy_unknown_outcomes: 11,
+      processed_task_ids: ["private-task-id"], updated_at: "2026-10-27T14:11:27.523Z" }));
+    const diagnosis = new ComponentReadinessKernel(f.store).diagnose({ component: "knowledge" });
+    const observation = (diagnosis.observability as JsonObject).learning_evaluation as JsonObject;
+    assert.deepEqual(observation, { status: "last_recorded", measurement_scope: "eligible_held_out_batch_only",
+      legacy_unknown_outcomes: 11, updated_at: "2026-10-27T14:11:27.523Z" });
+    assert.equal(JSON.stringify(observation).includes("private-task-id"), false);
+  } finally { await dispose(f); }
+});
+
+test("Knowledge learning status fails closed on malformed or unsafe state", async () => {
+  const f = await fixture();
+  try {
+    const directory = f.store.paths.knowledgeDir, path = join(directory, "session-evaluation-state.json");
+    const kernel = new ComponentReadinessKernel(f.store);
+    const status = () => ((kernel.diagnose({ component: "knowledge" }).observability as JsonObject).learning_evaluation as JsonObject).status;
+    await mkdir(directory, { recursive: true });
+    assert.equal(status(), "not_observed");
+    for (const value of [null, {}, { schema: "craft.knowledge-session-evaluation-state.v1" }]) {
+      await writeFile(path, JSON.stringify(value)); assert.equal(status(), "not_observed");
+    }
+    const base = { schema: "craft.knowledge-session-evaluation-state.v1", legacy_unknown_outcomes: 1, updated_at: "2026-10-27T14:11:27.523Z" };
+    for (const value of [{ ...base, legacy_unknown_outcomes: -1 }, { ...base, legacy_unknown_outcomes: 50_001 },
+      { ...base, legacy_unknown_outcomes: 1.5 }, { ...base, updated_at: null }, { ...base, updated_at: "a".repeat(65) },
+      { ...base, updated_at: "not-a-date" }]) {
+      await writeFile(path, JSON.stringify(value)); assert.equal(status(), "unavailable");
+    }
+    await writeFile(path, "{"); assert.equal(status(), "unavailable");
+    await writeFile(path, Buffer.alloc(8 * 1024 * 1024 + 1)); assert.equal(status(), "unavailable");
+    await rm(path); await symlink(join(f.root, "missing"), path); assert.equal(status(), "unavailable");
+    await rm(path); await mkdir(path); assert.equal(status(), "unavailable");
+    await rm(path, { recursive: true }); await rm(directory, { recursive: true });
+    await symlink(f.root, directory); assert.equal(status(), "unavailable");
+    await rm(directory); await writeFile(directory, "not a directory"); assert.equal(status(), "unavailable");
   } finally { await dispose(f); }
 });
 

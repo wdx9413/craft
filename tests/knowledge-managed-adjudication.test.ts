@@ -16,7 +16,7 @@ import type { ExperienceLearningClient } from "../deploy/experience-learning/wor
 
 const sha = (digit: string) => `sha256:${digit.repeat(64)}`;
 async function fixture(output = JSON.stringify({ decision: "accepted", expected_claim_ids: ["managed-claim"] }), gate?: Promise<void>,
-  options: { model?: string; no_usage?: boolean; fail?: unknown } = {}) {
+  options: { model?: string; no_usage?: boolean; fail?: unknown; synthetic_legacy_source?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "craft-managed-adjudication-"));
   const store = await new CraftStore(craftPaths(root)).open();
   const calls: JsonObject[] = [];
@@ -33,23 +33,31 @@ async function fixture(output = JSON.stringify({ decision: "accepted", expected_
     turn_id: "source-turn", source_ref: sha("a"), task_goal: "验证规则", task_result: "规则成立", sanitized: true,
     verification_artifacts: [{ runner: "javascript", command_digest: sha("b"), result_digest: sha("c"), call_digest: sha("d"),
       exit_code: 0, summary_kind: "tests_passed", content_stored: false }] });
+  const sourceEvidence = options.synthetic_legacy_source ? service.evidenceRecord({ evidence_id: "legacy-source-fixture", source_type: "program",
+    confidence: "confirmed", claim: "legacy fixture", source_id: source.source_id, fragment_id: source.fragment_id,
+    metadata: { source_session_id: "source-session", task_id: "source-task" } }) : source.evidence as JsonObject;
   const claim = service.knowledgeClaimSave({ claim_id: "managed-claim", kind: "fact", title: "已验证规则", content: "规则成立",
-    scope: "project:demo", source_id: source.source_id, evidence_ids: [(source.evidence as JsonObject).id] }).claim as JsonObject;
+    scope: "project:demo", source_id: source.source_id, evidence_ids: [sourceEvidence.id] }).claim as JsonObject;
   const held = service.knowledgeSessionEvidenceRecord({ scope: "project:demo", task_id: "held-task", source_session_id: "held-session",
     turn_id: "held-turn", source_ref: sha("e"), task_goal: "独立任务", task_result: "独立结果支持规则", sanitized: true,
     verification_artifacts: [{ runner: "javascript", command_digest: sha("f"), result_digest: sha("1"), call_digest: sha("2"),
       exit_code: 0, summary_kind: "tests_passed", content_stored: false }] });
+  // Synthetic positive control for the managed model/Trace workflow. This is
+  // not proof that public confidence labels are trustworthy in real operation.
+  const heldControl = store.create("evidence", "held-control", { source_type: "program", confidence: "confirmed",
+    claim: "独立任务结果", source_id: held.source_id, fragment_id: held.fragment_id,
+    metadata: { source_session_id: "held-session", task_id: "held-task" } });
   const case_ = service.knowledgeEvaluationCaseSave({ case_id: "managed-case", query: "规则成立", scope: "project:demo",
     expected_claim_ids: [claim.id], candidate_claim_refs: [{ claim_id: claim.id, claim_version: claim.version,
       identity_digest: claim.identity_digest, content_digest: claim.content_digest }],
-    source_session_id: "held-session", source_task_id: "held-task", source_evidence_ids: [(held.evidence as JsonObject).id],
+    source_session_id: "held-session", source_task_id: "held-task", source_evidence_ids: [heldControl.id],
     evaluation_channel: "real_session", dataset_partition: "held_out", sanitized: true, label_source: "model_candidate" }).case as JsonObject;
   Object.assign(service, {
     evaluationModelProfileEnsureSingle: () => ({ status: "ready_for_adapter", profile: { id: "managed-profile", version: 1,
       provider: "codex-cli", model: "gpt-6-luna", max_output_tokens: 256 } }),
     evaluationModelProfileGet: () => ({ readiness: { status: "ready_for_adapter" } }),
   });
-  return { root, store, service, case_, calls, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
+  return { root, store, service, case_, calls, held, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
 test("public adjudication owns the Host call and rejects caller-supplied Trace fields", async () => {
@@ -75,6 +83,90 @@ test("public adjudication owns the Host call and rejects caller-supplied Trace f
     await assert.rejects(f.service.knowledgeEvaluationCaseAdjudicateManaged({ case_id: f.case_.id,
       expected_version: f.case_.version }), /current sanitized held-out candidate/u);
     assert.equal(f.calls.length, 1);
+  } finally { await f.close(); }
+});
+
+test("caller-asserted Evidence cannot qualify a managed shadow run or promote a Claim", async () => {
+  const f = await fixture();
+  try {
+    const adjudicated = await f.service.knowledgeEvaluationCaseAdjudicateManaged({ case_id: f.case_.id, expected_version: f.case_.version });
+    const publicEvidence = createActionHandlers(f.service).craft_evidence_record;
+    await publicEvidence({ evidence_id: "held-control", source_type: "program", confidence: "confirmed", claim: "caller assertion",
+      record_origin: "managed", metadata: { source_session_id: "held-session", task_id: "held-task" } });
+    assert.equal(f.store.get("evidence", "held-control").record_origin, "caller_asserted");
+    const item = adjudicated.case as JsonObject;
+    const run = f.service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [item.id],
+      candidate_claim_ids: ["managed-claim"] }).run as JsonObject;
+    assert.equal(item.label_source, "host_adjudicated");
+    assert.equal((run.metrics as JsonObject).provenance_eligible, false);
+    assert.equal(run.status, "insufficient");
+    for (const n of [1, 2]) {
+      const evidence = f.service.evidenceRecord({ evidence_id: `claimed-support-${n}`, source_type: "program", confidence: "confirmed",
+        claim: "Caller asserted support", metadata: { source_session_id: `claimed-session-${n}`, task_id: `claimed-task-${n}` } });
+      f.service.knowledgeClaimSupportRecord({ claim_id: "managed-claim", evidence_id: evidence.id, observation_key: `claimed-observation-${n}` });
+    }
+    const review = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: ["managed-claim"] });
+    assert.equal(((review.assessments as JsonObject[])[0]!).promoted, false);
+    const context = f.service.wikiContextCompile({ query: "规则成立", scope: "project:demo" });
+    assert.equal((context.included as JsonObject[]).some(item => item.claim_id === "managed-claim"), false);
+  } finally { await f.close(); }
+});
+
+test("replacing held-out Evidence through the public API invalidates prior formal Knowledge", async () => {
+  const f = await fixture(undefined, undefined, { synthetic_legacy_source: true });
+  try {
+    const adjudicated = await f.service.knowledgeEvaluationCaseAdjudicateManaged({ case_id: f.case_.id, expected_version: f.case_.version });
+    f.service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [(adjudicated.case as JsonObject).id], candidate_claim_ids: ["managed-claim"] });
+    for (const n of [1, 2]) {
+      const evidence = f.service.evidenceRecord({ evidence_id: `support-${n}`, source_type: "program", confidence: "confirmed",
+        claim: "fixture support", metadata: { source_session_id: `session-${n}`, task_id: `task-${n}` } });
+      f.service.knowledgeClaimSupportRecord({ claim_id: "managed-claim", evidence_id: evidence.id, observation_key: `observation-${n}` });
+    }
+    const review = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: ["managed-claim"] });
+    assert.equal(((review.assessments as JsonObject[])[0]!).promoted, true);
+    assert.equal((f.service.wikiContextCompile({ query: "规则成立", scope: "project:demo" }).included as JsonObject[]).length, 1);
+    await createActionHandlers(f.service).craft_evidence_record({ evidence_id: "held-control", source_type: "program", confidence: "confirmed",
+      claim: "caller assertion", metadata: { source_session_id: "held-session", task_id: "held-task" } });
+    assert.equal((f.service.wikiContextCompile({ query: "规则成立", scope: "project:demo" }).included as JsonObject[]).length, 0);
+  } finally { await f.close(); }
+});
+
+test("replacing a bound support Evidence invalidates formal Knowledge at read time", async () => {
+  const f = await fixture(undefined, undefined, { synthetic_legacy_source: true });
+  try {
+    const adjudicated = await f.service.knowledgeEvaluationCaseAdjudicateManaged({ case_id: f.case_.id, expected_version: f.case_.version });
+    f.service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [(adjudicated.case as JsonObject).id], candidate_claim_ids: ["managed-claim"] });
+    for (const n of [1, 2]) {
+      const evidence = f.service.evidenceRecord({ evidence_id: `support-${n}`, source_type: "program", confidence: "confirmed",
+        claim: "fixture support", metadata: { source_session_id: `session-${n}`, task_id: `task-${n}` } });
+      f.service.knowledgeClaimSupportRecord({ claim_id: "managed-claim", evidence_id: evidence.id, observation_key: `observation-${n}` });
+    }
+    const review = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: ["managed-claim"] });
+    assert.equal(((review.assessments as JsonObject[])[0]!).promoted, true);
+    assert.equal((f.service.wikiContextCompile({ query: "规则成立", scope: "project:demo" }).included as JsonObject[]).length, 1);
+    await createActionHandlers(f.service).craft_evidence_record({ evidence_id: "support-1", source_type: "program", confidence: "confirmed",
+      claim: "caller assertion", metadata: { source_session_id: "session-1", task_id: "task-1" } });
+    assert.equal((f.service.wikiContextCompile({ query: "规则成立", scope: "project:demo" }).included as JsonObject[]).length, 0);
+  } finally { await f.close(); }
+});
+
+test("replacing the Claim source with a public assertion blocks formal Context", async () => {
+  const f = await fixture(undefined, undefined, { synthetic_legacy_source: true });
+  try {
+    const adjudicated = await f.service.knowledgeEvaluationCaseAdjudicateManaged({ case_id: f.case_.id, expected_version: f.case_.version });
+    f.service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [(adjudicated.case as JsonObject).id], candidate_claim_ids: ["managed-claim"] });
+    for (const n of [1, 2]) {
+      const support = f.service.evidenceRecord({ evidence_id: `claim-source-support-${n}`, source_type: "program", confidence: "confirmed",
+        claim: "fixture support", metadata: { source_session_id: `session-${n}`, task_id: `task-${n}` } });
+      f.service.knowledgeClaimSupportRecord({ claim_id: "managed-claim", evidence_id: support.id, observation_key: `observation-${n}` });
+    }
+    const review = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: ["managed-claim"] });
+    assert.equal(((review.assessments as JsonObject[])[0]!).promoted, true);
+    assert.equal((f.service.wikiContextCompile({ query: "规则成立", scope: "project:demo" }).included as JsonObject[]).length, 1);
+    const source = f.store.get("evidence", "legacy-source-fixture");
+    await createActionHandlers(f.service).craft_evidence_record({ evidence_id: source.id, source_type: source.source_type,
+      confidence: source.confidence, claim: source.claim, source_id: source.source_id, fragment_id: source.fragment_id, metadata: source.metadata });
+    assert.equal((f.service.wikiContextCompile({ query: "规则成立", scope: "project:demo" }).included as JsonObject[]).length, 0);
   } finally { await f.close(); }
 });
 
@@ -341,4 +433,17 @@ test("a damaged recovery result or Trace fails closed without repeating the mode
       assert.equal(f.store.list("knowledge_evaluation_adjudication", 10).length, 0);
     } finally { await f.close(); }
   }
+});
+
+test("managed adjudication rejects transcript-only and mixed evidence before invoking Host", async () => {
+  const f = await fixture();
+  try {
+    for (const sourceEvidenceIds of [[(f.held.evidence as JsonObject).id], [(f.held.evidence as JsonObject).id, "held-control"]]) {
+      const current = f.store.get("knowledge_evaluation_case", String(f.case_.id));
+      const next = f.store.save("knowledge_evaluation_case", String(f.case_.id), { ...current, source_evidence_ids: sourceEvidenceIds });
+      await assert.rejects(f.service.knowledgeEvaluationCaseAdjudicateManaged({ case_id: next.id, expected_version: next.version }),
+        /requires independent verified task Evidence/u);
+    }
+    assert.equal(f.calls.length, 0);
+  } finally { await f.close(); }
 });

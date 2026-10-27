@@ -531,7 +531,7 @@ test("portable Knowledge/Memory bundles preserve content but merge only addition
     const bundle = exported.bundle as JsonObject;
     assert.equal(source.service.knowledgeMemoryBundleVerify({ bundle }).valid, true);
     const plan = target.service.knowledgeMemoryBundleImportPlan({ bundle });
-    assert.equal(plan.additions, 4); // source, Evidence, Claim and Memory
+    assert.equal(plan.additions, 8); // source, Claim, Memory and the fixture's three Evidence and two support records
     assert.equal(plan.conflicts, 0);
     assert.throws(() => target.service.knowledgeMemoryBundleImportApply({ bundle, approved: false }), /requires approved/u);
     const applied = target.service.knowledgeMemoryBundleImportApply({ bundle, approved: true, import_id: "import-a" });
@@ -545,8 +545,8 @@ test("portable Knowledge/Memory bundles preserve content but merge only addition
     const duplicatePlan = target.service.knowledgeMemoryBundleImportPlan({ bundle });
     // The Claim's reviewed label loses source-machine promotion authority on import, so its
     // candidate projection is a conflict with the original reviewed bundle record.
-    assert.deepEqual((duplicatePlan.decisions as JsonObject[]).map((item) => `${item.kind}:${item.action}`).sort(), ["evidence:duplicate", "knowledge_claim:conflict", "knowledge_source:duplicate", "memory_ledger:duplicate"]);
-    assert.equal(duplicatePlan.duplicates, 3);
+    assert.deepEqual((duplicatePlan.decisions as JsonObject[]).map((item) => `${item.kind}:${item.action}`).sort(), ["evidence:duplicate", "evidence:duplicate", "evidence:duplicate", "knowledge_claim:conflict", "knowledge_claim_support:duplicate", "knowledge_claim_support:duplicate", "knowledge_source:duplicate", "memory_ledger:duplicate"]);
+    assert.equal(duplicatePlan.duplicates, 7);
 
     target.store.save("knowledge_claim", "claim-a", { ...target.store.get("knowledge_claim", "claim-a"), status: "revoked" });
     const conflictPlan = target.service.knowledgeMemoryBundleImportPlan({ bundle });

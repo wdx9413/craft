@@ -366,3 +366,20 @@ test("malformed MCP replies and raw failures retain safe retry state", async () 
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("test-only held-out evidence waits without asking the model and remains pending", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-adjudication-evidence-"));
+  try {
+    const f = fixture({ evidence: { id: "held-evidence", source_type: "program", confidence: "confirmed", claim: "测试通过",
+      metadata: { source_session_id: "held-session", task_id: "held-task", provenance: "codex_session_program_verification" } } });
+    const cursor = join(root, "knowledge", "cursor.json");
+    const result = await runSessionKnowledgeAdjudicationOnce({ client: f.client, providers: [provider], transport: f.transport,
+      knowledge_adjudication_cursor_file: cursor });
+    assert.equal(result.status, "waiting_for_outcome_evidence");
+    assert.equal(result.model_calls, 0);
+    assert.equal(readKnowledgeAdjudicationCursor(cursor), "held-case");
+    assert.equal(f.calls.some(call => call.name === "craft_knowledge_evaluation_case_adjudicate"), false);
+    assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_profile_ensure_single"), false);
+    assert.deepEqual(readKnowledgeAdjudicationRetries(cursor), {});
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

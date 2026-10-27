@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import test from "node:test";
-import { CraftStore } from "../core/infrastructure/store.ts";
+import { CraftStore, withContextLockBudget } from "../core/infrastructure/store.ts";
 import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
 import { MarkdownContentStore } from "../common/craft-common-store-local/src/content-store.ts";
 
@@ -23,6 +23,29 @@ function partitionCount(file: string, kind: string) {
   try { return Number(database.prepare("SELECT COUNT(*) count FROM records WHERE kind=?").get(kind)!.count); }
   finally { database.close(); }
 }
+
+test("Context lock budget survives awaits without leaking to unrelated operations", async () => {
+  const f = await fixture();
+  const writer = new DatabaseSync(f.paths.databaseFile);
+  try {
+    f.store.database.exec("PRAGMA busy_timeout=400");
+    writer.exec("BEGIN IMMEDIATE");
+    let resume!: () => void;
+    const suspended = new Promise<void>(resolve => { resume = resolve; });
+    const context = withContextLockBudget(async () => {
+      await suspended;
+      try { f.store.transaction(() => null); } catch (error) { return error as { safeDetails: { busy_timeout_ms: number } }; }
+      throw new Error("expected Context lock contention");
+    });
+    assert.throws(() => f.store.transaction(() => null), (error: { safeDetails: { busy_timeout_ms: number } }) => {
+      assert.equal(error.safeDetails.busy_timeout_ms, 400);
+      return true;
+    });
+    resume();
+    assert.equal((await context).safeDetails.busy_timeout_ms, 250);
+    assert.equal(Number(f.store.database.prepare("PRAGMA busy_timeout").get()!.timeout), 400);
+  } finally { try { writer.exec("ROLLBACK"); } finally { writer.close(); cleanup(f); } }
+});
 function crashAfterStage(root: string, statements: string, stages = 1) {
   const source = `
     import { CraftStore } from ${JSON.stringify(new URL("../core/infrastructure/store.ts", import.meta.url).href)};

@@ -84,12 +84,22 @@ export function recordKnowledgeSessionEvidence(store: CraftStore, args: JsonObje
   if (source.status !== "active" || source.trust !== "verified") throw new Error("Codex session Evidence Source is not active and verified");
 
   const artifactDigest = stableDigest(artifacts);
-  const body = ["# 已核验的 Codex 任务证据", "", `- 项目范围：${scope}`, `- 来源会话：${sessionId}`, `- 来源任务：${taskId}`,
+  const legacyBody = ["# 已核验的 Codex 任务证据", "", `- 项目范围：${scope}`, `- 来源会话：${sessionId}`, `- 来源任务：${taskId}`,
     `- 来源回合：${turnId}`, `- 来源摘要：${sourceRef}`, "", "## 任务目标", taskGoal, "", "## 任务结果", taskResult, "",
     "## 自动化验证", ...artifacts.map((item, index) => `- 验证 ${index + 1}：${item.runner}；通过；命令摘要 ${item.command_digest}；结果摘要 ${item.result_digest}；调用摘要 ${item.call_digest}`), ""].join("\n");
+  const baseIdentity = { schema: "craft.knowledge-session-evidence.v1", scope, task_id: taskId, source_session_id: sessionId,
+    turn_id: turnId, source_ref: sourceRef, task_goal: taskGoal, task_result: taskResult, artifact_digest: artifactDigest };
+  const legacySuffix = stableDigest({ ...baseIdentity, body_digest: stableDigest(legacyBody) }).slice(-24);
+  // A prior write may have stopped after its immutable revision but before its Evidence.
+  const legacyExists = store.find("evidence", `evidence_codex_session_verification_${legacySuffix}`, undefined, false) !== null
+    || store.find("knowledge_source_revision", `knowledge_source_revision_codex_session_${legacySuffix}`, undefined, false) !== null;
+  const title = legacyExists ? "已核验的 Codex 任务证据" : "待核验的 Codex 任务记录";
+  const body = legacyExists ? legacyBody : ["# 待核验的 Codex 任务记录", "", "以下内容由调用方提供，尚未独立核验任务结果或实际效果。", "",
+    `- 项目范围：${scope}`, `- 来源会话：${sessionId}`, `- 来源任务：${taskId}`, `- 来源回合：${turnId}`, `- 来源摘要：${sourceRef}`,
+    "", "## 任务目标（调用方提供）", taskGoal, "", "## 任务结果（调用方提供）", taskResult, "", "## 报告的测试记录",
+    ...artifacts.map((item, index) => `- 记录 ${index + 1}：${item.runner}；报告通过；命令摘要 ${item.command_digest}；结果摘要 ${item.result_digest}；调用摘要 ${item.call_digest}`), ""].join("\n");
   const bodyDigest = stableDigest(body);
-  const identity = { schema: "craft.knowledge-session-evidence.v1", scope, task_id: taskId, source_session_id: sessionId,
-    turn_id: turnId, source_ref: sourceRef, task_goal: taskGoal, task_result: taskResult, artifact_digest: artifactDigest, body_digest: bodyDigest };
+  const identity = { ...baseIdentity, body_digest: bodyDigest };
   const suffix = stableDigest(identity).slice(-24);
   const revisionId = `knowledge_source_revision_codex_session_${suffix}`;
   const documentId = `knowledge_document_codex_session_${suffix}`;
@@ -97,7 +107,7 @@ export function recordKnowledgeSessionEvidence(store: CraftStore, args: JsonObje
   const evidenceId = `evidence_codex_session_verification_${suffix}`;
   const locator = `codex-session-task:${taskId}#${sourceRef.slice(-16)}`;
   const contentRef = store.contentStore.writeSync({ kind: "knowledge", record_id: fragmentId, version: 1, scope,
-    status: "candidate", sensitivity: "internal", source_id: sourceId, title: "已核验的 Codex 任务证据", body });
+    status: "candidate", sensitivity: "internal", source_id: sourceId, title, body });
   const contentDigest = stableDigest(body);
   const revisionIdentity = { source_id: sourceId, source_version: source.version, source_revision_digest: bodyDigest };
   const revision = createOnce(store, "knowledge_source_revision", revisionId, revisionIdentity, {
@@ -117,12 +127,21 @@ export function recordKnowledgeSessionEvidence(store: CraftStore, args: JsonObje
   const evidenceIdentity = { ...identity, source_id: sourceId, fragment_id: fragmentId, evidence_id: evidenceId };
   const evidence = createOnce(store, "evidence", evidenceId, evidenceIdentity, {
     source_type: "program", source_id: sourceId, source_revision_id: revisionId, fragment_id: fragmentId,
-    locator, claim: "脱敏 Codex 任务摘要及其通过的自动化测试结果。", confidence: "confirmed",
+    record_origin: "caller_asserted",
+    locator, claim: "调用方提供的脱敏 Codex 任务摘要和测试结果，尚未独立核验。", confidence: "unverified",
     content_digest: contentDigest, observed_at: observedAt,
     metadata: { provenance: "codex_session_program_verification", scope, project_scope_id: scope,
       source_session_id: sessionId, task_id: taskId, turn_id: turnId, source_ref_digest: sourceRef,
       verification_artifact_digest: artifactDigest, content_stored: true, raw_content_stored: false },
   });
-  return { evidence: evidence.record, source_id: sourceId, fragment_id: fragmentId, content_digest: contentDigest,
+  const safeEvidence = evidence.record.confidence === "unverified" && evidence.record.recorded_confidence === undefined ? evidence.record : store.transaction(() => {
+    const current = store.get("evidence", evidenceId);
+    if (current.identity_digest !== evidence.record.identity_digest) throw new Error("session Evidence changed during confidence correction");
+    if (current.confidence === "unverified" && current.recorded_confidence === undefined) return current;
+    const { recorded_confidence: _recordedConfidence, ...persistable } = current;
+    return store.save("evidence", evidenceId, { ...persistable, confidence: "unverified", record_origin: "caller_asserted",
+      claim: "调用方提供的脱敏 Codex 任务摘要和测试结果，尚未独立核验。" }, Number(current.version) + 1);
+  });
+  return { evidence: safeEvidence, source_id: sourceId, fragment_id: fragmentId, content_digest: contentDigest,
     sanitized_content_stored: true, raw_content_stored: false };
 }

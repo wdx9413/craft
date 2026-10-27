@@ -2,6 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { createHash, randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
 import { performance } from "node:perf_hooks";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { applyMigrations, backupDatabase } from "./store-migrations.ts";
 import { canonicalCandidatePath, craftPaths, ensureLayout, ensureProjectStorageDirectory, existingProjectStorageDirectory, projectStorageDirectory,
   ensureSessionStorageDirectory, ensureSessionStorageDirectoryForScopeId, isLegacySafeSessionId, parseSessionStorageScopeId, sessionStorageDirectory,
@@ -15,6 +16,12 @@ import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { SCHEMA_VERSION } from "./store-schema.ts";
 export { SCHEMA_VERSION } from "./store-schema.ts";
 export type JsonObject = Record<string, unknown>;
+const contextLockBudget = new AsyncLocalStorage<number>();
+
+/** Bound only primary writer acquisition for latency-sensitive Context calls. */
+export function withContextLockBudget<T>(operation: () => T): T {
+  return contextLockBudget.run(250, operation);
+}
 export type SaveEntry = { kind: string; id: string; payload: JsonObject; version?: number };
 export type RawRecord = { kind: string; id: string; version: number; payload: JsonObject; created_at: string; updated_at: string };
 const RESERVED_FIELDS = new Set(["id", "version", "created_at", "updated_at", "_craft_logical_record_id"]);
@@ -821,8 +828,12 @@ export class CraftStore {
       if (!(["global", "user", "project", "workspace", "task", "session", "team", "organization", "legacy"] as string[]).includes(declaredScope.kind)) {
         throw new Error("Memory storage scope is malformed");
       }
+      if (declaredScope.kind === "project" && declaredScope.id.startsWith("project:")) declaredScope = { ...declaredScope, id: declaredScope.id.slice("project:".length) };
     }
-    const specific = scopes.filter(scope => scope.kind !== "global" && scope.kind !== "user");
+    // Historical Knowledge pointers may retain the canonical `project:` prefix
+    // inside the project id; declared string scopes store the same id without it.
+    const specific = scopes.filter(scope => scope.kind !== "global" && scope.kind !== "user")
+      .map(scope => scope.kind === "project" && scope.id.startsWith("project:") ? { ...scope, id: scope.id.slice("project:".length) } : scope);
     const unique = new Map(specific.map(scope => [JSON.stringify(scope), scope]));
     if (unique.size > 1) throw new Error("Knowledge record cannot combine different storage scopes");
     if (unique.size === 1 && scopes.some(scope => scope.kind === "user")) {
@@ -1602,22 +1613,24 @@ export class CraftStore {
   }
 
   private beginImmediate(database: DatabaseSync, role: string): void {
-    try { database.exec("BEGIN IMMEDIATE"); }
-    catch (error) {
-      const failure = storageFailure(error, database, role, "transaction_begin");
-      const details = failure && typeof failure === "object" ? (failure as { safeDetails?: Record<string, unknown> }).safeDetails : undefined;
-      // Hook processes share the central WAL with long-lived MCP servers. A
-      // single short retry absorbs a writer that releases just after the
-      // 100ms Hook busy window. Retry only BEGIN: replaying an operation
-      // after it starts could duplicate side effects. Keep partition writes
-      // fail-fast because their lock scope is already capability-local.
-      if (process.env.CRAFT_HOOK_MODE !== "1" || role !== "primary"
-        || details?.phase !== "transaction_begin" || details.retryable !== true) throw failure;
-      const wait = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
-      Atomics.wait(wait, 0, 0, 25);
+    const limit = role === "primary" ? contextLockBudget.getStore() : undefined;
+    const previous = limit === undefined ? undefined : Number(database.prepare("PRAGMA busy_timeout").get()!.timeout);
+    const changeTimeout = previous !== undefined && limit !== undefined && previous > limit;
+    if (changeTimeout) database.exec(`PRAGMA busy_timeout=${limit};`);
+    try {
       try { database.exec("BEGIN IMMEDIATE"); }
-      catch (retryError) { throw storageFailure(retryError, database, role, "transaction_begin"); }
-    }
+      catch (error) {
+        const failure = storageFailure(error, database, role, "transaction_begin");
+        const details = failure && typeof failure === "object" ? (failure as { safeDetails?: Record<string, unknown> }).safeDetails : undefined;
+        // Retry only BEGIN in Hook mode; never replay an operation after it starts.
+        if (process.env.CRAFT_HOOK_MODE !== "1" || role !== "primary"
+          || details?.phase !== "transaction_begin" || details.retryable !== true) throw failure;
+        const wait = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+        Atomics.wait(wait, 0, 0, 25);
+        try { database.exec("BEGIN IMMEDIATE"); }
+        catch (retryError) { throw storageFailure(retryError, database, role, "transaction_begin"); }
+      }
+    } finally { if (changeTimeout) database.exec(`PRAGMA busy_timeout=${previous};`); }
   }
 
   private updateMemoryContentIndex(database: DatabaseSync, kind: string, id: string, version: number, payload: JsonObject, updatedAt: string, domain: PartitionDomain = "memory"): void {
@@ -2177,6 +2190,13 @@ export class CraftStore {
   private record(row: Record<string, unknown>, hydrate = true): JsonObject {
     const { _craft_logical_record_id: _logicalId, ...payload } = JSON.parse(String(row.payload_json)) as JsonObject;
     const record: JsonObject = { ...payload, id: row.id, version: row.version, created_at: row.created_at, updated_at: row.updated_at };
+    const metadata = record.metadata;
+    if (row.kind === "evidence" && metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      && (metadata as JsonObject).provenance === "codex_session_program_verification"
+      && (record.confidence === "confirmed" || record.confidence === "bounded")) {
+      record.recorded_confidence = record.confidence;
+      record.confidence = "unverified";
+    }
     if (hydrate && record.content_ref && (row.kind === "knowledge_claim" || row.kind === "memory_ledger" || row.kind === "episodic_memory" || row.kind === "semantic_memory")) {
       try { record.content = this.contentStore.readCompatSync(record.content_ref as never, typeof record.scope === "string" ? record.scope : undefined).body; }
       catch { record.content_unavailable = true; }
