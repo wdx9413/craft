@@ -1,4 +1,5 @@
 import { ComponentTraceKernel } from "../component-trace.ts";
+import { operationErrorCode } from "../../common/craft-common-log/src/operation.ts";
 import { randomUUID as hookRequestId } from "node:crypto";
 import { assertContextReadCurrent } from "../context-access-guard.ts";
 import { contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
@@ -399,7 +400,7 @@ export class CodexHookBridge {
     // Resolve and bind the Git project identity once per Hook request. The old
     // path repeated synchronous `git config` calls in turn correlation,
     // retrieval, scenario classification, and journal persistence.
-    const projectScope = typeof input.cwd === "string"
+    const resolveProjectScope = () => typeof input.cwd === "string"
       ? process.env.CRAFT_HOOK_MODE === "1" && event === "PostToolUse"
         // High-volume signal writes only need the deterministic canonical ID.
         // Registering the same local alias on every edit/verification adds a
@@ -411,10 +412,13 @@ export class CodexHookBridge {
     // content-free hook-runtime ledger is the call receipt; avoid creating and
     // finalizing a separate SQLite Trace for each signal. This removes four
     // extra writer transactions from the highest-volume Hook event.
-    if (process.env.CRAFT_HOOK_MODE === "1" && event === "PostToolUse") return await this.dispatch(member, input, projectScope);
+    if (process.env.CRAFT_HOOK_MODE === "1" && event === "PostToolUse") return await this.dispatch(member, input, resolveProjectScope());
     const captured = await new ComponentTraceKernel(this.service.trace, "hook").capture({ requestId: hookRequestId(), component: "craft-hook",
-      operation: `handle.${member}.${event}`, input: { member, hook_event: event }, handler: () => this.dispatch(member, input, projectScope) });
+      operation: `handle.${member}.${event}`, input: { member, hook_event: event }, handler: () => this.dispatch(member, input, resolveProjectScope()) });
     if (!captured.ok) {
+      // The original error is recorded in the Trace shard and the Hook runtime
+      // journal. Retrying a central write here only waits on the same lock again.
+      if (process.env.CRAFT_HOOK_MODE === "1" && operationErrorCode(captured.error) === "STORAGE_BUSY") throw captured.error;
       this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, error_type: captured.error instanceof Error ? captured.error.name : "unknown" });
       return {};
     }

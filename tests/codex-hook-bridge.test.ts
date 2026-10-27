@@ -1852,3 +1852,23 @@ test("Experience Hook finalization validates project receipt identity and finds 
     assert.equal((internal.finalizedTurn({}, journal)!.source as JsonObject).scope, "user:user-1");
   } finally { await f.store.close(); await Promise.all([rm(f.root, { recursive: true, force: true }), rm(otherRoot, { recursive: true, force: true })]); }
 });
+
+test("Hook-mode project identity errors retain Trace and do not retry a busy central write", async () => {
+  const f = await fixture();
+  const previous = process.env.CRAFT_HOOK_MODE;
+  try {
+    process.env.CRAFT_HOOK_MODE = "1";
+    const bridge = new CodexHookBridge(f.service);
+    const busy = new Error("database is locked");
+    Object.defineProperty(f.service, "scopeIdentityResolveProject", { configurable: true, value: () => { throw busy; } });
+    await assert.rejects(bridge.handle("context", { cwd: f.root, hook_event_name: "UserPromptSubmit" }), error => error === busy);
+    assert(f.store.list("trace_event", 100).some(event => event.operation_id === "handle.context.UserPromptSubmit" && event.error_class === "STORAGE_BUSY"));
+    assert.equal(f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed").length, 0);
+    Object.defineProperty(f.service, "scopeIdentityResolveProject", { configurable: true, value: () => { throw new Error("invalid project"); } });
+    assert.deepEqual(await bridge.handle("context", { cwd: f.root, hook_event_name: "UserPromptSubmit" }), {});
+    assert.equal(f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed").length, 1);
+  } finally {
+    if (previous === undefined) delete process.env.CRAFT_HOOK_MODE; else process.env.CRAFT_HOOK_MODE = previous;
+    await dispose(f);
+  }
+});

@@ -40,6 +40,9 @@ function storageFailureAttributes(error: unknown): Record<string, string | numbe
   const timeout = details.busy_timeout_ms;
   if (typeof timeout === "number" && Number.isSafeInteger(timeout) && timeout >= 0 && timeout <= 60_000)
     attributes.busy_timeout_ms = timeout;
+  const waited = details.waited_ms;
+  if (typeof waited === "number" && Number.isSafeInteger(waited) && waited >= 0 && waited <= 3_600_000)
+    attributes.waited_ms = waited;
   if (typeof details.retryable === "boolean") attributes.retryable = details.retryable;
   return attributes;
 }

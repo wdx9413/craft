@@ -116,7 +116,7 @@ test("concurrent packaged prompts reject ambiguous signals and session boundarie
   } finally { await f.close(); }
 });
 
-test("packaged Hook returns promptly instead of waiting on the full SQLite lock timeout", async () => {
+test("packaged Hook returns promptly instead of waiting on the full SQLite lock timeout", async (t) => {
   const f = await replayFixture("codex");
   let locked = false;
   try {
@@ -133,12 +133,13 @@ test("packaged Hook returns promptly instead of waiting on the full SQLite lock 
     locked = false;
     assert.equal(child.error, undefined, child.error?.message);
     assert.equal(child.status, 0, child.stderr);
-    assert(elapsed < 1_000, `Hook exceeded its contention response budget: ${elapsed.toFixed(0)}ms`);
     const traces = f.store.list("trace_event", 1_000);
     assert(traces.some(event => event.operation_id === "handle.context.UserPromptSubmit" && event.error_class === "STORAGE_BUSY"));
     const diagnosticFiles = await readdir(join(f.store.paths.root, "trace", "hook-runtime", "v1"));
     const diagnosticRows = (await readFile(join(f.store.paths.root, "trace", "hook-runtime", "v1", diagnosticFiles[0]!), "utf8"))
       .trim().split("\n").map(line => JSON.parse(line) as JsonObject);
+    t.diagnostic(`Hook elapsed_ms=${elapsed.toFixed(0)}; phases=${JSON.stringify(diagnosticRows[1])}`);
+    assert(elapsed < 1_000, `Hook exceeded its contention response budget: ${elapsed.toFixed(0)}ms; ${JSON.stringify(diagnosticRows[1])}`);
     assert.equal(diagnosticRows[1]!.outcome, "failed");
     assert.equal(diagnosticRows[1]!.error_code, "STORAGE_BUSY");
     assert(Number(diagnosticRows[1]!.handler_ms) > 0);
@@ -270,4 +271,30 @@ test("packaged Hook records event and phase timings without logging prompt conte
     assert(!JSON.stringify(records).includes("sensitive prompt must not be logged"));
     assert(!JSON.stringify(records).includes("codex-process"));
   } finally { await f.close(); }
+});
+
+test("packaged Hook persists bounded lock wait in fallback diagnostics", async () => {
+  const f = await replayFixture("codex");
+  let locked = false;
+  try {
+    f.store.database.exec("BEGIN IMMEDIATE");
+    locked = true;
+    const child = spawnSync(process.execPath, [join(root, "plugins/craft-context/dist/plugin/craft-codex-hook.cjs"), "--member", "context"], {
+      cwd: root, encoding: "utf8", timeout: 4_000,
+      env: { PATH: process.env.PATH, CRAFT_DATA_DIR: f.store.paths.root, NODE_NO_WARNINGS: "1" },
+      input: JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: f.store.paths.root, session_id: "busy-timeout", prompt: "verify the change" }),
+    });
+    f.store.database.exec("ROLLBACK");
+    locked = false;
+    assert.equal(child.error, undefined, child.error?.message);
+    assert.equal(child.status, 0, child.stderr);
+    const files = await readdir(join(f.store.paths.root, "trace", "hook-runtime", "v1"));
+    const rows = (await readFile(join(f.store.paths.root, "trace", "hook-runtime", "v1", files[0]!), "utf8"))
+      .trim().split("\n").map(line => JSON.parse(line) as JsonObject);
+    assert.equal(rows[1]!.error_code, "STORAGE_BUSY");
+    assert(Number.isSafeInteger(rows[1]!.waited_ms) && Number(rows[1]!.waited_ms) >= 0);
+  } finally {
+    if (locked) f.store.database.exec("ROLLBACK");
+    await f.close();
+  }
 });

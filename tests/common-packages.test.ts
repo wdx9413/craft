@@ -85,13 +85,21 @@ test("common operation instrumentation classifies outcomes, nests spans, and pre
     assert(nonErrorEvents.some(item => item.phase === "failed" && item.event.attributes.reason_code === "OPERATION_FAILED"));
     const lockEvents: OperationEvent[] = [];
     const lockError = Object.assign(new Error("database is locked"), { code: "ERR_SQLITE_ERROR", errcode: 5,
-      safeDetails: { database_role: "primary", phase: "transaction_begin", busy_timeout_ms: 100, retryable: true } });
-    assert.throws(() => observeOperation(store, "fixture", "storage-lock", {}, () => { throw lockError; }, { observe: item => lockEvents.push(item) }), /database is locked/u);
+      safeDetails: { database_role: "primary", phase: "transaction_begin", busy_timeout_ms: 100, waited_ms: 103, retryable: true } });
+    assert.throws(() => observeOperation(store, "fixture", "storage-lock", {}, () => { throw lockError; }, { traceId: "lock-diagnostic-trace", observe: item => lockEvents.push(item) }), /database is locked/u);
     const lockAttributes = lockEvents.find(item => item.phase === "failed")!.event.attributes;
     assert.deepEqual({ database_role: lockAttributes.database_role, database_phase: lockAttributes.database_phase,
-      busy_timeout_ms: lockAttributes.busy_timeout_ms, retryable: lockAttributes.retryable }, {
-      database_role: "primary", database_phase: "transaction_begin", busy_timeout_ms: 100, retryable: true,
+      busy_timeout_ms: lockAttributes.busy_timeout_ms, waited_ms: lockAttributes.waited_ms, retryable: lockAttributes.retryable }, {
+      database_role: "primary", database_phase: "transaction_begin", busy_timeout_ms: 100, waited_ms: 103, retryable: true,
     });
+    assert.equal(new StoreTelemetrySink(store).list("lock-diagnostic-trace").find(event => event.attributes.stage === "failed")?.attributes.waited_ms, 103);
+    for (const waited of [-1, 3_600_001, 1.5, "100", null, 0, 3_600_000]) {
+      const events: OperationEvent[] = [];
+      const error = Object.assign(new Error("database is locked"), { safeDetails: { waited_ms: waited } });
+      assert.throws(() => observeOperation(store, "fixture", "lock-wait-boundary", {}, () => { throw error; }, { observe: item => events.push(item) }));
+      const attrs = events.find(item => item.phase === "failed")!.event.attributes;
+      assert.equal(attrs.waited_ms, waited === 0 || waited === 3_600_000 ? waited : undefined);
+    }
     const rejectedLockEvents: OperationEvent[] = [];
     const malformedLockDetails = Object.assign(new Error("database is locked"), { code: "ERR_SQLITE_ERROR", errcode: 5,
       safeDetails: { database_role: "user-input", phase: "credential=hidden", busy_timeout_ms: 60_001, retryable: "true" } });

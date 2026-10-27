@@ -23,12 +23,13 @@ export interface HookRuntimeTiming {
   readonly database_role?: "primary" | "capability_partition";
   readonly database_phase?: "transaction_begin" | "transaction_operation" | "savepoint_begin" | "savepoint_operation";
   readonly busy_timeout_ms?: number;
+  readonly waited_ms?: number;
   readonly retryable?: boolean;
 }
 
 const DATABASE_ROLES = new Set(["primary", "capability_partition"]);
 const DATABASE_PHASES = new Set(["transaction_begin", "transaction_operation", "savepoint_begin", "savepoint_operation"]);
-type HookStorageFailureDetails = { -readonly [K in "database_role" | "database_phase" | "busy_timeout_ms" | "retryable"]?: HookRuntimeTiming[K] };
+type HookStorageFailureDetails = { -readonly [K in "database_role" | "database_phase" | "busy_timeout_ms" | "waited_ms" | "retryable"]?: HookRuntimeTiming[K] };
 
 /** Copy only bounded storage-lock metadata; exception messages and payloads are never persisted. */
 export function hookStorageFailureDetails(error: unknown, errorCode: string): HookStorageFailureDetails {
@@ -41,6 +42,8 @@ export function hookStorageFailureDetails(error: unknown, errorCode: string): Ho
   if (typeof value.phase === "string" && DATABASE_PHASES.has(value.phase)) result.database_phase = value.phase as HookRuntimeTiming["database_phase"];
   if (typeof value.busy_timeout_ms === "number" && Number.isSafeInteger(value.busy_timeout_ms) && value.busy_timeout_ms >= 0 && value.busy_timeout_ms <= 60_000)
     result.busy_timeout_ms = value.busy_timeout_ms;
+  if (typeof value.waited_ms === "number" && Number.isSafeInteger(value.waited_ms) && value.waited_ms >= 0 && value.waited_ms <= 3_600_000)
+    result.waited_ms = value.waited_ms;
   if (typeof value.retryable === "boolean") result.retryable = value.retryable;
   return result;
 }
@@ -121,6 +124,8 @@ export function beginHookRuntimeDiagnostic(args: {
       ...(timing.database_phase && DATABASE_PHASES.has(timing.database_phase) ? { database_phase: timing.database_phase } : {}),
       ...(Number.isSafeInteger(timing.busy_timeout_ms) && Number(timing.busy_timeout_ms) >= 0 && Number(timing.busy_timeout_ms) <= 60_000
         ? { busy_timeout_ms: timing.busy_timeout_ms } : {}),
+      ...(Number.isSafeInteger(timing.waited_ms) && Number(timing.waited_ms) >= 0 && Number(timing.waited_ms) <= 3_600_000
+        ? { waited_ms: timing.waited_ms } : {}),
       ...(typeof timing.retryable === "boolean" ? { retryable: timing.retryable } : {}) });
   } };
 }
