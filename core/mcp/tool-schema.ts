@@ -118,7 +118,7 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_experience_scenario_classification_request_complete: { request_id: "string", scope: "string", expected_version: "integer", status: "string", result_digest: "string", project_root: "string" },
   craft_knowledge_source_register: { scope_envelope: "object" },
   craft_knowledge_source_ingest: { max_files: "integer", max_chars_per_fragment: "integer" },
-  craft_knowledge_storage_reconcile: { max_records: "integer", cursor: "string", dry_run: "boolean" },
+  craft_knowledge_storage_reconcile: { max_records: "integer", cursor: "string", dry_run: "boolean", summary_only: "boolean" },
   craft_knowledge_auto_review: { scope_kind: "string", scope_id: "string", auto_promote: "boolean" },
   craft_knowledge_memory_bundle: { allow_local_write: "boolean", include_candidates: "boolean", include_global: "boolean" },
   craft_memory_governance: { principal_ids: "array", explicit_consent: "boolean" },

@@ -14,7 +14,7 @@ import { componentForSurface, surfaceToolNames as resolveSurfaceToolNames } from
 import { createActionHandlers } from "../application/actions/action-handlers.ts";
 import type { McpHandler } from "./mcp/handler-types.js";
 import { ComponentTraceKernel, type ComponentTraceResult } from "../component-trace.ts";
-import { JsonlTelemetryJournal, observeOperation, withoutOperationPersistence, type OperationEvent } from "../../common/craft-common-log/src/index.ts";
+import { JsonlTelemetryJournal, observeOperation, operationErrorCode, withoutOperationPersistence, type OperationEvent } from "../../common/craft-common-log/src/index.ts";
 import { validateJsonSchema, type JsonValue } from "../json-schema.ts";
 import { generatedTextLanguageInstruction } from "../config.ts";
 import { CONTEXT_ROUTED_TOOL_NAMES } from "../mcp/context-tools.ts";
@@ -37,6 +37,7 @@ const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capab
   "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_kit_get", "craft_capability_kit_list", "craft_capability_kit_distribution", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume", "craft_knowledge_source_list", "craft_context_resolution_resolve", "craft_context_resolution_get", "craft_work_runtime_mode_get", "craft_continual_harness_view_create", "craft_continual_harness_refine", "craft_continual_harness_submit", "craft_continual_harness_signals", "craft_continual_harness_resolve", "craft_continual_harness_get", "craft_stateful_compute_session_prepare", "craft_stateful_compute_dispatch", "craft_stateful_compute_observe", "craft_stateful_compute_delegate", "craft_stateful_compute_report", "craft_stateful_compute_cancel", "craft_stateful_compute_session_get", "craft_uncertainty_resolve", "craft_release_qualification_evaluate", "craft_platform_ideal_state_assess", "craft_verification_get", "craft_evaluation_program_due", "craft_evaluation_program_report", "craft_enterprise_access_ticket_get", "craft_a2a_delegation_get", "craft_federated_delegation_get", "craft_harness_topology_get", "craft_runtime_readiness_get", "craft_runtime_model_status", "craft_assured_pilot_get", "craft_assured_pilot_reassess", "craft_usage_report", "craft_settings_get", "craft_trace_get", "craft_trace_query", "craft_trace_replay_bundle", "craft_trace_review", "craft_trace_review_get", "craft_trace_review_list", "craft_memory_maintenance_signal", "craft_memory_maintenance_run", "craft_memory_maintenance_get", "craft_trust_profile_recommend", "craft_trust_profile_get", "craft_trust_profile_list", "craft_web_fetch", "craft_web_operation_get"]);
 // Content diagnostics are safe core reads; migration remains full-surface only.
 CORE_TOOL_NAMES.add("craft_content_status").add("craft_content_verify");
+for (const name of ["craft_evolution_cycle_start", "craft_evolution_cycle_advance", "craft_evolution_cycle_get"]) CORE_TOOL_NAMES.add(name);
 // Durable Task and Runtime Proof operations are part of the compact control surface.
 for (const name of ["craft_mcp_task_create", "craft_mcp_task_get", "craft_mcp_task_update", "craft_mcp_task_cancel", "craft_mcp_task_expire", "craft_runtime_proof_manifest", "craft_runtime_proof_probe", "craft_runtime_proof_conformance", "craft_runtime_proof_attest", "craft_runtime_proof_rehydrate"]) CORE_TOOL_NAMES.add(name);
 export const CORE_TOOLS: Tool[] = ACTIVE_TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
@@ -317,7 +318,8 @@ export class McpServer {
 function safeFailure(error: unknown): JsonObject {
   if (!error || typeof error !== "object") return { error_code: "INTERNAL_ERROR", stage: "dispatch", details: {} };
   const value = error as { code?: unknown; stage?: unknown; safeDetails?: unknown };
-  const code = typeof value.code === "string" ? value.code : "INTERNAL_ERROR";
+  const code = value.code === "ERR_SQLITE_ERROR" && operationErrorCode(error) === "STORAGE_BUSY"
+    ? "STORAGE_BUSY" : typeof value.code === "string" ? value.code : "INTERNAL_ERROR";
   const stage = typeof value.stage === "string" ? value.stage : "dispatch";
   const details = value.safeDetails && typeof value.safeDetails === "object" && !Array.isArray(value.safeDetails) ? value.safeDetails as JsonObject : {};
   return { error_code: code, stage, details };

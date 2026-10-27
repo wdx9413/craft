@@ -49,7 +49,10 @@ test("Knowledge storage reconciliation facade validates and forwards bounded pag
     const preview = service.knowledgeStorageReconcile({ max_records: 1, dry_run: true });
     assert.equal(preview.dry_run, true);
     assert.equal(Number(preview.examined), 0);
+    assert.equal(service.knowledgeStorageReconcile({ max_records: 1, dry_run: true, summary_only: true }).summary_only, true);
     assert.throws(() => service.knowledgeStorageReconcile({ dry_run: "yes" as never }), /dry_run must be boolean/u);
+    assert.throws(() => service.knowledgeStorageReconcile({ summary_only: "yes" as never }), /summary_only must be boolean/u);
+    assert.throws(() => f.store.reconcileKnowledgeStorage({ summary_only: "yes" as never }), /summary_only must be boolean/u);
     assert.throws(() => service.knowledgeStorageReconcile({ max_records: 501 }), /max_records/u);
     assert.throws(() => service.knowledgeStorageReconcile({ cursor: "!" }), /cursor is invalid/u);
   } finally { cleanup(f); }
@@ -170,6 +173,10 @@ test("Knowledge migration is bounded, repeatable and leaves unavailable projects
     assert.equal(f.store.get("knowledge_claim", "known").content, "private legacy known");
     const remaining = f.store.reconcileKnowledgeStorage({ cursor: String(moved.next_cursor), max_records: 1 });
     assert.equal(remaining.migrated, 0); assert.equal((remaining.blocked as JsonObject[])[0]?.reason, "storage_scope_unavailable");
+    const compact = f.store.reconcileKnowledgeStorage({ max_records: 2, dry_run: true, summary_only: true });
+    assert.equal(compact.blocked_count, 1); assert.deepEqual(compact.blocked, []);
+    assert.deepEqual(compact.blocked_reasons, { storage_scope_unavailable: 1 });
+    assert.equal(JSON.stringify(compact).includes("private legacy unknown"), false);
     const repeated = f.store.reconcileKnowledgeStorage();
     assert.equal(repeated.migrated, 0); assert.equal((repeated.blocked as JsonObject[]).length, 1);
     const backupDir = join(projectStorageDirectory(f.paths, f.project), "knowledge", "backups");
@@ -247,6 +254,9 @@ test("Knowledge content retirement recovers after copy and backup without deleti
     const contentCursor = Buffer.from(JSON.stringify(["content_scan", "", 1])).toString("base64url");
     const pending = f.store.reconcileKnowledgeStorage({ cursor: contentCursor });
     assert.equal((pending.blocked as JsonObject[]).some(item => item.reason === "legacy_content_still_referenced"), true);
+    const compact = f.store.reconcileKnowledgeStorage({ cursor: contentCursor, dry_run: true, summary_only: true });
+    assert.equal(compact.blocked_count, 1); assert.deepEqual(compact.blocked, []);
+    assert.deepEqual(compact.blocked_reasons, { legacy_content_still_referenced: 1 });
     assert.equal(existsSync(referenced.path), true);
   } finally { cleanup(f); }
 });

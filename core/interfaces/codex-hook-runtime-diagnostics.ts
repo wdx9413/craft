@@ -20,6 +20,29 @@ export interface HookRuntimeTiming {
   readonly outcome?: "completed" | "failed" | "skipped";
   readonly error_code?: string;
   readonly error_type?: string;
+  readonly database_role?: "primary" | "capability_partition";
+  readonly database_phase?: "transaction_begin" | "transaction_operation" | "savepoint_begin" | "savepoint_operation";
+  readonly busy_timeout_ms?: number;
+  readonly retryable?: boolean;
+}
+
+const DATABASE_ROLES = new Set(["primary", "capability_partition"]);
+const DATABASE_PHASES = new Set(["transaction_begin", "transaction_operation", "savepoint_begin", "savepoint_operation"]);
+type HookStorageFailureDetails = { -readonly [K in "database_role" | "database_phase" | "busy_timeout_ms" | "retryable"]?: HookRuntimeTiming[K] };
+
+/** Copy only bounded storage-lock metadata; exception messages and payloads are never persisted. */
+export function hookStorageFailureDetails(error: unknown, errorCode: string): HookStorageFailureDetails {
+  if (errorCode !== "STORAGE_BUSY" || !error || typeof error !== "object") return {};
+  const details = (error as { safeDetails?: unknown }).safeDetails;
+  if (!details || typeof details !== "object" || Array.isArray(details)) return {};
+  const value = details as Record<string, unknown>;
+  const result: HookStorageFailureDetails = {};
+  if (typeof value.database_role === "string" && DATABASE_ROLES.has(value.database_role)) result.database_role = value.database_role as HookRuntimeTiming["database_role"];
+  if (typeof value.phase === "string" && DATABASE_PHASES.has(value.phase)) result.database_phase = value.phase as HookRuntimeTiming["database_phase"];
+  if (typeof value.busy_timeout_ms === "number" && Number.isSafeInteger(value.busy_timeout_ms) && value.busy_timeout_ms >= 0 && value.busy_timeout_ms <= 60_000)
+    result.busy_timeout_ms = value.busy_timeout_ms;
+  if (typeof value.retryable === "boolean") result.retryable = value.retryable;
+  return result;
 }
 
 export interface HookRuntimeRecorder {
@@ -93,6 +116,11 @@ export function beginHookRuntimeDiagnostic(args: {
       ...(timing.store_close_ms === undefined ? {} : { store_close_ms: Math.max(0, Math.round(timing.store_close_ms)) }),
       ...(timing.outcome ? { outcome: timing.outcome } : {}),
       ...(timing.error_code ? { error_code: timing.error_code.slice(0, 80) } : {}),
-      ...(timing.error_type ? { error_type: timing.error_type.slice(0, 80) } : {}) });
+      ...(timing.error_type ? { error_type: timing.error_type.slice(0, 80) } : {}),
+      ...(timing.database_role && DATABASE_ROLES.has(timing.database_role) ? { database_role: timing.database_role } : {}),
+      ...(timing.database_phase && DATABASE_PHASES.has(timing.database_phase) ? { database_phase: timing.database_phase } : {}),
+      ...(Number.isSafeInteger(timing.busy_timeout_ms) && Number(timing.busy_timeout_ms) >= 0 && Number(timing.busy_timeout_ms) <= 60_000
+        ? { busy_timeout_ms: timing.busy_timeout_ms } : {}),
+      ...(typeof timing.retryable === "boolean" ? { retryable: timing.retryable } : {}) });
   } };
 }

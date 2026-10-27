@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { withoutOperationPersistence } from "../common/craft-common-log/src/operation.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { contextAssetRef, contextAssetKey, contextAssetMatches, requiredContextRef } from "../common/craft-common-base/src/context-assets.ts";
@@ -53,6 +54,26 @@ test("code task reserves code; required refs fail closed; receipts reuse and inv
     const args = { project_root: f.repo, query: "修复用户登录代码", max_items: 1, task_id: "task", session_id: "session", turn_id: "turn" };
     const first = await f.service.contextOpen(args); assert.equal((first.codebase as JsonObject).references instanceof Array, true); assert.equal(((first.codebase as JsonObject).references as unknown[]).length, 1); assert.equal((first.items as unknown[]).length, 0);
     const again = await f.service.contextOpen(args); assert.equal((again.pack_receipt as JsonObject).id, (first.pack_receipt as JsonObject).id);
+    const packReceiptId = String((first.pack_receipt as JsonObject).id);
+    const find = f.store.find.bind(f.store); let hidePackReceiptOnce = true;
+    f.store.find = ((kind: string, id: string, ...rest: unknown[]) => {
+      if (kind === "context_pack_receipt" && id === packReceiptId && hidePackReceiptOnce) { hidePackReceiptOnce = false; return null; }
+      return (find as (...args: unknown[]) => JsonObject | null)(kind, id, ...rest);
+    }) as typeof f.store.find;
+    try {
+      const racedPack = await f.service.contextOpen(args);
+      assert.equal((racedPack.pack_receipt as JsonObject).id, packReceiptId);
+    } finally { f.store.find = find as typeof f.store.find; }
+    const lock = new DatabaseSync(f.store.paths.databaseFile);
+    const previousBusyTimeout = Number((f.store.database.prepare("PRAGMA busy_timeout").get() as { timeout: number }).timeout);
+    f.store.database.exec("PRAGMA busy_timeout=50");
+    lock.exec("BEGIN IMMEDIATE");
+    try {
+      const duringWriter = await withoutOperationPersistence(f.store, () => f.service.contextOpen(args));
+      assert.equal((duringWriter.pack_receipt as JsonObject).id, (first.pack_receipt as JsonObject).id);
+    } finally {
+      lock.exec("ROLLBACK"); lock.close(); f.store.database.exec(`PRAGMA busy_timeout=${previousBusyTimeout}`);
+    }
     const required = (first.asset_refs as JsonObject[])[0]!;
     const pinned = await f.service.contextOpen({ ...args, required_refs: [required] }); assert.equal((pinned.asset_refs as JsonObject[])[0]!.id, required.id);
     await assert.rejects(f.service.contextOpen({ ...args, max_chars: 1, required_refs: [required] }), /exceeds/);
@@ -73,6 +94,14 @@ test("host references are bounded, content-free and required independently from 
     const kernel = new ContextWorkingSetKernel(f.store, f.service.contextResolution);
     const args = { query: "q", members: ["history", "state"], history_refs: [{ id: "history", version: 1, content: "private host body" }], state_refs: [{ id: "state", version: 2 }], scope_kind: "project", scope_id: "p" };
     const first = await kernel.resolve(args); assert.equal((first.asset_refs as unknown[]).length, 2); assert(!JSON.stringify(first.working_set).includes("private host body"));
+    const workingSetId = (first.working_set as JsonObject).id;
+    const find = f.store.find.bind(f.store); let hidePriorOnce = true;
+    f.store.find = ((kind: string, id: string) => {
+      if (kind === "context_working_set_receipt" && id === workingSetId && hidePriorOnce) { hidePriorOnce = false; return null; }
+      return find(kind, id);
+    }) as typeof f.store.find;
+    try { assert.equal((await kernel.resolve(args)).idempotent, true); }
+    finally { f.store.find = find as typeof f.store.find; }
     assert((await kernel.resolve({ ...args, required_refs: [{ member: "history", id: "history", version: 1 }] })).working_set);
     await assert.rejects(kernel.resolve({ ...args, required_refs: [{ member: "state", id: "missing" }] }), /unavailable/);
     await assert.rejects(kernel.resolve({ ...args, max_items: 1 }), /budget/);
@@ -467,6 +496,36 @@ test("legacy receipts, direct required validation and code query truncation rema
   const f = await fixture();
   try {
     await assert.rejects(f.service.contextResolution.resolve({ query: "q", scope_kind: "project", scope_id: "p", required_refs: "bad" }), /array/);
+    const pinnedReceipt = { query: "q", scope_kind: "project", scope_id: "p", receipt_id: "pinned-resolution" };
+    await f.service.contextResolution.resolve(pinnedReceipt);
+    assert.equal((await f.service.contextResolution.resolve(pinnedReceipt)).idempotent, true);
+    await assert.rejects(f.service.contextResolution.resolve({ ...pinnedReceipt, query: "changed" }), /idempotency conflict/);
+    const racingReceipt = { ...pinnedReceipt, receipt_id: "racing-resolution" };
+    await f.service.contextResolution.resolve(racingReceipt);
+    const find = f.store.find.bind(f.store); let hidePriorOnce = true;
+    f.store.find = ((kind: string, id: string) => {
+      if (kind === "context_resolution_receipt" && id === racingReceipt.receipt_id && hidePriorOnce) { hidePriorOnce = false; return null; }
+      return find(kind, id);
+    }) as typeof f.store.find;
+    try { assert.equal((await f.service.contextResolution.resolve(racingReceipt)).idempotent, true); }
+    finally { f.store.find = find as typeof f.store.find; }
+    const conflictingRace = { ...pinnedReceipt, receipt_id: "conflicting-racing-resolution" };
+    await f.service.contextResolution.resolve(conflictingRace);
+    let hidePriorAndConflict = true;
+    const raceFind = (kind: string, id: string, version?: number, hydrate?: boolean) => {
+      if (kind === "context_resolution_receipt" && id === conflictingRace.receipt_id && hidePriorAndConflict) {
+        hidePriorAndConflict = false;
+        f.store.find = find as typeof f.store.find;
+        const current = f.store.get(kind, id);
+        f.store.save(kind, id, { ...payload(current), identity_digest: "sha256:concurrent-conflict" });
+        f.store.find = raceFind as typeof f.store.find;
+        return null;
+      }
+      return find(kind, id, version, hydrate);
+    };
+    f.store.find = raceFind as typeof f.store.find;
+    try { await assert.rejects(f.service.contextResolution.resolve(conflictingRace), /idempotency conflict/u); }
+    finally { f.store.find = find as typeof f.store.find; }
     f.store.create("context_resolution_receipt", "legacy", { memory_refs: [], scope: { kind: "project", id: "p" }, identity_digest: "legacy" });
     assert(f.service.contextResolutionFeedback({ receipt_id: "legacy", outcome: "irrelevant" }).feedback);
     const ensured = f.service.codebaseRepositoryEnsure({ project_root: f.repo });

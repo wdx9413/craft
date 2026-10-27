@@ -7,7 +7,7 @@ import { CODEBASE_OWNS } from "../../../capability/craft-codebase/ownership.ts";
 
 // Tool surfaces are a bounded projection over the canonical tool catalog. The
 // registry owns only names and matching rules; execution remains in McpServer.
-const QUALITY_TOOLS = /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|harness|trial|trajectory|experience|adaptation|adaptive|canary|acceptance|outcome|delivery_evaluation|agent_eval|verified_iteration|feedback|trace|verification)/;
+const QUALITY_TOOLS = /^craft_(evolution|evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|harness|trial|trajectory|experience|adaptation|adaptive|canary|acceptance|outcome|delivery_evaluation|agent_eval|verified_iteration|feedback|trace|verification)/;
 
 export const SURFACE_RULES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
   { name: "governance", pattern: /^craft_(capability|source|logical|contract|hub|supply|federation|materialization|certification|skill|publication|catalog|domain|hook)/ },

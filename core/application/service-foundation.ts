@@ -138,6 +138,7 @@ import type { KnowledgeRelationKernel } from "../../capability/craft-knowledge/k
 import { WorkRuntimeModeKernel } from "../work-runtime-mode.ts";
 import { TurnCognitiveRuntime } from "../turn-cognitive-runtime.ts";
 import { ContinualHarnessKernel } from "../continual-harness.ts";
+import { EvolutionCycleKernel } from "../evolution-cycle.ts";
 import { StatefulComputeKernel } from "../stateful-compute.ts";
 import { UncertaintyPolicyKernel } from "../uncertainty-policy.ts";
 import { ActionGateKernel } from "../action-gate.ts";
@@ -299,6 +300,7 @@ export abstract class ServiceFoundation {
   readonly workRuntimeModes: WorkRuntimeModeKernel;
   readonly turnCognitive: TurnCognitiveRuntime;
   readonly continualHarness: ContinualHarnessKernel;
+  readonly evolutionCycles: EvolutionCycleKernel;
   readonly statefulCompute: StatefulComputeKernel;
   readonly uncertaintyPolicies: UncertaintyPolicyKernel;
   /** Which interaction level an action earns, and the record of why (plan 4.2–6.3.1). */
@@ -548,6 +550,7 @@ export abstract class ServiceFoundation {
     this.workRuntimeModes = new WorkRuntimeModeKernel(store, this.hostDrivers.keys());
     this.turnCognitive = new TurnCognitiveRuntime(store, this.memoryLedger);
     this.continualHarness = new ContinualHarnessKernel(store);
+    this.evolutionCycles = new EvolutionCycleKernel(store);
     this.statefulCompute = new StatefulComputeKernel(store);
     this.uncertaintyPolicies = new UncertaintyPolicyKernel(store);
     this.actionGate = new ActionGateKernel(store);

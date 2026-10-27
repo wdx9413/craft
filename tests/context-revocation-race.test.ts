@@ -8,7 +8,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { payload, stableDigest } from "../core/digest.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
-import { ContextReadGuard, assertContextReadCurrent } from "../core/context-access-guard.ts";
+import { ContextAccessChangedError, ContextReadGuard, assertContextReadCurrent } from "../core/context-access-guard.ts";
 import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
 import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
@@ -77,6 +77,27 @@ test("warm receipts cannot bypass a changed read fence; unrelated records do not
     await assert.rejects(kernel.resolve(args), /idempotency conflict/);
     const empty = await kernel.resolve({ ...args, receipt_id: "fresh" }); assert.deepEqual(empty.items, []);
   } finally { await f.close(); }
+});
+
+test("read fence fails closed when two consecutive snapshots race with unrelated commits", async () => {
+  const f = await fixture();
+  const originalReadSnapshot = f.store.readSnapshot.bind(f.store);
+  let snapshots = 0;
+  f.store.readSnapshot = ((operation) => {
+    const result = originalReadSnapshot(operation);
+    snapshots += 1;
+    f.writer.create("unrelated_concurrent_write", `race-${snapshots}`, { sequence: snapshots });
+    return result;
+  }) as typeof f.store.readSnapshot;
+  try {
+    assert.throws(() => assertContextReadCurrent(f.store, { read_refs: [
+      { kind: "memory_ledger", id: "private", version: Number(f.memory.version) },
+    ] }), error => error instanceof ContextAccessChangedError);
+    assert.equal(snapshots, 2);
+  } finally {
+    f.store.readSnapshot = originalReadSnapshot as typeof f.store.readSnapshot;
+    await f.close();
+  }
 });
 
 test("local contribution revisions, source/document changes and releases are pinned without hydrating bodies", async () => {

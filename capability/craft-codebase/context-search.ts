@@ -183,11 +183,11 @@ export function rankCodeSymbols(nodes: readonly JsonObject[], query: string, lim
 }
 
 /** Bounded lexical seeds and their analyzed dependency neighbourhood. No source bodies. */
-export function codeContextCandidates(index: JsonObject, query: string, limit = 100): JsonObject {
+export function codeContextCandidates(index: JsonObject, query: string, limit = 100, searchIndex?: CodeSymbolSearchIndex): JsonObject {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new Error("Code Context limit must be between 1 and 1000");
   const aliases = Object.entries(INTENTS).filter(([word]) => query.includes(word)).flatMap(([, values]) => values);
   const nodes = index.nodes as JsonObject[];
-  const ranked = rankCodeSymbols(nodes, query, Math.max(1, nodes.length)).filter(row => row.score > 0);
+  const ranked = (searchIndex?.rank(query, Math.max(1, nodes.length)) ?? rankCodeSymbols(nodes, query, Math.max(1, nodes.length))).filter(row => row.score > 0);
   const edges = (index.edges ?? []) as JsonObject[];
   const seeds = ranked.slice(0, edges.length ? Math.ceil(limit * 2 / 3) : limit);
   const candidates = new Map<string, JsonObject>(seeds.map(row => [String(row.node.id), { ...row.node, score: row.score, selection_reason: "lexical_match" }]));

@@ -20,7 +20,7 @@ export interface TelemetryEvent {
 export interface TelemetrySink { append(event: TelemetryEvent): void | Promise<void> }
 export interface TelemetryReceipt { recorded: boolean; event: TelemetryEvent; error?: Error }
 
-const SAFE_KEY = /^(?:reason_code|(?:[a-z][a-z0-9_]*_)?(?:id|digest|count|bytes|duration_ms|status|stage|provider|model|unit|cost_usd|input_tokens|output_tokens|name))$/u;
+const SAFE_KEY = /^(?:reason_code|database_(?:role|phase)|busy_timeout_ms|retryable|(?:[a-z][a-z0-9_]*_)?(?:id|digest|count|bytes|duration_ms|status|stage|provider|model|unit|cost_usd|input_tokens|output_tokens|name))$/u;
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]/iu;
 
 function required(value: string, field: string): string {

@@ -845,6 +845,69 @@ test("semantic onboarding persists a full graph in immutable bounded shards", as
   } finally { f.close(); }
 });
 
+test("semantic onboarding packs small source files together without losing path or relation lookup", async () => {
+  const f = await fixture();
+  try {
+    mkdirSync(join(f.repo, "src"));
+    f.write("src/caller-6.ts", "export function sharedSource() { return 1; }\n");
+    f.write("src/caller-a.ts", 'import { sharedSource } from "./caller-6";\nexport function callerA() { return sharedSource(); }\n');
+    f.write("src/caller-30.ts", 'import { sharedSource } from "./caller-6";\nexport function callerB() { return sharedSource(); }\n');
+    const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(result.status, "ready");
+    const index = f.store.get("codebase_index", String(result.index_id));
+    assert.equal(index.source_file_count, 3);
+    assert((index.shard_ids as string[]).length < Number(index.source_file_count), "small files should share durable graph records");
+    const source = (f.service.codebaseSymbolFind({ workspace_id: result.workspace_id, index_id: result.index_id, query: "sharedSource" }).symbols as JsonObject[])
+      .find(item => item.path === "src/caller-6.ts")!;
+    const callers = f.service.codebaseCallersFind({ workspace_id: result.workspace_id, index_id: result.index_id, symbol_id: source.id });
+    assert.deepEqual((callers.callers as JsonObject[]).map(item => String((item.caller as JsonObject).name)).sort(), ["callerA", "callerB"]);
+    for (const path of ["src/caller-6.ts", "src/caller-a.ts", "src/caller-30.ts"]) {
+      const symbols = f.service.codebaseSymbolsOverview({ workspace_id: result.workspace_id, index_id: result.index_id, path });
+      assert.equal(symbols.path, path);
+      assert((symbols.symbols as JsonObject[]).length > 0);
+    }
+  } finally { f.close(); }
+});
+
+test("semantic import reuses source bodies already verified against the published checkpoint", async () => {
+  const f = await fixture();
+  const sourcePath = "src/index.ts";
+  try {
+    mkdirSync(join(f.repo, "src"));
+    f.write(sourcePath, "export function source() { return 1; }\nexport function caller() { return source(); }\n");
+    const files = repositoryFiles(f.repo).files;
+    const ensured = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const checkpoint = f.store.get("workspace_checkpoint", String(ensured.checkpoint_id));
+    const snapshotFile = join(String(checkpoint.snapshot_root), sourcePath);
+    unlinkSync(snapshotFile);
+    try {
+      const analysis = analyzeTypeScript(files, { include_file_units: true });
+      const importFromVerifiedSources = (f.service.codebaseAnalysisImport as (args: JsonObject, sources: typeof files) => JsonObject).bind(f.service);
+      const imported = importFromVerifiedSources({ workspace_id: ensured.workspace_id, checkpoint_id: ensured.checkpoint_id,
+        index_id: "verified-memory-source-import", analysis }, files);
+      assert.equal((imported.index as JsonObject).status, "ready");
+      assert.throws(() => importFromVerifiedSources({ workspace_id: ensured.workspace_id, checkpoint_id: ensured.checkpoint_id,
+        index_id: "outside-checkpoint-memory-source-import", analysis }, files.map(file => ({ ...file, path: "outside.ts" }))), /outside checkpoint/u);
+      assert.throws(() => importFromVerifiedSources({ workspace_id: ensured.workspace_id, checkpoint_id: ensured.checkpoint_id,
+        index_id: "duplicate-memory-source-import", analysis }, [files[0]!, files[0]!]), /source digest mismatch/u);
+      assert.throws(() => importFromVerifiedSources({ workspace_id: ensured.workspace_id, checkpoint_id: ensured.checkpoint_id,
+        index_id: "wrong-memory-source-digest-import", analysis }, files.map(file => ({ ...file, digest: "wrong" }))), /source digest mismatch/u);
+      assert.throws(() => importFromVerifiedSources({ workspace_id: ensured.workspace_id, checkpoint_id: ensured.checkpoint_id,
+        index_id: "same-size-memory-source-drift-import", analysis }, files.map(file => ({ ...file,
+          content: file.content.replace("return 1", "return 2") }))), /source digest mismatch/u);
+      const originalEntries = checkpoint.entries as JsonObject[];
+      f.store.save("workspace_checkpoint", String(ensured.checkpoint_id), { ...checkpoint,
+        entries: originalEntries.map(entry => entry.path === sourcePath ? { ...entry, size_bytes: Number(entry.size_bytes) + 1 } : entry) });
+      try {
+        assert.throws(() => importFromVerifiedSources({ workspace_id: ensured.workspace_id, checkpoint_id: ensured.checkpoint_id,
+          index_id: "wrong-memory-source-size-import", analysis }, files), /source digest mismatch/u);
+      } finally { f.store.save("workspace_checkpoint", String(ensured.checkpoint_id), checkpoint); }
+      assert.throws(() => importFromVerifiedSources({ workspace_id: ensured.workspace_id, checkpoint_id: ensured.checkpoint_id,
+        index_id: "mismatched-memory-source-import", analysis }, files.map(file => ({ ...file, content: `${file.content}\n// drift` }))), /source digest mismatch/u);
+    } finally { writeFileSync(snapshotFile, files.find(file => file.path === sourcePath)!.content); }
+  } finally { f.close(); }
+});
+
 test("semantic onboarding incrementally refreshes changed modules and matches a clean graph", async () => {
   const f = await fixture();
   try {
@@ -1161,6 +1224,47 @@ test("Go workspace metadata drift before checkpoint publication is rejected", as
   } finally { f.close(); }
 });
 
+test("repository ensure adopts a concurrent checkpoint published before a retryable snapshot race", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export function checkpointRace() { return true; }\n");
+    const checkpoint = f.service.workspaceCheckpointFromRepositoryFiles.bind(f.service);
+    let calls = 0;
+    f.service.workspaceCheckpointFromRepositoryFiles = args => {
+      const published = checkpoint(args);
+      calls += 1;
+      if (calls === 1) throw new Error("Workspace changed before repository checkpoint publication");
+      if (calls === 2) f.write("main.ts", "export function changedAfterCheckpoint() { return false; }\n");
+      else {
+        const row = published.checkpoint as JsonObject;
+        f.store.save("workspace_checkpoint", String(row.id), { ...payload(row), snapshot_root: join(f.root, "wrong-checkpoint-root") });
+      }
+      throw new Error("Workspace changed before repository checkpoint publication");
+    };
+    const ensured = f.service.codebaseRepositoryEnsure({ project_root: f.repo });
+    assert.equal(ensured.status, "ready");
+    assert.equal(calls, 1);
+    f.write("main.ts", "export function nextCheckpointRace() { return true; }\n");
+    assert.throws(() => f.service.codebaseRepositoryEnsure({ project_root: f.repo }), /Workspace changed before repository checkpoint publication/u);
+    assert.equal(calls, 2);
+    assert.throws(() => f.service.codebaseRepositoryEnsure({ project_root: f.repo }), /Workspace changed before repository checkpoint publication/u);
+    assert.equal(calls, 3);
+    f.service.workspaceCheckpointFromRepositoryFiles = () => { throw "non-error checkpoint failure"; };
+    assert.throws(() => f.service.codebaseRepositoryEnsure({ project_root: f.repo }), error => error === "non-error checkpoint failure");
+  } finally { f.close(); }
+});
+
+test("repository ensure fails closed when a retryable checkpoint race has no published checkpoint", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export function missingCheckpointRace() { return true; }\n");
+    f.service.workspaceCheckpointFromRepositoryFiles = () => {
+      throw new Error("Workspace changed before repository checkpoint publication");
+    };
+    assert.throws(() => f.service.codebaseRepositoryEnsure({ project_root: f.repo }), /Workspace changed before repository checkpoint publication/u);
+  } finally { f.close(); }
+});
+
 test("repository ensure retries once when source digests change before the checkpoint is captured", async () => {
   const f = await fixture();
   try {
@@ -1320,8 +1424,39 @@ test("edge route buckets deterministically sort multi-node adjacency and project
     f.store.save("codebase_index", String(index.id), index);
     const target = (f.service.codebaseSymbolFind({ workspace_id: ensured.workspace_id, index_id: ensured.index_id, query: "target123" }).symbols as JsonObject[])[0]!;
     assert.equal((f.service.codebaseCallersFind({ workspace_id: ensured.workspace_id, index_id: ensured.index_id, symbol_id: target.id }).callers as JsonObject[]).length, 1);
-    const projection = new CodebaseIndexKernel(f.store).contextProjection({ workspace_id: ensured.workspace_id, index_id: ensured.index_id, query: "target123" });
+    const kernel = new CodebaseIndexKernel(f.store);
+    const projectionArgs = { workspace_id: ensured.workspace_id, index_id: ensured.index_id, query: "target123" };
+    const projection = kernel.contextProjection(projectionArgs);
     assert((projection.candidates as JsonObject[]).length > 0);
+    const repeatedProjection = kernel.contextProjection(projectionArgs);
+    assert.deepEqual(repeatedProjection.candidates, projection.candidates);
+    const firstIndex = f.store.get("codebase_index", String(ensured.index_id));
+    f.store.save("codebase_index", String(firstIndex.id), payload(firstIndex));
+
+    const instrument = kernel as unknown as {
+      loadGraph(index: JsonObject): { nodes: JsonObject[]; edges: JsonObject[] };
+      contextGraph(this: CodebaseIndexKernel, index: JsonObject): { nodes: JsonObject[]; edges: JsonObject[] };
+    };
+    const loadGraph = instrument.loadGraph.bind(kernel);
+    let graphLoads = 0;
+    instrument.loadGraph = index => { graphLoads++; return loadGraph(index); };
+    const cachedProjection = kernel.contextProjection(projectionArgs);
+    const repeatedCachedProjection = kernel.contextProjection(projectionArgs);
+    assert.deepEqual(repeatedCachedProjection.candidates, cachedProjection.candidates);
+    assert.equal(graphLoads, 1, "a repeated Context read should reuse its verified immutable graph");
+    const latestIndex = f.store.get("codebase_index", String(ensured.index_id));
+    f.store.save("codebase_index", String(latestIndex.id), payload(latestIndex));
+    kernel.contextProjection(projectionArgs);
+    assert.equal(graphLoads, 2, "a new index version must invalidate the process-local graph cache");
+
+    const originalGraph = instrument.loadGraph;
+    const oversizedGraph = { nodes: Array.from({ length: 8_001 }, (_, i) => ({ id: `node-${i}` })), edges: [] };
+    instrument.loadGraph = () => { graphLoads++; return oversizedGraph; };
+    const oversizedIndex = { id: "large-index", version: 1, graph_digest: "large-digest", node_count: 8_001, edge_count: 0 };
+    instrument.contextGraph.call(kernel, oversizedIndex);
+    instrument.contextGraph.call(kernel, oversizedIndex);
+    assert.equal(graphLoads, 4, "graphs above the cache bound must be reread instead of retained");
+    instrument.loadGraph = originalGraph;
   } finally { f.close(); }
 });
 
@@ -1872,8 +2007,15 @@ test("aggregate MCP resolves bounded scope and code references while standalone 
     const server = new McpServer(f.service, "component-context-daily");
     const contextTool = server.tools.find(tool => tool.name === "craft_context_open") as JsonObject;
     assert.deepEqual((((contextTool.inputSchema as JsonObject).properties as JsonObject).response_detail as JsonObject).enum, ["compact", "full"]);
-    const pack = await result(server, "craft_context_open", { project_root: f.repo, query: "alpha", include_codebase: true });
+    const codebasePrototype = Object.getPrototypeOf(f.service.codebase) as { contextProjection(args: JsonObject): JsonObject };
+    const originalProjection = codebasePrototype.contextProjection;
+    let projectionLimit = 0;
+    codebasePrototype.contextProjection = function (args) { projectionLimit = Number(args.limit); return originalProjection.call(this, args); };
+    let pack: JsonObject;
+    try { pack = await result(server, "craft_context_open", { project_root: f.repo, query: "alpha", include_codebase: true }); }
+    finally { codebasePrototype.contextProjection = originalProjection; }
     assert.equal(pack.host_execution_authority, false); assert.equal((pack.codebase as JsonObject).status, "ready");
+    assert.equal(projectionLimit, 4, "Codebase retrieval should keep one fallback while bounding candidates to the shared Context budget");
     assert.equal(((pack.codebase as JsonObject).references as unknown[]).length, 1);
     assert.equal((pack.pack_receipt as JsonObject).max_items, 3);
     assert.equal((pack.pack_receipt as JsonObject).max_chars, 1_200);
@@ -1915,6 +2057,37 @@ test("aggregate MCP resolves bounded scope and code references while standalone 
     for (const budget of [0, 1.5]) await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", max_chars: budget }), /budget/);
     await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", max_items: 0 }), /budget/);
   } finally { f.close(); }
+});
+
+test("Context Pack Receipt fails closed on a conflicting prior version and a concurrent conflicting publisher", async () => {
+  const f = await fixture();
+  const originalFind = f.store.find.bind(f.store);
+  try {
+    const conflictRecord = (id: string) => ({ id, identity_digest: "sha256:conflict" }) as unknown as NonNullable<ReturnType<CraftStore["find"]>>;
+    f.store.find = ((kind: string, id: string, version?: number, hydrate?: boolean) => {
+      if (kind === "context_pack_receipt" && id.startsWith("context_pack_")) return conflictRecord(id);
+      return originalFind(kind, id, version, hydrate);
+    }) as typeof f.store.find;
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "receipt conflict", include_codebase: false }), /idempotency conflict/u);
+
+    let injected = false;
+    const racingFind = (kind: string, id: string, version?: number, hydrate?: boolean) => {
+      if (kind === "context_pack_receipt" && id.startsWith("context_pack_") && !injected) {
+        injected = true;
+        f.store.find = originalFind as typeof f.store.find;
+        f.store.create(kind, id, { identity_digest: "sha256:concurrent-conflict" });
+        f.store.find = racingFind as typeof f.store.find;
+        return null;
+      }
+      return originalFind(kind, id, version, hydrate);
+    };
+    f.store.find = racingFind as typeof f.store.find;
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "receipt race", include_codebase: false }), /idempotency conflict/u);
+    assert.equal(injected, true);
+  } finally {
+    f.store.find = originalFind as typeof f.store.find;
+    f.close();
+  }
 });
 
 test("context automatically ingests bounded project Knowledge into project data once", async () => {
@@ -2398,19 +2571,29 @@ test("repository graph file publication does not hold the shared database writer
   const otherWriter = new DatabaseSync(f.store.paths.databaseFile);
   otherWriter.exec("PRAGMA busy_timeout=0");
   const put = ProjectGraphStore.prototype.put;
-  let probes = 0;
+  const freshnessTarget = f.service.workspace as unknown as { freshness(args: JsonObject): JsonObject };
+  const freshness = freshnessTarget.freshness.bind(freshnessTarget);
+  const checkpointTarget = f.service as unknown as { workspaceCheckpointFromRepositoryFiles(args: JsonObject): JsonObject };
+  const checkpoint = checkpointTarget.workspaceCheckpointFromRepositoryFiles.bind(checkpointTarget);
+  let graphProbes = 0, freshnessProbes = 0, checkpointProbes = 0;
+  const probeWriter = () => { otherWriter.exec("BEGIN IMMEDIATE"); otherWriter.exec("ROLLBACK"); };
+  freshnessTarget.freshness = args => { probeWriter(); freshnessProbes++; return freshness(args); };
+  checkpointTarget.workspaceCheckpointFromRepositoryFiles = args => { probeWriter(); checkpointProbes++; return checkpoint(args); };
   ProjectGraphStore.prototype.put = function (id, record) {
-    otherWriter.exec("BEGIN IMMEDIATE");
-    otherWriter.exec("ROLLBACK");
-    probes++;
+    probeWriter();
+    graphProbes++;
     return put.call(this, id, record);
   };
   try {
     f.write("main.ts", "export function caller() { return target(); }\nexport function target() { return 1; }\n");
     const indexed = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(indexed.status, "ready");
-    assert(probes > 0, "probe must run while immutable graph files are published");
+    assert(freshnessProbes > 0, "repository freshness must run without the shared writer lock");
+    assert(checkpointProbes > 0, "snapshot copying must run without the shared writer lock");
+    assert(graphProbes > 0, "immutable graph files must be published without the shared writer lock");
   } finally {
+    freshnessTarget.freshness = freshness;
+    checkpointTarget.workspaceCheckpointFromRepositoryFiles = checkpoint;
     ProjectGraphStore.prototype.put = put;
     otherWriter.close();
     f.close();

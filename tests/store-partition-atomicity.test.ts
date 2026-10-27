@@ -101,12 +101,97 @@ test("a held publication lock leaves no staged row and create succeeds after rel
     writer = new DatabaseSync(f.paths.databaseFile);
     writer.exec("BEGIN IMMEDIATE");
     f.store.database.exec("PRAGMA busy_timeout=1");
-    assert.throws(() => f.store.create("knowledge_claim", "blocked", { scope: "global", content: "pending" }), /locked/u);
+    assert.throws(() => f.store.create("knowledge_claim", "blocked", { scope: "global", content: "pending" }), error => {
+      assert.match((error as Error).message, /locked/u);
+      assert.equal((error as { stage?: string }).stage, "storage_lock");
+      assert.deepEqual((error as { safeDetails?: Record<string, unknown> }).safeDetails, {
+        database_role: "primary", phase: "transaction_begin", busy_timeout_ms: 1, retryable: true,
+      });
+      return true;
+    });
     assert.equal(partitionCount(f.paths.knowledgeDatabaseFile, "knowledge_claim"), 1);
     writer.exec("ROLLBACK");
     assert.equal(f.store.find("knowledge_claim", "blocked"), null);
     assert.equal(f.store.create("knowledge_claim", "blocked", { scope: "global", content: "pending" }).version, 1);
   } finally { writer?.close(); cleanup(f); }
+});
+
+test("storage lock annotation preserves an existing safe phase diagnostic", async () => {
+  const f = await fixture(); let writer: DatabaseSync | undefined, partitionWriter: DatabaseSync | undefined;
+  try {
+    const run = (f.store as unknown as { transactionOn(database: DatabaseSync, operation: () => void): void }).transactionOn.bind(f.store);
+    const error = Object.assign(new Error("database is locked"), {
+      stage: "partition_publish", safeDetails: { database_role: "custom_partition" },
+    });
+    assert.throws(() => run(f.store.database, () => { throw error; }), caught => {
+      assert.equal((caught as Error).message, "database is locked");
+      assert.equal((caught as { stage?: string }).stage, "partition_publish");
+      assert.deepEqual((caught as { safeDetails?: Record<string, unknown> }).safeDetails, { database_role: "custom_partition" });
+      return true;
+    });
+    const nonBusySqliteError = Object.assign(new Error("invalid SQL"), { code: "ERR_SQLITE_ERROR", errcode: 1 });
+    assert.throws(() => run(f.store.database, () => { throw nonBusySqliteError; }), caught => {
+      assert.equal(caught, nonBusySqliteError);
+      assert.equal((caught as { stage?: string }).stage, undefined);
+      return true;
+    });
+    const codeWithoutMessage = { code: "ERR_SQLITE_ERROR", errcode: 1 };
+    assert.throws(() => run(f.store.database, () => { throw codeWithoutMessage; }), caught => caught === codeWithoutMessage);
+    assert.throws(() => run(f.store.database, () => { throw null; }), caught => caught === null);
+    assert.throws(() => run(f.store.database, () => { throw "primitive failure"; }), caught => caught === "primitive failure");
+    const codedBusy = Object.assign({ code: "ERR_SQLITE_ERROR", errcode: 5 });
+    assert.throws(() => run(f.store.database, () => { throw codedBusy; }), caught => {
+      assert.equal((caught as { stage?: string }).stage, "storage_lock");
+      assert.equal((caught as { safeDetails?: Record<string, unknown> }).safeDetails?.busy_timeout_ms, 15_000);
+      return true;
+    });
+    const brokenProbe = new Proxy(f.store.database, { get(target, property) {
+      if (property === "prepare") return (sql: string) => {
+        if (sql === "PRAGMA busy_timeout") throw new Error("diagnostic probe unavailable");
+        return target.prepare(sql);
+      };
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    } });
+    assert.throws(() => run(brokenProbe, () => { throw new Error("database is locked"); }), caught => {
+      assert.equal((caught as { safeDetails?: Record<string, unknown> }).safeDetails?.busy_timeout_ms, null);
+      return true;
+    });
+    writer = new DatabaseSync(f.paths.databaseFile);
+    const timeout = Number((f.store.database.prepare("PRAGMA busy_timeout").get() as { timeout: number }).timeout);
+    writer.exec("BEGIN IMMEDIATE"); f.store.database.exec("PRAGMA busy_timeout=1");
+    assert.throws(() => run(f.store.database, () => {}), caught => {
+      assert.equal((caught as { stage?: string }).stage, "storage_lock");
+      assert.equal((caught as { safeDetails?: Record<string, unknown> }).safeDetails?.phase, "transaction_begin");
+      return true;
+    });
+    writer.exec("ROLLBACK"); writer.close(); writer = undefined; f.store.database.exec(`PRAGMA busy_timeout=${timeout}`);
+    const database = f.store.database as DatabaseSync & { exec: (sql: string) => void };
+    const originalExec = database.exec.bind(database);
+    database.exec = sql => {
+      if (sql === "SAVEPOINT craft_atomic_1") throw new Error("database is locked");
+      originalExec(sql);
+    };
+    try {
+      assert.throws(() => f.store.transaction(() => f.store.transaction(() => {})), caught => {
+        assert.equal((caught as { stage?: string }).stage, "storage_lock");
+        assert.equal((caught as { safeDetails?: Record<string, unknown> }).safeDetails?.phase, "savepoint_begin");
+        return true;
+      });
+    } finally { database.exec = originalExec; }
+    const memoryStore = f.store as unknown as { memoryDatabase(scope: { kind: "global"; id: string }, domain: "memory"): { database: DatabaseSync; file: string } };
+    const partition = memoryStore.memoryDatabase({ kind: "global", id: "global" }, "memory");
+    partition.database.exec("PRAGMA busy_timeout=1"); partitionWriter = new DatabaseSync(partition.file);
+    partitionWriter.exec("PRAGMA busy_timeout=1; BEGIN IMMEDIATE");
+    assert.throws(() => run(partition.database, () => {}), caught => {
+      assert.equal((caught as { stage?: string }).stage, "storage_lock");
+      assert.deepEqual((caught as { safeDetails?: Record<string, unknown> }).safeDetails, {
+        database_role: "capability_partition", phase: "transaction_begin", busy_timeout_ms: 1, retryable: true,
+      });
+      return true;
+    });
+    partitionWriter.exec("ROLLBACK"); partitionWriter.close(); partitionWriter = undefined;
+  } finally { writer?.close(); partitionWriter?.close(); cleanup(f); }
 });
 
 test("an actual process exit after create staging recovers only an identical unpublished payload", async () => {

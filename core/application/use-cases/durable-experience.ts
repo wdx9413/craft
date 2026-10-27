@@ -97,7 +97,36 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
   };
   serviceClass.prototype.procedureInvocationBind = function (args) { return this.procedureInvocations.bind(args); };
   serviceClass.prototype.procedureInvocationDispatch = function (args) { return this.procedureInvocations.dispatch(args); };
-  serviceClass.prototype.procedureInvocationReport = function (args) { return this.procedureInvocations.report(args); };
+  serviceClass.prototype.procedureInvocationReport = function (args) {
+    const reported = this.procedureInvocations.report(args), receipt = reported.receipt as JsonObject | undefined;
+    if (!receipt || typeof receipt.host_session_id !== "string") return reported;
+    const session = this.store.find("host_session", receipt.host_session_id), cycleId = session?.evolution_cycle_id;
+    if (!session || typeof cycleId !== "string") return reported;
+    let cycle = this.evolutionCycleGet({ cycle_id: cycleId }).cycle as JsonObject;
+    if (cycle.stage === "act") {
+      const observation = this.store.get("outcome_observation", String(receipt.observation_id));
+      const hostState = this.hostSessionGet({ session_id: session.id }), events = hostState.events as JsonObject[];
+      const terminal = events.find(event => event.sequence === session.next_sequence && ["session.completed", "session.failed", "session.cancelled"].includes(String(event.kind)));
+      if (!terminal) throw new Error("Evolution Cycle cannot record feedback without a terminal Host event");
+      const traceRefs = [
+        { kind: "trace_event", id: String(terminal.trace_event_id), version: Number(terminal.trace_event_version) },
+        { kind: "trace_event", id: String(observation.trace_event_id), version: Number(observation.trace_event_version) },
+      ];
+      const evidenceRefs = [
+        { kind: "outcome_observation", id: String(observation.id), version: Number(observation.version) },
+        ...(Array.isArray(observation.evidence_ids) ? observation.evidence_ids as string[] : []).map(id => {
+          const evidence = this.store.get("evidence", id); return { kind: "evidence", id: String(evidence.id), version: Number(evidence.version) };
+        }),
+      ];
+      cycle = this.evolutionCycleAdvance({ cycle_id: cycleId, expected_version: cycle.version, transition_id: `${cycleId}:feedback:${receipt.id}`,
+        stage: "feedback", outcome: String(receipt.status), evidence_refs: evidenceRefs, trace_refs: traceRefs }).cycle as JsonObject;
+    }
+    if (cycle.stage === "feedback" && cycle.outcome === "passed") {
+      cycle = this.evolutionCycleAdvance({ cycle_id: cycleId, expected_version: cycle.version, transition_id: `${cycleId}:attribute:${receipt.id}`,
+        stage: "attribute" }).cycle as JsonObject;
+    }
+    return { ...reported, evolution_cycle: { cycle, status: cycle.stage === "feedback" ? "awaiting_failure_attribution" : "recorded" } };
+  };
   serviceClass.prototype.procedureInvocationResume = function (args) { return this.procedureInvocations.resume(args); };
   serviceClass.prototype.procedureInvocationTransition = function (args) { return this.procedureInvocations.transition(args); };
   serviceClass.prototype.procedureInvocationGet = function (args) { return this.procedureInvocations.get(args); };

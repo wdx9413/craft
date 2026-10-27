@@ -29,6 +29,32 @@ test("Experience MCP contract carries the exact source Host session identifier",
   for (const key of ["scope", "source_id", "fragment_id"]) assert(key in (properties("craft_evidence_record") ?? {}), `craft_evidence_record must expose ${key}`);
 });
 
+test("MCP maps SQLite lock failures to a stable storage-busy diagnostic", async () => {
+  const root = await mkdtemp(join(tmpdir(), `craft-mcp-storage-busy-${process.pid}-`));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = await CraftService.open(store);
+  let errorToThrow: Error & { code?: string; errcode?: number; stage?: string; safeDetails?: JsonObject } = Object.assign(new Error("database is locked"), { code: "ERR_SQLITE_ERROR", errcode: 5,
+    stage: "storage_lock", safeDetails: { database_role: "primary", phase: "transaction_begin", busy_timeout_ms: 1, retryable: true } });
+  service.workflowTransition = () => { throw errorToThrow; };
+  const server = new McpServer(service);
+  try {
+    const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_workflow_transition",
+      arguments: { workflow_id: "workflow", target: "verified", reason: "test" } } });
+    const result = (response?.result ?? {}) as JsonObject;
+    const failure = result.structuredContent as JsonObject;
+    assert.equal(result.isError, true);
+    assert.equal(failure.error_code, "STORAGE_BUSY");
+    assert.equal(failure.stage, "storage_lock");
+    assert.deepEqual(failure.details, { database_role: "primary", phase: "transaction_begin", busy_timeout_ms: 1, retryable: true });
+    assert.match(String((result.content as JsonObject[])[0]?.text), /database is locked/u);
+
+    errorToThrow = Object.assign(new Error("no such table"), { code: "ERR_SQLITE_ERROR", errcode: 1 });
+    const otherSqliteError = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_workflow_transition",
+      arguments: { workflow_id: "workflow", target: "verified", reason: "test" } } });
+    assert.equal(((otherSqliteError?.result as JsonObject).structuredContent as JsonObject).error_code, "ERR_SQLITE_ERROR");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("MCP negotiates protocols, lists tools, dispatches every handler, and reports errors", async () => {
   const root = join(tmpdir(), `craft-mcp-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });

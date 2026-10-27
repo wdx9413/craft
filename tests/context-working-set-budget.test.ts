@@ -77,6 +77,40 @@ test("required projections fail with typed budget errors and never enter accumul
   } finally { f.close(); }
 });
 
+test("Working Set validates malformed resolver projections and explicit identity conflicts", async () => {
+  const f = await fixture();
+  try {
+    const kernel = f.service.contextWorkingSets;
+    await assert.rejects(kernel.resolve({ ...f.args, members: [] }), /non-empty Context member list/);
+    await assert.rejects(kernel.resolve({ ...f.args, members: ["unknown"] }), /unsupported Context member/);
+
+    const sparse = new ContextWorkingSetKernel(f.store, { resolve: async () => ({}) } as never);
+    const sparseResult = await sparse.resolve({ query: "sparse", members: ["knowledge"], working_set_id: "sparse-working-set" });
+    assert.equal((sparseResult.working_set as JsonObject).id, "sparse-working-set");
+    assert.deepEqual(sparseResult.asset_refs, []);
+    assert.equal((sparseResult.working_set as JsonObject).scope, null);
+    assert.equal((sparse.get({ working_set_id: "sparse-working-set" }).working_set as JsonObject).id, "sparse-working-set");
+
+    const malformedContribution = new ContextWorkingSetKernel(f.store,
+      { resolve: async () => ({ contributions: [{ member: "experience", items: null, omitted_count: 0 }] }) } as never);
+    await malformedContribution.resolve({ query: "malformed", members: ["knowledge"], working_set_id: "malformed-working-set" });
+    await kernel.resolve({ ...f.args, required_refs: ["builtin.evidence-wiki"] });
+
+    await kernel.resolve({ ...f.args, working_set_id: "fixed-working-set" });
+    await assert.rejects(kernel.resolve({ ...f.args, query: "changed", working_set_id: "fixed-working-set" }), /idempotency conflict/);
+
+    const originalFind = f.store.find.bind(f.store);
+    let racingFinds = 0;
+    f.store.find = ((kind: string, id: string, version?: number) => {
+      if (kind === "context_working_set_receipt" && id === "racing-working-set" && ++racingFinds === 2)
+        return { id, identity_digest: "different" } as JsonObject;
+      return originalFind(kind, id, version);
+    }) as typeof f.store.find;
+    await assert.rejects(kernel.resolve({ ...f.args, working_set_id: "racing-working-set" }), /idempotency conflict/);
+    f.store.find = originalFind;
+  } finally { f.close(); }
+});
+
 test("Working Set defaults to a small shared budget while allowing explicit expansion", async () => {
   const f = await fixture();
   try {

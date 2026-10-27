@@ -292,6 +292,9 @@ test("Codebase symbol search preserves identifier fragments and context expansio
   assert(selected.some(item => item.id === "caller" || item.id === "target"));
   assert((result.repo_map as JsonObject).edges instanceof Array);
   assert.equal(result.candidate_only, true);
+  const preindexed = codeContextCandidates({ nodes, edges: [{ id: "e", kind: "calls", from_node_id: "caller", to_node_id: "target" }] },
+    "repository", 3, new CodeSymbolSearchIndex(nodes));
+  assert.deepEqual(preindexed, result);
 });
 
 test("Codebase context retrieval handles file-only graphs and validates result bounds", () => {

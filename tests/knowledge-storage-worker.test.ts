@@ -14,6 +14,7 @@ test("storage maintenance resumes persisted pages and does not manufacture model
   try {
     const calls: JsonObject[] = [];
     await runKnowledgeStorageReconcileOnce({ async call(name, args = {}) { assert.equal(name, "craft_knowledge_storage_reconcile"); calls.push(args); return page; } }, path);
+    assert.equal(calls[0]?.summary_only, true);
     await assert.rejects(runKnowledgeStorageReconcileOnce({ async call(_name, args) { calls.push(args!); throw new Error("transient failure"); } }, path), /transient/u);
     assert.equal(JSON.parse(await readFile(path, "utf8")).cursor, page.next_cursor);
     await runKnowledgeStorageReconcileOnce({ async call(_name, args) { calls.push(args!); return empty; } }, path);
@@ -21,6 +22,22 @@ test("storage maintenance resumes persisted pages and does not manufacture model
     const before = await readFile(path, "utf8");
     await runKnowledgeStorageReconcileOnce({ async call() { return empty; } }, path);
     assert.equal(await readFile(path, "utf8"), before);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("storage maintenance accepts bounded blocked-reason summaries and rejects inconsistent counts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-storage-summary-")), path = join(root, "state.json");
+  try {
+    const compact = { ...page, examined: 2, summary_only: true, blocked: [], blocked_count: 2, blocked_reasons: { scope_unavailable: 2 } };
+    const result = await runKnowledgeStorageReconcileOnce({ async call() { return compact; } }, path);
+    assert.equal(result.blocked_count, 2);
+    await rm(path);
+    await assert.rejects(runKnowledgeStorageReconcileOnce({ async call() {
+      return { ...compact, blocked_count: 3 };
+    } }, path), /invalid page/u);
+    await assert.rejects(runKnowledgeStorageReconcileOnce({ async call() {
+      return { ...compact, blocked_reasons: { scope_unavailable: -1 } };
+    } }, path), /invalid page/u);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

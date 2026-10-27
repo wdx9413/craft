@@ -3,7 +3,7 @@ import type { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { HookSignalSanitizer } from "../core/interfaces/codex-hook-signal-sanitizer.ts";
 import { randomUUID } from "node:crypto";
-import { beginHookRuntimeDiagnostic } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
+import { beginHookRuntimeDiagnostic, hookStorageFailureDetails } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
 import { operationErrorCode } from "../common/craft-common-log/src/index.ts";
 
 type CodexHookMember = "context" | "knowledge" | "memory" | "experience";
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   catch (error) {
     diagnostic?.finish({ process_elapsed_ms: process.uptime() * 1_000, input_read_ms: inputReadMs, input_parse_ms: inputParseMs,
       runtime_import_ms: runtimeImportMs, store_open_ms: performance.now() - storeOpenStarted, outcome: "failed", error_code: operationErrorCode(error),
-      error_type: error instanceof Error ? error.name : "unknown" });
+      error_type: error instanceof Error ? error.name : "unknown", ...hookStorageFailureDetails(error, operationErrorCode(error)) });
     throw error;
   }
   const storeOpenMs = performance.now() - storeOpenStarted;
@@ -76,6 +76,7 @@ async function main(): Promise<void> {
   let storeCloseMs = 0;
   let errorType: string | undefined;
   let errorCode: string | undefined;
+  let storageDetails: ReturnType<typeof hookStorageFailureDetails> = {};
   let outcome: "completed" | "failed" | undefined = event === "PostToolUse" ? "completed" : undefined;
   let serviceOpenStarted = 0;
   try {
@@ -94,6 +95,7 @@ async function main(): Promise<void> {
     outcome = "failed";
     errorType = error instanceof Error ? error.name : "unknown";
     errorCode = operationErrorCode(error);
+    storageDetails = hookStorageFailureDetails(error, errorCode);
     throw error;
   } finally {
     const closeStarted = performance.now();
@@ -104,7 +106,8 @@ async function main(): Promise<void> {
       handler_ms: handlerMs, output_write_ms: outputWriteMs, store_close_ms: storeCloseMs,
       ...(outcome ? { outcome } : {}),
       ...(errorCode ? { error_code: errorCode } : {}),
-      ...(errorType ? { error_type: errorType } : {}) });
+      ...(errorType ? { error_type: errorType } : {}),
+      ...storageDetails });
   }
 }
 

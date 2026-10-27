@@ -99,8 +99,17 @@ function writeSnapshotEntries(snapshotRoot: string, entries: SnapshotEntry[], co
 }
 
 function projectCodebaseSnapshotRoot(paths: CraftPaths, root: string, workspaceId: string, checkpointId: string): string {
+  let current = projectCodebaseSnapshotParent(paths, root, workspaceId);
+  current = join(current, checkpointId);
+  if (!snapshotStatIfPresent(current)) mkdirSync(current, { mode: 0o700 });
+  const stat = lstatSync(current);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("project Codebase snapshot path contains an unsafe directory");
+  return current;
+}
+
+function projectCodebaseSnapshotParent(paths: CraftPaths, root: string, workspaceId: string): string {
   let current = ensureProjectStorageDirectory(paths, root);
-  for (const part of ["codebase", "snapshots", workspaceId, checkpointId]) {
+  for (const part of ["codebase", "snapshots", workspaceId]) {
     current = join(current, part);
     if (!snapshotStatIfPresent(current)) mkdirSync(current, { mode: 0o700 });
     const stat = lstatSync(current);
@@ -203,7 +212,9 @@ export class WorkspaceState {
       size_bytes: Buffer.byteLength(file.content), file_version: file.file_version }))
       .sort((left, right) => left.path.localeCompare(right.path));
     const label = requiredText(args.label, "label");
-    mkdirSync(snapshotRoot, { recursive: true, mode: 0o700 });
+    // Copy and validate source bytes before the writer transaction. The final
+    // transaction below performs only the optimistic workspace-version check
+    // and the two metadata writes.
     writeSnapshotEntries(snapshotRoot, entries, new Map([...byPath].map(([path, file]) => [path, file.content])));
     const repositoryStateAfter = this.readRepositoryState(root);
     for (const entry of entries) {
@@ -212,11 +223,16 @@ export class WorkspaceState {
         throw new Error(`repository source changed during snapshot: ${entry.path}`);
     }
     if (!sameRepositoryState(repositoryStateBefore, repositoryStateAfter)) throw new Error("Git repository state changed during workspace checkpoint");
-    const checkpoint = this.store.create("workspace_checkpoint", checkpointId, { workspace_id: workspaceId, label,
-      snapshot_root: snapshotRoot, entries, ...(repositoryStateAfter ? { repository_state: repositoryStateAfter } : {}),
-      state_revision: workspace.state_revision, artifact_ids: args.artifact_ids ?? [], evidence_ids: args.evidence_ids ?? [] });
-    const saved = this.store.save("workspace", workspaceId, { ...recordPayload(workspace), snapshot_storage: "project_codebase", latest_checkpoint_id: checkpointId });
-    return { workspace: saved, checkpoint };
+    return this.store.transaction(() => {
+      const current = this.store.get("workspace", workspaceId);
+      if (current.version !== workspace.version || current.latest_checkpoint_id !== workspace.latest_checkpoint_id)
+        throw new Error("Workspace changed before repository checkpoint publication");
+      const checkpoint = this.store.create("workspace_checkpoint", checkpointId, { workspace_id: workspaceId, label,
+        snapshot_root: snapshotRoot, entries, ...(repositoryStateAfter ? { repository_state: repositoryStateAfter } : {}),
+        state_revision: workspace.state_revision, artifact_ids: args.artifact_ids ?? [], evidence_ids: args.evidence_ids ?? [] });
+      const saved = this.store.save("workspace", workspaceId, { ...recordPayload(workspace), snapshot_storage: "project_codebase", latest_checkpoint_id: checkpointId });
+      return { workspace: saved, checkpoint };
+    });
   }
 
   diff(args: JsonObject): JsonObject {

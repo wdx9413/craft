@@ -457,6 +457,8 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_continual_harness_authorize_canary: service.continualHarnessAuthorizeCanary.bind(service), craft_continual_harness_observe_canary: service.continualHarnessObserveCanary.bind(service),
       craft_continual_harness_rollback: service.continualHarnessRollback.bind(service), craft_continual_harness_get: service.continualHarnessGet.bind(service),
       craft_continual_harness_signals: service.continualHarnessSignals.bind(service), craft_continual_harness_resolve: service.continualHarnessResolve.bind(service),
+      craft_evolution_cycle_start: service.evolutionCycleStart.bind(service), craft_evolution_cycle_advance: service.evolutionCycleAdvance.bind(service),
+      craft_evolution_cycle_get: service.evolutionCycleGet.bind(service),
       craft_stateful_compute_host_register: service.statefulComputeHostRegister.bind(service), craft_stateful_compute_session_prepare: service.statefulComputeSessionPrepare.bind(service),
       craft_stateful_compute_dispatch: service.statefulComputeDispatch.bind(service), craft_stateful_compute_observe: service.statefulComputeObserve.bind(service),
       craft_stateful_compute_delegate: service.statefulComputeDelegate.bind(service), craft_stateful_compute_report: service.statefulComputeReport.bind(service),

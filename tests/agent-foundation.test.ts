@@ -180,9 +180,12 @@ test("workflow DAG lifecycle and import/export error paths", async () => {
     assert.throws(() => service.workflowDagTransition({ workflow_id: workflow.id, target: "routable", reason: "x" }), /Invalid/);
     service.workflowDagTransition({ workflow_id: workflow.id, target: "candidate", reason: "review" });
     assert.throws(() => service.workflowDagTransition({ workflow_id: workflow.id, target: "verified", reason: "x", evaluation_run_id: "missing" }), /Unknown/);
-    store.create("evaluation_run", "eval-edge", { verdict: "failed", split: "held_out" });
+    const candidate = store.get("workflow_dag", String(workflow.id));
+    store.create("evaluation_run", "eval-edge", { verdict: "failed", split: "held_out", subject_type: "workflow_dag",
+      subject_id: workflow.id, subject_version: candidate.version });
     assert.throws(() => service.workflowDagTransition({ workflow_id: workflow.id, target: "verified", reason: "x", evaluation_run_id: "eval-edge" }), /passed/);
-    store.save("evaluation_run", "eval-edge", { verdict: "passed", split: "held_out" });
+    store.save("evaluation_run", "eval-edge", { verdict: "passed", split: "held_out", subject_type: "workflow_dag",
+      subject_id: workflow.id, subject_version: candidate.version });
     service.workflowDagTransition({ workflow_id: workflow.id, target: "verified", reason: "verified", evaluation_run_id: "eval-edge" });
     service.workflowDagTransition({ workflow_id: workflow.id, target: "canary", reason: "canary" });
     assert.throws(() => service.workflowDagTransition({ workflow_id: workflow.id, target: "routable", reason: "route", evaluation_run_id: "eval-edge" }), /canary_receipt/);

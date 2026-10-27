@@ -99,12 +99,34 @@ export class WorkflowDagKernel {
     const workflow = this.store.get("workflow_dag", text(args.workflow_id, "workflow_id")); const current = String(workflow.lifecycle); const target = text(args.target, "target");
     const allowed: Record<string, string[]> = { draft: ["candidate"], candidate: ["verified"], verified: ["canary", "deprecated"], canary: ["routable", "rolled_back"], routable: ["deprecated", "rolled_back"], deprecated: [], rolled_back: [] };
     if (!LIFECYCLE.has(target) || !allowed[current]?.includes(target)) throw new Error(`Invalid Workflow DAG transition: ${current} -> ${target}`);
-    if (["verified", "routable"].includes(target)) {
+    let evaluationRunId: string | null = typeof workflow.evaluation_run_id === "string" ? workflow.evaluation_run_id : null;
+    let evaluationRunVersion: number | null = typeof workflow.evaluation_run_version === "number" ? workflow.evaluation_run_version : null;
+    let evaluatedCandidateVersion: number | null = typeof workflow.evaluated_candidate_version === "number" ? workflow.evaluated_candidate_version : null;
+    if (target === "verified") {
       const evaluation = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
-      if (evaluation.verdict !== "passed" || evaluation.split !== "held_out") throw new Error("Workflow verification requires a passed held-out evaluation");
+      if (evaluation.verdict !== "passed" || evaluation.split !== "held_out" ||
+          evaluation.subject_type !== "workflow_dag" || evaluation.subject_id !== workflow.id ||
+          Number(evaluation.subject_version) !== Number(workflow.version)) {
+        throw new Error("Workflow verification requires a passed held-out evaluation for this exact Workflow DAG candidate version");
+      }
+      evaluationRunId = String(evaluation.id);
+      evaluationRunVersion = Number(evaluation.version);
+      evaluatedCandidateVersion = Number(workflow.version);
+    }
+    if (target === "routable") {
+      if (!evaluationRunId || !evaluationRunVersion || !evaluatedCandidateVersion ||
+          (args.evaluation_run_id !== undefined && args.evaluation_run_id !== evaluationRunId)) {
+        throw new Error("Workflow routing requires the held-out evaluation bound to its verified candidate");
+      }
+      const evaluation = this.store.get("evaluation_run", String(evaluationRunId), Number(evaluationRunVersion));
+      if (evaluation.verdict !== "passed" || evaluation.split !== "held_out" ||
+          evaluation.subject_type !== "workflow_dag" || evaluation.subject_id !== workflow.id ||
+          Number(evaluation.subject_version) !== Number(evaluatedCandidateVersion)) {
+        throw new Error("Workflow routing requires the original passed held-out evaluation for this exact Workflow DAG candidate version");
+      }
     }
     if (target === "routable" && args.canary_receipt === undefined) throw new Error("Workflow routable transition requires canary_receipt");
-    const reason = text(args.reason, "reason"); return { workflow: this.store.save("workflow_dag", String(workflow.id), { ...payload(workflow), lifecycle: target, transition_reason_digest: digest(reason), evaluation_run_id: args.evaluation_run_id ?? null, canary_receipt: args.canary_receipt ?? null, automation_authority: false }) };
+    const reason = text(args.reason, "reason"); return { workflow: this.store.save("workflow_dag", String(workflow.id), { ...payload(workflow), lifecycle: target, transition_reason_digest: digest(reason), evaluation_run_id: evaluationRunId, evaluation_run_version: evaluationRunVersion, evaluated_candidate_version: evaluatedCandidateVersion, canary_receipt: args.canary_receipt ?? workflow.canary_receipt ?? null, automation_authority: false }) };
   }
 
   checkpoint(args: JsonObject): JsonObject {

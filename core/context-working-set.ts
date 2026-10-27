@@ -103,16 +103,27 @@ export class ContextWorkingSetKernel {
     const identity = { codebase_projection: { asset_refs: references.map(item => contextAssetRef("codebase", item, scope)), budget_omitted_count: budgetOmitted, budget_rebalanced: budgetRebalanced }, total_items: budget.items, total_used_chars: budget.chars, query_digest: stableDigest(query), task_id: args.task_id ?? null, session_id: args.session_id ?? null, turn_id: args.turn_id ?? null, source_receipt_id: (base.receipt as JsonObject | null)?.id ?? null, members: [...selectedMembers].sort(), retrieval_members: [...retrievalMembers].sort(), host_refs: hostRefs, asset_refs: assetRefs, selected_refs: selectedRefs, omitted_count: omittedCount,
       scope: args.scope_kind === undefined ? null : { kind: text(args.scope_kind, "scope_kind"), id: text(args.scope_id, "scope_id") }, budget: { max_items: Number(args.max_items ?? DEFAULT_CONTEXT_MAX_ITEMS), max_chars: Number(args.max_chars ?? DEFAULT_CONTEXT_MAX_CHARS) }, retrieval_adapter_id: args.retrieval_adapter_id ?? null };
     const workingSetId = args.working_set_id === undefined ? `context_working_set_${stableDigest(identity).slice(-32)}` : text(args.working_set_id, "working_set_id");
+    const identityDigest = stableDigest(identity);
+    const projectionResult = (workingSet: JsonObject, idempotent: boolean): JsonObject => ({ ...base, ...projection, working_set: workingSet,
+      host_used_chars: hostChars, host_items: hostRefs.length, host_refs: hostRefs, asset_refs: assetRefs, selected_refs: selectedRefs,
+      selection_reasons: selectionReasons, omitted_refs: [], omitted_count: omittedCount, idempotent });
+    // Existing immutable Working Sets need validation, not a writer transaction.
+    assertContextReadCurrent(this.store, base.receipt as JsonObject | null);
+    const prior = this.store.find("context_working_set_receipt", workingSetId);
+    if (prior) {
+      if (prior.identity_digest !== identityDigest) throw new Error("Context Working Set idempotency conflict");
+      return projectionResult(prior, true);
+    }
     return this.store.transaction(() => {
       assertContextReadCurrent(this.store, base.receipt as JsonObject | null);
       const existing = this.store.find("context_working_set_receipt", workingSetId);
       if (existing) {
-        if (existing.identity_digest !== stableDigest(identity)) throw new Error("Context Working Set idempotency conflict");
-        return { ...base, ...projection, working_set: existing, host_used_chars: hostChars, host_items: hostRefs.length, host_refs: hostRefs, asset_refs: assetRefs, selected_refs: selectedRefs, selection_reasons: selectionReasons, omitted_refs: [], omitted_count: omittedCount, idempotent: true };
+        if (existing.identity_digest !== identityDigest) throw new Error("Context Working Set idempotency conflict");
+        return projectionResult(existing, true);
       }
-      const workingSet = this.store.create("context_working_set_receipt", workingSetId, { ...identity, identity_digest: stableDigest(identity), omitted_refs: [], content_free: true,
+      const workingSet = this.store.create("context_working_set_receipt", workingSetId, { ...identity, identity_digest: identityDigest, omitted_refs: [], content_free: true,
         asset_refs: assetRefs, host_owned_members: selectedMembers.filter((item) => !RETRIEVABLE.has(item)), source_receipt_id: (base.receipt as JsonObject | null)?.id ?? null });
-      return { ...base, ...projection, working_set: workingSet, host_used_chars: hostChars, host_items: hostRefs.length, host_refs: hostRefs, asset_refs: assetRefs, selected_refs: selectedRefs, omitted_refs: [], selection_reasons: selectionReasons, omitted_count: omittedCount, idempotent: false };
+      return projectionResult(workingSet, false);
     });
   }
 

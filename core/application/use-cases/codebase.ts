@@ -20,7 +20,7 @@ declare module "../craft-service.ts" {
     codebaseActivate(args: JsonObject): JsonObject;
     codebaseDeactivate(args: JsonObject): JsonObject;
     codebaseStatus(args: JsonObject): JsonObject;
-    codebaseAnalysisImport(args: JsonObject): JsonObject;
+    codebaseAnalysisImport(args: JsonObject, verifiedSources?: readonly { path: string; digest: string; content: string }[]): JsonObject;
     codebaseIndexBuild(args: JsonObject): JsonObject;
     codebaseSymbolFind(args: JsonObject): JsonObject;
     codebaseSymbolExplore(args: JsonObject): JsonObject;
@@ -61,7 +61,7 @@ export function installCodebaseMethods(serviceClass: typeof CraftService): void 
   serviceClass.prototype.codebaseActivate = function (args) { return this.codebase.activate(args); };
   serviceClass.prototype.codebaseDeactivate = function (args) { return this.codebase.deactivate(args); };
   serviceClass.prototype.codebaseStatus = function (args) { return { ...this.codebase.status(args), working_tree: this.workspace.freshness(args) }; };
-  serviceClass.prototype.codebaseAnalysisImport = function (args) { return this.codebase.importAnalysis(args); };
+  serviceClass.prototype.codebaseAnalysisImport = function (args, verifiedSources) { return this.codebase.importAnalysis(args, verifiedSources); };
   serviceClass.prototype.codebaseIndexBuild = function (args) { return this.codebase.build(args); };
   serviceClass.prototype.codebaseSymbolFind = function (args) { return this.codebase.findSymbol(args); };
   serviceClass.prototype.codebaseSymbolExplore = function (args) { return this.codebase.exploreSymbols(args); };

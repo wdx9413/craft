@@ -19,7 +19,7 @@ import { CODEBASE_LSP_WORKER_FLAG } from "./lsp-worker.ts";
 import { stageLspSnapshotFiles } from "./lsp-snapshot-files.ts";
 import { ProjectAnalysisCache } from "./project-analysis-cache.ts";
 import { projectStorageDirectory } from "../../common/craft-common-store-local/src/paths.ts";
-import type { RepositoryContextFile } from "./repository-files.ts";
+import type { RepositoryContextFile, RepositoryFile } from "./repository-files.ts";
 import type { LspStdioRequest } from "./lsp-stdio-client.ts";
 export interface RepositoryOnboardingPort {
   store: CraftStore;
@@ -28,7 +28,7 @@ export interface RepositoryOnboardingPort {
   workspaceCheckpoint(args: JsonObject): JsonObject;
   workspaceCheckpointFromRepositoryFiles?(args: JsonObject): JsonObject;
   codebaseActivate(args: JsonObject): JsonObject;
-  codebaseAnalysisImport(args: JsonObject): JsonObject;
+  codebaseAnalysisImport(args: JsonObject, verifiedSources?: readonly RepositoryFile[]): JsonObject;
   codebaseIndexBuild(args: JsonObject): JsonObject;
   analyzeTypeScript?: typeof analyzeTypeScript;
   analyzePython?: typeof analyzePythonCheckpoint;
@@ -436,8 +436,8 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     if (sourceRetry < 1) return ensureRepositoryAttempt(service, args, sourceRetry + 1);
     throw new Error("Repository selection policy changed during index analysis");
   }
-  // Only workspace/checkpoint metadata preparation owns the shared writer lock.
-  // Immutable graph files and rebuildable analysis caches are published outside it.
+  // Keep the shared writer lock for metadata only. Repository freshness scans,
+  // checkpoint file copies and analyzer work must not hold it across filesystems.
   const publish = () => {
     const prepared = service.store.transaction(() => {
     const activation = service.store.find("codebase_activation", `codebase_activation_${workspaceId}`);
@@ -448,17 +448,36 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     if (!old) service.workspaceOpen({ workspace_id: workspaceId, root_path: root, include_paths: includes, name: root, snapshot_storage: "project_codebase" });
     else if (JSON.stringify(old.include_paths) !== JSON.stringify(includes) || old.snapshot_storage !== "project_codebase")
       service.store.save("workspace", workspaceId, { ...payload(old), include_paths: includes, snapshot_storage: "project_codebase" });
+    if (!activation) service.codebaseActivate({ workspace_id: workspaceId, actor: "repository-auto" });
+    const workspace = service.store.get("workspace", workspaceId);
+    const active = service.store.get("codebase_activation", `codebase_activation_${workspaceId}`);
+    return { workspace, activationVersion: Number(active.version) };
+    });
+    const preparedIndex = prepared as JsonObject & { workspace?: JsonObject; activationVersion?: number };
+    if (!preparedIndex.workspace || preparedIndex.activationVersion === undefined) return prepared as JsonObject;
+    const workspaceBeforeSnapshot = preparedIndex.workspace;
+    const latestCheckpointIdBeforeSnapshot = String(workspaceBeforeSnapshot.latest_checkpoint_id ?? "");
+    const latestCheckpointBeforeSnapshot = latestCheckpointIdBeforeSnapshot
+      ? service.store.find("workspace_checkpoint", latestCheckpointIdBeforeSnapshot) : undefined;
+    const expectedSnapshotRoot = join(projectStorageDirectory(service.store.paths, root), "codebase", "snapshots", workspaceId, latestCheckpointIdBeforeSnapshot);
     const freshness = service.workspace.freshness({ workspace_id: workspaceId });
-    const latestCheckpointId = String(service.store.get("workspace", workspaceId).latest_checkpoint_id ?? "");
-    const latestCheckpoint = latestCheckpointId ? service.store.find("workspace_checkpoint", latestCheckpointId) : undefined;
-    const expectedSnapshotRoot = join(projectStorageDirectory(service.store.paths, root), "codebase", "snapshots", workspaceId, latestCheckpointId);
-    if (freshness.status !== "current" || latestCheckpoint?.snapshot_root !== expectedSnapshotRoot) {
+    if (freshness.status !== "current" || latestCheckpointBeforeSnapshot?.snapshot_root !== expectedSnapshotRoot) {
       const checkpointArgs = { workspace_id: workspaceId, label: "automatic repository snapshot" };
-      if (service.workspaceCheckpointFromRepositoryFiles) service.workspaceCheckpointFromRepositoryFiles({ ...checkpointArgs, repository_files: [...selected.files, ...workspaceContextFiles] });
-      else service.workspaceCheckpoint(checkpointArgs);
+      try {
+        if (service.workspaceCheckpointFromRepositoryFiles)
+          service.workspaceCheckpointFromRepositoryFiles({ ...checkpointArgs, repository_files: [...selected.files, ...workspaceContextFiles] });
+        else service.workspaceCheckpoint(checkpointArgs);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (!/Workspace changed before repository checkpoint publication/u.test(message)) throw error;
+        const currentWorkspace = service.store.get("workspace", workspaceId);
+        const currentCheckpointId = String(currentWorkspace.latest_checkpoint_id ?? "");
+        const currentCheckpoint = currentCheckpointId ? service.store.find("workspace_checkpoint", currentCheckpointId) : undefined;
+        const currentFreshness = service.workspace.freshness({ workspace_id: workspaceId });
+        if (currentFreshness.status !== "current" || currentCheckpoint?.snapshot_root !== join(projectStorageDirectory(service.store.paths, root), "codebase", "snapshots", workspaceId, currentCheckpointId)) throw error;
+      }
     }
     const workspace = service.store.get("workspace", workspaceId);
-    if (!activation) service.codebaseActivate({ workspace_id: workspaceId, actor: "repository-auto" });
     if (!includes.length) return { ...base, status: "empty", checkpoint_id: workspace.latest_checkpoint_id, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language };
     const checkpointId = String(workspace.latest_checkpoint_id);
     if (workspaceContextFiles.length) {
@@ -466,12 +485,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
       const checkpointDigests = new Map((checkpoint.entries as JsonObject[]).map(entry => [String(entry.path), String(entry.digest)]));
       if (workspaceContextFiles.some(file => checkpointDigests.get(file.path) !== file.digest)) throw new Error("Go workspace context changed during snapshot analysis");
     }
-    const active = service.store.get("codebase_activation", `codebase_activation_${workspaceId}`);
-    return { workspace, checkpointId, activationVersion: Number(active.version) };
-    });
-    const preparedIndex = prepared as JsonObject & { workspace?: JsonObject; checkpointId?: string; activationVersion?: number };
-    if (!preparedIndex.workspace || !preparedIndex.checkpointId || preparedIndex.activationVersion === undefined) return prepared as JsonObject;
-    const { workspace, checkpointId, activationVersion } = preparedIndex as JsonObject & { workspace: JsonObject; checkpointId: string; activationVersion: number };
+    const { activationVersion } = preparedIndex;
     const stateId = `${workspaceId}_${depth}`;
     // Restoring a checkpoint must not revive the stale index previously attached to it.
     const indexId = `repository_index_${stableDigest({ workspaceId, depth, checkpointId, state_revision: workspace.state_revision,
@@ -479,7 +493,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
       ...(typeof priorState?.semantic_retry_after === "string" ? { semantic_retry_after: priorState.semantic_retry_after } : {}),
       ...(hasSemanticAdapterFailure(priorState) && typeof priorState?.index_id === "string" ? { previous_index_id: priorState.index_id } : {}) }).slice(-24)}`;
     const publication_guard = { workspace_version: workspace.version, checkpoint_id: checkpointId, activation_version: activationVersion };
-    const built = analysis ? service.codebaseAnalysisImport({ workspace_id: workspaceId, checkpoint_id: checkpointId, index_id: indexId, analysis, publication_guard })
+    const built = analysis ? service.codebaseAnalysisImport({ workspace_id: workspaceId, checkpoint_id: checkpointId, index_id: indexId, analysis, publication_guard }, selected.files)
       : service.codebaseIndexBuild({ workspace_id: workspaceId, index_id: indexId, analyzer: "heuristic", publication_guard });
     const index = built.index as JsonObject;
     const details = index.analysis as JsonObject;

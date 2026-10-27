@@ -56,7 +56,11 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   for (const member of ["history", "state"]) if (Array.isArray(args[`${member}_refs`]) && (args[`${member}_refs`] as unknown[]).length > 0) requiredMemberNames.push(member);
   const selectedMembers = args.members ?? [...new Set([...defaultMembers, ...requiredMemberNames])];
   const codeFirst = ["code", "review", "debug", "development"].includes(String(taskKind)) || codeRequired.length > 0;
-  const projection = codebase.status === "ready" ? service.codebase.contextProjection({ workspace_id: codebase.workspace_id, index_id: codebase.index_id, query: args.query, limit: 100, required_refs: codeRequired, scope }) : null;
+  // Keep one fallback candidate while bounding retrieval to the shared budget.
+  // Required references remain eligible even when they exceed this optional
+  // window; the budget gate below still validates them.
+  const projectionLimit = Math.max(maxItems + 1, codeRequired.length);
+  const projection = codebase.status === "ready" ? service.codebase.contextProjection({ workspace_id: codebase.workspace_id, index_id: codebase.index_id, query: args.query, limit: projectionLimit, required_refs: codeRequired, scope }) : null;
   const queryOmitted = Number(projection?.query_omitted_count ?? 0);
   const candidates = (projection?.candidates ?? []) as JsonObject[];
   const context = await service.contextWorkingSets.resolve({ ...controls, query: args.query, scope_kind: scope.kind, scope_id: scope.id,
@@ -87,12 +91,27 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   const injection = JSON.stringify({ items: injectionItems, contributions: injectionContributions, host_refs: context.host_refs, codebase_references: references });
   const estimatedTokens = estimateTokens(injection);
   if (args.max_tokens !== undefined && (!Number.isSafeInteger(args.max_tokens) || Number(args.max_tokens) < 1 || estimatedTokens > Number(args.max_tokens))) throw new CraftOperationError("LIMIT_EXCEEDED", "injection_budget", "Context injection exceeds estimated token budget or max_tokens is invalid", { budget: "max_tokens", estimated_tokens: estimatedTokens, limit: args.max_tokens });
-  return service.store.transaction(() => {
-    assertContextReadCurrent(service.store, receipt);
-    if (projection) service.codebase.assertContextProjectionCurrent(projection, references);
-    const packReceipt = service.store.find("context_pack_receipt", id) ?? service.store.create("context_pack_receipt", id, { ...packIdentity, identity_digest: stableDigest(packIdentity), content_free: true });
+  const identityDigest = stableDigest(packIdentity);
+  const response = (packReceipt: JsonObject): JsonObject => {
     const contextStatus = receipt?.partial === true ? "partial" : "resolved";
     const packStatus = reasons.length ? "partial" : "ready";
     return { ...context, context_status: contextStatus, pack_status: packStatus, items: injectionItems, contributions: injectionContributions, knowledge_source_discovery: knowledgeSourceDiscovery, already_emitted_refs: alreadyEmitted, hook_reused: alreadyEmitted.length > 0, asset_refs: assetRefs, injection_measurement: { measurement_scope: "material_projection_excludes_protocol_envelope_and_host_history_bodies", serialized_chars: injection.length, estimated_tokens: estimatedTokens, tokenizer: "cjk_char_latin_four_char_estimate", exact: false, host_measured_tokens: null }, partial: reasons.length > 0, codebase: { ...codebase, analysis_confidence: (codebase.summary as JsonObject | undefined)?.certainty ?? null, references }, pack_receipt: packReceipt, host_execution_authority: false };
+  };
+  const priorPackReceipt = service.store.find("context_pack_receipt", id);
+  if (priorPackReceipt) {
+    assertContextReadCurrent(service.store, receipt);
+    if (projection) service.codebase.assertContextProjectionCurrent(projection, references);
+    if (priorPackReceipt.identity_digest !== identityDigest) throw new Error("Context Pack Receipt idempotency conflict");
+    return response(priorPackReceipt);
+  }
+  return service.store.transaction(() => {
+    assertContextReadCurrent(service.store, receipt);
+    if (projection) service.codebase.assertContextProjectionCurrent(projection, references);
+    const current = service.store.find("context_pack_receipt", id);
+    if (current) {
+      if (current.identity_digest !== identityDigest) throw new Error("Context Pack Receipt idempotency conflict");
+      return response(current);
+    }
+    return response(service.store.create("context_pack_receipt", id, { ...packIdentity, identity_digest: identityDigest, content_free: true }));
   });
 }

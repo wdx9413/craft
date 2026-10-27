@@ -83,6 +83,35 @@ test("common operation instrumentation classifies outcomes, nests spans, and pre
     const nonErrorEvents: OperationEvent[] = [];
     assert.throws(() => observeOperation(store, "fixture", "opaque-observed", {}, () => { throw "opaque failure"; }, { observe: item => nonErrorEvents.push(item) }), /opaque failure/u);
     assert(nonErrorEvents.some(item => item.phase === "failed" && item.event.attributes.reason_code === "OPERATION_FAILED"));
+    const lockEvents: OperationEvent[] = [];
+    const lockError = Object.assign(new Error("database is locked"), { code: "ERR_SQLITE_ERROR", errcode: 5,
+      safeDetails: { database_role: "primary", phase: "transaction_begin", busy_timeout_ms: 100, retryable: true } });
+    assert.throws(() => observeOperation(store, "fixture", "storage-lock", {}, () => { throw lockError; }, { observe: item => lockEvents.push(item) }), /database is locked/u);
+    const lockAttributes = lockEvents.find(item => item.phase === "failed")!.event.attributes;
+    assert.deepEqual({ database_role: lockAttributes.database_role, database_phase: lockAttributes.database_phase,
+      busy_timeout_ms: lockAttributes.busy_timeout_ms, retryable: lockAttributes.retryable }, {
+      database_role: "primary", database_phase: "transaction_begin", busy_timeout_ms: 100, retryable: true,
+    });
+    const rejectedLockEvents: OperationEvent[] = [];
+    const malformedLockDetails = Object.assign(new Error("database is locked"), { code: "ERR_SQLITE_ERROR", errcode: 5,
+      safeDetails: { database_role: "user-input", phase: "credential=hidden", busy_timeout_ms: 60_001, retryable: "true" } });
+    assert.throws(() => observeOperation(store, "fixture", "storage-lock-unsafe-details", {}, () => { throw malformedLockDetails; },
+      { observe: item => rejectedLockEvents.push(item) }), /database is locked/u);
+    const rejectedLockAttributes = rejectedLockEvents.find(item => item.phase === "failed")!.event.attributes;
+    assert.equal("database_role" in rejectedLockAttributes, false);
+    assert.equal("database_phase" in rejectedLockAttributes, false);
+    assert.equal("busy_timeout_ms" in rejectedLockAttributes, false);
+    assert.equal("retryable" in rejectedLockAttributes, false);
+    const falseRetryableEvents: OperationEvent[] = [];
+    const falseRetryableLock = Object.assign(new Error("database is busy"), { code: "ERR_SQLITE_ERROR", errcode: 6,
+      safeDetails: { database_role: "capability_partition", phase: "savepoint_operation", busy_timeout_ms: 0, retryable: false } });
+    assert.throws(() => observeOperation(store, "fixture", "storage-lock-not-retryable", {}, () => { throw falseRetryableLock; },
+      { observe: item => falseRetryableEvents.push(item) }), /database is busy/u);
+    const falseRetryableAttributes = falseRetryableEvents.find(item => item.phase === "failed")!.event.attributes;
+    assert.equal(falseRetryableAttributes.retryable, false);
+    assert.equal(falseRetryableAttributes.database_role, "capability_partition");
+    assert.equal(falseRetryableAttributes.database_phase, "savepoint_operation");
+    assert.equal(falseRetryableAttributes.busy_timeout_ms, 0);
     const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
     assert.equal(observeOperation(store, "fixture", "digest-failure", cyclic, () => "ok", { onError: error => failures.push(error) }), "ok");
     assert.equal(observeOperation(store, "fixture", "observe-failure", {}, () => "ok", {

@@ -32,6 +32,7 @@ const SEARCH_CONTEXT_DECLARATION_KINDS = new Set(["function", "method", "class",
 const SEARCH_CONTEXT_CONTAINER_KINDS = new Set(["class", "interface", "type", "enum", "struct"]);
 
 type SourceFile = { readonly path: string; readonly digest: string; readonly content: string; readonly language: string };
+type VerifiedRepositorySource = { readonly path: string; readonly digest: string; readonly content: string };
 type SymbolSearchContext = { readonly identifiers: Map<string, string>; readonly enclosingTypes: Map<string, string> };
 type Node = JsonObject & { readonly id: string; readonly kind: "file" | "symbol"; readonly path: string; readonly name: string; readonly source_digest: string; readonly span: JsonObject };
 type Edge = JsonObject & { readonly id: string; readonly kind: "imports" | "calls" | "references" | "definitions" | "implements" | "extends" | "type_definition"; readonly from_node_id: string; readonly to_node_id: string; readonly provenance: "extracted" | "heuristic"; readonly confidence: "high" | "partial"; readonly source_span: JsonObject };
@@ -182,6 +183,8 @@ export function contentAddressedShardIds(shardDigests: readonly string[]): strin
 export class CodebaseIndexKernel {
   readonly store: CraftStore;
   readonly #symbolSearchCache = new Map<string, { fingerprint: string; search: CodeSymbolSearchIndex }>();
+  #contextSearchCache: { key: string; search: CodeSymbolSearchIndex } | null = null;
+  #contextGraphCache: { key: string; graph: { nodes: Node[]; edges: Edge[] } } | null = null;
   readonly #impactCache = new Map<string, ImpactCacheEntry>();
   constructor(store: CraftStore) { this.store = store; }
 
@@ -259,7 +262,7 @@ export class CodebaseIndexKernel {
   }
 
   /** Normalized adapter boundary: no executable plugins or source bodies enter the store. */
-  importAnalysis(args: JsonObject): JsonObject {
+  importAnalysis(args: JsonObject, verifiedSources?: readonly VerifiedRepositorySource[]): JsonObject {
     const workspaceId = identifier(args.workspace_id, "workspace_id"); const workspace = this.store.get("workspace", workspaceId); this.requireActive(args, workspaceId);
     const checkpointId = identifier(args.checkpoint_id, "checkpoint_id"); const checkpoint = this.store.get("workspace_checkpoint", checkpointId);
     if (checkpoint.workspace_id !== workspaceId || workspace.latest_checkpoint_id !== checkpointId) throw new Error("Analysis requires the latest workspace checkpoint");
@@ -270,12 +273,23 @@ export class CodebaseIndexKernel {
     if (analyzer.length > 100 || analyzerVersion.length > 100) throw new Error("Analyzer identity exceeds budget");
     if (!Array.isArray(input.nodes) || !input.nodes.length || input.nodes.length > MAX_GRAPH_NODES || !Array.isArray(input.edges) || input.edges.length > MAX_GRAPH_EDGES) throw new Error("Analysis nodes/edges exceed budget or are missing");
     const entries = new Map((checkpoint.entries as JsonObject[]).map((entry) => [String(entry.path), entry]));
+    const verifiedByPath = new Map<string, VerifiedRepositorySource>();
+    for (const source of verifiedSources ?? []) {
+      const path = text(source.path, "repository_source.path");
+      const entry = entries.get(path);
+      if (!entry) throw new Error("Analysis path is outside checkpoint");
+      if (verifiedByPath.has(path) || source.digest !== entry.digest || digest(source.content) !== entry.digest
+        || Buffer.byteLength(source.content) !== Number(entry.size_bytes)) throw new Error(`Analysis source digest mismatch: ${path}`);
+      verifiedByPath.set(path, source);
+    }
     const files = new Map<string, SourceFile>();
     const lineStartsByPath = new Map<string, number[]>();
     const fileAt = (path: string): SourceFile => {
       const cached = files.get(path); if (cached) return cached;
       const entry = entries.get(path); if (!entry) throw new Error("Analysis path is outside checkpoint");
-      const file = this.sourceFile(String(checkpoint.snapshot_root), entry); files.set(path, file); return file;
+      const verified = verifiedByPath.get(path);
+      const file = verified ? { ...verified, language: language(path) } : this.sourceFile(String(checkpoint.snapshot_root), entry);
+      files.set(path, file); return file;
     };
     const position = (lineStarts: readonly number[], offset: number): { line: number; column: number } => {
       let low = 0, high = lineStarts.length;
@@ -345,8 +359,8 @@ export class CodebaseIndexKernel {
     const configurationDigest = this.repositoryConfigurationDigest(workspace);
     // Graph files are immutable and this operation only reads. Do not hold the
     // shared SQLite writer while loading/ranking a repository-sized graph.
-    const graph = this.loadGraph(index);
-    const found = codeContextCandidates({ ...graph }, query, limit);
+    const graph = this.contextGraph(index);
+    const found = codeContextCandidates(graph, query, limit, this.contextSearch(index, graph.nodes));
     const candidates = [...found.symbols as JsonObject[]];
     for (const node of graph.nodes) if (required.some(ref => contextAssetMatches(ref, contextAssetRef("codebase", normalize(node), scope))) && !candidates.some(candidate => candidate.id === node.id)) candidates.unshift(node);
     const references = candidates.map(normalize);
@@ -786,22 +800,37 @@ export class CodebaseIndexKernel {
       edgesByPath.set(path, pathEdges);
     }
     const paths = [...nodesByPath.keys()].sort(compareCodePoint);
+    const pathsByBucket = new Map<string, string[]>();
     for (const path of paths) {
-      const fileShards: Array<{ nodes: Node[]; edges: Edge[]; bytes: number }> = [{ nodes: [], edges: [], bytes: 128 }];
-      const append = (key: "nodes" | "edges", item: Node | Edge): void => {
+      const bucket = stableDigest({ path }).slice(-1);
+      const bucketPaths = pathsByBucket.get(bucket) ?? [];
+      bucketPaths.push(path);
+      pathsByBucket.set(bucket, bucketPaths);
+    }
+    const newShard = () => ({ nodes: [] as Node[], edges: [] as Edge[], bytes: 128 });
+    let currentShard = newShard();
+    const appendToShard = (key: "nodes" | "edges", item: Node | Edge): void => {
       const encoded = JSON.stringify(item); const size = Buffer.byteLength(encoded, "utf8") + 1;
       graphBytes += size;
       if (graphBytes > MAX_GRAPH_BYTES) throw new Error("Codebase graph exceeds storage byte budget");
       if (size > MAX_SHARD_BYTES) throw new Error("Codebase graph item exceeds shard budget");
-      let shard = fileShards[fileShards.length - 1]!;
-      if (shard.bytes + size > MAX_SHARD_BYTES) { shard = { nodes: [], edges: [], bytes: 128 }; fileShards.push(shard); }
-      (shard[key] as (Node | Edge)[]).push(item); shard.bytes += size;
-      };
-      for (const node of nodesByPath.get(path)!) append("nodes", node);
-      for (const edge of edgesByPath.get(path) ?? []) append("edges", edge);
-      // Every path comes from at least one node; overflow shards receive the item
-      // that caused the split, so no empty shard can be emitted here.
-      shards.push(...fileShards);
+      if (currentShard.bytes + size > MAX_SHARD_BYTES) {
+        if (currentShard.nodes.length || currentShard.edges.length) shards.push(currentShard);
+        currentShard = newShard();
+      }
+      (currentShard[key] as (Node | Edge)[]).push(item);
+      currentShard.bytes += size;
+    };
+    for (const bucket of [...pathsByBucket.keys()].sort(compareCodePoint)) {
+      currentShard = newShard();
+      for (const path of pathsByBucket.get(bucket)!) {
+        for (const node of nodesByPath.get(path)!) appendToShard("nodes", node);
+        for (const edge of edgesByPath.get(path) ?? []) appendToShard("edges", edge);
+      }
+      // Stable path buckets limit the invalidation radius: an edited source
+      // file only changes its own content-addressed batch, while paths route to
+      // every record that contains their nodes or outgoing edges.
+      if (currentShard.nodes.length || currentShard.edges.length) shards.push(currentShard);
     }
     const shardDigests = shards.map(shard => digestJson({ nodes: shard.nodes, edges: shard.edges }));
     const shardIds = contentAddressedShardIds(shardDigests);
@@ -930,6 +959,22 @@ export class CodebaseIndexKernel {
     this.#symbolSearchCache.set(String(index.id), { fingerprint, search });
     while (this.#symbolSearchCache.size > 2) this.#symbolSearchCache.delete(this.#symbolSearchCache.keys().next().value as string);
     return search;
+  }
+  /** Reuse the all-node lexical index for repeated Context queries on this immutable graph. */
+  private contextSearch(index: JsonObject, nodes: readonly Node[]): CodeSymbolSearchIndex {
+    const key = `${String(index.id)}:${String(index.graph_digest)}`;
+    if (this.#contextSearchCache?.key === key) return this.#contextSearchCache.search;
+    const search = new CodeSymbolSearchIndex(nodes);
+    this.#contextSearchCache = { key, search };
+    return search;
+  }
+  /** Cache one verified, bounded immutable graph for repeated Context reads in this process. */
+  private contextGraph(index: JsonObject): { nodes: Node[]; edges: Edge[] } {
+    const key = `${String(index.id)}:${String(index.version)}:${String(index.graph_digest)}`;
+    if (this.#contextGraphCache?.key === key) return this.#contextGraphCache.graph;
+    const graph = this.loadGraph(index);
+    this.#contextGraphCache = graph.nodes.length <= 8_000 && graph.edges.length <= 16_000 ? { key, graph } : null;
+    return graph;
   }
   /** Build ephemeral identifier-only search terms from digest-verified declarations. */
   private symbolSearchContext(index: JsonObject, symbols: readonly Node[]): SymbolSearchContext {

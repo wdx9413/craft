@@ -29,6 +29,21 @@ export function operationErrorCode(error: unknown): string {
   return "OPERATION_FAILED";
 }
 
+function storageFailureAttributes(error: unknown): Record<string, string | number | boolean> {
+  if (operationErrorCode(error) !== "STORAGE_BUSY") return {};
+  const details = object(object(error).safeDetails);
+  const attributes: Record<string, string | number | boolean> = {};
+  if (details.database_role === "primary" || details.database_role === "capability_partition")
+    attributes.database_role = details.database_role;
+  if (["transaction_begin", "transaction_operation", "savepoint_begin", "savepoint_operation"].includes(String(details.phase)))
+    attributes.database_phase = String(details.phase);
+  const timeout = details.busy_timeout_ms;
+  if (typeof timeout === "number" && Number.isSafeInteger(timeout) && timeout >= 0 && timeout <= 60_000)
+    attributes.busy_timeout_ms = timeout;
+  if (typeof details.retryable === "boolean") attributes.retryable = details.retryable;
+  return attributes;
+}
+
 export function operationResultStatus(result: unknown): string {
   const value = object(result);
   if (value.denied === true) return "denied";
@@ -84,7 +99,7 @@ export function observeOperation<T>(store: CraftStore, component: string, operat
         parent_span_id: options.parentSpanId ?? (parent?.traceId === traceId ? parent.spanId : null),
         outcome: phase === "started" ? "observed" : phase === "failed" || ["failed", "denied"].includes(status) ? "failed" : status === "completed" ? "succeeded" : "unverified",
         attributes: { stage: phase, status, duration_ms: Math.max(0, performance.now() - started),
-          ...(phase === "started" ? { input_digest: stableDigest(input ?? null) } : phase === "failed" ? { reason_code: operationErrorCode(error), error_digest: stableDigest(error instanceof Error ? `${error.name}:${error.message}` : String(error)) } : { result_digest: stableDigest(result ?? null) }),
+          ...(phase === "started" ? { input_digest: stableDigest(input ?? null) } : phase === "failed" ? { reason_code: operationErrorCode(error), error_digest: stableDigest(error instanceof Error ? `${error.name}:${error.message}` : String(error)), ...storageFailureAttributes(error) } : { result_digest: stableDigest(result ?? null) }),
           ...Object.fromEntries(refs.map((id, index) => [`${phase === "started" ? "input" : "output"}_ref_${index}_id`, id])) } });
       if (!active.persist) { active.observe?.({ event, phase, refs }); return; }
       // Independent sinks: a failed Trace projection must not suppress common-log.

@@ -495,3 +495,152 @@ Experience 范围修复：新写入子记录缺父项且无可确定范围时失
 - 为上述条件新增预检与失败关闭回归，`legacy-repository-storage-preflight` 组行/分支/函数覆盖均为 100%。复扫后 `eval-all`、`worksheet-system`、`my-craft` 三个既有登记路径转为 ready，各自仍绑定原路径，没有合并子仓库身份。
 - 对这三处执行只复制归档：70、22、8 个文件，共 100 个文件、60,756 字节。源文件保留；独立复核全部目标文件的大小与 SHA-256、源文件存在性和项目级/全局收据一致性，全部通过。
 - 仍有 `net-route/data/runtime` 因 `EACCES` 未完整扫描；需要再次以可读权限核实此路径下是否隐藏额外 `.craft_data` 根。历史 Codebase 9 个快照问题也未改变。运行时读写切换和 Host `.109` 的发布后实测仍未完成。
+
+### 2026-10-26 `.115` 归档与运行态复核
+
+- 当前 Craft 源码 `main` 为 `c22ab60`（`.115`），Marketplace `main` 为 `5d6c519`。Codex CLI 刷新 Git Marketplace 后读回 Craft Context `0.12.115`；Marketplace、插件缓存和 MCP 入口包 SHA-256 均为 `f678a94c...`。MCP 进程自报 `.115`，但 `host_session_verified=false`，所以只证明当前 MCP 进程的构建身份，不证明另一个 Host 会话已切换。
+- 只读旧仓库盘点覆盖 `/Users/didi/Documents/work/my-craft`、`work/other` 和 `/private/tmp`：14 个 `.craft_data` 根中 8 个具有精确项目映射且无符号链接，可安全归档；6 个因项目身份不可用或包含符号链接而阻塞，另有 `net-route/data/runtime` 的 `EACCES` 和一个临时 Codex daemon 目录的 `EPERM` 扫描错误。
+- 对 8 个可绑定项目运行幂等归档复制。2 个新来源共 17,016 个文件、98,263,086 字节复制并逐文件 SHA-256 校验；另外 6 个与既有 manifest/目标一致，读回 `already_migrated`。这 8 个来源合计 4,141,023,465 字节（约 3.86 GiB），源目录全部保留。命令退出码 2 是因为 6 个不具身份映射的来源及扫描错误仍被明确阻塞，不是已迁移来源校验失败。该步骤只完成旧数据归档，不代表知识/记忆/索引运行时读取路径已切换，也不授权删除这些源目录。
+- 正式 Store 迁移 dry-run 读回 23,535 个物理分区指针均为 `current`、0 个可迁移/阻塞；对 `/tmp/.craft_data/memory` 执行带校验的隔离后，22 个断链均写入 `~/.craft_data/quarantine/legacy-session-memory/v1/` 摘要清单并退役，复扫 0 个残留会话目录，`remaining=0`。这只关闭这 22 个无内容断链，不解决仍存在于其他项目或临时目录的旧数据。
+- 当前 MCP 诊断读回：Knowledge 有 64 candidate、189 stale、1 reviewed、53 revalidation_required、仅 1 个 Evaluation Case；Memory 有 10 条反馈但 0 条已验证 helpful；Experience 有 22 条 Observation、0 个 Pattern，且没有本次调用写入 verified observation。三个能力均为 `model_effect_proven=false`，Host session 均未核验，usage measurement unavailable。产物/回执数量不是效果证据。
+- 尚未完成：身份不明的 2.96 GB 临时 Codebase 旧目录、6 个 unbound 临时 `.craft_data` 根、`net-route/data/runtime` 权限受限区域、剩余项目存量的运行时切换及停写证明；独立真实会话生成/留出集；Knowledge/Memory/Experience 效果门；Context/Codebase 真实负载性能与五语言独立评测。归档和 MCP 读回不能替代这些验收。
+
+### 2026-10-26 HoH 迭代控制审查与候选评测绑定修复
+
+- 将 XERJ 视为可对照的检索后端，而非替代 Codebase 快照治理或 Knowledge 来源管理；2.7 倍结果来自项目方小样本输出 token 对比，不能外推为 Craft 的综合 token、时延或任务收益。[XERJ 案例](https://github.com/xerj-org/xerj/blob/main/docs/case-studies/reference-coding/CASE_STUDY.md)
+- HoH 的独立验收和按小步重规划与 Craft 现有 Workflow DAG、Delivery Evaluation、Harness Topology 及 Continual Harness 设计有较大重合；不新增平行调度器。核对发现 DAG Kernel 的 `verified` 原来只要求任意 `passed + held_out` Evaluation Run，未检查被评测对象、候选版本；`routable` 也可传入一条新评测，未沿用验证时绑定的精确记录。
+- 已收紧 `WorkflowDagKernel.transition`：验证阶段要求 Evaluation Run 的 `subject_type/id/version` 精确绑定当前候选 DAG；记录评测 ID/版本和被评测候选版本。进入 `routable` 时只读取这一条冻结的评测版本并复核绑定，不允许替换评测。新增成功、失败、错范围、错版本、评测后记录更新及改绑拒绝用例。
+- `tests/workflow-dag-coverage.test.ts` 与 `tests/agent-foundation.test.ts` 共 9/9 通过；对 `core/workflow-dag.ts` 单文件执行行、分支、函数覆盖均为 100%；`node node_modules/typescript/bin/tsc --noEmit` 通过。`pnpm exec` 包装因 pnpm 11 无交互环境尝试重建依赖目录而中止，使用现有 `node_modules/.bin/c8` 直接执行了同一覆盖门。尚未运行全仓增量覆盖门，也尚未发布。
+- 当前 `.115` MCP 进程的范围诊断仍为 `host_session_verified=false`：Knowledge 64 candidate、190 stale、1 reviewed、53 revalidation_required、1 Evaluation Case；Memory 10 条反馈中 0 条已验证 helpful；Experience 22 observations、0 patterns、0 draft proposal、0 shadow experiment。三项的 `model_effect_proven` 都是 `false`，无可用 usage measurement。
+- 本轮 `craft_context_open` 用 1,000 token 响应预算耗时约 11.3 秒，Knowledge/Experience 均未命中，只返回一个 Codebase 文件引用；索引报告 `partial`、99 条预算省略、1,638 条查询省略，分析置信度为 partial。响应估算 891 token，材料估算 281 token（估算值，不是 Host 实测）。并发调用 `craft_codebase_repository_ensure(index_depth=semantic)` 返回 `database is locked`；这次并发检查不能单独证明生产负载故障，但再次说明启动、索引和共享 SQLite 的竞争需要作为发布门测试。
+- 本地补上的是通用候选评测绑定，不等同于 HoH 风格的完整多轮控制面，也不证明自动候选生成、正式晋升或收益。仍须完成全量数据路径切换、独立真实留出样本、真实 Host Trace 和效果反馈、并发及性能门、全语言 Codebase 评测及最终发布验收。
+
+### 2026-10-26 MCP SQLite busy 留痕补强
+
+- 本轮新请求中，`craft_context_open`（含 `include_codebase:false`）及 `craft_codebase_repository_ensure(index_depth=semantic)` 都出现 SQLite `database is locked`；MCP 结构化回执为 `ERR_SQLITE_ERROR`、stage `dispatch`、details 空，无法通过该请求读回组件诊断。不能据此区分 Store 初始化、Trace 写入或并发事务哪个阶段占锁。
+- `~/.craft_data/db/craft.db` 约 6.1 GiB，WAL 约 15 MiB；只读 `lsof` 在采样时看到 10 个 Node 进程持有该数据库文件句柄，均以 Marketplace `.115` 插件缓存为工作目录。Knowledge/Experience/Trace-retention 锁文件中的 PID 也持有同库句柄，但进程枚举命令被系统限制，无法检查每个进程参数或将某次 busy 错误对应到具体调用方。进程数证明共享数据访问并发存在，不证明哪一个进程造成锁。
+- Store 启动扫描的 7 类内容引用记录共 5,876 个版本、约 6.0 MiB；因此不能仅凭主数据库 6.1 GiB 推断启动时会全表读取全部历史正文。`trace` 和 `trace_event` 分别约 597,666 与 442,438 行，历史 Trace 规模仍需单独纳入存储/保留性能测量。
+- 修复 MCP `safeFailure` 的结构化错误分类：原生 `ERR_SQLITE_ERROR` 仅在公共分类器判定为 locked/busy 时映射 `STORAGE_BUSY`，非 busy 的 SQLite 错误保留原分类；响应不额外复制错误消息到 `details`。通过真实 MCP `tools/call` 测试分别覆盖 locked 与非 busy SQL 错误。`tests/mcp.test.ts` 19/19、`workflow-dag` 与 `agent-foundation` 9/9；`workflow-dag.ts` 行/分支/函数覆盖均 100%；MCP 新增诊断行的语句与分支均命中，类型检查、文档链接检查及 `git diff --check` 通过。MCP 整个模块定向测试覆盖为行 85.53%、分支 90.78%、函数 93.33%，该数字不是增量覆盖率；全仓增量覆盖门尚未运行。
+- 错误类别补强提升可聚合性，但没有修复锁争用本身。还需用 Host 带关联 ID 的 Trace 区分 SQLite 打开、Hook、Trace 记录和业务写入阶段，并在固定版本下进行多 Host 并发读写与延迟测试；当前仍未发布，真实 Host 的 lock failure 率没有变化证据。
+
+### 2026-10-26 当前 MCP Context 与能力读回
+
+- 当前对话实际可调用的 Craft MCP 自报 `0.12.115`，数据根为 `~/.craft_data`，内容语言为 `zh-CN`；入口哈希为 `f678a94c...`。诊断只验证了这个 MCP 进程可响应，`host_session_verified=false`，不能证明用户另一个 Host 会话已加载同一包。
+- 针对本仓库的首次 `craft_context_open` 约 10.5 秒，估算响应 879/900 token，返回 1 个 Codebase 符号引用、Knowledge/Experience 零命中；Codebase 为 `partial`，有 99 条预算省略、1,516 条查询省略及不支持文件分析。相同查询热调用约 1.45 秒，仍为 `partial`，返回 1 个符号引用、257 条查询省略。跳过 Codebase 的热调用约 442 ms，结果为空且 `pack_status=ready`。这些是本对话的单机 MCP 时延样本，不是 Host Hook P95/P99 或并发基准。
+- 将响应预算降到 500 token 时，MCP 明确返回 `Compact Context response exceeds estimated token budget (679/500)`，没有静默截断；`task_kind=planning` 则被输入校验拒绝，属于无效参数探测，不计入成功时延样本。
+- 同期能力诊断：Knowledge 有 64 candidate、190 stale、53 revalidation_required、1 条评测用例；Memory 有 10 条反馈、0 条已验证 helpful；Experience 有 22 条 observation、0 个 pattern、0 个 shadow experiment。三项均 `model_effect_proven=false`，usage measurement unavailable。没有触发模型调用或候选生成，因此这次仅证明当前 MCP 的诊断与 Context 返回行为，不证明自进化收益。
+- 下一步应分别测量真正 Host Hook 的端到端冷/热时延和请求关联 Trace，再对 Codebase 检索省略率及 Context 空包率做真实任务评测；不能把跳过 Codebase 的快速空包当作有效检索。
+
+### 2026-10-26 Codebase Context 投影复用与 SQLite 锁错误复核
+
+- 同一 MCP 进程的成功 Trace 已能按阶段核算：跳过 Codebase 的一次调用总计约 717 ms，其中 Knowledge/Memory 检索约 214 ms、Context resolve 539 ms；含 Codebase 的一次调用总计约 1,760 ms，其中仓库索引复用 369 ms、Codebase Context 投影 792 ms、Knowledge/Memory 检索 211 ms、Context resolve 484 ms。Trace 事件只含操作名和阶段耗时，没有记录提示词正文。两条均为单次样本，不能作为分位数。
+- 投影 Trace 指向明确热点：`codeContextCandidates` 每次都新建完整 `CodeSymbolSearchIndex`，再对全部候选排序。现将查询索引加入 `CodebaseIndexKernel` 单项缓存，键绑定不可变 `index.id + graph_digest`；图仍先经 `loadGraph` 校验完整性。缓存只在当前进程保留一个图，避免跨项目累积。检索顺序、候选和预算未变。
+- Context/Codebase 真实调用函数级合成基准使用 8,000 个符号、16,000 条关系，热身后 P50：每次重建检索索引 830.5 ms、复用索引 27.4 ms，约 30.34 倍；两路径输出完全一致。此基准只隔离测量索引构建复用，不等同真实仓库端到端或多进程负载收益。
+- 相关覆盖门组通过：Context remediation 491/491，Codebase 232/232；两个组纳管文件行/分支/函数覆盖均为 100%。`tsc --noEmit` 与 `git diff --check` 通过。全仓其他门未在本轮重跑。
+- 用户另报告项目 `/Users/didi/Documents/project/inte/fitan` 的 `craft_context_open` 返回 `database is locked`，未提供该调用的 request/Trace ID。该文本确认一次请求失败，但无法区分中央 Store、项目 Codebase 数据库或其他事务阶段，也不能量化影响范围。本轮随后当前 MCP 的 `craft_info`（322 ms）和本仓 Context 调用都成功，说明未见持续性全局不可用；不证明其它服务或并发写入无失败。锁竞争仍需将 Host 请求 ID 与 SQLite 阶段及具体数据库文件关联后才能确认根因。
+- 按用户给出的同一 Fitan 参数单次重试成功，4.34 秒；随后热调用也成功，2.80 秒。两次都返回 `pack_status=partial`，原因为文件省略、预算耗尽、查询截断。对应 Trace 中 Codebase ensure 分别约 1,060/451 ms，Context projection 约 2,245/1,662 ms，Context resolve 约 608/469 ms；两次均未记录 `STORAGE_BUSY`。这证明当前没有持续锁住该请求路径，但不推翻先前一次锁失败；热路径投影仍慢，且它运行于未含本轮缓存改动的 `.115` 包。
+- 缓存改动尚未进入 Marketplace 新包或 Host；锁错误也未修复。发布后须在真实 Host/多进程负载下核对锁失败率、Hook 完整信号率和 P95/P99，不能以合成检索基准推断线上收益。
+
+### 2026-10-26 Context 回执重放与共享库锁影响
+
+- 本轮按 Skill 打开 Craft 仓库上下文时，MCP 再次返回 `ERR_SQLITE_ERROR`、stage `dispatch`、`details={}`，实际耗时超过 30 秒后失败。错误发生在 Context 打开路径，但没有阶段 Trace，无法判断具体哪个 SQL 写事务或哪个进程持锁。只读 `lsof` 看到 12 个 Node 进程同时打开 `~/.craft_data/db/craft.db`（约 6.1 GiB，WAL 约 16 MiB）；`ps` 被系统拒绝，`lsof` 也不能识别其中哪一个进程正持有写锁。
+- Craft 的 MCP 进程共享这个中央 SQLite 文件。WAL 允许并发读取，但同一数据库同一时间只能有一个写事务；同库服务在写事务期间仍可读，任何需要写中央库的服务可能等待或在忙超时后报错。独立 Codebase 分片库或其他不使用此中央库的服务不受这把锁直接影响。测试 Fixture 使用临时数据根，代码编辑本身不会锁正式数据库；本机存在多个共享正式库的 Host/worker 进程，是比“正在改代码”更直接的竞争条件。当前证据不支持“所有其他服务都不可用”，但已足以确认同库写服务存在间歇性可用性风险。
+- 本地为不可变 Context Resolution、Working Set 和最终 Pack 回执增加已有记录的只读重放分支，避免重复读取时进入 `BEGIN IMMEDIATE`；首次创建仍需事务，Codebase 重索引及 Knowledge 来源发现也可能写数据，因此它不能修复所有锁错误。新增临时库回归：先生成回执，再由第二连接持有 `BEGIN IMMEDIATE`，重复打开仍成功并复用相同 Pack 回执。Context remediation 84/84，`context-working-set.ts` 行/分支/函数覆盖均 100%。
+- 补上显式 ID 冲突、Context Resolution 并发创建、Working Set 并发创建、Pack Receipt 并发创建四条隔离竞态用例后，Context Resolution 覆盖组 377/377 且 `context-resolution.ts` 行/分支/函数 100%；`repository-context-products` 覆盖组 194/194 且纳管文件行/分支/函数 100%。`context-remediation.test.ts` 31/31，`context-working-set.ts` 行/分支/函数 100%；`tsc --noEmit`、文档链接检查和 `git diff --check` 通过。`pnpm exec tsc` 曾触发 pnpm workspace 安装，网络不可用后中止，后续改用仓库现有 `node_modules/.bin/tsc --noEmit -p tsconfig.json`。以上源码和测试尚未发布，当前 `.115` Runtime 行为没有改变。
+- 因此对“开发中其他服务是否不能用”的准确回答是：不会普遍停服；同一 `craft.db` 上的写服务会受 SQLite 单写者约束，用户这次遇到的 `craft_context_open` 失败及本轮 MCP 再现证明它已造成真实请求失败。下一步应为首次写入/索引/Source discovery 继续拆分写路径或分片，并让 busy 错误回执标记具体数据库、阶段、等待时长及请求 ID；在正式库多进程压力测试和固定版 Host 复验前，不能宣称争锁已解决。
+
+### 2026-10-26 SQLite 写锁诊断阶段留痕
+
+- `CraftStore.transaction()` 与分区 `transactionOn()` 遇到 SQLite busy/locked 时，现保留原始错误码并附加白名单诊断：`stage=storage_lock`、数据库角色（`primary`/`capability_partition`）、失败阶段（事务开始、保存点开始或事务操作）、该连接的 `busy_timeout_ms` 和 `retryable=true`。不写 SQL 文本、绝对路径或用户内容；MCP `safeFailure` 会保留这些安全字段。该改动让下一次 Host 请求能从泛化 `dispatch` 进一步区分存储锁阶段，但还没有真实 `.115` Host 读回证据。
+- 加入真实 SQLite 连接锁定与异常注入回归，覆盖主库和分区库事务开始、嵌套保存点、无错误消息的 SQLite 错误，以及忙错误上已有安全诊断时的保留行为。MCP 回归验证该诊断能传到结构化失败回执。
+- 验收：`store-atomicity` 组 392/392，通过 `store.ts` 行、分支、函数覆盖各 100%；`context-remediation` 31/31、`mcp` 19/19 与新增存储锁场景用例通过；`tsc --noEmit`、Core 构建、Standalone common packages 构建、MCP bundle 构建及最终 diff 检查通过。
+- 这只提升故障可定位性，不消除 SQLite 单写者竞争，也不表明其他 Craft 服务在所有时段可用。当前运行时仍是 `.115`；未做正式库压力写入、Host 多进程 P95/P99、数据迁移或发布验证。
+
+### 2026-10-26 新增自进化控制面验收要求
+
+- 后续改造须采用追加式进化轨迹和版本化产物，记录目标、触发原因、范围、Host 会话、代码快照、候选版本、评测来源、证据、决策、成本/时延和使用反馈；固定状态流转为 Observe → Retrieve → Act → Feedback → Attribute → Candidate → Evaluate → Promote/Reject/Rollback → Replan。
+- 失败归因需区分环境、检索/路由、执行、流程和评测故障；环境故障不应触发能力产物修改。Experience、Knowledge、Memory、Context、Codebase 各自按用户给出的演进边界实现；本轮不修改 Skill。
+- 评测需结合固定回归、历史失败、成功样例和生成来源隔离的留出任务；模型判官只作辅助。发布候选需绑定隔离工作区和基线快照，限制改写范围/次数/预算，切换时保留用户改动；评测异常或失败不得晋升。
+- 本节是新增验收合同，不代表控制面、留出集、安全发布或回滚能力已完成。下一步需盘点现有 `verified_iteration`、`iteration_attempt`、Evaluation/Promotion、Work Loop 与 Experience 状态模型的覆盖和缺口，再把这些要求映射到可验收实现，避免平行新建重复调度器。
+
+### 2026-10-26 Verified Iteration 评测消费与原子结算
+
+- 现有 `verified_iteration` 已限制重试次数、路径和失败分类；环境/评测配置错误走阻塞交接，范围违规与无进展停止重试。此前一次 assessment 可重复用于多个 attempt，且 attempt 插入与 iteration 状态更新不是同一事务。
+- 将 assessment 结算提取到 `core/application/use-cases/verified-iteration.ts`：终态读取先走只读路径，活动态在单一事务内重读、校验冻结的 Acceptance Plan 版本及摘要、拒绝重复消费相同 assessment，再追加 attempt 并更新 iteration。Attempt 绑定 assessment ID/版本/摘要、plan 版本以及 Work Launch 版本/摘要；事务失败时两项写入一起回滚。
+- 回归覆盖同一 assessment 重用拒绝、plan 改版拒绝、环境与验证配置交接、范围/无进展停止、尝试预算、成功终态、事务中途故障回滚，以及观察后状态改变的竞态。`verified-iteration` 新覆盖门 1/1 测试通过；Use Case 行/分支/函数均 100%。
+- 这仍不是完整的进化控制面：Work Launch 摘要绑定的是任务运行配置，不是实际 Git/Workspace 代码快照；当前记录也未统一采集模型 token/成本、端到端延迟、候选产物版本、发布回滚和实际使用反馈。独立留出评测仍需绑定生成来源并在真实 Host 任务中验收。
+
+### 2026-10-26 统一进化轨迹首个实现
+
+- 新增 `EvolutionCycleKernel` 和三个 MCP 操作：`craft_evolution_cycle_start/advance/get`。它是跨能力的追加式控制记录，不替代已有 `verified_iteration` 重试调度器，也不直接改写 Experience、Knowledge、Memory 或 Codebase 的正式状态。
+- 周期状态按项目写入 `~/.craft_data/projects/<项目名--路径哈希>/evolution/evolution.db`；主库只保留分区指针和事件事务。无项目范围或项目根未注册时拒绝写入。
+- `start` 要求真实存在的活动 Host 会话、与 workspace 根路径一致的项目身份、该 workspace 最新代码检查点，以及带版本的触发引用。快照绑定项目路径摘要、分支、revision、工作区摘要和源文件摘要；不把绝对项目路径放进回执。每次 `advance` 使用乐观版本校验，引用均解析为精确资产版本。
+- 事件记录附前序摘要和事件摘要；读取时验证事件顺序、周期 ID、事件摘要和周期头。模型 token、耗时和成本为可选非负指标；原因只保存摘要。环境故障归因强制转入 `replan`，并在下一次 `observe` 前清除环境分类。
+- `Knowledge` 留出评测引用必须绑定确切候选版本，且评测记录需来自候选影子评测；系统重新验证案例的独立来源、脱敏状态、已完成审定和逐案例评测结果。晋升事件仍只记录能力治理系统提供的精确授权引用，不授予通用控制面晋升权。
+- 新增 11 项状态流转、竞态、评测来源、分区边界、篡改与拒绝路径测试。`evolution-cycle` 增量覆盖门通过：11/11，`core/evolution-cycle.ts` 行/分支/函数覆盖均为 100%；扩展 Store 原子性组通过 403/403，纳管 `store.ts` 行/分支/函数覆盖均为 100%；MCP/Agent foundation 25/25，直接 TypeScript 检查和 `git diff --check` 通过。`pnpm run typecheck` 因 pnpm 试图访问不可达的 registry 并要求清理 modules 而中止；改用已安装 TypeScript 直接执行 `node node_modules/typescript/bin/tsc --noEmit` 成功。
+- 这些测试使用临时数据根；Knowledge 审定夹具使用测试合成 Trace。它们证明数据契约和拒绝逻辑，不证明真实 Host 曾跑完整闭环或产物提升有效。主库事件事务仍需评估并发成本；全量覆盖门、候选隔离工作区、固定/历史/成功/留出任务集、真实候选生成、发布前基线复核、原子晋升/回滚、实际使用反馈、正式库迁移与 Host 性能分位数仍未完成。工作区保持 dirty，未提交、未推送、未安装或重启 Host。
+- 本轮只读查询活动 MCP：Host 报告版本 `0.12.115`、data root 为 `~/.craft_data`、语言 `zh-CN`；已注册工具列表不含新建的 Evolution Cycle API。故真实 Host 尚未执行本轮代码，也未产生真实 Evolution Cycle 记录。当前 `main` 与 `origin/main` 仍为 `c22ab60134a3a6f38642b7a79667d152a552340e`；本轮没有提交或推送。
+- 后续复核发现晋升门控允许 `evaluation_run.verdict=failed` 的候选继续记为 `promote`。现已在记录晋升事件前重新校验 exact candidate 的留出评测：普通评测要求 run 与所有 trial outcome 均通过；Knowledge 影子评测要求状态为 `eligible`。失败评测仍可进入拒绝路径，但晋升被拒绝。新增回归后 Evolution Cycle 为 12/12；该模块行/分支/函数覆盖仍为 100%，直接 TypeScript 检查通过。此补丁仍只在本地源码，未进入运行时。
+- 并发只读核对发现 13 个 Node 进程同时打开 `~/.craft_data/db/craft.db`（约 6.1 GB，WAL 约 15 MB），与用户观察到的 `database is locked` 一致，表明共享主库写入存在竞争。`lsof` 可见 PID 和 Node 进程名，但当前工具权限不允许读取父进程关系及完整命令行，因此无法据此归因到具体 Hook 或服务；Evolution Cycle 的事件仍落在主库，这个分区实现尚未消除主库写锁竞争。没有重启进程或写入正式库。
+- 随后将 Evolution Cycle 的当前版本与追加事件一并迁到项目级 `evolution.db` 事务；中央库保留启动指针以支持发现和路由。版本推进带乐观版本校验，事件序列与幂等键在同一项目写锁内检查。增加同项目写竞争、跨项目锁隔离、重复请求和冲突重试覆盖。Storage 严格门禁现为 407/407，`store.ts` 行/分支/函数覆盖 100%；Evolution Cycle 为 15/15，`core/evolution-cycle.ts` 行/分支/函数覆盖 100%；直接 TypeScript 检查和 `git diff --check` 通过。
+- 这只降低 Evolution Cycle 写路径对共享主库写锁的依赖，没有消除主库竞争：其他能力仍使用主库索引，且上次只读检查的 13 个 Node 持有者无法可靠映射到具体 Hook。写锁错误现在附带不含业务正文的数据库角色、阶段、等待上限和可重试标记；还没有从真实超时 Hook 留痕反查其具体调用进程。未向正式数据根写入、未重启服务。
+- 晋升前现在会再次读取周期绑定的 Workspace 与检查点，要求 Workspace 版本、最新检查点 ID 及检查点版本仍与周期基线一致；原检查点即使原位改版也会被识别。基线漂移时拒绝晋升且不追加事件，要求重规划和重评。Evolution Cycle 专项测试 16/16，`core/evolution-cycle.ts` 行/分支/函数覆盖 100%；此改动仍在本地源码，尚未加载到 Host。
+- 统一轨迹的每个事件现在固定带 `input_tokens`、`output_tokens`、`duration_ms`、`cost_usd` 四项；没有测量值时存 `null` 而不省略或伪记为零。该改动只消除记录形状歧义，仍需由真实 Host/模型调用方提交实测值，并报告来源、缺失率与聚合延迟；不代表现有轨迹已经收集到真实成本。
+- 对照 2026-10-26 提交的五项进化控制要求，追加轨迹、状态约束、失败归因字段、候选确切版本引用、独立留出评测及基线漂移拒绝已有代码证据。尚未实现或验证的部分包括：控制面自动接入真实任务闭环；Experience/Knowledge/Memory/Codebase 各自候选与正式状态的原子切换和可执行回滚；隔离候选工作区及保留未提交改动；会话级修改/成本预算；固定回归集与留出集的统一报告。当前能力授权引用只记录晋升依据，不等于跨子能力发布器已完成。
+- 2026-10-26 当日复核把锁源定位到 Craft Context：当前 13 个持有 `~/.craft_data/db/craft.db` 的 Node 进程工作目录均为 Codex 插件缓存 `craft-context/0.12.115`。`ps` 仍因系统权限被拒；无需依赖命令行参数即可从工作目录确认这些是 Craft Context 插件进程。全局 PII Hook 配置为 5 秒；Craft Context Codex Hook 配置为 `PostToolUse=3s`、`Stop=10s`、`UserPromptSubmit=20s`，SessionStart/SessionEnd 为 3 秒。
+- 只读汇总 `~/.craft_data/trace/hook-runtime/v1/*.jsonl`：Context `PostToolUse` 有 3,205 个开始、3,200 个完成，5 个开始无结束记录且采样时都已超过 20 秒；完成记录 P50/P95/最大耗时 65/1,822/2,210 ms。开始无结束与 3 秒 Host 超时一致，但也可能是进程异常退出，日志没有 Host 提供的终止原因。`UserPromptSubmit` 64 次中 16 次标为 `STORAGE_BUSY`（P95 2,180 ms、最大 2,498 ms）；`Stop` 86 次中 20 次 `STORAGE_BUSY`（最大 2,008 ms）；`SessionEnd` 37 次中 5 次 `STORAGE_BUSY`（最大 1,883 ms）。近期 Hook Runtime 中没有超过 10 秒的 Stop 未完成记录，因此当前数据没有证实用户看到的 10 秒超时来自 Stop。
+- Trace 分片里的历史遥测另显示 `craft_context_open` 有 22 次 `STORAGE_BUSY`，P50/P95/最大耗时 16.3/36.6/43.6 秒；Knowledge `sourceIngest` 有 152 次 `STORAGE_BUSY`，P50/P95/最大耗时 31.6/33.1/34.9 秒，另有 312 次 `OPERATION_FAILED`。这些是历史累计事件，不能与上面的当日 Hook Runtime 计数混为一组。Trace 只存错误摘要，原有 Hook Runtime 只存 `STORAGE_BUSY` 类别，旧记录无法追溯数据库角色和事务阶段。
+- 新增的安全诊断会在后续 Trace 和 Hook Runtime 记录白名单 `database_role`、`database_phase`、`busy_timeout_ms` 和 `retryable`，错误正文、路径及 SQL 不落盘。`common-log-sdk` 覆盖门 52/52、行/分支/函数 100%；`hook-runtime-diagnostics` 7/7、行/分支/函数 100%；直接 TypeScript 检查通过。当前运行时仍为 `.115`，因此这些新字段尚未在真实 Host 中读回，主库锁竞争也尚未消除。
+
+### 2026-10-27 Evolution Cycle 轨迹与基线门控
+
+- 当前 MCP 只读读回仍是 `0.12.115`，数据根 `~/.craft_data`、语言 `zh-CN`；`host_session_verified=false`。Knowledge 64 候选/191 stale/53 revalidation_required/1 评测案例；Memory 10 条反馈、0 条 verified helpful；Experience 22 observations、0 patterns、0 shadow experiments。三者 `model_effect_proven=false`。这些是当前组件状态，不是本地新源码的运行证据。
+- 为避免把“字段缺失”误读成成本为零，Evolution Cycle 每条事件固定包含输入 token、输出 token、耗时与成本四项；未采集时保存 `null`。真实 Host/模型调用目前尚未向控制面持续提交这些指标，仍缺指标来源绑定与缺失率报告。
+- 晋升前重新核对周期开始时的 Workspace 版本、最新检查点 ID 和原检查点版本；基线变化时拒绝晋升，且不写决策事件。这里绑定的是未改动的基线 Workspace；候选隔离工作区及原子发布器仍未实现。
+- Evolution Cycle 专项测试 17/17；`core/evolution-cycle.ts` 行/分支/函数覆盖均 100%；直接 TypeScript 检查与 `git diff --check` 通过。源码仍在 `main` 的本地 dirty worktree（33 个改动路径），未提交、未推送、未安装；Host 仍为 `.115`。
+- `craft_evolution_cycle_advance` 新增可选 `trace_refs`：指标可从明确引用的 `trace_event` 汇总，事件必须为 `observed`/`verified` 且所属 Trace 的 `task_id` 与周期任务一致；不接受同一事件同时手填与引用 Trace 指标。每项缺失仍为 `null`，手填值会标 `caller_reported`，不冒充 Trace 来源。17 项 Evolution Cycle 与 19 项 MCP 测试合计 36/36 通过；受影响源码行/分支/函数覆盖 100%。这是基于当前存储信任标签的来源绑定，Host 签名和自动从真实 Worker 传入 Trace 引用仍未实现。
+- 尚未关闭的五项要求包括：把 Evolution Cycle 自动连接到 Host 任务收尾；让各能力在自身治理边界内原子发布/回滚正式版本；隔离候选且保留已有未提交文件；在真实工作流中执行回归/失败/成功/留出数据集；落实会话次数与成本预算。Skill 本轮未修改。
+- 2026-10-27 后续收口：候选创建、held-out 评测和晋升均重新校验周期基线未变化；候选证据引用必须是 Evidence；普通评测与 Knowledge 留出案例还会拒绝与候选 Evidence 已记录的来源任务/会话重叠。无来源身份的 Evidence 不会被补造身份。新增快照漂移和候选来源重叠回归后，Evolution Cycle 为 22/22；`core/evolution-cycle.ts` 行/分支/函数覆盖均 100%，`tsc --noEmit` 与 `git diff --check` 通过。
+- 本次实时只读 `craft_info` 仍读回 Host `0.12.115`、数据根 `~/.craft_data`、语言 `zh-CN`；该运行时没有新 Evolution Cycle 接口/记录，不能验证本地改动已运行。评测留出仍依赖当前可写存储中的 Evidence/Outcome 来源标记，不是签名来源证明；候选沙箱、统一原子发布/回滚、真实独立效果集、正式数据迁移和 Host 负载分位数仍未完成。
+
+### 2026-10-27 Context 冷热调用和 Codebase 图缓存
+
+- 实时 MCP `craft_info` 仍报告 `0.12.115`、数据根 `~/.craft_data`、语言 `zh-CN`。本轮 `craft_context_open` 首次重试超过 30 秒后返回 `database is locked`；后续一次失败实际是 Compact 响应估算 560/500 超预算，并非锁；将响应上限调到 700 后，不含 Codebase 的调用约 2 秒成功。之后含 basic Codebase 的冷调用约 20.4 秒，热调用约 3.3 秒，均没有再次报锁。工具回执 `host_execution_authority=false`，属于 MCP 组件调用，不能算真实 Host 任务证据；锁错误也未携带数据库角色/阶段，根因仍未定位。
+- 该仓库实时索引为 5,510 节点、0 条关系、`analysis_confidence=partial`。冷调用返回 `codebase_analyzer_unsupported_files`、`codebase_budget_exhausted`、`codebase_query_truncated`；上下文预算省略 99 项、查询截断 1,901 项。索引状态为 ready 不代表选材完整，当前该仓库 Basic Codebase 也没有任何关系边。
+- 本地 Codebase Context 投影现在对已完整校验的不可变图保留单条进程内缓存，键含索引 ID、版本及图摘要；最多缓存 8,000 个节点和 16,000 条边，超限图不保留。缓存不跨项目累积，不改变候选排序或 Context 预算；索引新版本会自然失效。完整 `craft-codebase` 覆盖组 233/233，`codebase-index.ts` 行/分支/函数覆盖均 100%，直接 `tsc --noEmit` 通过。
+- 缓存只在本地 dirty 源码。Host 仍加载 `.115`，因此 3.3 秒是旧运行时热调用数据，不是新缓存收益；需固定版本发布并由新 Host 重读后再测冷/热延迟和并发 P95/P99。此次 Codebase 冷调用虽消除了后续锁报错，但仍耗时约 20.4 秒且返回部分结果；不能据此宣称初始化性能达标。
+
+### 2026-10-27 候选写入范围与冻结
+
+- `craft_evolution_cycle_start` 接收可选相对路径白名单 `allowed_paths`；未设置时默认不允许候选工作区发生修改。候选、评测和晋升阶段重新扫描隔离副本，拒绝越界路径、符号链接和非普通文件，并把文件清单摘要写入候选事件。
+- 评测及晋升前均重新核对候选摘要；候选在冻结后发生改动必须重建候选并重跑评测。候选树扫描最多检查 10,000 个文件，避免目录规模无限放大。
+- 候选工作区、Evolution Cycle 增量测试均通过；对应两个源码文件行/分支/函数覆盖率 100%，直接 TypeScript 检查与 `git diff --check` 通过。覆盖测试使用临时数据根，不等同于真实 Host 执行。
+- 这仍未把 Host 执行重定向到候选工作区，也未限制跨多个 Cycle 的会话写入次数或模型预算；这些限制需 Host 调度层的授权、写入回执和实际 Trace 一起实施，不能由本地周期记录单独保证。原子晋升/回滚和真实独立任务效果仍未验收。
+- 追加基线校验：Cycle 启动和晋升前调用 `WorkspaceState.freshness`，直接比对检查点与当前项目文件及 Git 状态；候选和评测阶段只核对不可变检查点身份，避免在每个阶段重复扫描项目并启动 Git 子进程。新增“检查点后用户修改文件”启动拒绝及晋升前拒绝用例；Evolution Cycle 27/27 通过，`evolution-cycle.ts` 行/分支/函数覆盖 100%。性能分位数仍未测量。
+
+### 2026-10-27 Knowledge 迁移盘点响应
+
+- `~/.craft_data` 只读预检：25,108 条已有分区指针均指向当前路径；Knowledge Claim 另有 296 个未分区版本（scope 前缀 `project` 137、`legacy` 159）。这不等同于 296 个当前有效 Claim。
+- 运行时 Knowledge 迁移 dry-run 的首 500 条：76 可迁移、242 跳过、182 因范围不可解析阻塞，单页返回约 38 KB。后台 Worker 实际只使用阻塞数量，却接收并回传逐记录明细。
+- 为迁移 API 和 Worker 增加 `summary_only`：保留原逐条模式；汇总模式返回 `blocked_count` 与按原因分组的 `blocked_reasons`，不返回记录 ID。Worker 请求汇总模式并校验计数，减少每页响应体。
+- 以上迁移盘点为只读；尚未应用迁移。当前 Host 版本不支持新参数，本地改动未推送。阻塞记录的可靠范围仍未明确，不能自动归全局或猜项目根。
+
+### 2026-10-27 Store 覆盖与实时锁复核
+
+- Knowledge 存储新增 `summary_only` 类型拒绝分支的直接 Store 断言后，Store 原子性覆盖组 419/419 通过，`store.ts` 行、分支、函数覆盖均为 100%；`tsc --noEmit` 和 `git diff --check` 通过。
+- 实时 `craft_context_open`（明确关闭 Codebase）首次返回 `database is locked`，约 16 秒后失败；同参数单次重试约 0.6 秒成功，返回 `resolved/ready` 但 0 个知识/经验条目，`host_execution_authority=false`，并留下 Context Receipt 与 Trace 相关 ID。这是间歇性锁证据，不是任务效果证据。
+- 对成功重试的 Trace 分片做只读回读：`craft_context_open` 端到端 Span 494ms，Context resolve 415ms，Memory contribute 125ms，Knowledge contribute 126ms（其中项目 Source discovery 21ms），Experience contribute 3.6ms；没有模型 usage/token 字段。单次低延迟不构成 P95/P99 或并发稳定性证明。
+- 单独用只读连接打开 `~/.craft_data/db/craft.db`、读取 `journal_mode`/`busy_timeout` 和查询 `sqlite_master`，分别约 2ms/2ms 成功。之前把完整 `PRAGMA quick_check` 放在同一个输出表达式里并将超过 30 秒误记为数据库打开卡住；该结论已撤回，未再执行完整性扫描。
+- `craft_info` 约 0.2 秒读回 Host `0.12.115` 与 `~/.craft_data`。`lsof` 观察到 PID 5585（node）的工作目录是已安装的 Craft Context `.115`，并打开全局 `craft.db` 及约 65 个 `.db` 主文件/其 WAL 与 SHM；这确认了 Craft Context 进程持有许多分区连接，但沙箱拒绝 `ps`/`sample`，无法确认具体被锁的数据库、持锁事务及调用栈。不能据此断言其他服务不可用或认定根因。
+- 进一步按全局 `craft.db` 文件句柄去重，观察到 13 个不同 PID，工作目录全部是 Craft Context `.115` 插件缓存；它们共享同一全局 SQLite 文件。`~/.craft_data/runtime` 的跨进程 Worker 锁显示 Knowledge/Experience 由 PID 57584 持有，Experience 资产迁移由 57624 持有，Trace retention 由 35270 持有；因此有 Worker leader 机制，不能把问题直接归咎为 13 份重复学习 Worker。
+- 用独立临时数据根启动 13 个 Node 进程，各自打开同一全新 Craft Store 并写 5 条记录：13/13 成功，整体约 1.2 秒，进程总时长 P95/max 247ms；没有复现锁。该数据集是空库，不代表正式库或长事务性能，不能据此排除真实库的竞争。
+- 本地锁诊断已能在 Store 写事务错误中记录数据库角色、阶段和等待时长，但当前运行时错误仍只有通用文本；这次实时锁没有数据库角色/阶段证据，不能用本地改动声称已修复。需在可识别运行进程/事务来源后，再验证修复与并发影响。
+
+### 2026-10-27 Codebase 冷语义索引剖析
+
+- 当前工作树 Codebase 覆盖组 237/237 通过，`codebase-index.ts` 行/分支/函数覆盖均为 100%。新增行为用例覆盖小文件跨路径分片后仍可按路径查符号、跨文件查调用者，并确保修改某文件不会使其他路径的内容寻址分片全部失效；已校验源码复用也覆盖越界路径、重复路径、摘要漂移和 checkpoint 大小漂移。
+- 原打包 smoke 的当前仓库 `craft_context_open(index_depth=semantic)` 单次耗时 32.3 秒。基于分片写入批处理并重新打包后，同 smoke 单次为 29.9 秒；只有一次前后样本，差值约 7.5%，不能当成稳定收益或 P95。
+- 同一工作树的独立临时数据根剖析：`repositoryFiles` 选出 988 个文件、其中 976 个受支持；TypeScript 分析 955 个文件约 7.8 秒，Python 15 个约 0.3 秒、Java 6 个约 1.2 秒；快照提交约 0.5 秒；索引导入约 8.2 秒；图文件写入 386 次、合计约 2.9 秒；整次 semantic ensure 约 20.5 秒。该运行未配置 Go LSP，与打包 smoke 设置不同，计时不应直接横向比较。
+- 图文件按源路径哈希的 16 个稳定桶批量打包，单文件内容变化只影响其所属桶，仍保留未修改桶的内容寻址复用。它减少了图记录写入数，但 smoke 仍接近 30 秒；冷语义索引仍是阻塞项，当前证据不支持宣称性能问题已解决。
+- 完成 verified-source 复用后，重新构建的插件完整组件 smoke 仍可启动并调用；其 large-semantic 场景单次为 33.5 秒。与此前 29.9 秒单次结果相比没有稳定改善证据，继续把冷语义全量索引视为待优化项，不以 smoke 单样本推断 P95。
+- 实时安装的 `0.12.115` MCP 热路径本轮一次返回约 2.2 秒，因复用既有索引且响应预算导致 partial；该结果不是新源码 Host 的冷启动、并发或效果验证。

@@ -183,6 +183,49 @@ test("repository snapshots reject source and repository state races", async () =
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("repository snapshot publication rejects workspace changes during the file copy", async () => {
+  const root = join(tmpdir(), `craft-workspace-version-race-${process.pid}-${Date.now()}`), worktree = join(root, "worktree");
+  const store = await new CraftStore(craftPaths(join(root, "craft"))).open();
+  const content = "export const versionRace = true;\n";
+  try {
+    await mkdir(worktree, { recursive: true });
+    await writeFile(join(worktree, "race.ts"), content, "utf8");
+    const service = new CraftService(store);
+    service.workspaceOpen({ workspace_id: "repository_version_race", name: "Version race", root_path: worktree,
+      include_paths: ["race.ts"] });
+    const metadata = await stat(join(worktree, "race.ts"));
+    const repositoryFiles = [{ path: "race.ts", content,
+      digest: createHash("sha256").update(content).digest("hex"),
+      file_version: [metadata.dev, metadata.ino, metadata.size, metadata.mtimeMs, metadata.ctimeMs].join(":") }];
+    let reads = 0;
+    const racing = new WorkspaceState(store, store.paths, () => {
+      if (++reads === 1) {
+        const current = store.get("workspace", "repository_version_race");
+        store.save("workspace", "repository_version_race", { ...current, state_revision: Number(current.state_revision) + 1 });
+      }
+      return undefined;
+    });
+    assert.throws(() => racing.checkpointFromRepositoryFiles({ workspace_id: "repository_version_race",
+      checkpoint_id: "racing_checkpoint", label: "racing", repository_files: repositoryFiles }), /Workspace changed before repository checkpoint publication/u);
+    assert.equal(store.find("workspace_checkpoint", "racing_checkpoint"), null);
+
+    service.workspaceOpen({ workspace_id: "repository_pointer_race", name: "Pointer race", root_path: worktree,
+      include_paths: ["race.ts"] });
+    let pointerReads = 0;
+    const pointerRacing = new WorkspaceState(store, store.paths, () => {
+      if (++pointerReads === 1) {
+        const current = store.get("workspace", "repository_pointer_race");
+        store.database.prepare("UPDATE records SET payload_json=? WHERE kind='workspace' AND id=? AND version=?")
+          .run(JSON.stringify({ ...current, latest_checkpoint_id: "concurrent_checkpoint" }), "repository_pointer_race", Number(current.version));
+      }
+      return undefined;
+    });
+    assert.throws(() => pointerRacing.checkpointFromRepositoryFiles({ workspace_id: "repository_pointer_race",
+      checkpoint_id: "pointer_racing_checkpoint", label: "racing", repository_files: repositoryFiles }), /Workspace changed before repository checkpoint publication/u);
+    assert.equal(store.find("workspace_checkpoint", "pointer_racing_checkpoint"), null);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("workspace freshness reports missing checkpoints and added, changed, and deleted files", async () => {
   const root = join(tmpdir(), `craft-workspace-freshness-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");
@@ -270,6 +313,11 @@ test("rejects symlinked project Codebase snapshot directories and files", async 
     await writeFile(join(projectStorage, "codebase"), "not a directory", "utf8");
     assert.throws(() => service.workspaceCheckpoint({ workspace_id: "repository_link", checkpoint_id: "file_root", label: "file" }), /unsafe directory/);
     await rm(join(projectStorage, "codebase"));
+    const invalidCheckpointPath = join(projectStorage, "codebase", "snapshots", "repository_link", "file_checkpoint");
+    await mkdir(join(projectStorage, "codebase", "snapshots", "repository_link"), { recursive: true });
+    await writeFile(invalidCheckpointPath, "not a directory", "utf8");
+    assert.throws(() => service.workspaceCheckpoint({ workspace_id: "repository_link", checkpoint_id: "file_checkpoint", label: "file" }), /unsafe directory/);
+    await rm(invalidCheckpointPath);
     const snapshotRoot = join(ensureProjectStorageDirectory(store.paths, worktree), "codebase", "snapshots", "repository_link", "linked_file");
     await mkdir(snapshotRoot, { recursive: true });
     await symlink(join(outside, "note.txt"), join(snapshotRoot, "src"));

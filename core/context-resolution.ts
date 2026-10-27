@@ -367,6 +367,14 @@ export class ContextResolutionKernel {
           digest: item.content_digest, source_id: item.source_id ?? null, reason: item.reason ?? "routeable_scope_match" })) })) };
     const identityDigest = stableDigest(identity);
     const receiptId = String(args.receipt_id ?? `context_resolution_${stableDigest({ identityDigest, access, task_id: args.task_id ?? null, session_id: args.session_id ?? null, turn_id: args.turn_id ?? null }).slice(-32)}`);
+    // Replaying an immutable receipt is read-only. Avoid BEGIN IMMEDIATE on the
+    // common idempotent path so Context readers do not contend with writers.
+    recheck();
+    const priorReceipt = this.store.find("context_resolution_receipt", receiptId);
+    if (priorReceipt) {
+      if (priorReceipt.identity_digest !== identityDigest) throw new Error("Context Resolution Receipt idempotency conflict");
+      return { receipt: priorReceipt, items, contributions, idempotent: true };
+    }
     return this.store.transaction(() => {
       recheck();
       const existing = this.store.find("context_resolution_receipt", receiptId);

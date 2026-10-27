@@ -54,6 +54,7 @@ import { EvaluationRunCoordinator } from "./coordinators/evaluation-runs.ts";
 import { CognitiveSearchCoordinator } from "./coordinators/cognitive-search.ts";
 import { CognitiveWriteCoordinator } from "./coordinators/cognitive-write.ts";
 import { workbenchWorkflowInput } from "./use-cases/workbench-workflow-input.ts";
+import { assessVerifiedIteration } from "./use-cases/verified-iteration.ts";
 import type { TraceArchiveRuntimeBackend } from "../trace-archive-storage.ts";
 import { dataSpaceId } from "../data-space.ts";
 import { classifyTool } from "../internal-tool-authorization.ts";
@@ -576,7 +577,7 @@ export class CraftService extends ServiceFoundation {
       "agent_profile", "orchestration_plan", "harness_configuration", "trial", "outcome",
       "grader", "grade", "signoff_policy", "signoff", "experience_pattern", "skill_proposal",
       "skill_publication", "budget", "model_provider", "agent_session", "route", "route_strategy",
-      "project_policy", "route_receipt", "host_adapter", "host_dispatch", "runtime_policy", "runtime_run",
+      "project_policy", "route_receipt", "host_adapter", "host_dispatch", "runtime_policy", "runtime_run", "evolution_cycle",
       "runtime_operation", "runtime_adapter", "evaluation_runner", "evaluation_promotion", "experience_mining_candidate",
       "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
       "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "capability_connector", "capability_connector_asset", "capability_connector_ticket", "capability_connector_health", "capability_connector_revocation", "logical_activation_plan", "logical_activation_audit", "logical_activation_resolution", "expert_profile", "context_capsule",
@@ -859,6 +860,9 @@ export class CraftService extends ServiceFoundation {
   continualHarnessSignals(args: JsonObject): JsonObject { return this.continualHarness.signals(args); }
   continualHarnessResolve(args: JsonObject): JsonObject { return this.continualHarness.resolve(args); }
   continualHarnessGet(args: JsonObject): JsonObject { return this.continualHarness.get(args); }
+  evolutionCycleStart(args: JsonObject): JsonObject { return this.evolutionCycles.start(args); }
+  evolutionCycleAdvance(args: JsonObject): JsonObject { return this.evolutionCycles.advance(args); }
+  evolutionCycleGet(args: JsonObject): JsonObject { return this.evolutionCycles.get(args); }
   statefulComputeHostRegister(args: JsonObject): JsonObject { return this.statefulCompute.hostRegister(args); }
   statefulComputeSessionPrepare(args: JsonObject): JsonObject { return this.statefulCompute.sessionPrepare(args); }
   statefulComputeDispatch(args: JsonObject): JsonObject { return this.statefulCompute.dispatch(args); }
@@ -2821,7 +2825,9 @@ export class CraftService extends ServiceFoundation {
     const iterationId = String(args.iteration_id ?? id("verified_iteration")); const existing = this.store.find("verified_iteration", iterationId);
     const identity = { task_id: task.id, launch_id: launch.id, acceptance_plan_id: plan.id, max_attempts: maxAttempts, allowed_paths: allowedPaths };
     if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Verified iteration idempotency conflict"); return { iteration: existing, idempotent: true }; }
-    const iteration = this.store.create("verified_iteration", iterationId, { ...identity, identity_digest: valueDigest(identity), status: "active", attempts_started: 0, last_assessment_id: null, terminal_reason: null });
+    const iteration = this.store.create("verified_iteration", iterationId, { ...identity, identity_digest: valueDigest(identity),
+      acceptance_plan_version: plan.version, acceptance_plan_digest: valueDigest(recordPayload(plan)), status: "active", attempts_started: 0,
+      last_assessment_id: null, terminal_reason: null });
     return { iteration, idempotent: false };
   }
   verifiedIterationGet(args: JsonObject): JsonObject {
@@ -2829,24 +2835,7 @@ export class CraftService extends ServiceFoundation {
     return { iteration, attempts: this.store.list("iteration_attempt", 10_000, (item) => item.iteration_id === iteration.id) };
   }
   verifiedIterationAssess(args: JsonObject): JsonObject {
-    const iteration = this.store.get("verified_iteration", text(args.iteration_id, "iteration_id"));
-    if (iteration.status !== "active") return { iteration, action: "terminal", idempotent: true };
-    const assessment = this.store.get("acceptance_assessment", text(args.assessment_id, "assessment_id"));
-    const plan = this.store.get("acceptance_plan", String(iteration.acceptance_plan_id));
-    if (assessment.plan_id !== plan.id) throw new Error("Acceptance assessment does not belong to this verified iteration");
-    const classification = text(args.classification, "classification");
-    if (!new Set(["task_failure", "verification_configuration", "environment", "scope_violation", "no_progress"]).has(classification)) throw new Error("Verified iteration classification is unsupported");
-    const attemptNo = Number(iteration.attempts_started) + 1;
-    const feedback = assertNoSecret(document(args.feedback ?? `Acceptance ${assessment.status}.`, "feedback"), "feedback");
-    const attempt = this.store.create("iteration_attempt", String(args.attempt_id ?? id("iteration_attempt")), { iteration_id: iteration.id, number: attemptNo, assessment_id: assessment.id, assessment_status: assessment.status, classification, feedback_digest: valueDigest(feedback), raw_feedback_stored: false });
-    let status = "active"; let action = "retry"; let terminalReason: string | null = null;
-    if (assessment.status === "passed") { status = "passed"; action = "passed"; terminalReason = "acceptance_passed"; }
-    else if (classification === "verification_configuration" || classification === "environment") { status = "blocked"; action = "handoff"; terminalReason = classification; }
-    else if (classification === "scope_violation" || classification === "no_progress") { status = "unresolved"; action = "handoff"; terminalReason = classification; }
-    else if (attemptNo >= Number(iteration.max_attempts)) { status = "unresolved"; action = "handoff"; terminalReason = "attempt_budget_exhausted"; }
-    const saved = this.store.save("verified_iteration", String(iteration.id), { ...recordPayload(iteration), status, attempts_started: attemptNo, last_assessment_id: assessment.id, terminal_reason: terminalReason });
-    const next = action === "retry" ? { action: "retry", prompt_feedback: feedback, remaining_attempts: Number(saved.max_attempts) - attemptNo, allowed_paths: saved.allowed_paths } : { action, reason: terminalReason };
-    return { iteration: saved, attempt, next, idempotent: false };
+    return assessVerifiedIteration(this.store, args, value => assertNoSecret(document(value, "feedback"), "feedback"));
   }
   strategyRecommend(args: JsonObject): JsonObject {
     const task = this.store.get("task", text(args.task_id, "task_id")); const comparison = this.store.get("evaluation_comparison", text(args.comparison_id, "comparison_id"));
@@ -2864,9 +2853,11 @@ export class CraftService extends ServiceFoundation {
   knowledgeClaimGet(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimGet(args); }
   knowledgeStorageReconcile(args: JsonObject): JsonObject {
     if (args.dry_run !== undefined && typeof args.dry_run !== "boolean") throw new Error("dry_run must be boolean");
+    if (args.summary_only !== undefined && typeof args.summary_only !== "boolean") throw new Error("summary_only must be boolean");
     return this.store.reconcileKnowledgeStorage({ max_records: finiteInteger(args.max_records, "max_records", 100, 1, 500),
       ...(args.cursor === undefined ? {} : { cursor: text(args.cursor, "cursor") }),
-      ...(typeof args.dry_run === "boolean" ? { dry_run: args.dry_run } : {}) });
+      ...(typeof args.dry_run === "boolean" ? { dry_run: args.dry_run } : {}),
+      ...(typeof args.summary_only === "boolean" ? { summary_only: args.summary_only } : {}) });
   }
   knowledgeClaimList(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimList(args); }
   knowledgeClaimReview(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimReview(args); }

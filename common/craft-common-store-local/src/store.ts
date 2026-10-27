@@ -38,7 +38,9 @@ const EXPERIENCE_PARTITIONED_KINDS = new Set([
   "experience_shadow_evaluation", "experience_shadow_experiment", "experience_skill_export",
   "workflow_evolution_observation", "workflow_evolution_proposal", "workflow_evolution_request",
 ]);
-type PartitionDomain = "memory" | "experience" | "knowledge";
+const EVOLUTION_PARTITIONED_KINDS = new Set(["evolution_cycle"]);
+type PartitionDomain = "memory" | "experience" | "knowledge" | "evolution";
+const PARTITION_LABELS: Record<PartitionDomain, string> = { memory: "Memory", experience: "Experience", knowledge: "Knowledge", evolution: "Evolution" };
 type MemoryScope = { kind: "global" | "user" | "project" | "workspace" | "task" | "session" | "team" | "organization" | "legacy"; id: string };
 type MigrationBackupFileOps = { write: typeof writeFileSync; rename: typeof renameSync; unlink: typeof unlinkSync };
 type ContentMigrationSnapshot = { path: string; digest: string; markdown: string };
@@ -63,6 +65,16 @@ function validLimit(limit: number): number {
   return Math.max(1, limit);
 }
 
+function blockedSummary(blocked: JsonObject[], summaryOnly: boolean): JsonObject {
+  const reasons: Record<string, number> = {};
+  for (const item of blocked) {
+    const reason = String(item.reason);
+    reasons[reason] = (reasons[reason] ?? 0) + 1;
+  }
+  return summaryOnly ? { blocked: [], blocked_count: blocked.length, blocked_reasons: reasons }
+    : { blocked, blocked_count: blocked.length };
+}
+
 function storedSchemaVersion(database: DatabaseSync): number {
   try {
     const row = database.prepare("SELECT value FROM meta WHERE key='schema_version'").get() as { value?: string } | undefined;
@@ -74,6 +86,23 @@ function storedSchemaVersion(database: DatabaseSync): number {
 
 function tableExists(database: DatabaseSync, name: string): boolean {
   return database.prepare("SELECT 1 present FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name) !== undefined;
+}
+
+function storageFailure(error: unknown, database: DatabaseSync, role: string, phase: string): unknown {
+  if (!error || typeof error !== "object") return error;
+  const value = error as { code?: unknown; errcode?: unknown; message?: unknown; stage?: unknown; safeDetails?: unknown };
+  const busy = value.code === "ERR_SQLITE_ERROR" && [5, 6].includes(Number(value.errcode))
+    || /database (?:is )?(?:locked|busy)|sqlite_busy|sqlite_locked/iu.test(String(value.message ?? ""));
+  if (!busy) return error;
+  let busyTimeoutMs: number | null = null;
+  try { busyTimeoutMs = Number(database.prepare("PRAGMA busy_timeout").get()!.timeout); } catch { /* Keep the diagnostic content-free if SQLite is already unusable. */ }
+  Object.assign(value, {
+    stage: typeof value.stage === "string" ? value.stage : "storage_lock",
+    safeDetails: value.safeDetails && typeof value.safeDetails === "object" ? value.safeDetails : {
+      database_role: role, phase, busy_timeout_ms: busyTimeoutMs, retryable: true,
+    },
+  });
+  return error;
 }
 
 function ensureJournalMode(database: DatabaseSync): void {
@@ -328,7 +357,8 @@ export class CraftStore {
     const pendingStart = this.#pendingMemoryRows.length;
     const deletionStart = this.#pendingMemoryDeletes.length;
     const savepoint = `craft_atomic_${this.#transactionDepth}`;
-    database.exec(nested ? `SAVEPOINT ${savepoint}` : "BEGIN IMMEDIATE");
+    try { database.exec(nested ? `SAVEPOINT ${savepoint}` : "BEGIN IMMEDIATE"); }
+    catch (error) { throw storageFailure(error, database, "primary", nested ? "savepoint_begin" : "transaction_begin"); }
     this.#transactionDepth += 1;
     let result: T;
     try {
@@ -339,7 +369,7 @@ export class CraftStore {
       database.exec(nested ? `ROLLBACK TO ${savepoint}; RELEASE ${savepoint}` : "ROLLBACK");
       this.#pendingMemoryDeletes.splice(deletionStart);
       this.cleanupMemoryRows(this.#pendingMemoryRows.splice(pendingStart));
-      throw error;
+      throw storageFailure(error, database, "primary", nested ? "savepoint_operation" : "transaction_operation");
     }
     this.#transactionDepth -= 1;
     if (!nested) {
@@ -482,7 +512,10 @@ export class CraftStore {
   save(kind: string, id: string, payload: JsonObject, version?: number): JsonObject {
     this.assertPartitionDomain(kind, id, payload);
     const existingPointer = this.partitionPointer(kind, id);
-    if (this.memoryScope(kind, { ...payload, id }, true, Boolean(existingPointer))) return this.writeMemory(kind, id, payload, "save", undefined, version);
+    if (this.memoryScope(kind, { ...payload, id }, true, Boolean(existingPointer))) {
+      if (kind === "evolution_cycle" && existingPointer?.domain === "evolution") return this.saveEvolutionPartition(id, payload, version);
+      return this.writeMemory(kind, id, payload, "save", undefined, version);
+    }
     if (TRACE_SHARDED_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) return this.traceShards.save(kind, id, payload, version);
     if (CODEBASE_GRAPH_KINDS.has(kind) && this.codebaseShards.raw(kind, id)
       && !this.database.prepare("SELECT 1 FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id))
@@ -599,7 +632,57 @@ export class CraftStore {
       return { ...payload, id, version: next, created_at: now, updated_at: now };
   }
 
+  /** Advance a project Evolution Cycle and append its event in one project-local transaction. */
+  advanceEvolutionCycle(id: string, expectedVersion: number, payload: JsonObject, eventType: string, eventPayload: JsonObject): JsonObject {
+    const pointer = this.partitionPointer("evolution_cycle", id);
+    if (pointer?.domain !== "evolution") throw new Error("Evolution Cycle project partition is unavailable");
+    const { database } = this.memoryDatabase(pointer.scope, "evolution");
+    const stream = `evolution:${id}`;
+    return this.transactionOn(database, () => {
+      const priorRow = database.prepare("SELECT * FROM records WHERE kind='evolution_cycle' AND id=? ORDER BY version DESC LIMIT 1")
+        .get(id) as Record<string, unknown> | undefined;
+      if (!priorRow) throw new Error("Evolution Cycle partition record is unavailable");
+      const current = this.record(priorRow, false);
+      const transitionId = String(eventPayload.transition_id ?? "");
+      if (!transitionId) throw new Error("Evolution Cycle event requires a transition ID");
+      const priorEvent = database.prepare("SELECT * FROM events WHERE stream=? AND json_extract(payload_json,'$.transition_id')=? ORDER BY sequence DESC LIMIT 1")
+        .get(stream, transitionId) as Record<string, unknown> | undefined;
+      if (priorEvent) {
+        const priorPayload = JSON.parse(String(priorEvent.payload_json)) as JsonObject;
+        if (priorPayload.request_digest !== eventPayload.request_digest) throw new Error("Evolution Cycle transition idempotency conflict");
+        return { cycle: current, event: priorPayload, idempotent: true };
+      }
+      if (Number(current.version) !== expectedVersion) throw new Error("Evolution Cycle version conflict; reread before advancing");
+      const sequence = Number((database.prepare("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM events WHERE stream=?")
+        .get(stream) as { sequence: number }).sequence);
+      if (eventPayload.cycle_id !== id || Number(eventPayload.sequence) !== sequence) throw new Error("Evolution Cycle event sequence is stale");
+      const saved = this.insert(database, { kind: "evolution_cycle", id, payload, version: expectedVersion + 1 });
+      const created_at = new Date().toISOString();
+      database.prepare("INSERT INTO events(stream,sequence,event_type,payload_json,created_at) VALUES(?,?,?,?,?)")
+        .run(stream, sequence, eventType, JSON.stringify(eventPayload), created_at);
+      return { cycle: saved, event: eventPayload, idempotent: false };
+    });
+  }
+
+  private saveEvolutionPartition(id: string, payload: JsonObject, version?: number): JsonObject {
+    const pointer = this.partitionPointer("evolution_cycle", id);
+    if (pointer?.domain !== "evolution") throw new Error("Evolution Cycle project partition is unavailable");
+    const { database } = this.memoryDatabase(pointer.scope, "evolution");
+    // partitionPointer already proves the central pointer exists; find() fails closed if the partition row is missing.
+    const current = this.find("evolution_cycle", id, undefined, false)!;
+    const expectedVersion = Number.isSafeInteger(payload.version) ? Number(payload.version) : Number(current.version);
+    return this.transactionOn(database, () => {
+      const latest = Number((database.prepare("SELECT COALESCE(MAX(version),0) AS version FROM records WHERE kind='evolution_cycle' AND id=?")
+        .get(id) as { version: number }).version);
+      if (latest !== expectedVersion) throw new Error(`Concurrent update detected for evolution_cycle: ${id}`);
+      const nextVersion = version ?? latest + 1;
+      if (nextVersion !== latest + 1) throw new Error("Evolution Cycle versions must be appended in order");
+      return this.insert(database, { kind: "evolution_cycle", id, payload, version: nextVersion });
+    });
+  }
+
   private partitionDomain(kind: string, payload: JsonObject): PartitionDomain | null {
+    if (EVOLUTION_PARTITIONED_KINDS.has(kind)) return "evolution";
     if (MEMORY_PARTITIONED_KINDS.has(kind)) return "memory";
     if (EXPERIENCE_PARTITIONED_KINDS.has(kind)) return "experience";
     if ((kind.startsWith("knowledge_") && !kind.startsWith("knowledge_memory_")) || kind.startsWith("wiki_")) return "knowledge";
@@ -815,6 +898,7 @@ export class CraftStore {
       && !(domain === "knowledge" && scope.kind === "legacy")) || typeof scope.id !== "string" || !scope.id.trim()) {
       throw new Error("Memory storage scope is malformed");
     }
+    if (domain === "evolution" && scope.kind !== "project") throw new Error("Evolution Cycle storage requires project scope");
     return { kind: scope.kind as MemoryScope["kind"], id: scope.id };
   }
 
@@ -853,6 +937,13 @@ export class CraftStore {
   private partitionDatabaseFile(domain: PartitionDomain, scope: MemoryScope, create = true): string {
     if (domain === "memory") return this.memoryDatabaseFile(scope, create);
     if (domain === "experience") return this.experienceDatabaseFile(scope, create);
+    if (domain === "evolution") {
+      if (scope.kind !== "project") throw new Error("Evolution Cycle storage requires project scope");
+      const roots = this.projectRoots(scope.id);
+      if (roots.length !== 1) throw new Error(roots.length ? "Project Evolution storage root is ambiguous" : "Project Evolution storage root is not registered");
+      const directory = this.projectDomainDirectory(roots[0]!, "evolution", create);
+      return join(directory ?? join(projectStorageDirectory(this.paths, roots[0]!), "evolution"), "evolution.db");
+    }
     if (scope.kind === "global" || scope.kind === "user") return this.paths.knowledgeDatabaseFile;
     if (scope.kind !== "project") {
       const digest = createHash("sha256").update(`${scope.kind}:${scope.id}`).digest("hex").slice(0, 24);
@@ -1108,10 +1199,12 @@ export class CraftStore {
   }
 
   /** Move a bounded keyset page. Legacy reads keep working while the background owner drains pages. */
-  reconcileKnowledgeStorage(args: { max_records?: number; cursor?: string; dry_run?: boolean } = {}): JsonObject {
+  reconcileKnowledgeStorage(args: { max_records?: number; cursor?: string; dry_run?: boolean; summary_only?: boolean } = {}): JsonObject {
     const limit = args.max_records ?? 100;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error("max_records must be between 1 and 500");
     if (args.dry_run !== undefined && typeof args.dry_run !== "boolean") throw new Error("dry_run must be boolean");
+    if (args.summary_only !== undefined && typeof args.summary_only !== "boolean") throw new Error("summary_only must be boolean");
+    const summaryOnly = args.summary_only === true;
     let after: [string, string, number] = ["", "", 0];
     if (args.cursor !== undefined) {
       if (typeof args.cursor !== "string" || !/^[A-Za-z0-9_-]{1,4096}$/u.test(args.cursor)) throw new Error("Knowledge migration cursor is invalid");
@@ -1124,7 +1217,7 @@ export class CraftStore {
     }
     if (after[0] === "content_scan") {
       if (after[2] !== 1) throw new Error("Knowledge migration cursor is invalid");
-      return this.retireLegacyKnowledgeContent(after[1], limit, args.dry_run === true);
+      return this.retireLegacyKnowledgeContent(after[1], limit, args.dry_run === true, summaryOnly);
     }
     const rows = this.database.prepare(`SELECT kind,id,version,payload_json,created_at,updated_at FROM records
       WHERE (kind GLOB 'knowledge_*' OR kind GLOB 'wiki_*' OR kind='evidence') AND kind NOT GLOB 'knowledge_memory_*'
@@ -1132,7 +1225,7 @@ export class CraftStore {
         AND (kind>? OR (kind=? AND id>?) OR (kind=? AND id=? AND version>?))
       ORDER BY kind,id,version LIMIT ?`).all(after[0], after[0], after[1], after[0], after[1], after[2], limit + 1) as Array<Record<string, unknown>>;
     const page = rows.slice(0, limit), hasMore = rows.length > limit;
-    if (!page.length) return this.retireLegacyKnowledgeContent("", limit, args.dry_run === true);
+    if (!page.length) return this.retireLegacyKnowledgeContent("", limit, args.dry_run === true, summaryOnly);
     const blocked: JsonObject[] = [];
     const groups = new Map<string, { scope: MemoryScope; rows: Array<Record<string, unknown>> }>();
     let skipped = 0, migrated = 0;
@@ -1210,7 +1303,8 @@ export class CraftStore {
     const cursor = Buffer.from(JSON.stringify(hasMore ? [last.kind, last.id, last.version] : ["content_scan", "", 1])).toString("base64url");
     return { status: "partial", phase: "records", examined: page.length,
       migratable: [...groups.values()].reduce((total, group) => total + group.rows.length, 0), migrated, skipped,
-      blocked, has_more: true, next_cursor: cursor, dry_run: args.dry_run === true, raw_content_stored: false };
+      ...blockedSummary(blocked, summaryOnly), summary_only: summaryOnly,
+      has_more: true, next_cursor: cursor, dry_run: args.dry_run === true, raw_content_stored: false };
   }
 
   private memoryContentScopeMatches(value: string, scope: MemoryScope): boolean {
@@ -1231,7 +1325,7 @@ export class CraftStore {
 
   /** Files themselves are the retry queue: never remove a legacy body before
    * its scoped copy, self-contained backup and all versioned references agree. */
-  private retireLegacyKnowledgeContent(after: string, limit: number, dryRun: boolean): JsonObject {
+  private retireLegacyKnowledgeContent(after: string, limit: number, dryRun: boolean, summaryOnly: boolean): JsonObject {
     const root = this.paths.knowledgeContentDir;
     const stat = lstatSync(root);
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Legacy Knowledge content directory must be regular");
@@ -1279,7 +1373,8 @@ export class CraftStore {
       } catch { blocked.push({ ...identity, reason: "legacy_content_retirement_failed" }); }
     }
     return { status: blocked.length || hasMore ? "partial" : "completed", phase: "content", examined: page.length,
-      migratable, migrated: 0, retired_content: retired, skipped, blocked, has_more: hasMore,
+      migratable, migrated: 0, retired_content: retired, skipped, ...blockedSummary(blocked, summaryOnly), summary_only: summaryOnly,
+      has_more: hasMore,
       next_cursor: hasMore ? Buffer.from(JSON.stringify(["content_scan", page.at(-1), 1])).toString("base64url") : null,
       dry_run: dryRun, raw_content_stored: false };
   }
@@ -1293,15 +1388,16 @@ export class CraftStore {
   }
 
   private partitionPointer(kind: string, id: string, version?: number): { domain: PartitionDomain; scope: MemoryScope; file: string; recordId?: string } | null {
-    const row = version === undefined
+    let row = version === undefined
       ? this.database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1").get(kind, id)
       : this.database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=?").get(kind, id, version);
+    if (!row && kind === "evolution_cycle") row = this.database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1").get(kind, id);
     if (!row) return null;
     return this.partitionPointerFromPayload(JSON.parse(String((row as { payload_json: string }).payload_json)) as JsonObject);
   }
 
   private partitionPointerFromPayload(payload: JsonObject): { domain: PartitionDomain; scope: MemoryScope; file: string; recordId?: string } | null {
-    for (const domain of ["memory", "experience", "knowledge"] as const) {
+    for (const domain of ["memory", "experience", "knowledge", "evolution"] as const) {
       const pointer = payload[`_${domain}_partition`] as JsonObject | undefined;
       if (!pointer || !pointer.scope || typeof pointer.scope !== "object") continue;
       const scope = pointer.scope as MemoryScope;
@@ -1409,9 +1505,10 @@ export class CraftStore {
       ? Number(database.prepare("PRAGMA busy_timeout").get()!.timeout) : undefined;
     if (previousTimeout !== undefined) database.exec("PRAGMA busy_timeout=0;");
     try {
-      database.exec("BEGIN IMMEDIATE");
+      try { database.exec("BEGIN IMMEDIATE"); }
+      catch (error) { throw storageFailure(error, database, database === this.#database ? "primary" : "capability_partition", "transaction_begin"); }
       try { const result = operation(); database.exec("COMMIT"); return result; }
-      catch (error) { database.exec("ROLLBACK"); throw error; }
+      catch (error) { database.exec("ROLLBACK"); throw storageFailure(error, database, database === this.#database ? "primary" : "capability_partition", "transaction_operation"); }
     } finally { if (previousTimeout !== undefined) database.exec(`PRAGMA busy_timeout=${previousTimeout};`); }
   }
 
@@ -1426,21 +1523,26 @@ export class CraftStore {
   }
 
   find(kind: string, id: string, version?: number, hydrate = true): JsonObject | null {
-    const row = version === undefined
+    let row = version === undefined
       ? this.database.prepare(
         "SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1",
       ).get(kind, id)
       : this.database.prepare(
         "SELECT * FROM records WHERE kind=? AND id=? AND version=?",
       ).get(kind, id, version);
+    if (!row && kind === "evolution_cycle") row = this.database.prepare(
+      "SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1",
+    ).get(kind, id);
     if (!row) return TRACE_SHARDED_KINDS.has(kind) ? this.traceShards.find(kind, id, version)
       : CODEBASE_GRAPH_KINDS.has(kind) ? this.codebaseShards.find(kind, id, version) : null;
     const raw = row as Record<string, unknown>;
     const partition = this.partitionPointerFromPayload(JSON.parse(String(raw.payload_json)) as JsonObject);
     if (partition) {
       const target = this.memoryDatabaseForRead(partition.scope, partition.domain, partition.file).database;
-      const source = target.prepare("SELECT * FROM records WHERE kind=? AND id=? AND version=?").get(kind, partition.recordId ?? id, Number(raw.version));
-      if (!source) throw new Error(`${partition.domain === "memory" ? "Memory" : partition.domain === "knowledge" ? "Knowledge" : "Experience"} partition record is missing: ${kind}/${id}@${String(raw.version)}`);
+      const source = partition.domain === "evolution" && version === undefined
+        ? target.prepare("SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1").get(kind, partition.recordId ?? id)
+        : target.prepare("SELECT * FROM records WHERE kind=? AND id=? AND version=?").get(kind, partition.recordId ?? id, Number(version ?? raw.version));
+      if (!source) throw new Error(`${PARTITION_LABELS[partition.domain]} partition record is missing: ${kind}/${id}@${String(version ?? raw.version)}`);
       return this.record({ ...(source as Record<string, unknown>), id }, hydrate);
     }
     return this.record(raw, hydrate);
@@ -1450,9 +1552,10 @@ export class CraftStore {
     const partition = this.partitionPointerFromPayload(JSON.parse(String(row.payload_json)) as JsonObject);
     if (!partition) return this.record(row, hydrate);
     const target = this.memoryDatabaseForRead(partition.scope, partition.domain, partition.file).database;
-    const source = target.prepare("SELECT * FROM records WHERE kind=? AND id=? AND version=?")
-      .get(String(row.kind), partition.recordId ?? String(row.id), Number(row.version));
-    if (!source) throw new Error(`${partition.domain === "memory" ? "Memory" : partition.domain === "knowledge" ? "Knowledge" : "Experience"} partition record is missing: ${String(row.kind)}/${String(row.id)}@${String(row.version)}`);
+    const source = partition.domain === "evolution"
+      ? target.prepare("SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1").get(String(row.kind), partition.recordId ?? String(row.id))
+      : target.prepare("SELECT * FROM records WHERE kind=? AND id=? AND version=?").get(String(row.kind), partition.recordId ?? String(row.id), Number(row.version));
+    if (!source) throw new Error(`${PARTITION_LABELS[partition.domain]} partition record is missing: ${String(row.kind)}/${String(row.id)}@${String(row.version)}`);
     return this.record({ ...(source as Record<string, unknown>), id: row.id }, hydrate);
   }
 
@@ -1901,6 +2004,28 @@ export class CraftStore {
   appendEvent(stream: string, eventType: string, payload: JsonObject): JsonObject {
     if (stream.startsWith("trace:") && !this.legacyTrace(stream.slice(6)))
       return this.traceShards.appendEvent(stream.slice(6), eventType, payload);
+    if (stream.startsWith("evolution:")) {
+      const cycleId = stream.slice("evolution:".length), pointer = this.partitionPointer("evolution_cycle", cycleId);
+      if (pointer?.domain !== "evolution") throw new Error("Evolution Cycle project partition is unavailable");
+      const { database } = this.memoryDatabase(pointer.scope, "evolution");
+      return this.transactionOn(database, () => {
+        const nextSequence = Number((database.prepare("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM events WHERE stream=?")
+          .get(stream) as { sequence: number }).sequence);
+        const requestedSequence = Number(payload.sequence);
+        const sequence = Number.isSafeInteger(requestedSequence) && requestedSequence > 0 ? requestedSequence : nextSequence;
+        if (sequence < nextSequence) {
+          const existing = database.prepare("SELECT * FROM events WHERE stream=? AND sequence=?").get(stream, sequence) as Record<string, unknown> | undefined;
+          if (existing && existing.event_type === eventType && String(existing.payload_json) === JSON.stringify(payload))
+            return { stream, sequence, event_type: eventType, payload, created_at: existing.created_at };
+          throw new Error("Evolution Cycle event sequence conflicts with an existing event");
+        }
+        if (sequence !== nextSequence) throw new Error("Evolution Cycle event sequence is stale");
+        const created_at = new Date().toISOString();
+        database.prepare("INSERT INTO events(stream,sequence,event_type,payload_json,created_at) VALUES(?,?,?,?,?)")
+          .run(stream, sequence, eventType, JSON.stringify(payload), created_at);
+        return { stream, sequence, event_type: eventType, payload, created_at };
+      });
+    }
     return this.transaction((database) => {
       const sequence = Number((database.prepare(
         "SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM events WHERE stream=?",
@@ -1915,7 +2040,11 @@ export class CraftStore {
 
   events(stream: string): JsonObject[] {
     if (stream.startsWith("trace:") && !this.legacyTrace(stream.slice(6))) return this.traceShards.events(stream.slice(6));
-    return this.database.prepare(
+    const cycleId = stream.startsWith("evolution:") ? stream.slice("evolution:".length) : "";
+    const pointer = cycleId ? this.partitionPointer("evolution_cycle", cycleId) : null;
+    if (cycleId && pointer?.domain !== "evolution") throw new Error("Evolution Cycle project partition is unavailable");
+    const source = pointer?.domain === "evolution" ? this.memoryDatabaseForRead(pointer.scope, "evolution", pointer.file).database : this.database;
+    return source.prepare(
       "SELECT * FROM events WHERE stream=? ORDER BY sequence",
     ).all(stream).map((row) => {
       const item = row as Record<string, unknown>;
