@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { acquireLearningWorkerLocks } from "../infrastructure/learning-worker-lock.ts";
+import { CRAFT_RELEASE_VERSION } from "../version.ts";
 export { acquireLearningWorkerLocks, learningWorkerOwnerAlive } from "../infrastructure/learning-worker-lock.ts";
 import { craftPaths, dataRoot } from "../infrastructure/paths.ts";
 
@@ -55,7 +56,7 @@ export async function startContextLearningWorker(options: LearningWorkerSupervis
   if (!Number.isSafeInteger(restartBase) || restartBase < 1 || restartBase > 30_000) throw new Error("restart_base_delay_ms must be between 1 and 30000");
   let releaseLocks: (() => Promise<void>) | null;
   try {
-    releaseLocks = await acquireLearningWorkerLocks(craftPaths(dataRoot(options.env)).runtimeDir, component.learning.split(","));
+    releaseLocks = await acquireLearningWorkerLocks(craftPaths(dataRoot(options.env)).runtimeDir, component.learning.split(","), { runtime_version: CRAFT_RELEASE_VERSION });
   } catch {
     options.on_failure?.("worker_lock_unavailable");
     return undefined;

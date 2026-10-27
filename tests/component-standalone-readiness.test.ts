@@ -32,6 +32,10 @@ test("component diagnosis filters execution receipts by component, session and r
     for (const observed_tool_names of [null, [false], [" "]]) assert.throws(() => kernel.diagnose({ component: "memory", observed_tool_names }), /observed_tool_names/);
     const empty = kernel.diagnose({ component: "memory" });
     assert.equal((empty.execution_proof as JsonObject).status, "not_observed");
+    assert.equal((empty.observability as JsonObject).learning_worker, undefined);
+    await writeFile(join(f.store.paths.runtimeDir, "learning-worker-knowledge.lock.json"), JSON.stringify({ pid: 123, owner_id: "owner", runtime_version: "0.12.1" }));
+    const worker = (kernel.diagnose({ component: "knowledge" }).observability as JsonObject).learning_worker as JsonObject;
+    assert.equal(worker.version_relation, "different"); assert.equal(worker.liveness, "unverified");
     assert.equal(empty.next_action, "run_one_real_host_turn_then_recheck_with_session_id");
     const routed = kernel.diagnose({ component: "experience", observed_tool_names: ["craft_run", "craft_context_tools_discover"] });
     assert.equal(routed.tool_access_mode, "syscall_discovery");

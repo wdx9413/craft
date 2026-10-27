@@ -159,8 +159,9 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     assert.equal(await server.handle({ jsonrpc: "2.0", method: "ping" }), undefined);
     const initialized = (await server.handle({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }))?.result as Record<string, unknown>;
     assert.equal(initialized.protocolVersion, "2025-06-18");
-    assert.match(String(initialized.instructions), /Experience text.*ja-JP/u);
-    assert.match(String(initialized.instructions), /Preserve user-authored statements and source evidence verbatim/u);
+    assert.match(String(initialized.instructions), /Experience prose.*ja-JP/u);
+    assert.match(String(initialized.instructions), /preserve user text, source evidence, IDs, stable keys and JSON keys verbatim/u);
+    assert(String(initialized.instructions).length < 160, "server instructions are copied into each Host tool description");
     assert.equal(((await server.handle({ id: 1, method: "initialize" }))?.result as Record<string, unknown>).protocolVersion, "2025-11-25");
     assert.deepEqual((await server.handle({ id: 2, method: "ping" }))?.result, {});
     assert.equal((((await server.handle({ id: 3, method: "tools/list" }))?.result as Record<string, unknown>).tools as unknown[]).length, TOOLS.length);

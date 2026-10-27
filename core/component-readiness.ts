@@ -2,6 +2,7 @@ import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { CRAFT_RELEASE_VERSION } from "./version.ts";
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { learningWorkerDiagnostic } from "./learning-worker-diagnostic.ts";
 
 const COMPONENTS = new Set(["knowledge", "memory", "experience"]);
 
@@ -90,7 +91,9 @@ export class ComponentReadinessKernel {
       host_attachment: observed === null ? "this_mcp_process_replied; compare this release with the Host cache when another conversation cannot see it"
         : missing.length ? "bundle_or_surface_mismatch" : "surface_matches",
       execution_proof: execution,
-      observability: { data_root: this.store.paths.root, ...(name === "knowledge" ? { learning_evaluation: knowledgeEvaluationDiagnostic(this.store.paths.knowledgeDir) } : {}), trace_retention: this.store.find("maintenance_component", "trace_retention") ?? { status: "not_observed" },
+      observability: { data_root: this.store.paths.root, ...(name === "knowledge" ? { learning_evaluation: knowledgeEvaluationDiagnostic(this.store.paths.knowledgeDir) } : {}),
+        ...(name === "knowledge" || name === "experience" ? { learning_worker: learningWorkerDiagnostic(this.store.paths.runtimeDir, name, CRAFT_RELEASE_VERSION) } : {}),
+        trace_retention: this.store.find("maintenance_component", "trace_retention") ?? { status: "not_observed" },
         telemetry_events: this.store.count("telemetry_event"), usage_records: this.store.count("usage_ledger"),
         usage_measurement: this.store.count("usage_ledger") === 0 ? "unavailable" : "recorded", full_content_logged: false },
       next_action: missing.length ? "reinstall_or_restart_the_host_then_compare_initialize_and_tools_list"

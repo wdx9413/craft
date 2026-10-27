@@ -12,6 +12,12 @@
   },
   "groups": [
     {
+      "name": "learning-worker-diagnostic",
+      "include": ["core/learning-worker-diagnostic.ts"],
+      "tests": ["tests/learning-worker-diagnostic.test.ts"],
+      "branches": true
+    },
+    {
       "name": "skill-release-order",
       "include": ["scripts/ci/skill-release-compatibility.ts"],
       "tests": ["tests/skill-release-compatibility.test.ts"],

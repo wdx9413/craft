@@ -94,6 +94,7 @@ test("held-out source mismatch blocks model adjudication", async () => {
   const result = await runSessionKnowledgeAdjudicationOnce({ client: f.client, transport: f.transport, providers: [provider] });
   assert.equal(result.status, "waiting_for_verified_evidence");
   assert.equal(f.calls.some(call => call.name === "craft_trace_start"), false);
+  assert.equal(f.calls.some(call => call.name === "craft_knowledge_semantic_review_packet"), false);
 });
 
 test("a blocked oldest held-out case does not starve the next case", async () => {

@@ -651,16 +651,21 @@ export async function reconcileCodexSessionTaskEvidence(evidenceValue: unknown,
   }
   const path = statePath(options, env);
   const state = await readState(path, options.now ?? new Date().toISOString());
+  const tasks = Object.values(state.tasks);
+  const taskGoalCounts = new Map<string, number>();
+  for (const task of tasks) {
+    if (task.status !== "completed" || !task.user_input_seen || !task.assistant_final_seen || !task.task_goal_digest || !task.project_scope_id) continue;
+    const key = `${task.session_id}\0${task.project_scope_id}\0${task.task_goal_digest}`;
+    taskGoalCounts.set(key, (taskGoalCounts.get(key) ?? 0) + 1);
+  }
   let verified = 0;
-  for (const task of Object.values(state.tasks)) {
+  for (const task of tasks) {
     if (task.verification_status === "verified") continue;
     let matches = byTurn.get(`${task.session_id}\0${task.turn_id}`) ?? [];
     if (!matches.length && task.task_goal_digest && task.project_scope_id) {
-      const sameGoalTasks = Object.values(state.tasks).filter(candidate => candidate.session_id === task.session_id
-        && candidate.project_scope_id === task.project_scope_id && candidate.task_goal_digest === task.task_goal_digest
-        && candidate.status === "completed" && candidate.user_input_seen && candidate.assistant_final_seen);
-      const goalEvidence = evidenceByTaskGoal.get(`${task.session_id}\0${task.project_scope_id}\0${task.task_goal_digest}`) ?? [];
-      if (sameGoalTasks.length === 1 && goalEvidence.length === 1) matches = goalEvidence;
+      const goalKey = `${task.session_id}\0${task.project_scope_id}\0${task.task_goal_digest}`;
+      const goalEvidence = evidenceByTaskGoal.get(goalKey) ?? [];
+      if (taskGoalCounts.get(goalKey) === 1 && goalEvidence.length === 1) matches = goalEvidence;
     }
     // A matching turn is not enough when the Host also supplied a conflicting
     // project, goal, or terminal identity. Preserve legacy records without

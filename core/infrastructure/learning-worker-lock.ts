@@ -18,13 +18,13 @@ export function learningWorkerOwnerAlive(pid: number, kill: (pid: number, signal
   catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; }
 }
 
-async function acquireComponentLock(path: string, fileSystem: WorkerLockFileSystem, isOwnerAlive: (pid: number) => boolean): Promise<ReleaseLock | null> {
+async function acquireComponentLock(path: string, fileSystem: WorkerLockFileSystem, isOwnerAlive: (pid: number) => boolean, runtimeVersion?: string): Promise<ReleaseLock | null> {
   const ownerId = randomUUID();
   const pendingPath = `${path}.creating.${process.pid}.${ownerId}`;
   let handle;
   handle = await fileSystem.open(pendingPath, "wx", 0o600);
   try {
-    await handle.writeFile(JSON.stringify({ pid: process.pid, owner_id: ownerId, started_at: new Date().toISOString() }));
+    await handle.writeFile(JSON.stringify({ pid: process.pid, owner_id: ownerId, started_at: new Date().toISOString(), ...(runtimeVersion ? { runtime_version: runtimeVersion } : {}) }));
     await handle.close();
   } catch (error) {
     try { await handle.close(); } catch { /* Keep the original write failure. */ }
@@ -65,13 +65,14 @@ async function acquireComponentLock(path: string, fileSystem: WorkerLockFileSyst
 export async function acquireLearningWorkerLocks(runtimeDir: string, components: string[], dependencies: {
   file_system?: Partial<WorkerLockFileSystem>;
   is_process_alive?: (pid: number) => boolean;
+  runtime_version?: string;
 } = {}): Promise<(() => Promise<void>) | null> {
   const fileSystem = { ...workerLockFileSystem, ...dependencies.file_system };
   const isOwnerAlive = dependencies.is_process_alive ?? learningWorkerOwnerAlive;
   await fileSystem.mkdir(runtimeDir, { recursive: true, mode: 0o700 });
   const releases: ReleaseLock[] = [];
   for (const component of [...new Set(components)].sort()) {
-    const release = await acquireComponentLock(join(runtimeDir, `learning-worker-${component}.lock.json`), fileSystem, isOwnerAlive);
+    const release = await acquireComponentLock(join(runtimeDir, `learning-worker-${component}.lock.json`), fileSystem, isOwnerAlive, dependencies.runtime_version);
     if (!release) {
       await Promise.all(releases.reverse().map(item => item()));
       return null;

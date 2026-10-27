@@ -113,11 +113,13 @@ test("worker lock publishes complete metadata atomically under concurrent startu
       return link(source, destination);
     } };
     const [first, second] = await Promise.all([
-      acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: atomicFileSystem }),
-      acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: atomicFileSystem }),
+      acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: atomicFileSystem, runtime_version: (await import("../core/version.ts")).CRAFT_RELEASE_VERSION }),
+      acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: atomicFileSystem, runtime_version: (await import("../core/version.ts")).CRAFT_RELEASE_VERSION }),
     ]);
     assert.equal([first, second].filter(Boolean).length, 1);
-    assert.equal(JSON.parse(await readFile(join(runtimeDir, "learning-worker-knowledge.lock.json"), "utf8")).pid, process.pid);
+    const lock = JSON.parse(await readFile(join(runtimeDir, "learning-worker-knowledge.lock.json"), "utf8"));
+    assert.equal(lock.pid, process.pid);
+    assert.equal(lock.runtime_version, (await import("../core/version.ts")).CRAFT_RELEASE_VERSION);
     await (first ?? second)?.();
   } finally { await f.close(); }
 });

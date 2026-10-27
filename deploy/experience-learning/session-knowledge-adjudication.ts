@@ -83,21 +83,6 @@ export async function runSessionKnowledgeAdjudicationOnce(deps: DistillationDepe
       run_status: run.status, evaluation_eligible: (run.metrics as JsonObject | undefined)?.provenance_eligible === true, raw_content_stored: false });
   }
 
-  const claimRefs: JsonObject[] = Array.isArray(current.candidate_claim_refs) && current.candidate_claim_refs.length > 0
-    ? current.candidate_claim_refs as JsonObject[]
-    : (current.expected_claim_ids as string[]).map(claim_id => ({ claim_id }));
-  const claimsAreVersionBound = Array.isArray(current.candidate_claim_refs) && current.candidate_claim_refs.length > 0;
-  const claims: JsonObject[] = [];
-  for (const ref of claimRefs) {
-    const packetResult = await deps.client.call("craft_knowledge_semantic_review_packet", { claim_id: ref.claim_id });
-    if (packetResult.status !== "ready" || !["candidate", "reviewed"].includes(String(packetResult.claim_status))) return withMetrics({ status: "waiting_for_current_claims", processed: 0, model_calls: 0, raw_content_stored: false });
-    const packet = object(packetResult.packet, "Knowledge Claim packet"), claim = object(packet.claim, "Knowledge Claim");
-    if (claim.id !== ref.claim_id || claimsAreVersionBound && (claim.version !== ref.claim_version
-      || claim.content_digest !== ref.content_digest) || typeof claim.content !== "string" || !claim.content.trim()) {
-      return withMetrics({ status: "waiting_for_current_candidates", processed: 0, model_calls: 0, raw_content_stored: false });
-    }
-    claims.push({ claim_id: claim.id, claim_version: claim.version, title: claim.title ?? "", content: claim.content, tags: claim.tags ?? [] });
-  }
   const evidence: JsonObject[] = [];
   for (const evidenceId of Array.isArray(current.source_evidence_ids) ? current.source_evidence_ids as string[] : []) {
     const result = await deps.client.call("craft_evidence_get", { evidence_id: evidenceId });
@@ -113,6 +98,21 @@ export async function runSessionKnowledgeAdjudicationOnce(deps: DistillationDepe
       claim: typeof item.claim === "string" ? item.claim : "", source_session_id: metadata.source_session_id, task_id: metadata.task_id });
   }
   if (!evidence.length) return withMetrics({ status: "waiting_for_verified_evidence", processed: 0, model_calls: 0, raw_content_stored: false });
+  const claimRefs: JsonObject[] = Array.isArray(current.candidate_claim_refs) && current.candidate_claim_refs.length > 0
+    ? current.candidate_claim_refs as JsonObject[]
+    : (current.expected_claim_ids as string[]).map(claim_id => ({ claim_id }));
+  const claimsAreVersionBound = Array.isArray(current.candidate_claim_refs) && current.candidate_claim_refs.length > 0;
+  const claims: JsonObject[] = [];
+  for (const ref of claimRefs) {
+    const packetResult = await deps.client.call("craft_knowledge_semantic_review_packet", { claim_id: ref.claim_id });
+    if (packetResult.status !== "ready" || !["candidate", "reviewed"].includes(String(packetResult.claim_status))) return withMetrics({ status: "waiting_for_current_claims", processed: 0, model_calls: 0, raw_content_stored: false });
+    const packet = object(packetResult.packet, "Knowledge Claim packet"), claim = object(packet.claim, "Knowledge Claim");
+    if (claim.id !== ref.claim_id || claimsAreVersionBound && (claim.version !== ref.claim_version
+      || claim.content_digest !== ref.content_digest) || typeof claim.content !== "string" || !claim.content.trim()) {
+      return withMetrics({ status: "waiting_for_current_candidates", processed: 0, model_calls: 0, raw_content_stored: false });
+    }
+    claims.push({ claim_id: claim.id, claim_version: claim.version, title: claim.title ?? "", content: claim.content, tags: claim.tags ?? [] });
+  }
   const profileResult = await deps.client.call("craft_evaluation_model_profile_ensure_single", { purpose: "knowledge_scenario_classification" });
   if (profileResult.status !== "ready_for_adapter" || !profileResult.profile) return withMetrics({ status: "waiting_for_model", processed: 0, model_calls: 0,
     reason: String(profileResult.reason ?? profileResult.status ?? "model_profile_unavailable"), raw_content_stored: false });

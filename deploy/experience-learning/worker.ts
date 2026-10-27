@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createFetchTransport, buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
 import { stableDigest } from "../../core/digest.ts";
-import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import { craftPaths, dataRoot } from "../../core/infrastructure/paths.ts";
 import { generatedTextLanguageInstruction, loadConfig } from "../../core/config.ts";
@@ -23,12 +22,13 @@ import { createLearningModelTransport } from "./codex-cli-transport.ts";
 import { learningFailureKind, learningTickStatus, runLearningTick as runResilientLearningTick } from "./learning-tick.ts";
 import { codexSessionEvidenceBatch, commitCodexSessionEvidenceBatch, reconcileCodexSessionTaskEvidence, runCodexSessionCollectionOnce } from "../../core/codex-session-archive.ts";
 import { acquireLearningWorkerLocks } from "../../core/interfaces/learning-worker-supervisor.ts";
+import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 
 export interface ExperienceLearningClient { call(name: string, args?: JsonObject): Promise<JsonObject> }
 export type LearningComponent = "experience" | "knowledge";
 
 async function collectCodexSessionsWithLock(client: ExperienceLearningClient): Promise<JsonObject> {
-  const release = await acquireLearningWorkerLocks(craftPaths(dataRoot()).runtimeDir, ["codex-session-collection"]);
+  const release = await acquireLearningWorkerLocks(craftPaths(dataRoot()).runtimeDir, ["codex-session-collection"], { runtime_version: CRAFT_RELEASE_VERSION });
   if (!release) return { status: "skipped_locked", sessions_processed: 0, raw_content_stored: false };
   try {
     const collection = await runCodexSessionCollectionOnce();
@@ -456,7 +456,7 @@ async function main(): Promise<void> {
   const lockComponents = components.filter(component => !inheritedLocks.has(component));
   let releaseWorkerLocks: (() => Promise<void>) | null = null;
   if (lockComponents.length) {
-    try { releaseWorkerLocks = await acquireLearningWorkerLocks(craftPaths(dataRoot()).runtimeDir, lockComponents); }
+    try { releaseWorkerLocks = await acquireLearningWorkerLocks(craftPaths(dataRoot()).runtimeDir, lockComponents, { runtime_version: CRAFT_RELEASE_VERSION }); }
     catch (error) {
       process.stderr.write(`Craft learning worker lock failed (${learningFailureKind(error)}).\n`);
       process.exitCode = 1;
