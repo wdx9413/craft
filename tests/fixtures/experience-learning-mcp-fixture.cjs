@@ -43,6 +43,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
                 : request.method === "tools/call" && request.params.name === "craft_knowledge_source_list" ? { isError: false, structuredContent: { sources: [] }, content: [] }
                 : request.method === "tools/call" && request.params.name === "craft_learning_cycle_task_evidence_list" ? { isError: false, structuredContent: { evidence: JSON.parse(process.env.CRAFT_TEST_SESSION_EVIDENCE ?? "[]") }, content: [] }
                 : request.method === "tools/call" && request.params.name === "craft_knowledge_claim_list" ? { isError: false, structuredContent: { claims: [] }, content: [] }
+                : request.method === "tools/call" && request.params.name === "craft_evaluation_model_ticket_list" ? { isError: false, structuredContent: { tickets: [], has_more: false, next_cursor: null }, content: [] }
                 : request.method === "tools/call" ? { isError: false, structuredContent: { tickets: [] }, content: [] }
                 : undefined;
   if (request.method === "initialize") {

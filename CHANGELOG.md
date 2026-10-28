@@ -1,3 +1,8 @@
+## 0.12.124
+
+- Experience 分类队列支持稳定 ID 分页、持久游标和有界轮转，跳过被抑制或未就绪的票据，避免阻塞后续任务。
+- 分类失败检查点按票据摘要分文件保存，并兼容读取旧检查点，避免超过 500 张票据后重新消耗模型调用。
+
 ## 0.12.123
 
 - Persist deterministic Experience classification failures by ticket, input and classifier/profile version so unchanged failures do not consume another Host call each polling cycle.

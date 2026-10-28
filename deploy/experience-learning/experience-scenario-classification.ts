@@ -4,7 +4,7 @@ import { stableDigest } from "../../core/digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { generatedTextLanguageInstruction } from "../../core/config.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
-import { recordExperienceClassificationFailure, shouldSuppressExperienceClassification } from "./experience-classification-state.ts";
+import { readExperienceClassificationCursor, recordExperienceClassificationCursor, recordExperienceClassificationFailure, shouldSuppressExperienceClassification } from "./experience-classification-state.ts";
 
 export interface ExperienceScenarioClassificationClient { call(name: string, args?: JsonObject): Promise<JsonObject> }
 export interface ExperienceScenarioClassificationDependencies {
@@ -84,13 +84,40 @@ class DeterministicClassificationFailure extends Error {
 
 /** Process at most one real, ready Experience scenario-classification task per worker tick. */
 export async function runExperienceScenarioClassificationOnce(deps: ExperienceScenarioClassificationDependencies): Promise<JsonObject> {
-  const listed = await deps.client.call("craft_evaluation_model_ticket_list", { purpose: "workflow_evolution", limit: 100 });
-  const tickets = array(listed.tickets, "tickets").map((value, index) => object(value, `tickets[${index}]`));
-  const ticket = tickets.find(value => {
-    const target = value.target as JsonObject | undefined;
-    return value.purpose === "workflow_evolution" && target?.kind === "experience_scenario_classification_request";
-  });
-  if (!ticket) return { processed: 0, outcomes: [] };
+  let cursor = deps.state_file ? readExperienceClassificationCursor(deps.state_file) : undefined;
+  let skipped: JsonObject | undefined;
+  for (let page = 0; page < 4; page++) {
+    const listed = await deps.client.call("craft_evaluation_model_ticket_list", { purpose: "workflow_evolution", limit: 100,
+      ...(cursor === undefined ? {} : { after_id: cursor }) });
+    const tickets = array(listed.tickets, "tickets").map((value, index) => object(value, `tickets[${index}]`));
+    const paged = typeof listed.has_more === "boolean";
+    if (cursor !== undefined && !paged) throw new Error("Experience classification ticket pagination is unavailable");
+    for (const ticket of tickets) {
+      const target = ticket.target as JsonObject | undefined;
+      if (ticket.purpose !== "workflow_evolution" || target?.kind !== "experience_scenario_classification_request") continue;
+      const result = await runClassificationTicket(deps, ticket);
+      if (Number(result.processed) > 0) {
+        if (paged && deps.state_file) await recordExperienceClassificationCursor(deps.state_file, String(ticket.id));
+        return result;
+      }
+      if (result.reason === "model_call_budget_exhausted") return result;
+      skipped ??= result;
+    }
+    if (!paged || listed.has_more !== true) {
+      if (paged && deps.state_file) await recordExperienceClassificationCursor(deps.state_file, "");
+      return skipped ?? { processed: 0, outcomes: [] };
+    }
+    if (typeof listed.next_cursor !== "string" || !listed.next_cursor
+      || (cursor !== undefined && Buffer.compare(Buffer.from(listed.next_cursor), Buffer.from(cursor)) <= 0)) {
+      throw new Error("Experience classification ticket cursor did not advance");
+    }
+    cursor = listed.next_cursor;
+    if (deps.state_file) await recordExperienceClassificationCursor(deps.state_file, cursor);
+  }
+  return { processed: 0, skipped: true, reason: "ticket_scan_limit_reached", scan_has_more: true, outcomes: skipped?.outcomes ?? [] };
+}
+
+async function runClassificationTicket(deps: ExperienceScenarioClassificationDependencies, ticket: JsonObject): Promise<JsonObject> {
   const target = object(ticket.target, "ticket.target");
   const ticketId = summary(ticket.id, "ticket.id");
   const requestId = summary(target.id, "ticket.target.id");

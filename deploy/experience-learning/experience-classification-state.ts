@@ -1,12 +1,26 @@
 import { lstatSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { basename, dirname, join } from "node:path";
 import { atomicPrivateJson } from "../../common/craft-common-store-local/src/paths.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 
 const SCHEMA = "craft.experience-classification-attempts.v1";
+const ENTRY_SCHEMA = "craft.experience-classification-attempt.v2";
 const DIGEST = /^sha256:[a-f0-9]{64}$/u;
 const IDENTIFIER = /^[A-Za-z0-9._:-]{1,200}$/u;
 const MAX_ENTRIES = 500;
+function validCursor(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 65_536 && !value.includes("\0");
+}
+
+function validFailure(value: unknown): value is ExperienceClassificationFailure {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as JsonObject;
+  return DIGEST.test(String(item.attempt_digest)) && typeof item.classifier_version === "string" && Boolean(item.classifier_version.trim())
+    && typeof item.failure_stage === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(item.failure_stage)
+    && typeof item.failure_code === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(item.failure_code)
+    && typeof item.failed_at === "string" && Number.isFinite(Date.parse(item.failed_at));
+}
 
 export interface ExperienceClassificationFailure {
   attempt_digest: string;
@@ -16,28 +30,23 @@ export interface ExperienceClassificationFailure {
   failed_at: string;
 }
 
-interface AttemptState { schema: string; attempts: Record<string, ExperienceClassificationFailure> }
+interface AttemptState { schema: string; attempts: Record<string, ExperienceClassificationFailure>; last_ticket_id?: string }
 
 function readAttempts(path: string): AttemptState {
   try {
     const stat = lstatSync(path);
     if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Experience classification state must be a regular file");
     const state = JSON.parse(readFileSync(path, "utf8")) as JsonObject;
-    if (state.schema !== SCHEMA || !state.attempts || typeof state.attempts !== "object" || Array.isArray(state.attempts)) {
+    if (state.schema !== SCHEMA || !state.attempts || typeof state.attempts !== "object" || Array.isArray(state.attempts)
+      || (state.last_ticket_id !== undefined && !validCursor(state.last_ticket_id))) {
       throw new Error("Experience classification state is invalid");
     }
     const entries = Object.entries(state.attempts);
-    if (entries.length > MAX_ENTRIES || entries.some(([ticketId, value]) => !IDENTIFIER.test(ticketId)
-      || !value || typeof value !== "object" || Array.isArray(value)
-      || !DIGEST.test(String((value as JsonObject).attempt_digest))
-      || typeof (value as JsonObject).classifier_version !== "string" || !(value as JsonObject).classifier_version
-      || typeof (value as JsonObject).failure_stage !== "string" || !/^[a-z][a-z0-9_]{0,63}$/u.test(String((value as JsonObject).failure_stage))
-      || typeof (value as JsonObject).failure_code !== "string" || !/^[a-z][a-z0-9_]{0,63}$/u.test(String((value as JsonObject).failure_code))
-      || typeof (value as JsonObject).failed_at !== "string"
-      || !Number.isFinite(Date.parse(String((value as JsonObject).failed_at))))) {
+    if (entries.length > MAX_ENTRIES || entries.some(([ticketId, value]) => !IDENTIFIER.test(ticketId) || !validFailure(value))) {
       throw new Error("Experience classification state is invalid");
     }
-    return { schema: SCHEMA, attempts: Object.fromEntries(entries) as Record<string, ExperienceClassificationFailure> };
+    return { schema: SCHEMA, attempts: Object.fromEntries(entries) as Record<string, ExperienceClassificationFailure>,
+      ...(state.last_ticket_id === undefined ? {} : { last_ticket_id: state.last_ticket_id as string }) };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { schema: SCHEMA, attempts: {} };
     throw error;
@@ -49,22 +58,53 @@ function checkStateDirectory(path: string): void {
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 }
 
+function attemptFile(path: string, ticketId: string): { path: string; ticket_digest: string } {
+  const hash = createHash("sha256").update(ticketId).digest("hex");
+  return { path: join(dirname(path), `${basename(path)}.entries`, `${hash}.json`), ticket_digest: `sha256:${hash}` };
+}
+
+function readAttempt(path: string, ticketId: string): ExperienceClassificationFailure | undefined {
+  const entry = attemptFile(path, ticketId);
+  checkStateDirectory(entry.path);
+  try {
+    const stat = lstatSync(entry.path);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Experience classification attempt must be a regular file");
+    const stored = JSON.parse(readFileSync(entry.path, "utf8")) as JsonObject;
+    if (stored.schema !== ENTRY_SCHEMA || stored.ticket_digest !== entry.ticket_digest || !validFailure(stored.failure)) {
+      throw new Error("Experience classification attempt is invalid");
+    }
+    return stored.failure;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
 export function shouldSuppressExperienceClassification(path: string, ticketId: string, attemptDigest: string, classifierVersion: string): boolean {
   if (!IDENTIFIER.test(ticketId) || !DIGEST.test(attemptDigest) || typeof classifierVersion !== "string" || !classifierVersion.trim()) {
     throw new Error("Experience classification attempt identity is invalid");
   }
   checkStateDirectory(path);
-  const failure = readAttempts(path).attempts[ticketId];
+  const failure = readAttempt(path, ticketId) ?? readAttempts(path).attempts[ticketId];
   return failure?.attempt_digest === attemptDigest && failure.classifier_version === classifierVersion;
 }
 
 export async function recordExperienceClassificationFailure(path: string, ticketId: string, failure: ExperienceClassificationFailure): Promise<void> {
-  if (!IDENTIFIER.test(ticketId) || !DIGEST.test(failure.attempt_digest) || typeof failure.classifier_version !== "string" || !failure.classifier_version.trim()
-    || !/^[a-z][a-z0-9_]{0,63}$/u.test(failure.failure_stage) || !/^[a-z][a-z0-9_]{0,63}$/u.test(failure.failure_code)
-    || !Number.isFinite(Date.parse(failure.failed_at))) throw new Error("Experience classification attempt identity is invalid");
+  if (!IDENTIFIER.test(ticketId) || !validFailure(failure)) throw new Error("Experience classification attempt identity is invalid");
   checkStateDirectory(path);
-  const current = readAttempts(path).attempts;
-  const attempts = Object.fromEntries(Object.entries({ ...current, [ticketId]: failure })
-    .sort(([, left], [, right]) => left.failed_at.localeCompare(right.failed_at)).slice(-MAX_ENTRIES));
-  await atomicPrivateJson(path, { schema: SCHEMA, attempts });
+  const entry = attemptFile(path, ticketId);
+  checkStateDirectory(entry.path);
+  await atomicPrivateJson(entry.path, { schema: ENTRY_SCHEMA, ticket_digest: entry.ticket_digest, failure });
+}
+
+export function readExperienceClassificationCursor(path: string): string {
+  checkStateDirectory(path);
+  return readAttempts(path).last_ticket_id ?? "";
+}
+
+export async function recordExperienceClassificationCursor(path: string, ticketId: string): Promise<void> {
+  if (!validCursor(ticketId)) throw new Error("Experience classification cursor identity is invalid");
+  checkStateDirectory(path);
+  const state = readAttempts(path);
+  if ((state.last_ticket_id ?? "") !== ticketId) await atomicPrivateJson(path, { ...state, last_ticket_id: ticketId });
 }

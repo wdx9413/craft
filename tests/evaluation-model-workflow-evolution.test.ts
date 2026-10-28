@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { stableDigest } from "../core/digest.ts";
 import { EvaluationModelProfileKernel } from "../capability/craft-experience/evaluation-model-profile.ts";
@@ -19,6 +20,35 @@ async function fixture() {
   return { root, store, service, evidence };
 }
 async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+
+test("model ticket pages advance over filtered records and retain the legacy list contract", async () => {
+  const f = await fixture();
+  try {
+    const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, { DASHSCOPE_API_KEY: "configured-for-test" });
+    const profile = kernel.save({ profile_id: "paging-profile", provider: "qwen", model: "qwen-plus",
+      purposes: ["evaluation"], network_execution_enabled: true }).profile as JsonObject;
+    for (const [id, status] of [["a", "ready_for_adapter"], ["b", "completed"], ["c", "ready_for_adapter"], ["d", "ready_for_adapter"]]) {
+      f.store.create("evaluation_model_ticket", id!, { purpose: "evaluation", status, profile_id: profile.id, profile_version: profile.version });
+    }
+    const first = kernel.ticketList({ purpose: "evaluation", limit: 2, after_id: "" });
+    assert.deepEqual((first.tickets as JsonObject[]).map(item => item.id), ["a"]);
+    assert.equal(first.has_more, true);
+    assert.equal(first.next_cursor, "b");
+    const second = kernel.ticketList({ purpose: "evaluation", limit: 2, after_id: first.next_cursor });
+    assert.deepEqual((second.tickets as JsonObject[]).map(item => item.id), ["c", "d"]);
+    assert.equal(second.has_more, false);
+    assert.equal(second.next_cursor, null);
+    const legacy = kernel.ticketList({ purpose: "evaluation", limit: 2 });
+    assert.equal((legacy.tickets as JsonObject[]).length, 2);
+    assert.equal(Object.hasOwn(legacy, "has_more"), false);
+    assert.throws(() => kernel.ticketList({ after_id: "bad\0cursor" }), /after_id/u);
+    const writer = new DatabaseSync(craftPaths(f.root).databaseFile);
+    try {
+      writer.exec("BEGIN IMMEDIATE");
+      assert.deepEqual((kernel.ticketList({ purpose: "evaluation", limit: 2, after_id: "" }).tickets as JsonObject[]).map(item => item.id), ["a"]);
+    } finally { writer.exec("ROLLBACK"); writer.close(); }
+  } finally { await close(f); }
+});
 function observation(service: CraftService, id: string, sourceId: string, outcome: string = "passed") {
   return service.workflowEvolutionObserve({ observation_id: id, scope: "project:demo", scenario_key: "support-refund", source_kind: "external_execution", source_id: sourceId, source_digest: `sha256:${sourceId}`, outcome, evidence_ids: ["confirmed"], sanitized: true, content_stored: false }).observation as JsonObject;
 }
@@ -184,6 +214,9 @@ test("Knowledge classification tickets track the live candidate and keep result 
     const completionSchema = knowledgeTools.find(item => item.name === "craft_evaluation_model_ticket_complete")?.inputSchema as JsonObject;
     assert.deepEqual((completionSchema.properties as JsonObject).trace_id, { type: "string" });
     assert.equal((completionSchema.required as string[]).includes("trace_id"), false, "Workflow tickets do not require a Knowledge Trace");
+    const listSchema = knowledgeTools.find(item => item.name === "craft_evaluation_model_ticket_list")?.inputSchema as JsonObject;
+    assert.deepEqual((listSchema.properties as JsonObject).after_id, { type: "string" });
+    assert.equal((listSchema.required as string[]).includes("after_id"), false);
     f.store.create("knowledge_source", "source-1", { scope: { kind: "project", id: "demo" }, status: "active", trust: "verified" });
     f.store.create("knowledge_claim", "claim-1", { status: "candidate", scope: "project:demo", version: 1,
       content_digest: "sha256:claim", source_id: "source-1" });

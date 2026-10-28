@@ -197,7 +197,8 @@ export function learningWorkFound(result: JsonObject): boolean {
   const evaluation = result.evaluation && typeof result.evaluation === "object" ? result.evaluation as JsonObject : null;
   const classification = result.scenario_classification && typeof result.scenario_classification === "object"
     ? result.scenario_classification as JsonObject : null;
-  return Number(result.processed ?? 0) > 0 || Number(evaluation?.processed ?? 0) > 0 || Number(classification?.processed ?? 0) > 0;
+  return Number(result.processed ?? 0) > 0 || Number(evaluation?.processed ?? 0) > 0 || Number(classification?.processed ?? 0) > 0
+    || classification?.scan_has_more === true;
 }
 function parseModelJson(value: string): JsonObject {
   const source = value.trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, "");

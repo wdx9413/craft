@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { runExperienceScenarioClassificationOnce, type ExperienceScenarioClassificationClient } from "../deploy/experience-learning/experience-scenario-classification.ts";
-import { recordExperienceClassificationFailure, shouldSuppressExperienceClassification } from "../deploy/experience-learning/experience-classification-state.ts";
+import { readExperienceClassificationCursor, recordExperienceClassificationCursor, recordExperienceClassificationFailure, shouldSuppressExperienceClassification } from "../deploy/experience-learning/experience-classification-state.ts";
 
 const provider: ModelProviderSpec = { provider: "test", label: "Test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
   api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
@@ -24,9 +24,12 @@ function fixture(options: { response?: string; ticket?: JsonObject | null; reque
   const client: ExperienceScenarioClassificationClient = { async call(name, args = {}) {
     calls.push({ name, args });
     if (options.throwOn === name) { if (options.throwRaw) throw "controlled failure"; throw Object.assign(new Error("controlled failure"), { name: options.throwName ?? "TypeError" }); }
-    if (name === "craft_evaluation_model_ticket_list") return options.ticketResult ?? { tickets: options.ticket === null ? [] : [options.ticket ?? { id: "ticket-1", purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
-      target: { kind: "experience_scenario_classification_request", id: "scenario_classification_1", version: 1, scope: "project:craft" },
-      readiness: { status: "ready_for_adapter" } }] };
+    if (name === "craft_evaluation_model_ticket_list") {
+      const result = options.ticketResult ?? { tickets: options.ticket === null ? [] : [options.ticket ?? { id: "ticket-1", purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
+        target: { kind: "experience_scenario_classification_request", id: "scenario_classification_1", version: 1, scope: "project:craft" },
+        readiness: { status: "ready_for_adapter" } }] };
+      return args.after_id === undefined ? result : { ...result, has_more: false, next_cursor: null };
+    }
     if (name === "craft_evaluation_model_profile_get") return { profile: options.profile ?? { provider: "test", model: "test-model", version: 1, max_attempts: 1,
       max_output_tokens: 256, temperature: 0 }, readiness: options.profileReadiness ?? { status: "ready_for_adapter" }, ...(options.provider ? { provider: options.provider } : {}) };
     if (name === "craft_experience_scenario_classification_request_get") return { request: options.request ?? { id: "scenario_classification_1", version: 1, status: "awaiting_model",
@@ -116,6 +119,16 @@ test("skips tickets that are not ready for the adapter", async () => {
   const result = await runExperienceScenarioClassificationOnce({ client: f.client });
   assert.equal(result.reason, "configure_profile");
   assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_profile_get"), false);
+});
+
+test("a ticket awaiting profile readiness does not block another ready ticket", async () => {
+  const makeTicket = (id: string, status: string) => ({ id, purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
+    target: { kind: "experience_scenario_classification_request", id: "scenario_classification_1", version: 1, scope: "project:craft" },
+    readiness: { status } });
+  const f = fixture({ ticketResult: { tickets: [makeTicket("waiting", "waiting"), makeTicket("ready", "ready_for_adapter")] } });
+  const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.ticket_id, "ready");
+  assert.equal(f.requests.length, 1);
 });
 
 test("skips a profile that is not ready for the adapter", async () => {
@@ -340,12 +353,14 @@ test("suppresses repeated model calls after deterministic rejection until the in
     const failed = await runExperienceScenarioClassificationOnce(deps);
     assert.equal((failed.outcomes as JsonObject[])[0]?.failure_kind, "classification_link_rejected");
     const attemptsBefore = f.requests.length;
+    await recordExperienceClassificationCursor(stateFile, "");
     const suppressed = await runExperienceScenarioClassificationOnce(deps);
     assert.equal(suppressed.reason, "unchanged_input_failure_suppressed");
     assert.equal(f.requests.length, attemptsBefore);
-    const persisted = JSON.parse(readFileSync(stateFile, "utf8")) as JsonObject;
-    assert.equal(persisted.schema, "craft.experience-classification-attempts.v1");
-    assert.equal(Object.keys(persisted.attempts as object).length, 1);
+    const entries = readdirSync(`${stateFile}.entries`);
+    assert.equal(entries.length, 1);
+    const persisted = JSON.parse(readFileSync(join(`${stateFile}.entries`, entries[0]!), "utf8")) as JsonObject;
+    assert.equal(persisted.schema, "craft.experience-classification-attempt.v2");
 
     const changedClient: ExperienceScenarioClassificationClient = { async call(name, args) {
       const result = await client.call(name, args);
@@ -354,6 +369,7 @@ test("suppresses repeated model calls after deterministic rejection until the in
     } };
     await runExperienceScenarioClassificationOnce({ ...deps, client: changedClient });
     assert.equal(f.requests.length, attemptsBefore + 1);
+    await recordExperienceClassificationCursor(stateFile, "");
     const changedProfile: ExperienceScenarioClassificationClient = { async call(name, args) {
       const result = await client.call(name, args);
       if (name !== "craft_evaluation_model_profile_get") return result;
@@ -361,6 +377,102 @@ test("suppresses repeated model calls after deterministic rejection until the in
     } };
     await runExperienceScenarioClassificationOnce({ ...deps, client: changedProfile });
     assert.equal(f.requests.length, attemptsBefore + 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a suppressed classification ticket does not starve the next ready ticket", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-classification-fairness-"));
+  try {
+    const stateFile = join(root, "attempts.json");
+    const rejected = fixture({ response: "not-json" });
+    await runExperienceScenarioClassificationOnce({ client: rejected.client, providers: [provider], transport: rejected.transport, state_file: stateFile });
+    await recordExperienceClassificationCursor(stateFile, "");
+    const ready = fixture();
+    const tickets = ["ticket-1", "ticket-2"].map((id, index) => ({ id, purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
+      target: { kind: "experience_scenario_classification_request", id: `scenario_classification_${index + 1}`, version: 1, scope: "project:craft" },
+      readiness: { status: "ready_for_adapter" } }));
+    const client: ExperienceScenarioClassificationClient = { async call(name, args = {}) {
+      if (name === "craft_evaluation_model_ticket_list") return { tickets, has_more: false, next_cursor: null };
+      const result = await ready.client.call(name, args);
+      if (name === "craft_experience_scenario_classification_request_get") return { ...result, request: { ...(result.request as JsonObject), id: args.request_id } };
+      return result;
+    } };
+    const result = await runExperienceScenarioClassificationOnce({ client, providers: [provider], transport: ready.transport, state_file: stateFile });
+    assert.equal((result.outcomes as JsonObject[])[0]?.ticket_id, "ticket-2");
+    assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
+    assert.equal(ready.requests.length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("classification advances through paged tickets and resumes its cursor after restart", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-classification-pages-"));
+  try {
+    const stateFile = join(root, "attempts.json"), rejected = fixture({ response: "not-json" });
+    await runExperienceScenarioClassificationOnce({ client: rejected.client, providers: [provider], transport: rejected.transport, state_file: stateFile });
+    await recordExperienceClassificationCursor(stateFile, "");
+    const ready = fixture({ response: JSON.stringify({ decision: "unclassified" }) });
+    const ticket = (id: string) => ({ id, purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
+      target: { kind: "experience_scenario_classification_request", id: `scenario_${id}`, version: 1, scope: "project:craft" },
+      readiness: { status: "ready_for_adapter" } });
+    const cursors: unknown[] = [];
+    const client: ExperienceScenarioClassificationClient = { async call(name, args = {}) {
+      if (name === "craft_evaluation_model_ticket_list") {
+        cursors.push(args.after_id);
+        if (args.after_id === "") return { tickets: [ticket("ticket-1")], has_more: true, next_cursor: "ticket-1" };
+        if (args.after_id === "ticket-1") return { tickets: [ticket("ticket-2")], has_more: true, next_cursor: "ticket-2" };
+        return { tickets: [ticket("ticket-3")], has_more: false, next_cursor: null };
+      }
+      return ready.client.call(name, args);
+    } };
+    const deps = { client, providers: [provider], transport: ready.transport, state_file: stateFile };
+    const first = await runExperienceScenarioClassificationOnce(deps);
+    assert.equal((first.outcomes as JsonObject[])[0]?.ticket_id, "ticket-2");
+    assert.equal(ready.requests.length, 1);
+    const second = await runExperienceScenarioClassificationOnce({ ...deps });
+    assert.equal((second.outcomes as JsonObject[])[0]?.ticket_id, "ticket-3");
+    assert.equal(ready.requests.length, 2);
+    assert.deepEqual(cursors, ["", "ticket-1", "ticket-2"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("empty ticket pages advance within a bounded scan and resume on the next tick", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-empty-pages-"));
+  try {
+    const stateFile = join(root, "attempts.json"), seen: unknown[] = [];
+    const client: ExperienceScenarioClassificationClient = { async call(name, args = {}) {
+      assert.equal(name, "craft_evaluation_model_ticket_list");
+      seen.push(args.after_id);
+      const next = ({ "": "a", a: "b", b: "c", c: "d" } as Record<string, string>)[String(args.after_id)];
+      return { tickets: [], has_more: next !== undefined, next_cursor: next ?? null };
+    } };
+    const first = await runExperienceScenarioClassificationOnce({ client, state_file: stateFile });
+    assert.equal(first.reason, "ticket_scan_limit_reached");
+    assert.equal(first.scan_has_more, true);
+    assert.equal(readExperienceClassificationCursor(stateFile), "d");
+    const second = await runExperienceScenarioClassificationOnce({ client, state_file: stateFile });
+    assert.equal(second.processed, 0);
+    assert.equal(readExperienceClassificationCursor(stateFile), "");
+    assert.deepEqual(seen, ["", "a", "b", "c", "d"]);
+    const invalid: ExperienceScenarioClassificationClient = { async call() { return { tickets: [], has_more: true, next_cursor: "" }; } };
+    await assert.rejects(runExperienceScenarioClassificationOnce({ client: invalid, state_file: stateFile }), /cursor did not advance/u);
+    const legacy: ExperienceScenarioClassificationClient = { async call() { return { tickets: [] }; } };
+    await assert.rejects(runExperienceScenarioClassificationOnce({ client: legacy, state_file: stateFile }), /pagination is unavailable/u);
+
+    const failed = fixture({ response: "not-json" }), otherState = join(root, "suppressed.json");
+    await runExperienceScenarioClassificationOnce({ client: failed.client, providers: [provider], transport: failed.transport, state_file: otherState });
+    await recordExperienceClassificationCursor(otherState, "");
+    const pending = (await failed.client.call("craft_evaluation_model_ticket_list")).tickets;
+    let page = 0;
+    const withSuppressed: ExperienceScenarioClassificationClient = { async call(name, args = {}) {
+      if (name === "craft_evaluation_model_ticket_list") {
+        page++;
+        return { tickets: page === 1 ? pending : [], has_more: true, next_cursor: `ticket-${page}` };
+      }
+      return failed.client.call(name, args);
+    } };
+    const bounded = await runExperienceScenarioClassificationOnce({ client: withSuppressed, providers: [provider], transport: failed.transport, state_file: otherState });
+    assert.equal(bounded.scan_has_more, true);
+    assert.equal((bounded.outcomes as JsonObject[])[0]?.ticket_id, "ticket-1");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -377,9 +489,8 @@ test("keeps the classification failure visible when retry-state persistence is u
       return { ...result, observation: { id: context.observation_id,
         scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "project", id: "project:other" } } } };
     } };
-    const result = await runExperienceScenarioClassificationOnce({ client, providers: [provider], transport: f.transport,
-      state_file: join(runtimeDir, "attempts.json") });
-    assert.equal((result.outcomes as JsonObject[])[0]?.failure_kind, "classification_link_rejected");
+    await assert.rejects(runExperienceScenarioClassificationOnce({ client, providers: [provider], transport: f.transport,
+      state_file: join(runtimeDir, "attempts.json") }), /directory must not be a symbolic link/u);
     assert.equal(f.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"), true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -399,6 +510,14 @@ test("validates persisted Experience classification retry state", async () => {
     assert.throws(() => shouldSuppressExperienceClassification(stateFile, "bad id", digest, "0.12.123"), /identity is invalid/u);
     await assert.rejects(recordExperienceClassificationFailure(stateFile, "bad id", { attempt_digest: digest, classifier_version: "0.12.123",
       failure_stage: "stage", failure_code: "failure", failed_at: new Date().toISOString() }), /identity is invalid/u);
+    assert.equal(readExperienceClassificationCursor(stateFile), "");
+    await recordExperienceClassificationCursor(stateFile, "项目 ticket");
+    await recordExperienceClassificationCursor(stateFile, "项目 ticket");
+    assert.equal(readExperienceClassificationCursor(stateFile), "项目 ticket");
+    await assert.rejects(recordExperienceClassificationCursor(stateFile, "bad\0cursor"), /cursor identity is invalid/u);
+    await recordExperienceClassificationFailure(stateFile, "ticket-3", { attempt_digest: digest, classifier_version: "0.12.123",
+      failure_stage: "classification_link", failure_code: "classification_link_rejected", failed_at: new Date().toISOString() });
+    assert.equal(readExperienceClassificationCursor(stateFile), "项目 ticket");
 
     const invalidFile = join(root, "invalid.json");
     writeFileSync(invalidFile, "{}");
@@ -413,11 +532,62 @@ test("validates persisted Experience classification retry state", async () => {
     const malformedFile = join(root, "malformed.json");
     writeFileSync(malformedFile, JSON.stringify({ schema: "craft.experience-classification-attempts.v1", attempts: { "ticket-1": { attempt_digest: "bad" } } }));
     assert.throws(() => shouldSuppressExperienceClassification(malformedFile, "ticket-1", digest, "0.12.123"), /state is invalid/u);
+    writeFileSync(malformedFile, JSON.stringify({ schema: "craft.experience-classification-attempts.v1", attempts: { "ticket-1": null } }));
+    assert.throws(() => shouldSuppressExperienceClassification(malformedFile, "ticket-1", digest, "0.12.123"), /state is invalid/u);
     const fullFile = join(root, "full.json"), many = Object.fromEntries(Array.from({ length: 501 }, (_, index) => [`ticket-${index}`, {
       attempt_digest: digest, classifier_version: "0.12.123", failure_stage: "classification_link", failure_code: "classification_link_rejected", failed_at: new Date().toISOString(),
     }]));
     writeFileSync(fullFile, JSON.stringify({ schema: "craft.experience-classification-attempts.v1", attempts: many }));
     assert.throws(() => shouldSuppressExperienceClassification(fullFile, "ticket-1", digest, "0.12.123"), /state is invalid/u);
+
+    const legacyFile = join(root, "legacy.json"), failure = { attempt_digest: digest, classifier_version: "0.12.123",
+      failure_stage: "classification_link", failure_code: "classification_link_rejected", failed_at: new Date().toISOString() };
+    writeFileSync(legacyFile, JSON.stringify({ schema: "craft.experience-classification-attempts.v1", attempts: { "ticket-legacy": failure } }));
+    assert.equal(shouldSuppressExperienceClassification(legacyFile, "ticket-legacy", digest, "0.12.123"), true);
+    const replacement = `sha256:${"c".repeat(64)}`;
+    await recordExperienceClassificationFailure(legacyFile, "ticket-legacy", { ...failure, attempt_digest: replacement });
+    assert.equal(shouldSuppressExperienceClassification(legacyFile, "ticket-legacy", digest, "0.12.123"), false);
+    assert.equal(shouldSuppressExperienceClassification(legacyFile, "ticket-legacy", replacement, "0.12.123"), true);
+
+    const entryState = join(root, "entry-state.json");
+    await recordExperienceClassificationFailure(entryState, "ticket-entry", failure);
+    const entryDir = `${entryState}.entries`, entryFile = join(entryDir, readdirSync(entryDir)[0]!);
+    writeFileSync(entryFile, "{}");
+    assert.throws(() => shouldSuppressExperienceClassification(entryState, "ticket-entry", digest, "0.12.123"), /attempt is invalid/u);
+    rmSync(entryFile);
+    symlinkSync(invalidFile, entryFile);
+    assert.throws(() => shouldSuppressExperienceClassification(entryState, "ticket-entry", digest, "0.12.123"), /attempt must be a regular file/u);
+    rmSync(entryDir, { recursive: true });
+    symlinkSync(root, entryDir, "dir");
+    assert.throws(() => shouldSuppressExperienceClassification(entryState, "ticket-entry", digest, "0.12.123"), /directory must not be a symbolic link/u);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("classification suppression survives more than 500 distinct failed tickets", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-many-attempts-"));
+  try {
+    const stateFile = join(root, "attempts.json"), digest = `sha256:${"a".repeat(64)}`;
+    for (let index = 0; index <= 500; index++) {
+      await recordExperienceClassificationFailure(stateFile, `ticket-${index}`, { attempt_digest: digest, classifier_version: "0.12.123",
+        failure_stage: "classification_link", failure_code: "classification_link_rejected", failed_at: new Date(1_700_000_000_000 + index).toISOString() });
+    }
+    assert.equal(shouldSuppressExperienceClassification(stateFile, "ticket-0", digest, "0.12.123"), true);
+    assert.equal(shouldSuppressExperienceClassification(stateFile, "ticket-500", digest, "0.12.123"), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("independent ticket checkpoints and the scan cursor survive concurrent writes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-concurrent-attempts-"));
+  try {
+    const stateFile = join(root, "attempts.json"), digest = `sha256:${"b".repeat(64)}`;
+    const failure = { attempt_digest: digest, classifier_version: "0.12.123", failure_stage: "classification_link",
+      failure_code: "classification_link_rejected", failed_at: new Date().toISOString() };
+    await Promise.all([
+      ...Array.from({ length: 32 }, (_, index) => recordExperienceClassificationFailure(stateFile, `ticket-${index}`, failure)),
+      recordExperienceClassificationCursor(stateFile, "ticket-31"),
+    ]);
+    for (let index = 0; index < 32; index++) assert.equal(shouldSuppressExperienceClassification(stateFile, `ticket-${index}`, digest, "0.12.123"), true);
+    assert.equal(readExperienceClassificationCursor(stateFile), "ticket-31");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -273,6 +273,7 @@ test("empty Experience passes back off to a bounded interval and any processed w
   assert.equal(learningWorkFound({ processed: 0, evaluation: { processed: 1 } }), true);
   assert.equal(learningWorkFound({ processed: 0, scenario_classification: { processed: 1 } }), true);
   assert.equal(learningWorkFound({ evaluation: { processed: 0 }, scenario_classification: { processed: 1 } }), true);
+  assert.equal(learningWorkFound({ scenario_classification: { scan_has_more: true } }), true);
   assert.equal(learningWorkFound({ processed: 0, evaluation: null, scenario_classification: {} }), false);
   assert.throws(() => learningPollInterval(0, 1), /bounds are invalid/u);
   assert.throws(() => learningPollInterval(30_000, -1), /bounds are invalid/u);
@@ -285,7 +286,7 @@ test("continuous learning tick contains transient Experience and Knowledge failu
     if (name === "craft_evaluation_model_ticket_list") {
       ticketAttempts += 1;
       if (ticketAttempts === 1) throw new TypeError("provider credential and response body must stay private");
-      return { tickets: [] };
+      return { tickets: [], has_more: false, next_cursor: null };
     }
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
     if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
@@ -325,7 +326,7 @@ test("continuous learning tick contains transient Experience and Knowledge failu
   const invalidNameClient: ExperienceLearningClient = { async call() { throw unusualError; } };
   assert.equal((await runLearningTick({ client: invalidNameClient, env: directWorkerEnv })).failure_kind, "Error");
   const knowledgeOnlyFailure = await runLearningTick({ client: { async call(name) {
-    if (name === "craft_evaluation_model_ticket_list" || name === "craft_experience_learning_evaluation_dispatch_list") return { tickets: [], dispatches: [] };
+    if (name === "craft_evaluation_model_ticket_list" || name === "craft_experience_learning_evaluation_dispatch_list") return { tickets: [], dispatches: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_source_list") throw new Error("private");
     return {};
@@ -362,7 +363,7 @@ test("learning failure diagnostics expose only safe error names", () => {
 
 test("Knowledge classification failures remain visible without dropping completed source sync", async () => {
   const client: ExperienceLearningClient = { async call(name) {
-    if (name === "craft_experience_learning_evaluation_dispatch_list" || name === "craft_evaluation_model_ticket_list") return { dispatches: [], tickets: [] };
+    if (name === "craft_experience_learning_evaluation_dispatch_list" || name === "craft_evaluation_model_ticket_list") return { dispatches: [], tickets: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_source_list") return { sources: [] };
     if (name === "craft_knowledge_claim_list") throw new TypeError("private classification failure");
@@ -409,7 +410,7 @@ test("standalone learning modes call only their mounted Knowledge or Experience 
   const calls: string[] = [];
   const client: ExperienceLearningClient = { async call(name) {
     calls.push(name);
-    if (name === "craft_evaluation_model_ticket_list") return { tickets: [] };
+    if (name === "craft_evaluation_model_ticket_list") return { tickets: [], has_more: false, next_cursor: null };
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
     if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_source_list") return { sources: [] };

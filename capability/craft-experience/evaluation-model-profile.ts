@@ -87,7 +87,10 @@ export class EvaluationModelProfileKernel {
     const limit = integer(args.limit, "limit", 100, 1, 1_000);
     const purpose = args.purpose === undefined ? null : text(args.purpose, "purpose");
     if (purpose !== null && !PURPOSES.has(purpose)) throw new Error("purpose is unsupported");
-    const tickets = this.store.list("evaluation_model_ticket", limit, (ticket) => {
+    if (args.after_id !== undefined && (typeof args.after_id !== "string" || args.after_id.length > 65_536 || args.after_id.includes("\0"))) {
+      throw new Error("after_id must be a bounded ticket cursor");
+    }
+    const eligible = (ticket: JsonObject): boolean => {
       if (purpose !== null && ticket.purpose !== purpose) return false;
       if (ticket.status !== "ready_for_adapter") return false;
       const target = ticket.target as JsonObject | undefined;
@@ -125,12 +128,14 @@ export class EvaluationModelProfileKernel {
       if (target?.kind !== "workflow_evolution_request") return false;
       const request = this.store.find("workflow_evolution_request", String(target.id));
       return request?.lifecycle === "awaiting_model" && Number(request.version) === Number(target.version);
-    });
+    };
+    const page = args.after_id === undefined ? null : this.store.listByIdPage("evaluation_model_ticket", args.after_id as string, limit);
+    const tickets = page ? page.records.filter(eligible) : this.store.list("evaluation_model_ticket", limit, eligible);
     return { tickets: tickets.map((ticket) => {
       const profile = this.store.get("evaluation_model_profile", String(ticket.profile_id), Number(ticket.profile_version));
       const readiness = this.readiness(profile);
       return { ...ticket, readiness };
-    }) };
+    }), ...(page ? { has_more: page.has_more, next_cursor: page.next_cursor } : {}) };
   }
 
   ticketComplete(args: JsonObject): JsonObject {
