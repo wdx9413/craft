@@ -46,6 +46,9 @@ export function learningTickStatus(result: JsonObject, once: boolean): { diagnos
   const sessionCollection = result.session_collection && typeof result.session_collection === "object" ? result.session_collection as JsonObject : null;
   const sessionCollectionFailure = typeof sessionCollection?.failure_kind === "string" ? sessionCollection.failure_kind : null;
   const experienceFailure = typeof result.failure_kind === "string" ? result.failure_kind : null;
+  const experienceClassification = result.scenario_classification && typeof result.scenario_classification === "object"
+    ? result.scenario_classification as JsonObject : null;
+  const experienceReconciliation = experienceClassification?.reconciliation_pending === true;
   const knowledge = result.knowledge && typeof result.knowledge === "object" ? result.knowledge as JsonObject : null;
   const knowledgeFailure = typeof knowledge?.failure_kind === "string" ? knowledge.failure_kind : null;
   const classification = knowledge?.classification && typeof knowledge.classification === "object" ? knowledge.classification as JsonObject : null;
@@ -88,13 +91,15 @@ export function learningTickStatus(result: JsonObject, once: boolean): { diagnos
   const diagnostics = [
     ...(sessionCollectionFailure ? [`Craft Codex session collection failed (${sessionCollectionFailure}).\n`] : []),
     ...(experienceFailure ? [`Craft Experience learning pass failed (${experienceFailure}).\n`] : []),
+    ...(experienceReconciliation ? ["Craft Experience classification requires reconciliation (model_result_unknown).\n"] : []),
+    ...(experienceClassification?.reconciliation_checkpoint_failed === true ? ["Craft Experience reconciliation checkpoint could not be saved or verified.\n"] : []),
     ...(knowledgeFailure ? [`Craft Knowledge learning pass failed (${knowledgeFailure}).\n`] : []),
     ...(classificationFailure ? [`Craft Knowledge scenario classification failed (${classificationFailure}).\n`] : []),
     ...(classificationSkip ? [`Craft Knowledge scenario classification skipped (${classificationSkip}); configure one ready model profile to resume.\n`] : []),
     ...(!classificationFailure && failedClassifications ? [`Craft Knowledge scenario classification failed for ${failedClassifications} Claim(s)${stageSummary ? ` at ${stageSummary}` : ""}.\n`] : []),
     ...sourceIssues,
   ].join("");
-  return { diagnostics, exit_code: once && (sessionCollectionFailure !== null || experienceFailure !== null || knowledgeFailure !== null || classificationFailure !== null || classificationSkipped || failedClassifications > 0 || sourceIssues.length > 0) ? 1 : null };
+  return { diagnostics, exit_code: once && (sessionCollectionFailure !== null || experienceFailure !== null || experienceReconciliation || knowledgeFailure !== null || classificationFailure !== null || classificationSkipped || failedClassifications > 0 || sourceIssues.length > 0) ? 1 : null };
 }
 
 export function learningFailureKind(error: unknown): string { return failureKind(error); }

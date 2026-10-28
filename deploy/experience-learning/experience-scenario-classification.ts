@@ -29,10 +29,6 @@ function array(value: unknown, name: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
   return value;
 }
-function digest(value: unknown, name: string): string {
-  if (typeof value !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(value)) throw new Error(`${name} must be a SHA-256 digest`);
-  return value;
-}
 function projectScopeMatches(value: unknown, expectedScope: string): boolean {
   if (typeof value === "string") return value === expectedScope;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -86,6 +82,10 @@ class DeterministicClassificationFailure extends Error {
 export async function runExperienceScenarioClassificationOnce(deps: ExperienceScenarioClassificationDependencies): Promise<JsonObject> {
   let cursor = deps.state_file ? readExperienceClassificationCursor(deps.state_file) : undefined;
   let skipped: JsonObject | undefined;
+  let reconciliationPending = false;
+  let checkpointFailed = false;
+  const finish = (result: JsonObject): JsonObject => reconciliationPending ? { ...result, reconciliation_pending: true,
+    ...(checkpointFailed ? { reconciliation_checkpoint_failed: true } : {}) } : result;
   for (let page = 0; page < 4; page++) {
     const listed = await deps.client.call("craft_evaluation_model_ticket_list", { purpose: "workflow_evolution", limit: 100,
       ...(cursor === undefined ? {} : { after_id: cursor }) });
@@ -96,16 +96,18 @@ export async function runExperienceScenarioClassificationOnce(deps: ExperienceSc
       const target = ticket.target as JsonObject | undefined;
       if (ticket.purpose !== "workflow_evolution" || target?.kind !== "experience_scenario_classification_request") continue;
       const result = await runClassificationTicket(deps, ticket);
+      if (result.reason === "resolved_request_reference_stale") reconciliationPending = true;
+      if (result.reconciliation_checkpoint_failed === true) checkpointFailed = true;
       if (Number(result.processed) > 0) {
         if (paged && deps.state_file) await recordExperienceClassificationCursor(deps.state_file, String(ticket.id));
-        return result;
+        return finish(result);
       }
-      if (result.reason === "model_call_budget_exhausted") return result;
+      if (result.reason === "model_call_budget_exhausted") return finish(result);
       skipped ??= result;
     }
     if (!paged || listed.has_more !== true) {
       if (paged && deps.state_file) await recordExperienceClassificationCursor(deps.state_file, "");
-      return skipped ?? { processed: 0, outcomes: [] };
+      return finish(skipped ?? { processed: 0, outcomes: [] });
     }
     if (typeof listed.next_cursor !== "string" || !listed.next_cursor
       || (cursor !== undefined && Buffer.compare(Buffer.from(listed.next_cursor), Buffer.from(cursor)) <= 0)) {
@@ -114,7 +116,7 @@ export async function runExperienceScenarioClassificationOnce(deps: ExperienceSc
     cursor = listed.next_cursor;
     if (deps.state_file) await recordExperienceClassificationCursor(deps.state_file, cursor);
   }
-  return { processed: 0, skipped: true, reason: "ticket_scan_limit_reached", scan_has_more: true, outcomes: skipped?.outcomes ?? [] };
+  return finish({ processed: 0, skipped: true, reason: "ticket_scan_limit_reached", scan_has_more: true, outcomes: skipped?.outcomes ?? [] });
 }
 
 async function runClassificationTicket(deps: ExperienceScenarioClassificationDependencies, ticket: JsonObject): Promise<JsonObject> {
@@ -135,8 +137,28 @@ async function runClassificationTicket(deps: ExperienceScenarioClassificationDep
   const request = object(requestResult.request, "classification request"), taxonomy = object(requestResult.taxonomy, "Experience taxonomy");
   if (request.status !== "awaiting_model" || Number(request.version) !== Number(target.version)) {
     if (request.status === "classified" || request.status === "unclassified") {
-      await deps.client.call("craft_evaluation_model_ticket_complete", { ticket_id: ticketId, result_digest: digest(request.result_digest, "request.result_digest") });
-      return { processed: 1, outcomes: [{ ticket_id: ticketId, request_id: requestId, status: request.status, idempotent: true }] };
+      if (typeof request.result_digest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(request.result_digest)) {
+        return { processed: 0, skipped: true, reason: "resolved_request_reference_stale", reconciliation_checkpoint_failed: true,
+          outcomes: [{ ticket_id: ticketId, request_id: requestId, status: "model_result_unknown" }] };
+      }
+      const resultDigest = request.result_digest;
+      let checkpointFailed = false;
+      if (deps.state_file) {
+        try {
+          if (!Number.isSafeInteger(target.version) || !Number.isSafeInteger(request.version)) throw new Error("Experience reconciliation versions are invalid");
+          const reconciliationDigest = stableDigest({ ticket_id: ticketId, request_id: requestId, scope, target_version: target.version,
+            request_version: request.version, request_status: request.status, result_digest: resultDigest });
+          const reconciliationFile = `${deps.state_file}.reconciliation.${reconciliationDigest.slice(7)}`;
+          if (!shouldSuppressExperienceClassification(reconciliationFile, ticketId, reconciliationDigest, "reconciliation-v1")) {
+            await recordExperienceClassificationFailure(reconciliationFile, ticketId, { attempt_digest: reconciliationDigest,
+              classifier_version: "reconciliation-v1", failure_stage: "reconciliation", failure_code: "model_result_unknown", failed_at: new Date().toISOString(),
+              reconciliation: { ticket_id: ticketId, request_id: requestId, scope, target_version: Number(target.version),
+                request_version: Number(request.version), request_status: String(request.status), result_digest: resultDigest } });
+          }
+        } catch { checkpointFailed = true; }
+      }
+      return { processed: 0, skipped: true, reason: "resolved_request_reference_stale", outcomes: [{ ticket_id: ticketId, request_id: requestId,
+        status: "model_result_unknown", result_digest: resultDigest }], ...(checkpointFailed ? { reconciliation_checkpoint_failed: true } : {}) };
     }
     return { processed: 0, outcomes: [{ ticket_id: ticketId, request_id: requestId, status: "stale" }] };
   }

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { atomicPrivateJson } from "../../common/craft-common-store-local/src/paths.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
+import { stableDigest } from "../../core/digest.ts";
 
 const SCHEMA = "craft.experience-classification-attempts.v1";
 const ENTRY_SCHEMA = "craft.experience-classification-attempt.v2";
@@ -28,6 +29,8 @@ export interface ExperienceClassificationFailure {
   failure_stage: string;
   failure_code: string;
   failed_at: string;
+  reconciliation?: { ticket_id: string; request_id: string; scope: string; target_version: number; request_version: number;
+    request_status: string; result_digest: string };
 }
 
 interface AttemptState { schema: string; attempts: Record<string, ExperienceClassificationFailure>; last_ticket_id?: string }
@@ -73,7 +76,17 @@ function readAttempt(path: string, ticketId: string): ExperienceClassificationFa
     if (stored.schema !== ENTRY_SCHEMA || stored.ticket_digest !== entry.ticket_digest || !validFailure(stored.failure)) {
       throw new Error("Experience classification attempt is invalid");
     }
-    return stored.failure;
+    const failure = stored.failure as ExperienceClassificationFailure;
+    if (failure.classifier_version === "reconciliation-v1" && (failure.failure_stage !== "reconciliation" || failure.failure_code !== "model_result_unknown")) {
+      throw new Error("Experience reconciliation checkpoint has an invalid status");
+    }
+    if (failure.failure_code === "model_result_unknown" && !failure.reconciliation) {
+      throw new Error("Experience reconciliation checkpoint is missing its identity");
+    }
+    if (failure.reconciliation && (failure.reconciliation.ticket_id !== ticketId || stableDigest(failure.reconciliation) !== failure.attempt_digest)) {
+      throw new Error("Experience reconciliation checkpoint conflicts with its identity");
+    }
+    return failure;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;

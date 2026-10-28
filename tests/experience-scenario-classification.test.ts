@@ -137,11 +137,97 @@ test("skips a profile that is not ready for the adapter", async () => {
   assert.equal(result.reason, "profile_incomplete");
 });
 
-test("completes an already resolved request idempotently", async () => {
+test("reports a resolved request with a stale ticket as an unknown result without fabricating completion", async () => {
   const f = fixture({ request: { id: "scenario_classification_1", version: 2, status: "classified", result_digest: "sha256:" + "c".repeat(64) } });
   const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider] });
-  assert.equal((result.outcomes as JsonObject[])[0]?.idempotent, true);
+  assert.equal(result.reason, "resolved_request_reference_stale");
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "model_result_unknown");
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
   assert.equal(f.calls.some(call => call.name === "craft_trace_start"), false);
+});
+
+test("persists an unknown classification checkpoint without rewriting it on retry", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "craft-reconciliation-"));
+  try {
+    const stateFile = join(directory, "attempts.json");
+    const f = fixture({ request: { id: "scenario_classification_1", version: 2, status: "unclassified", result_digest: "sha256:" + "c".repeat(64) } });
+    const deps = { client: f.client, providers: [provider], state_file: stateFile };
+    await runExperienceScenarioClassificationOnce(deps);
+    const entryDirectory = readdirSync(directory).find(name => name.includes(".reconciliation.") && name.endsWith(".entries"));
+    assert.ok(entryDirectory);
+    const checkpoint = join(directory, entryDirectory, readdirSync(join(directory, entryDirectory))[0]!);
+    const first = readFileSync(checkpoint, "utf8");
+    const failure = (JSON.parse(first) as { failure: { failure_code: string; reconciliation: JsonObject } }).failure;
+    assert.equal(failure.failure_code, "model_result_unknown");
+    assert.deepEqual(failure.reconciliation, { ticket_id: "ticket-1", request_id: "scenario_classification_1", scope: "project:craft",
+      target_version: 1, request_version: 2, request_status: "unclassified", result_digest: "sha256:" + "c".repeat(64) });
+    await runExperienceScenarioClassificationOnce(deps);
+    assert.equal(readFileSync(checkpoint, "utf8"), first);
+    assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+    failure.reconciliation.scope = "project:other";
+    writeFileSync(checkpoint, JSON.stringify({ ...JSON.parse(first), failure }));
+    assert.equal((await runExperienceScenarioClassificationOnce(deps)).reconciliation_checkpoint_failed, true);
+    failure.reconciliation.ticket_id = "ticket-other";
+    writeFileSync(checkpoint, JSON.stringify({ ...JSON.parse(first), failure }));
+    assert.equal((await runExperienceScenarioClassificationOnce(deps)).reconciliation_checkpoint_failed, true);
+    const missingIdentity = JSON.parse(first) as { failure: { reconciliation?: JsonObject } };
+    delete missingIdentity.failure.reconciliation;
+    writeFileSync(checkpoint, JSON.stringify(missingIdentity));
+    assert.equal((await runExperienceScenarioClassificationOnce(deps)).reconciliation_checkpoint_failed, true);
+    const invalidStatus = JSON.parse(first) as { failure: { failure_code: string } };
+    invalidStatus.failure.failure_code = "other";
+    writeFileSync(checkpoint, JSON.stringify(invalidStatus));
+    assert.equal((await runExperienceScenarioClassificationOnce(deps)).reconciliation_checkpoint_failed, true);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("does not write a reconciliation checkpoint with an invalid request version", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "craft-reconciliation-invalid-"));
+  try {
+    const f = fixture({ request: { id: "scenario_classification_1", version: "invalid", status: "unclassified", result_digest: "sha256:" + "c".repeat(64) } });
+    const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], state_file: join(directory, "state") });
+    assert.equal(result.reconciliation_checkpoint_failed, true);
+    assert.deepEqual(readdirSync(directory), []);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("continues to a ready ticket while reporting a stale resolved request", async () => {
+  const makeTicket = (id: string) => ({ id, purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
+    target: { kind: "experience_scenario_classification_request", id, version: 1, scope: "project:craft" },
+    readiness: { status: "ready_for_adapter" } });
+  const f = fixture({ ticketResult: { tickets: [makeTicket("stale"), makeTicket("ready")] } });
+  const client: ExperienceScenarioClassificationClient = { async call(name, args = {}) {
+    if (name === "craft_experience_scenario_classification_request_get" && args.request_id === "stale") {
+      return { request: { id: "stale", version: 2, status: "unclassified", result_digest: "sha256:" + "c".repeat(64) }, taxonomy: {} };
+    }
+    return f.client.call(name, args);
+  } };
+  const result = await runExperienceScenarioClassificationOnce({ client, providers: [provider], transport: f.transport });
+  assert.equal(result.reconciliation_pending, true);
+  assert.equal(result.processed, 1);
+  assert.equal((result.outcomes as JsonObject[])[0]?.ticket_id, "ready");
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.calls.filter(call => call.name === "craft_evaluation_model_ticket_complete").length, 1);
+});
+
+test("continues to another ticket when reconciliation checkpoint cannot be saved", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "craft-reconciliation-skip-"));
+  try {
+    const makeTicket = (id: string) => ({ id, purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
+      target: { kind: "experience_scenario_classification_request", id, version: 1, scope: "project:craft" }, readiness: { status: "ready_for_adapter" } });
+    const f = fixture({ ticketResult: { tickets: [makeTicket("stale"), makeTicket("ready")], has_more: false, next_cursor: null } });
+    const client: ExperienceScenarioClassificationClient = { async call(name, args = {}) {
+      if (name === "craft_experience_scenario_classification_request_get" && args.request_id === "stale") {
+        return { request: { id: "stale", version: "invalid", status: "unclassified", result_digest: "sha256:" + "c".repeat(64) }, taxonomy: {} };
+      }
+      return f.client.call(name, args);
+    } };
+    const result = await runExperienceScenarioClassificationOnce({ client, providers: [provider], transport: f.transport, state_file: join(directory, "state") });
+    assert.equal(result.processed, 1);
+    assert.equal(result.reconciliation_pending, true);
+    assert.equal(result.reconciliation_checkpoint_failed, true);
+    assert.equal(f.requests.length, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("leaves a request stale when its version changed without a result", async () => {
@@ -290,9 +376,9 @@ test("skips invalid scope and missing profile providers", async () => {
   assert.equal(result.reason, "provider_unavailable");
 });
 
-test("completes resolved unclassified requests and skips unsupported queue entries", async () => {
+test("reports resolved unclassified requests as unknown and skips unsupported queue entries", async () => {
   const resolved = fixture({ request: { id: "scenario_classification_1", version: 2, status: "unclassified", result_digest: "sha256:" + "c".repeat(64) } });
-  assert.equal((await runExperienceScenarioClassificationOnce({ client: resolved.client, providers: [provider] })).processed, 1);
+  assert.equal((await runExperienceScenarioClassificationOnce({ client: resolved.client, providers: [provider] })).reason, "resolved_request_reference_stale");
   const unsupported = fixture({ ticket: { id: "ticket-1", purpose: "other", profile_id: "profile-1", profile_version: 1,
     target: { kind: "other", id: "other", version: 1 }, readiness: { status: "ready_for_adapter" } } });
   assert.deepEqual(await runExperienceScenarioClassificationOnce({ client: unsupported.client }), { processed: 0, outcomes: [] });
@@ -611,7 +697,9 @@ test("rejects malformed tool envelopes, identifiers, digests, and task context",
     target: { kind: "experience_scenario_classification_request", id: "request-1", version: 1, scope: "project:craft" }, readiness: { status: "ready_for_adapter" } } });
   await assert.rejects(runExperienceScenarioClassificationOnce({ client: invalidTicketId.client }), /bounded sanitized summary/u);
   const invalidDigest = fixture({ request: { id: "scenario_classification_1", version: 2, status: "classified", result_digest: "bad" } });
-  await assert.rejects(runExperienceScenarioClassificationOnce({ client: invalidDigest.client, providers: [provider] }), /SHA-256 digest/u);
+  assert.equal((await runExperienceScenarioClassificationOnce({ client: invalidDigest.client, providers: [provider] })).reconciliation_checkpoint_failed, true);
+  const missingDigest = fixture({ request: { id: "scenario_classification_1", version: 2, status: "classified" } });
+  assert.equal((await runExperienceScenarioClassificationOnce({ client: missingDigest.client, providers: [provider] })).reconciliation_pending, true);
   const unsanitized = fixture({ request: { id: "scenario_classification_1", version: 1, status: "awaiting_model", context: { ...context, sanitized: false } } });
   await assert.rejects(runExperienceScenarioClassificationOnce({ client: unsanitized.client, providers: [provider] }), /non-sanitized/u);
 });

@@ -12,6 +12,15 @@ import type { JsonObject } from "../core/infrastructure/store.ts";
 import { McpStdioClient, boundedPollInterval, learningComponents, learningMcpRequestTimeoutMs, learningPollInterval, learningWorkFound, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
+
+test("reports unknown Experience classification results in continuous and one-shot runs", () => {
+  const result = { scenario_classification: { processed: 1, reconciliation_pending: true } };
+  const diagnostics = "Craft Experience classification requires reconciliation (model_result_unknown).\n";
+  assert.deepEqual(learningTickStatus(result, false), { diagnostics, exit_code: null });
+  assert.deepEqual(learningTickStatus(result, true), { diagnostics, exit_code: 1 });
+  assert.match(learningTickStatus({ scenario_classification: { reconciliation_pending: true, reconciliation_checkpoint_failed: true } }, true).diagnostics,
+    /checkpoint could not be saved or verified/u);
+});
 import { acquireLearningWorkerLocks } from "../core/interfaces/learning-worker-supervisor.ts";
 
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
