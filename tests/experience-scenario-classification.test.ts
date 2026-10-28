@@ -66,6 +66,15 @@ test("classifies a verified task and links the model decision through the normal
   assert.equal(modelCompleted?.args.source, "model-transport:test");
   assert.deepEqual(modelCompleted?.args.usage, { input_tokens: 10, output_tokens: 20 });
   assert.match(String((modelCompleted?.args.data as JsonObject | undefined)?.response_digest), /^sha256:[a-f0-9]{64}$/u);
+  assert.deepEqual(modelCompleted?.args.output_refs, [(modelCompleted?.args.data as JsonObject).response_digest]);
+  const boundIndex = f.calls.findIndex(call => call.name === "craft_trace_append" && call.args.event_kind === "model.result_bound");
+  const completeIndex = f.calls.findIndex(call => call.name === "craft_experience_scenario_classification_request_complete");
+  assert.ok(boundIndex >= 0 && boundIndex < completeIndex);
+  const bound = f.calls[boundIndex]!.args.data as JsonObject;
+  assert.equal(bound.response_digest, (modelCompleted?.args.data as JsonObject).response_digest);
+  assert.match(String(bound.result_digest), /^sha256:[a-f0-9]{64}$/u);
+  assert.deepEqual(f.calls[boundIndex]!.args.input_refs, [bound.response_digest]);
+  assert.deepEqual(f.calls[boundIndex]!.args.output_refs, ["scenario_classification_1", bound.result_digest]);
   assert.equal(Object.hasOwn(modelCompleted?.args ?? {}, "text"), false);
   assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["completed"]);
 });
@@ -261,7 +270,7 @@ test("reports model and finalize failures without leaking error messages", async
   assert.equal((classificationFailure?.args.data as JsonObject).failure_stage, "classification_link");
 });
 
-test("keeps model request failures retryable when persistent classification state is enabled", async () => {
+test("does not replay an ambiguous model request when persistent classification state is enabled", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-experience-classification-request-retry-"));
   try {
     const f = fixture({ throwOn: "transport.complete" });
@@ -269,9 +278,66 @@ test("keeps model request failures retryable when persistent classification stat
     const first = await runExperienceScenarioClassificationOnce(deps);
     const second = await runExperienceScenarioClassificationOnce(deps);
     assert.equal((first.outcomes as JsonObject[])[0]?.failure_stage, "model_request");
-    assert.equal((second.outcomes as JsonObject[])[0]?.failure_stage, "model_request");
-    assert.equal(f.calls.filter(call => call.name === "craft_trace_start").length, 2);
+    assert.equal((first.outcomes as JsonObject[])[0]?.status, "model_result_unknown");
+    assert.equal(first.reconciliation_pending, true);
+    assert.equal(second.reason, "model_result_unknown");
+    assert.equal(second.reconciliation_pending, true);
+    assert.equal((second.outcomes as JsonObject[])[0]?.trace_id, f.calls.find(call => call.name === "craft_trace_start")?.args.trace_id);
+    assert.equal(f.calls.filter(call => call.name === "craft_trace_start").length, 1);
+    const entries = `${deps.state_file}.entries`;
+    const saved = JSON.parse(readFileSync(join(entries, readdirSync(entries)[0]!), "utf8")) as { failure: { trace_id: string; failure_code: string } };
+    assert.equal(saved.failure.trace_id, f.calls.find(call => call.name === "craft_trace_start")?.args.trace_id);
+    assert.equal(saved.failure.failure_code, "model_dispatch_unknown");
+    assert.equal(shouldSuppressExperienceClassification(deps.state_file, "ticket-1", `sha256:${"f".repeat(64)}`, "future-version"), true);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("does not repeat a completed model call when classification persistence fails", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "craft-post-response-"));
+  try {
+    const f = fixture({ throwOn: "craft_experience_scenario_classification_request_complete", response: JSON.stringify({ decision: "unclassified" }) });
+    const deps = { client: f.client, providers: [provider], transport: f.transport, state_file: join(directory, "attempts.json") };
+    const first = await runExperienceScenarioClassificationOnce(deps);
+    assert.equal((first.outcomes as JsonObject[])[0]?.status, "model_result_unknown");
+    assert.equal(first.reconciliation_pending, true);
+    const second = await runExperienceScenarioClassificationOnce(deps);
+    assert.equal(second.reason, "model_result_unknown");
+    assert.equal(f.requests.length, 1);
+    assert.equal(shouldSuppressExperienceClassification(deps.state_file, "ticket-1", `sha256:${"f".repeat(64)}`, "future-version"), true);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("a replacement ticket cannot replay an unresolved call for the same scoped request", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "craft-unknown-request-"));
+  try {
+    const stateFile = join(directory, "attempts.json"), first = fixture({ throwOn: "transport.complete" });
+    await runExperienceScenarioClassificationOnce({ client: first.client, providers: [provider], transport: first.transport, state_file: stateFile });
+    const replacement = fixture({ ticket: { id: "replacement", purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
+      target: { kind: "experience_scenario_classification_request", id: "scenario_classification_1", version: 1, scope: "project:craft" },
+      readiness: { status: "ready_for_adapter" } } });
+    const result = await runExperienceScenarioClassificationOnce({ client: replacement.client, providers: [provider], transport: replacement.transport, state_file: stateFile });
+    assert.equal(result.reason, "model_result_unknown");
+    assert.equal((result.outcomes as JsonObject[])[0]?.trace_id, first.calls.find(call => call.name === "craft_trace_start")?.args.trace_id);
+    assert.equal(replacement.requests.length, 0);
+    const otherProject = fixture({ response: JSON.stringify({ decision: "unclassified" }), ticket: { id: "other-project", purpose: "workflow_evolution",
+      profile_id: "profile-1", profile_version: 1, target: { kind: "experience_scenario_classification_request", id: "scenario_classification_1",
+        version: 1, scope: "project:other" }, readiness: { status: "ready_for_adapter" } } });
+    await runExperienceScenarioClassificationOnce({ client: otherProject.client, providers: [provider], transport: otherProject.transport, state_file: stateFile });
+    assert.equal(otherProject.requests.length, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("reports a legacy unknown call without inventing a missing Trace ID", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "craft-legacy-unknown-"));
+  try {
+    const stateFile = join(directory, "attempts.json"), f = fixture();
+    await recordExperienceClassificationFailure(stateFile, "ticket-1", { attempt_digest: `sha256:${"a".repeat(64)}`, classifier_version: "old",
+      failure_stage: "model_request", failure_code: "model_dispatch_unknown", failed_at: new Date().toISOString() });
+    const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport, state_file: stateFile });
+    assert.equal(result.reason, "model_result_unknown");
+    assert.equal(Object.hasOwn((result.outcomes as JsonObject[])[0]!, "trace_id"), false);
+    assert.equal(f.requests.length, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("retries a failed classification with a fresh trace", async () => {
@@ -571,6 +637,7 @@ test("keeps the classification failure visible when retry-state persistence is u
     const client: ExperienceScenarioClassificationClient = { async call(name, args) {
       const result = await f.client.call(name, args);
       if (name !== "craft_learning_cycle_finalize") return result;
+      rmSync(runtimeDir, { recursive: true, force: true });
       symlinkSync(targetDir, runtimeDir, "dir");
       return { ...result, observation: { id: context.observation_id,
         scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "project", id: "project:other" } } } };
@@ -581,10 +648,33 @@ test("keeps the classification failure visible when retry-state persistence is u
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("reports an unknown result if the post-response checkpoint cannot be updated", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-checkpoint-update-"));
+  try {
+    const stateFile = join(root, "attempts.json"), entries = `${stateFile}.entries`, target = join(root, "target");
+    mkdirSync(target);
+    const f = fixture();
+    const client: ExperienceScenarioClassificationClient = { async call(name, args) {
+      const result = await f.client.call(name, args);
+      if (name !== "craft_learning_cycle_finalize") return result;
+      rmSync(entries, { recursive: true, force: true });
+      symlinkSync(target, entries, "dir");
+      return { ...result, observation: { id: context.observation_id,
+        scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "project", id: "project:other" } } } };
+    } };
+    const result = await runExperienceScenarioClassificationOnce({ client, providers: [provider], transport: f.transport, state_file: stateFile });
+    assert.equal(result.reconciliation_pending, true);
+    assert.equal(result.reconciliation_checkpoint_failed, true);
+    assert.equal((result.outcomes as JsonObject[])[0]?.status, "model_result_unknown");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("validates persisted Experience classification retry state", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-experience-classification-state-validation-"));
   try {
     const stateFile = join(root, "attempts.json"), digest = `sha256:${"a".repeat(64)}`;
+    await assert.rejects(recordExperienceClassificationFailure(stateFile, "ticket-1", { attempt_digest: digest, classifier_version: "v1",
+      failure_stage: "model_request", failure_code: "model_dispatch_unknown", failed_at: new Date().toISOString(), trace_id: "unsafe trace" }), /identity is invalid/u);
     assert.equal(shouldSuppressExperienceClassification(stateFile, "ticket-1", digest, "0.12.123"), false);
     await recordExperienceClassificationFailure(stateFile, "ticket-1", { attempt_digest: digest, classifier_version: "0.12.123",
       failure_stage: "classification_link", failure_code: "classification_link_rejected", failed_at: new Date().toISOString() });

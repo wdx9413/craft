@@ -175,6 +175,20 @@ test("worker supervisor recovers dead-owner locks and fails closed on invalid lo
   } finally { await f.close(); }
 });
 
+test("dead-owner lock recovery retains the new worker release version", async () => {
+  const f = await fixture();
+  try {
+    const runtimeDir = join(f.root, "runtime");
+    await mkdir(runtimeDir, { recursive: true });
+    const path = join(runtimeDir, "learning-worker-experience.lock.json");
+    await writeFile(path, JSON.stringify({ pid: 999_999_999, owner_id: "old-owner", runtime_version: "0.12.124" }));
+    const release = await acquireLearningWorkerLocks(runtimeDir, ["experience"], { is_process_alive: () => false, runtime_version: "0.12.125" });
+    assert.ok(release);
+    assert.equal(JSON.parse(await readFile(path, "utf8")).runtime_version, "0.12.125");
+    await release();
+  } finally { await f.close(); }
+});
+
 test("worker supervisor never removes a lock after ownership changes", async () => {
   const f = await fixture(); const failures: string[] = [];
   try {

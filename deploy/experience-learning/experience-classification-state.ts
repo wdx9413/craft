@@ -20,7 +20,8 @@ function validFailure(value: unknown): value is ExperienceClassificationFailure 
   return DIGEST.test(String(item.attempt_digest)) && typeof item.classifier_version === "string" && Boolean(item.classifier_version.trim())
     && typeof item.failure_stage === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(item.failure_stage)
     && typeof item.failure_code === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(item.failure_code)
-    && typeof item.failed_at === "string" && Number.isFinite(Date.parse(item.failed_at));
+    && typeof item.failed_at === "string" && Number.isFinite(Date.parse(item.failed_at))
+    && (item.trace_id === undefined || typeof item.trace_id === "string" && IDENTIFIER.test(item.trace_id));
 }
 
 export interface ExperienceClassificationFailure {
@@ -29,6 +30,7 @@ export interface ExperienceClassificationFailure {
   failure_stage: string;
   failure_code: string;
   failed_at: string;
+  trace_id?: string;
   reconciliation?: { ticket_id: string; request_id: string; scope: string; target_version: number; request_version: number;
     request_status: string; result_digest: string };
 }
@@ -93,13 +95,18 @@ function readAttempt(path: string, ticketId: string): ExperienceClassificationFa
   }
 }
 
-export function shouldSuppressExperienceClassification(path: string, ticketId: string, attemptDigest: string, classifierVersion: string): boolean {
+export function experienceClassificationSuppression(path: string, ticketId: string, attemptDigest: string, classifierVersion: string): { reason: "model_result_unknown" | "unchanged_failure"; trace_id?: string } | null {
   if (!IDENTIFIER.test(ticketId) || !DIGEST.test(attemptDigest) || typeof classifierVersion !== "string" || !classifierVersion.trim()) {
     throw new Error("Experience classification attempt identity is invalid");
   }
   checkStateDirectory(path);
   const failure = readAttempt(path, ticketId) ?? readAttempts(path).attempts[ticketId];
-  return failure?.attempt_digest === attemptDigest && failure.classifier_version === classifierVersion;
+  if (failure?.failure_code === "model_dispatch_unknown") return { reason: "model_result_unknown", ...(failure.trace_id ? { trace_id: failure.trace_id } : {}) };
+  return failure?.attempt_digest === attemptDigest && failure.classifier_version === classifierVersion ? { reason: "unchanged_failure" } : null;
+}
+
+export function shouldSuppressExperienceClassification(path: string, ticketId: string, attemptDigest: string, classifierVersion: string): boolean {
+  return experienceClassificationSuppression(path, ticketId, attemptDigest, classifierVersion) !== null;
 }
 
 export async function recordExperienceClassificationFailure(path: string, ticketId: string, failure: ExperienceClassificationFailure): Promise<void> {

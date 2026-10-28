@@ -19,6 +19,22 @@ async function fixture() {
   return { root, store, service: new CraftService(store) };
 }
 
+test("Experience result binding preserves content-free response and result references in Trace storage", async () => {
+  const f = await fixture();
+  try {
+    const response = `sha256:${"a".repeat(64)}`, result = `sha256:${"b".repeat(64)}`;
+    f.service.traceStart({ trace_id: "binding", task_id: "task", operation_id: "ticket" });
+    const appended = f.service.traceAppend({ trace_id: "binding", event_kind: "model.result_bound", actor: "experience-learning-worker",
+      source: "craft-experience", trust: "observed", operation_id: "ticket", input_refs: [response], output_refs: ["request", result],
+      data: { request_id: "request", request_version: 1, response_digest: response, result_digest: result, decision: "unclassified" } });
+    const event = appended.event as JsonObject;
+    assert.deepEqual(event.input_refs, [response]);
+    assert.deepEqual(event.output_refs, ["request", result]);
+    assert.equal(event.content_stored, false);
+    assert.equal(event.trust, "observed");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("Trace Kernel provides canonical append, observation, feedback and terminal closure", async () => {
   const f = await fixture();
   try {

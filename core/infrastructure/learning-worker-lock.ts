@@ -50,7 +50,7 @@ async function acquireComponentLock(path: string, fileSystem: WorkerLockFileSyst
       throw new Error("Learning worker lock changed during recovery");
     }
     await fileSystem.unlink(recoveredPath);
-    return acquireComponentLock(path, fileSystem, isOwnerAlive);
+    return acquireComponentLock(path, fileSystem, isOwnerAlive, runtimeVersion);
   }
   try { await fileSystem.unlink(pendingPath); }
   catch { /* The published lock is valid; a leftover private staging link is harmless. */ }
