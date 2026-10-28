@@ -247,10 +247,11 @@ export class TraceShardStore {
     });
   }
 
-  events(traceId: string): JsonObject[] {
+  events(traceId: string, limit?: number): JsonObject[] {
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error("Event limit must be a positive safe integer");
     const database = this.database(this.shard(traceId), false);
     if (!database) return [];
-    return (database.prepare("SELECT * FROM events WHERE stream=? ORDER BY sequence").all(`trace:${traceId}`) as Array<Record<string, unknown>>)
+    return (database.prepare("SELECT * FROM events WHERE stream=? ORDER BY sequence LIMIT ?").all(`trace:${traceId}`, limit ?? -1) as Array<Record<string, unknown>>)
       .map(row => ({ stream: row.stream, sequence: row.sequence, event_type: row.event_type,
         payload: JSON.parse(String(row.payload_json)), created_at: row.created_at }));
   }

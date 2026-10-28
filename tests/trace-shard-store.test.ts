@@ -242,6 +242,10 @@ test("offline migration preserves historical versions and events, then is repeat
     insert.run("trace_event", "old-event", 1, JSON.stringify({ trace_id: "old-trace", sequence: 1 }), now, now);
     store.database.prepare("INSERT INTO events(stream,sequence,event_type,payload_json,created_at) VALUES(?,?,?,?,?)")
       .run("trace:old-trace", 1, "task.done", JSON.stringify({ trace_id: "old-trace" }), now);
+    assert.equal(store.events("trace:old-trace", 1).length, 1);
+    assert.equal(store.findTraceChild("trace_event", "old-event", "old-trace")?.sequence, 1);
+    assert.throws(() => store.events("trace:old-trace", 0), /positive safe integer/u);
+    assert.throws(() => store.events("trace:old-trace", Number.NaN), /positive safe integer/u);
   } finally { store.close(); }
   try {
     const dry = await migrateTraceStorage(root);
@@ -273,6 +277,8 @@ test("offline migration preserves historical versions and events, then is repeat
       assert.equal(reopened.find("trace", "old-trace")?.version, 2);
       assert.equal(reopened.find("trace", "old-trace", 1)?.status, "running");
       assert.equal(reopened.find("trace_event", "old-event")?.trace_id, "old-trace");
+      assert.equal(reopened.findTraceChild("trace_event", "old-event", "old-trace")?.trace_id, "old-trace");
+      assert.equal(reopened.findTraceChild("trace_event", "missing", "old-trace"), null);
       assert.equal(reopened.events("trace:old-trace").length, 1);
       assert.equal(reopened.database.prepare("SELECT COUNT(*) n FROM records WHERE kind IN ('trace','trace_event')").get()?.n, 0);
     } finally { reopened.close(); }
@@ -344,6 +350,9 @@ test("Trace shard reads, filtering, retention, nested transactions and removal h
     assert.equal(shards.children("trace_event", traceId)[0]?.summary, "latest");
     assert.equal(shards.retentionCandidates("2030-01-01T00:00:00.000Z", 10).length, 3);
     assert.deepEqual(shards.events(traceId).map(item => item.sequence), [1, 2]);
+    assert.deepEqual(shards.events(traceId, 1).map(item => item.sequence), [1]);
+    assert.throws(() => shards.events(traceId, 0), /positive safe integer/u);
+    assert.throws(() => shards.events(traceId, Number.NaN), /positive safe integer/u);
 
     assert.throws(() => shards.transaction(traceId, () => shards.transaction(traceId, () => { throw new Error("nested rollback"); })), /nested rollback/u);
     assert.equal(shards.events(traceId).length, 2);

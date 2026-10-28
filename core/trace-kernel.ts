@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { lstatSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { CraftStore } from "./infrastructure/store.ts";
 import { TRACE_SCHEMA, TRACE_SCHEMA_REVISION } from "./runtime-truth.ts";
@@ -15,6 +18,29 @@ export type TraceTrust = "observed" | "verified" | "human" | "untrusted";
 const TERMINAL = new Set<TraceStatus>(["completed", "failed", "cancelled", "blocked"]);
 const TRUST = new Set<TraceTrust>(["observed", "verified", "human", "untrusted"]);
 const SIGNALS = new Set(["accepted", "rejected", "corrected", "retried", "stopped", "handoff", "rated"]);
+
+function withFeedbackIdLock<T>(runtimeDir: string, feedbackId: string, operation: () => T): T {
+  const directory = join(runtimeDir, "trace-feedback-locks");
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const stat = lstatSync(directory);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Trace feedback lock directory is unsafe");
+  const path = join(directory, `${stableDigest(feedbackId).slice(7, 9)}.db`);
+  try {
+    const file = lstatSync(path);
+    if (file.isSymbolicLink() || !file.isFile()) throw new Error("Trace feedback lock file is unsafe");
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  const database = new DatabaseSync(path);
+  try {
+    database.exec("PRAGMA busy_timeout=0");
+    try { database.exec("BEGIN IMMEDIATE"); }
+    catch (error) {
+      if (error instanceof Error && /locked|busy/iu.test(error.message)) throw new Error("Trace feedback ID conflict or busy; retry", { cause: error });
+      throw error;
+    }
+    try { const result = operation(); database.exec("COMMIT"); return result; }
+    catch (error) { database.exec("ROLLBACK"); throw error; }
+  } finally { database.close(); }
+}
 
 function optional(value: unknown): string | null { return value === undefined || value === null ? null : text(value, "reference"); }
 function object(value: unknown, name: string, fallback: JsonObject = {}): JsonObject {
@@ -99,17 +125,26 @@ export class TraceKernel {
   }
 
   feedback(args: JsonObject): JsonObject {
-    const traceId = text(args.trace_id, "trace_id"); this.store.get("trace", traceId);
+    const traceId = text(args.trace_id, "trace_id");
     const signal = text(args.signal, "signal"); if (!SIGNALS.has(signal)) throw new Error("Trace feedback signal is unsupported");
     const summary = text(args.summary, "summary"); const feedbackId = String(args.feedback_id ?? `feedback_${traceId}_${stableDigest({ signal, summary }).slice(-16)}`);
-    const existing = this.store.find("trace_feedback", feedbackId);
-    if (existing) {
-      if (existing.signal !== signal || existing.summary !== summary) throw new Error("Trace feedback idempotency conflict");
-      return { feedback: existing, idempotent: true };
-    }
-    const record = this.store.create("trace_feedback", feedbackId, { trace_id: traceId, signal, actor: String(args.actor ?? "human"), summary, value: args.value === undefined ? null : safeData(args.value, "value"), evidence_ids: strings(args.evidence_ids, "evidence_ids"), outcome: optional(args.outcome), signal_digest: stableDigest({ signal, summary, value: args.value ?? null }) });
-    const event = this.append({ trace_id: traceId, event_kind: `feedback.${signal}`, actor: record.actor, source: "feedback", trust: record.actor === "human" ? "human" : "untrusted", summary, data: {}, output_refs: [record.id] });
-    return { feedback: record, event, idempotent: event.idempotent === true };
+    return withFeedbackIdLock(this.store.paths.runtimeDir, feedbackId, () => this.store.traceTransaction(traceId, () => {
+      this.store.get("trace", traceId);
+      const existing = this.store.find("trace_feedback", feedbackId);
+      if (existing) {
+        if (existing.trace_id !== traceId || existing.signal !== signal || existing.summary !== summary
+          || args.value !== undefined && stableDigest(safeData(args.value, "value")) !== stableDigest(existing.value)
+          || args.actor !== undefined && String(args.actor) !== existing.actor
+          || args.outcome !== undefined && optional(args.outcome) !== existing.outcome
+          || args.evidence_ids !== undefined && stableDigest(strings(args.evidence_ids, "evidence_ids")) !== stableDigest(existing.evidence_ids)) {
+          throw new Error("Trace feedback idempotency conflict");
+        }
+        return { feedback: existing, idempotent: true };
+      }
+      const record = this.store.create("trace_feedback", feedbackId, { trace_id: traceId, signal, actor: String(args.actor ?? "human"), summary, value: args.value === undefined ? null : safeData(args.value, "value"), evidence_ids: strings(args.evidence_ids, "evidence_ids"), outcome: optional(args.outcome), signal_digest: stableDigest({ signal, summary, value: args.value ?? null }) });
+      const event = this.append({ trace_id: traceId, event_kind: `feedback.${signal}`, actor: record.actor, source: "feedback", trust: record.actor === "human" ? "human" : "untrusted", summary, data: {}, output_refs: [record.id] });
+      return { feedback: record, event, idempotent: event.idempotent === true };
+    }));
   }
 
   finalize(args: JsonObject): JsonObject {
@@ -125,8 +160,28 @@ export class TraceKernel {
   }
 
   get(args: JsonObject): JsonObject {
-    const traceId = text(args.trace_id, "trace_id"); const trace = this.store.find("trace", traceId);
-    if (trace) return { trace, events: this.store.list("trace_event", Number.MAX_SAFE_INTEGER, (item) => item.trace_id === trace.id).sort((a, b) => Number(a.sequence) - Number(b.sequence)), feedback: this.store.list("trace_feedback", Number.MAX_SAFE_INTEGER, (item) => item.trace_id === trace.id) };
+    const traceId = text(args.trace_id, "trace_id"); let trace = this.store.find("trace", traceId);
+    if (trace) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const count = Number(trace.event_count);
+        const journal = Number.isSafeInteger(count) && count >= 0 && count <= 10_000 ? this.store.events(`trace:${traceId}`, count + 1) : [];
+        const ids = journal.map(item => (item.payload as JsonObject | undefined)?.event_id);
+        const events = ids.length === count && ids.every(id => typeof id === "string") && new Set(ids).size === count
+          ? ids.map(id => this.store.findTraceChild("trace_event", String(id), traceId)) : [];
+        const exact = events.length === count && events.every((event, index) => event?.trace_id === traceId && Number(event.sequence) === index + 1);
+        let current = this.store.find("trace", traceId);
+        if (!current) throw new Error("Trace changed during lookup; retry");
+        if (current.version !== trace.version) { trace = current; continue; }
+        const resolvedEvents = exact ? events : this.store.list("trace_event", Number.MAX_SAFE_INTEGER, (item) => item.trace_id === traceId)
+          .sort((a, b) => Number(a.sequence) - Number(b.sequence));
+        const feedback = this.store.list("trace_feedback", Number.MAX_SAFE_INTEGER, (item) => item.trace_id === traceId);
+        current = this.store.find("trace", traceId);
+        if (!current) throw new Error("Trace changed during lookup; retry");
+        if (current.version === trace.version) return { trace, events: resolvedEvents, feedback };
+        trace = current;
+      }
+      throw new Error("Trace changed during lookup; retry");
+    }
     const archive = this.store.find("trace_archive", traceId); if (!archive) throw new Error(`Unknown trace: ${traceId}`);
     const bundle = this.archives.read(this.archivePointer(archive));
     return { trace: bundle.trace, events: bundle.events, feedback: bundle.feedback, ...(bundle.telemetry_events ? { telemetry_events: bundle.telemetry_events } : {}), archived: true, archive };

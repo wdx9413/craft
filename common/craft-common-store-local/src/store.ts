@@ -1767,6 +1767,12 @@ export class CraftStore {
     return [...merged.values()].sort((a, b) => String(a.last_event_at ?? a.updated_at).localeCompare(String(b.last_event_at ?? b.updated_at))).slice(0, bounded);
   }
 
+  /** Resolve a Trace child without scanning unrelated Trace shards. */
+  findTraceChild(kind: "trace_event" | "trace_feedback", id: string, traceId: string): JsonObject | null {
+    const row = this.database.prepare("SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1").get(kind, id) as Record<string, unknown> | undefined;
+    return row ? this.record(row, true) : this.traceShards.find(kind, id, undefined, traceId);
+  }
+
   /** Read only one trace's latest child records; used to build an archive outside write transactions. */
   listTraceChildren(kind: "trace_event" | "trace_feedback" | "telemetry_event", traceId: string): JsonObject[] {
     const rows = this.database.prepare(`SELECT r.* FROM records r JOIN (
@@ -2159,15 +2165,16 @@ export class CraftStore {
     });
   }
 
-  events(stream: string): JsonObject[] {
-    if (stream.startsWith("trace:") && !this.legacyTrace(stream.slice(6))) return this.traceShards.events(stream.slice(6));
+  events(stream: string, limit?: number): JsonObject[] {
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error("Event limit must be a positive safe integer");
+    if (stream.startsWith("trace:") && !this.legacyTrace(stream.slice(6))) return this.traceShards.events(stream.slice(6), limit);
     const cycleId = stream.startsWith("evolution:") ? stream.slice("evolution:".length) : "";
     const pointer = cycleId ? this.partitionPointer("evolution_cycle", cycleId) : null;
     if (cycleId && pointer?.domain !== "evolution") throw new Error("Evolution Cycle project partition is unavailable");
     const source = pointer?.domain === "evolution" ? this.memoryDatabaseForRead(pointer.scope, "evolution", pointer.file).database : this.database;
     return source.prepare(
-      "SELECT * FROM events WHERE stream=? ORDER BY sequence",
-    ).all(stream).map((row) => {
+      "SELECT * FROM events WHERE stream=? ORDER BY sequence LIMIT ?",
+    ).all(stream, limit ?? -1).map((row) => {
       const item = row as Record<string, unknown>;
       return { stream: item.stream, sequence: item.sequence, event_type: item.event_type,
         payload: JSON.parse(String(item.payload_json)), created_at: item.created_at };

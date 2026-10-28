@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, symlinkSync, unlinkSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import test from "node:test";
 import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer, CORE_TOOLS } from "../core/mcp.ts";
@@ -11,6 +14,7 @@ import { CraftService, VERSION } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { TRACE_SCHEMA_VERSION, TraceKernel } from "../core/trace-kernel.ts";
 import { MaintenanceKernel } from "../core/maintenance.ts";
+import { stableDigest } from "../core/digest.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-trace-evolution-"));
@@ -18,6 +22,240 @@ async function fixture() {
   store.create("task", "task", { title: "Trace task", goal: "verify" });
   return { root, store, service: new CraftService(store) };
 }
+
+test("Trace lookup uses journal IDs and falls back if the journal is incomplete", async () => {
+  const f = await fixture();
+  try {
+    f.service.traceStart({ trace_id: "indexed", task_id: "task" });
+    f.service.traceAppend({ trace_id: "indexed", event_id: "custom-event", event_kind: "action" });
+    const events = f.store.events.bind(f.store);
+    let requestedLimit: number | undefined;
+    f.store.events = (stream, limit) => { requestedLimit = limit; return events(stream, limit); };
+    const shardFind = f.store.traceShards.find.bind(f.store.traceShards);
+    let locatedTrace: string | undefined;
+    f.store.traceShards.find = (kind, id, version, traceId) => { if (kind === "trace_event") locatedTrace = traceId; return shardFind(kind, id, version, traceId); };
+    const list = f.store.list.bind(f.store);
+    f.store.list = ((kind: string, ...args: unknown[]) => {
+      if (kind === "trace_event") throw new Error("unbounded scan");
+      return (list as (...values: unknown[]) => JsonObject[])(kind, ...args);
+    }) as typeof f.store.list;
+    assert.deepEqual((f.service.traceGet({ trace_id: "indexed" }).events as JsonObject[]).map(event => event.id), ["custom-event"]);
+    assert.equal(requestedLimit, 2);
+    assert.equal(locatedTrace, "indexed");
+    f.store.list = list;
+    f.store.events = () => [];
+    assert.deepEqual((f.service.traceGet({ trace_id: "indexed" }).events as JsonObject[]).map(event => event.id), ["custom-event"]);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Trace journal fast path fails closed on malformed or inconsistent entries", async () => {
+  const f = await fixture();
+  try {
+    f.service.traceStart({ trace_id: "fallback", task_id: "task" });
+    f.service.traceAppend({ trace_id: "fallback", event_id: "first", event_kind: "action" });
+    f.service.traceAppend({ trace_id: "fallback", event_id: "second", event_kind: "action" });
+    assert.equal(f.store.events("trace:fallback", 1).length, 1);
+    assert.throws(() => f.store.events("trace:fallback", 0), /positive safe integer/u);
+    for (const journal of [[{ payload: {} }, { payload: { event_id: "second" } }],
+      [{ payload: { event_id: "first" } }, { payload: { event_id: "first" } }],
+      [{ payload: { event_id: "missing" } }, { payload: { event_id: "second" } }],
+      [{ payload: { event_id: "second" } }, { payload: { event_id: "first" } }]]) {
+      f.store.events = () => journal;
+      assert.deepEqual((f.service.traceGet({ trace_id: "fallback" }).events as JsonObject[]).map(event => event.id), ["first", "second"]);
+    }
+    const find = f.store.find.bind(f.store);
+    f.store.find = ((kind: string, id: string, ...args: unknown[]) => {
+      const record = (find as (...values: unknown[]) => JsonObject | null)(kind, id, ...args);
+      return kind === "trace" && record ? { ...record, event_count: 10_001 } : record;
+    }) as typeof f.store.find;
+    assert.equal((f.service.traceGet({ trace_id: "fallback" }).events as JsonObject[]).length, 2);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Trace lookup retries a concurrent append and bounds repeated changes", async () => {
+  const f = await fixture();
+  try {
+    f.service.traceStart({ trace_id: "racing", task_id: "task" });
+    f.service.traceAppend({ trace_id: "racing", event_kind: "initial" });
+    const events = f.store.events.bind(f.store);
+    let remaining = 1;
+    f.store.events = (stream, limit) => {
+      if (remaining-- > 0) f.service.traceAppend({ trace_id: "racing", event_kind: "concurrent" });
+      return events(stream, limit);
+    };
+    const result = f.service.traceGet({ trace_id: "racing" });
+    assert.equal((result.trace as JsonObject).event_count, 2);
+    assert.equal((result.events as JsonObject[]).length, 2);
+    remaining = 2;
+    assert.throws(() => f.service.traceGet({ trace_id: "racing" }), /changed during lookup/u);
+    const find = f.store.find.bind(f.store);
+    let reads = 0;
+    f.store.find = ((kind: string, id: string, ...args: unknown[]) => {
+      if (kind === "trace" && ++reads === 2) return null;
+      return (find as (...values: unknown[]) => JsonObject | null)(kind, id, ...args);
+    }) as typeof f.store.find;
+    remaining = 0;
+    assert.throws(() => f.service.traceGet({ trace_id: "racing" }), /changed during lookup/u);
+    f.store.find = find;
+    const list = f.store.list.bind(f.store);
+    let appendOnFeedback = true;
+    f.store.list = ((kind: string, ...args: unknown[]) => {
+      const records = (list as (...values: unknown[]) => JsonObject[])(kind, ...args);
+      if (kind === "trace_feedback" && appendOnFeedback) { appendOnFeedback = false; f.service.traceAppend({ trace_id: "racing", event_kind: "feedback-race" }); }
+      return records;
+    }) as typeof f.store.list;
+    const afterFeedback = f.service.traceGet({ trace_id: "racing" });
+    assert.equal((afterFeedback.trace as JsonObject).event_count, (afterFeedback.events as JsonObject[]).length);
+    reads = 0;
+    f.store.find = ((kind: string, id: string, ...args: unknown[]) => {
+      if (kind === "trace" && ++reads === 3) return null;
+      return (find as (...values: unknown[]) => JsonObject | null)(kind, id, ...args);
+    }) as typeof f.store.find;
+    assert.throws(() => f.service.traceGet({ trace_id: "racing" }), /changed during lookup/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("feedback and its Trace event commit together and cannot be reused across Traces", async () => {
+  const f = await fixture();
+  try {
+    f.service.traceStart({ trace_id: "feedback-first", task_id: "task" });
+    f.service.traceStart({ trace_id: "feedback-second", task_id: "task" });
+    f.service.traceFeedback({ trace_id: "feedback-first", feedback_id: "shared-feedback", signal: "corrected", summary: "same", value: {}, outcome: "verified" });
+    assert.throws(() => f.service.traceFeedback({ trace_id: "feedback-second", feedback_id: "shared-feedback", signal: "corrected", summary: "same" }), /idempotency conflict/u);
+    assert.throws(() => f.service.traceFeedback({ trace_id: "feedback-first", feedback_id: "shared-feedback", signal: "corrected", summary: "same", value: { changed: true } }), /idempotency conflict/u);
+    assert.throws(() => f.service.traceFeedback({ trace_id: "feedback-first", feedback_id: "shared-feedback", signal: "corrected", summary: "same", actor: "model" }), /idempotency conflict/u);
+    assert.throws(() => f.service.traceFeedback({ trace_id: "feedback-first", feedback_id: "shared-feedback", signal: "corrected", summary: "same", outcome: "better" }), /idempotency conflict/u);
+    assert.throws(() => f.service.traceFeedback({ trace_id: "feedback-first", feedback_id: "shared-feedback", signal: "corrected", summary: "same", evidence_ids: ["other"] }), /idempotency conflict/u);
+    assert.equal(f.service.traceFeedback({ trace_id: "feedback-first", feedback_id: "shared-feedback", signal: "corrected", summary: "same",
+      value: {}, actor: "human", evidence_ids: [], outcome: "verified" }).idempotent, true);
+    f.service.traceFinalize({ trace_id: "feedback-second", status: "completed", summary: "done" });
+    assert.throws(() => f.service.traceFeedback({ trace_id: "feedback-second", feedback_id: "terminal-feedback", signal: "corrected", summary: "late" }), /terminal Trace/u);
+    assert.equal(f.store.find("trace_feedback", "terminal-feedback"), null);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("feedback rollback also preserves legacy central Trace data", async () => {
+  const f = await fixture();
+  try {
+    const now = new Date().toISOString();
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("trace", "legacy-feedback", 1, JSON.stringify({ task_id: "task", status: "completed", event_count: 0, next_sequence: 0 }), now, now);
+    assert.throws(() => f.service.traceFeedback({ trace_id: "legacy-feedback", feedback_id: "legacy-terminal", signal: "corrected", summary: "late" }), /terminal Trace/u);
+    assert.equal(f.store.find("trace_feedback", "legacy-terminal"), null);
+    assert.equal(f.store.events("trace:legacy-feedback").length, 0);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("simultaneous feedback IDs across different Trace shards do not both commit", async () => {
+  const f = await fixture();
+  const otherStore = await new CraftStore(craftPaths(join(f.root, "data"))).open();
+  try {
+    const otherService = new CraftService(otherStore);
+    f.service.traceStart({ trace_id: "race-a", task_id: "task" });
+    f.service.traceStart({ trace_id: "race-b", task_id: "task" });
+    const find = f.store.find.bind(f.store);
+    let interleaved = false;
+    f.store.find = ((kind: string, id: string, ...args: unknown[]) => {
+      const found = (find as (...values: unknown[]) => JsonObject | null)(kind, id, ...args);
+      if (!interleaved && kind === "trace_feedback" && id === "racing-feedback") {
+        interleaved = true;
+        otherService.traceFeedback({ trace_id: "race-b", feedback_id: id, signal: "corrected", summary: "observed" });
+      }
+      return found;
+    }) as typeof f.store.find;
+    assert.throws(() => f.service.traceFeedback({ trace_id: "race-a", feedback_id: "racing-feedback", signal: "corrected", summary: "observed" }), /conflict/u);
+    assert.equal(f.store.find("trace_feedback", "racing-feedback"), null);
+    assert.equal(otherService.traceFeedback({ trace_id: "race-b", feedback_id: "racing-feedback", signal: "corrected", summary: "observed" }).idempotent, false);
+    assert.throws(() => f.service.traceFeedback({ trace_id: "race-a", feedback_id: "racing-feedback", signal: "corrected", summary: "observed" }), /idempotency conflict/u);
+  } finally { otherStore.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("different feedback lock partitions do not block each other", async () => {
+  const f = await fixture();
+  const otherStore = await new CraftStore(craftPaths(join(f.root, "data"))).open();
+  try {
+    const otherService = new CraftService(otherStore), firstId = "first-feedback";
+    const secondId = Array.from({ length: 100 }, (_, index) => `other-feedback-${index}`)
+      .find(id => stableDigest(id).slice(7, 9) !== stableDigest(firstId).slice(7, 9))!;
+    f.service.traceStart({ trace_id: "race-a", task_id: "task" });
+    f.service.traceStart({ trace_id: "race-b", task_id: "task" });
+    const find = f.store.find.bind(f.store);
+    let interleaved = false;
+    f.store.find = ((kind: string, id: string, ...args: unknown[]) => {
+      const found = (find as (...values: unknown[]) => JsonObject | null)(kind, id, ...args);
+      if (!interleaved && kind === "trace_feedback" && id === firstId) {
+        interleaved = true;
+        otherService.traceFeedback({ trace_id: "race-b", feedback_id: secondId, signal: "corrected", summary: "observed" });
+      }
+      return found;
+    }) as typeof f.store.find;
+    assert.equal(f.service.traceFeedback({ trace_id: "race-a", feedback_id: firstId, signal: "corrected", summary: "observed" }).idempotent, false);
+    assert.equal(otherStore.find("trace_feedback", secondId)?.trace_id, "race-b");
+  } finally { otherStore.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("a crashed lock owner releases its feedback partition", async () => {
+  const f = await fixture();
+  const directory = join(f.store.paths.runtimeDir, "trace-feedback-locks");
+  mkdirSync(directory, { recursive: true });
+  const lockFile = join(directory, `${stableDigest("crash-feedback").slice(7, 9)}.db`);
+  const child = spawn(process.execPath, ["-e", "const { DatabaseSync } = require('node:sqlite'); const db = new DatabaseSync(process.argv[1]); db.exec('BEGIN IMMEDIATE'); process.stdout.write('ready'); setInterval(() => {}, 1000);", lockFile], { stdio: ["ignore", "pipe", "ignore"] });
+  try {
+    await once(child.stdout!, "data");
+    f.service.traceStart({ trace_id: "crash-trace", task_id: "task" });
+    const feedback = { trace_id: "crash-trace", feedback_id: "crash-feedback", signal: "corrected", summary: "observed" };
+    assert.throws(() => f.service.traceFeedback(feedback), /busy/u);
+    const exited = once(child, "exit");
+    child.kill("SIGKILL");
+    await exited;
+    assert.equal(f.service.traceFeedback(feedback).idempotent, false);
+  } finally { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("feedback locks reject unsafe paths and report unexpected database errors", async () => {
+  const f = await fixture();
+  try {
+    f.service.traceStart({ trace_id: "lock-path", task_id: "task" });
+    const runtime = f.store.paths.runtimeDir, directory = join(runtime, "trace-feedback-locks"), target = join(f.root, "target");
+    mkdirSync(runtime, { recursive: true }); mkdirSync(target);
+    symlinkSync(target, directory, "dir");
+    const input = { trace_id: "lock-path", feedback_id: "lock-id", signal: "corrected", summary: "safe" };
+    assert.throws(() => f.service.traceFeedback(input), /directory is unsafe/u);
+    unlinkSync(directory); mkdirSync(directory);
+    const lockFile = join(directory, `${stableDigest("lock-id").slice(7, 9)}.db`);
+    symlinkSync(target, lockFile, "dir");
+    assert.throws(() => f.service.traceFeedback(input), /file is unsafe/u);
+    unlinkSync(lockFile);
+    symlinkSync(join(f.root, "missing"), lockFile);
+    assert.throws(() => f.service.traceFeedback(input), /file is unsafe/u);
+    unlinkSync(lockFile);
+    const original = DatabaseSync.prototype.exec;
+    try {
+      DatabaseSync.prototype.exec = function (sql: string) { if (sql === "BEGIN IMMEDIATE") throw new Error("unexpected storage error"); return original.call(this, sql); };
+      assert.throws(() => f.service.traceFeedback(input), /unexpected storage error/u);
+    } finally { DatabaseSync.prototype.exec = original; }
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Trace lookup detects a concurrent archive and reads it on retry", async () => {
+  const f = await fixture();
+  try {
+    f.service.traceStart({ trace_id: "archive-race", task_id: "task" });
+    f.service.traceAppend({ trace_id: "archive-race", event_kind: "action" });
+    f.service.traceFinalize({ trace_id: "archive-race", status: "completed", summary: "done" });
+    const events = f.store.events.bind(f.store);
+    let archive = true;
+    f.store.events = (stream, limit) => {
+      const result = events(stream, limit);
+      if (archive) { archive = false; f.service.traceRetentionSweep({ now: "2100-01-01T00:00:00.000Z" }); }
+      return result;
+    };
+    assert.throws(() => f.service.traceGet({ trace_id: "archive-race" }), /changed during lookup/u);
+    const result = f.service.traceGet({ trace_id: "archive-race" });
+    assert.equal(result.archived, true);
+    assert.equal((result.events as JsonObject[]).length, 2);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
 
 test("Experience result binding preserves content-free response and result references in Trace storage", async () => {
   const f = await fixture();
