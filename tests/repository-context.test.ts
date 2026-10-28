@@ -2043,6 +2043,13 @@ test("aggregate MCP resolves bounded scope and code references while standalone 
     assert.equal((reduced.pack_receipt as JsonObject).max_chars, 400);
     await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", max_items: 8 }), /configured maximum/);
     await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", max_chars: 8_000 }), /configured maximum/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "Logbook 单机限流方案", include_codebase: false,
+      task_kind: "knowledge", max_items: 3, max_chars: 1800 }), /max_items <= 3, max_chars <= 1200; omit these parameters/u);
+    const overBudget = await server.handle({ jsonrpc: "2.0", id: 42, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: f.repo, query: "Logbook 单机限流方案", include_codebase: false, task_kind: "knowledge", max_items: 3, max_chars: 1800 } } }) as JsonObject;
+    assert.equal((overBudget.result as JsonObject).isError, true);
+    assert.match(JSON.stringify((overBudget.result as JsonObject).content), /max_items <= 3, max_chars <= 1200; omit these parameters/u);
+    assert.equal(((overBudget.result as JsonObject).structuredContent as JsonObject).error_code, "LIMIT_EXCEEDED");
     const tiny = await result(server, "craft_context_open", { project_root: f.repo, query: "alpha", include_codebase: true, max_chars: 1 });
     assert.equal((tiny.pack_receipt as JsonObject).total_used_chars, 0);
     const standalone = new McpServer(f.service, "component-codebase");

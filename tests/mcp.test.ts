@@ -17,6 +17,13 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 
+test("Context open advertises the actual material budget bounds", () => {
+  const tool = TOOLS.find(item => item.name === "craft_context_open")!;
+  const properties = tool.inputSchema.properties as JsonObject;
+  assert.deepEqual(properties.max_chars, { type: "integer", description: "Range: 1 to 1200; omit to use the default." });
+  assert.deepEqual(properties.max_items, { type: "integer", description: "Range: 1 to 3; omit to use the default." });
+});
+
 test("Experience MCP contract carries the exact source Host session identifier", () => {
   const properties = (toolName: string) => {
     const tool = TOOLS.find(item => item.name === toolName) as unknown as JsonObject | undefined;

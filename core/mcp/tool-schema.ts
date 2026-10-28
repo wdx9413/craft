@@ -1,4 +1,5 @@
 import type { JsonObject } from "../infrastructure/store.ts";
+import { DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from "../../common/craft-common-base/src/context-assets.ts";
 
 export type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 export type ParamType = "boolean" | "integer" | "number" | "object" | "array" | "string";
@@ -171,7 +172,9 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
 };
 
 const objectSchema = (toolName: string, required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
-  properties: Object.fromEntries([...required, ...optional].map((name) => [name, ENUMS_BY_TOOL[toolName]?.[name]
+  properties: Object.fromEntries([...required, ...optional].map((name) => [name, toolName === "craft_context_open" && (name === "max_chars" || name === "max_items")
+    ? { type: "integer", description: `Range: 1 to ${name === "max_chars" ? DEFAULT_CONTEXT_MAX_CHARS : DEFAULT_CONTEXT_MAX_ITEMS}; omit to use the default.` }
+    : ENUMS_BY_TOOL[toolName]?.[name]
     ? { type: "string", enum: [...ENUMS_BY_TOOL[toolName][name]!] }
     : TYPES_BY_TOOL[toolName]?.[name] ? { type: TYPES_BY_TOOL[toolName][name] } : schemaFor(name)])), required,
   additionalProperties: false });

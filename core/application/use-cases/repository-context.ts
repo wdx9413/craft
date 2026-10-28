@@ -21,7 +21,7 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   try { new ContextBudget(maxItems, maxChars); }
   catch { throw new CraftOperationError("LIMIT_EXCEEDED", "budget_validation", "Context budget is invalid", { budget: !Number.isSafeInteger(maxItems) || maxItems < 1 ? "max_items" : "max_chars", max_items: maxItems, max_chars: maxChars, minimum: 1 }); }
   if (maxItems > DEFAULT_CONTEXT_MAX_ITEMS || maxChars > DEFAULT_CONTEXT_MAX_CHARS) {
-    throw new CraftOperationError("LIMIT_EXCEEDED", "budget_validation", "Context budget exceeds the configured maximum", {
+    throw new CraftOperationError("LIMIT_EXCEEDED", "budget_validation", `Context budget exceeds the configured maximum: max_items <= ${DEFAULT_CONTEXT_MAX_ITEMS}, max_chars <= ${DEFAULT_CONTEXT_MAX_CHARS}; omit these parameters to use defaults`, {
       max_items: maxItems, max_chars: maxChars,
       maximum_items: DEFAULT_CONTEXT_MAX_ITEMS, maximum_chars: DEFAULT_CONTEXT_MAX_CHARS,
     });
