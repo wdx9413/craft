@@ -51,6 +51,7 @@ export interface DistillationDependencies {
   knowledge_stage_cursor_file?: string;
   learning_pass_cursor_file?: string;
   knowledge_adjudication_cursor_file?: string;
+  experience_classification_state_file?: string;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -75,7 +76,8 @@ export async function runEvaluationOnce(client: ExperienceLearningClient): Promi
 
 export async function runOnce(deps: DistillationDependencies): Promise<JsonObject> {
   let scenarioClassification: JsonObject;
-  try { scenarioClassification = await runExperienceScenarioClassificationOnce(deps); }
+  try { scenarioClassification = await runExperienceScenarioClassificationOnce({ ...deps,
+    state_file: deps.experience_classification_state_file }); }
   catch (error) { scenarioClassification = { status: "failed", failure_kind: safeWorkerErrorClass(error, "ClassificationError") }; }
   const distillation = await runDistillationOnce(deps);
   const evaluation = await runEvaluationOnce(deps.client);
@@ -100,7 +102,8 @@ export async function runLearningTick(deps: DistillationDependencies, syncKnowle
   const env = deps.env ?? process.env;
   const paths = craftPaths(dataRoot(env));
   const config = await loadConfig(paths);
-  const configuredDeps = { ...deps, contentLanguage: deps.contentLanguage ?? config?.contentLanguage ?? "zh-CN" };
+  const configuredDeps = { ...deps, contentLanguage: deps.contentLanguage ?? config?.contentLanguage ?? "zh-CN",
+    experience_classification_state_file: deps.experience_classification_state_file ?? join(paths.runtimeDir, "experience-classification-attempts.json") };
   const includesExperience = components.includes("experience"), includesKnowledge = components.includes("knowledge");
   const passOrder = includesExperience && includesKnowledge
     ? await nextLearningPassOrder(deps.learning_pass_cursor_file ?? join(paths.runtimeDir, "learning-pass-order.json"))

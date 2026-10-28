@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { runExperienceScenarioClassificationOnce, type ExperienceScenarioClassificationClient } from "../deploy/experience-learning/experience-scenario-classification.ts";
+import { recordExperienceClassificationFailure, shouldSuppressExperienceClassification } from "../deploy/experience-learning/experience-classification-state.ts";
 
 const provider: ModelProviderSpec = { provider: "test", label: "Test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
   api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
@@ -158,6 +162,19 @@ test("reports model and finalize failures without leaking error messages", async
   assert.equal((classificationFailure?.args.data as JsonObject).failure_stage, "classification_link");
 });
 
+test("keeps model request failures retryable when persistent classification state is enabled", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-classification-request-retry-"));
+  try {
+    const f = fixture({ throwOn: "transport.complete" });
+    const deps = { client: f.client, providers: [provider], transport: f.transport, state_file: join(root, "attempts.json") };
+    const first = await runExperienceScenarioClassificationOnce(deps);
+    const second = await runExperienceScenarioClassificationOnce(deps);
+    assert.equal((first.outcomes as JsonObject[])[0]?.failure_stage, "model_request");
+    assert.equal((second.outcomes as JsonObject[])[0]?.failure_stage, "model_request");
+    assert.equal(f.calls.filter(call => call.name === "craft_trace_start").length, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("retries a failed classification with a fresh trace", async () => {
   const f = fixture();
   let attempts = 0;
@@ -307,6 +324,101 @@ test("rejects a classification receipt for another project or unavailable scene"
   } };
   const result = await runExperienceScenarioClassificationOnce({ client, providers: [provider], transport: unavailable.transport });
   assert.equal((result.outcomes as JsonObject[])[0]?.status, "failed");
+});
+
+test("suppresses repeated model calls after deterministic rejection until the input changes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-classification-state-"));
+  try {
+    const stateFile = join(root, "runtime", "experience-classification-attempts.json");
+    const f = fixture();
+    const client: ExperienceScenarioClassificationClient = { async call(name, args) {
+      const result = await f.client.call(name, args);
+      return name === "craft_learning_cycle_finalize" ? { ...result,
+        observation: { id: context.observation_id, scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "project", id: "project:other" } } } } : result;
+    } };
+    const deps = { client, providers: [provider], transport: f.transport, state_file: stateFile };
+    const failed = await runExperienceScenarioClassificationOnce(deps);
+    assert.equal((failed.outcomes as JsonObject[])[0]?.failure_kind, "classification_link_rejected");
+    const attemptsBefore = f.requests.length;
+    const suppressed = await runExperienceScenarioClassificationOnce(deps);
+    assert.equal(suppressed.reason, "unchanged_input_failure_suppressed");
+    assert.equal(f.requests.length, attemptsBefore);
+    const persisted = JSON.parse(readFileSync(stateFile, "utf8")) as JsonObject;
+    assert.equal(persisted.schema, "craft.experience-classification-attempts.v1");
+    assert.equal(Object.keys(persisted.attempts as object).length, 1);
+
+    const changedClient: ExperienceScenarioClassificationClient = { async call(name, args) {
+      const result = await client.call(name, args);
+      if (name !== "craft_experience_scenario_classification_request_get") return result;
+      return { ...result, taxonomy: { catalog_version: 1, scenarios: [] } };
+    } };
+    await runExperienceScenarioClassificationOnce({ ...deps, client: changedClient });
+    assert.equal(f.requests.length, attemptsBefore + 1);
+    const changedProfile: ExperienceScenarioClassificationClient = { async call(name, args) {
+      const result = await client.call(name, args);
+      if (name !== "craft_evaluation_model_profile_get") return result;
+      return { ...result, profile: { ...(result.profile as JsonObject), max_output_tokens: 128 } };
+    } };
+    await runExperienceScenarioClassificationOnce({ ...deps, client: changedProfile });
+    assert.equal(f.requests.length, attemptsBefore + 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("keeps the classification failure visible when retry-state persistence is unsafe", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-classification-state-link-"));
+  try {
+    const runtimeDir = join(root, "runtime"), targetDir = join(root, "target");
+    mkdirSync(targetDir);
+    const f = fixture();
+    const client: ExperienceScenarioClassificationClient = { async call(name, args) {
+      const result = await f.client.call(name, args);
+      if (name !== "craft_learning_cycle_finalize") return result;
+      symlinkSync(targetDir, runtimeDir, "dir");
+      return { ...result, observation: { id: context.observation_id,
+        scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "project", id: "project:other" } } } };
+    } };
+    const result = await runExperienceScenarioClassificationOnce({ client, providers: [provider], transport: f.transport,
+      state_file: join(runtimeDir, "attempts.json") });
+    assert.equal((result.outcomes as JsonObject[])[0]?.failure_kind, "classification_link_rejected");
+    assert.equal(f.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("validates persisted Experience classification retry state", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-classification-state-validation-"));
+  try {
+    const stateFile = join(root, "attempts.json"), digest = `sha256:${"a".repeat(64)}`;
+    assert.equal(shouldSuppressExperienceClassification(stateFile, "ticket-1", digest, "0.12.123"), false);
+    await recordExperienceClassificationFailure(stateFile, "ticket-1", { attempt_digest: digest, classifier_version: "0.12.123",
+      failure_stage: "classification_link", failure_code: "classification_link_rejected", failed_at: new Date().toISOString() });
+    await recordExperienceClassificationFailure(stateFile, "ticket-2", { attempt_digest: digest, classifier_version: "0.12.123",
+      failure_stage: "classification_link", failure_code: "classification_link_rejected", failed_at: new Date().toISOString() });
+    assert.equal(shouldSuppressExperienceClassification(stateFile, "ticket-1", digest, "0.12.123"), true);
+    assert.equal(shouldSuppressExperienceClassification(stateFile, "ticket-1", digest, "0.12.124"), false);
+    assert.equal(shouldSuppressExperienceClassification(stateFile, "ticket-1", `sha256:${"b".repeat(64)}`, "0.12.123"), false);
+    assert.throws(() => shouldSuppressExperienceClassification(stateFile, "bad id", digest, "0.12.123"), /identity is invalid/u);
+    await assert.rejects(recordExperienceClassificationFailure(stateFile, "bad id", { attempt_digest: digest, classifier_version: "0.12.123",
+      failure_stage: "stage", failure_code: "failure", failed_at: new Date().toISOString() }), /identity is invalid/u);
+
+    const invalidFile = join(root, "invalid.json");
+    writeFileSync(invalidFile, "{}");
+    assert.throws(() => shouldSuppressExperienceClassification(invalidFile, "ticket-1", digest, "0.12.123"), /state is invalid/u);
+    const linkedFile = join(root, "linked.json");
+    symlinkSync(invalidFile, linkedFile);
+    assert.throws(() => shouldSuppressExperienceClassification(linkedFile, "ticket-1", digest, "0.12.123"), /regular file/u);
+    const linkedDir = join(root, "linked-dir");
+    symlinkSync(root, linkedDir, "dir");
+    assert.throws(() => shouldSuppressExperienceClassification(join(linkedDir, "attempts.json"), "ticket-1", digest, "0.12.123"), /directory must not be a symbolic link/u);
+
+    const malformedFile = join(root, "malformed.json");
+    writeFileSync(malformedFile, JSON.stringify({ schema: "craft.experience-classification-attempts.v1", attempts: { "ticket-1": { attempt_digest: "bad" } } }));
+    assert.throws(() => shouldSuppressExperienceClassification(malformedFile, "ticket-1", digest, "0.12.123"), /state is invalid/u);
+    const fullFile = join(root, "full.json"), many = Object.fromEntries(Array.from({ length: 501 }, (_, index) => [`ticket-${index}`, {
+      attempt_digest: digest, classifier_version: "0.12.123", failure_stage: "classification_link", failure_code: "classification_link_rejected", failed_at: new Date().toISOString(),
+    }]));
+    writeFileSync(fullFile, JSON.stringify({ schema: "craft.experience-classification-attempts.v1", attempts: many }));
+    assert.throws(() => shouldSuppressExperienceClassification(fullFile, "ticket-1", digest, "0.12.123"), /state is invalid/u);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("accepts a legacy string project scope when linking a classified observation", async () => {

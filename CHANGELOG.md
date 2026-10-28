@@ -1,3 +1,8 @@
+## 0.12.123
+
+- Persist deterministic Experience classification failures by ticket, input and classifier/profile version so unchanged failures do not consume another Host call each polling cycle.
+- Keep transient model request failures retryable; changed input, taxonomy, profile or classifier release permits a fresh assessment.
+
 ## 0.12.122
 
 - 修复 Experience Worker 将项目签名对象与项目范围字符串直接比较，导致真实模型分类结果每轮都被拒绝的问题。

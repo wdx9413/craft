@@ -1815,7 +1815,8 @@
     {
       "name": "experience-scenario-classification-worker",
       "include": [
-        "deploy/experience-learning/experience-scenario-classification.ts"
+        "deploy/experience-learning/experience-scenario-classification.ts",
+        "deploy/experience-learning/experience-classification-state.ts"
       ],
       "tests": [
         "tests/experience-scenario-classification.test.ts"
