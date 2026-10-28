@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test, { before, mock } from "node:test";
 import { DEFAULT_RULES, Sanitizer, type Json } from "../capability/craft-datasec/rules.ts";
-import { TokenVault } from "../capability/craft-datasec/vault.ts";
+import { TokenVault, isPrivateDirectory, isPrivateFile } from "../capability/craft-datasec/vault.ts";
 import { blank, blankResult, FAILURE, handleHook, type Event, type HookInput, type Host } from "../capability/craft-datasec/hook.ts";
 import { runDataSecHookCli, runIfInvoked, writeCliResult } from "../bin/craft-datasec-hook.ts";
 import { allReleaseProducts, externalDistributionContract, externalMarketplaceProducts, releaseManifest, releaseProduct, releaseProductNames } from "../core/release-catalog.ts";
@@ -156,14 +156,14 @@ test("private session mappings are stable, isolated, reversible and never change
     const vault = new TokenVault(f.root, "first");
     const token = vault.token("phone", phone);
     assert.equal(vault.token("phone", phone), token);
-    assert.equal(new TokenVault(f.root, "first").token("phone", phone), token);
-    assert.notEqual(new TokenVault(f.root, "other").token("phone", phone), token);
+    const reopened = new TokenVault(f.root, "first"); assert.equal(reopened.token("phone", phone), token); reopened.close();
+    const other = new TokenVault(f.root, "other"); assert.notEqual(other.token("phone", phone), token); other.close();
     assert.notEqual(vault.token("password", phone), token);
     assert.equal(vault.restore(`before ${token} after`), `before ${phone} after`);
     assert.equal(readFileSync(source, "utf8"), phone);
-    assert.equal(lstatSync(f.root).mode & 0o777, 0o700);
+    if (process.platform !== "win32") assert.equal(lstatSync(f.root).mode & 0o777, 0o700);
     const directory = join(f.root, createHash("sha256").update("first").digest("hex"));
-    assert.equal(lstatSync(join(directory, "key")).mode & 0o777, 0o600);
+    if (process.platform !== "win32") assert.equal(lstatSync(join(directory, "key")).mode & 0o777, 0o600);
     assert(readdirSync(directory).every(name => !name.startsWith(".write-")));
     assert.throws(() => vault.restore("[CRAFT_DATASEC_phone_broken]"));
     assert.throws(() => vault.restore(`[CRAFT_DATASEC_phone_${"f".repeat(32)}]`));
@@ -172,8 +172,8 @@ test("private session mappings are stable, isolated, reversible and never change
     const db = new DatabaseSync(join(directory, "mappings.sqlite"));
     db.prepare("UPDATE mappings SET value = ? WHERE token = ?").run("tampered", token); db.close();
     assert.throws(() => vault.restore(token), /Invalid mapping/);
-    chmodSync(join(directory, "key"), 0o644);
-    assert.throws(() => new TokenVault(f.root, "first"), /Unsafe vault file/);
+    if (process.platform !== "win32") { chmodSync(join(directory, "key"), 0o644);
+    assert.throws(() => new TokenVault(f.root, "first"), /Unsafe vault file/); }
     vault.close(); vault.close();
   } finally { f.close(); }
 });
@@ -181,17 +181,28 @@ test("private session mappings are stable, isolated, reversible and never change
 test("vault rejects public directories, symlinks, corrupt keys, wrong owners and failed publication", () => {
   const f = fixture();
   try {
-    mkdirSync(f.root, { mode: 0o755 }); assert.throws(() => new TokenVault(f.root, "session"));
-    chmodSync(f.root, 0o700);
-    const link = join(f.temp, "link"); symlinkSync(f.root, link); assert.throws(() => new TokenVault(link, "session"));
-    new TokenVault(f.root, "session");
+    if (process.platform !== "win32") { mkdirSync(f.root, { mode: 0o755 }); assert.throws(() => new TokenVault(f.root, "session")); }
+    if (process.platform !== "win32") chmodSync(f.root, 0o700);
+    const link = join(f.temp, "link"); symlinkSync(f.root, link, "junction"); assert.throws(() => new TokenVault(link, "session")); rmSync(link, { recursive: true, force: true });
+    const okVault = new TokenVault(f.root, "session"); okVault.close();
     const key = join(f.root, createHash("sha256").update("session").digest("hex"), "key");
     writeFileSync(key, "corrupt"); assert.throws(() => new TokenVault(f.root, "session"), /Invalid vault key/);
-    const owner = mock.method(process as { getuid: () => number }, "getuid", () => -1);
-    assert.throws(() => new TokenVault(f.root, "session"), /Unsafe vault directory/); owner.mock.restore();
+    if (process.platform !== "win32") { const owner = mock.method(process as { getuid: () => number }, "getuid", () => -1);
+    assert.throws(() => new TokenVault(f.root, "session"), /Unsafe vault directory/); owner.mock.restore(); }
     const linkMock = mock.method(fs, "linkSync", () => { throw Object.assign(new Error("test IO failure"), { code: "EIO" }); }); syncBuiltinESMExports();
     assert.throws(() => new TokenVault(f.root, "io"), /test IO failure/);
     linkMock.mock.restore(); syncBuiltinESMExports();
+    const dirStat = { isDirectory: () => true, isSymbolicLink: () => false, mode: 0o700, uid: 0 };
+    const fileStat = { isFile: () => true, mode: 0o600, uid: 0 };
+    assert.equal(isPrivateDirectory(dirStat, "linux", 0), true);
+    assert.equal(isPrivateDirectory({ ...dirStat, mode: 0o755 }, "linux", 0), false);
+    assert.equal(isPrivateDirectory({ ...dirStat, uid: 1 }, "linux", 0), false);
+    assert.equal(isPrivateDirectory({ ...dirStat, isSymbolicLink: () => true }, "win32"), false);
+    assert.equal(isPrivateDirectory(dirStat, "win32"), true);
+    assert.equal(isPrivateFile(fileStat, "linux", 0), true);
+    assert.equal(isPrivateFile({ ...fileStat, mode: 0o644 }, "linux", 0), false);
+    assert.equal(isPrivateFile(fileStat, "win32"), true);
+    assert.equal(isPrivateFile({ ...fileStat, isFile: () => false }, "win32"), false);
   } finally { mock.restoreAll(); syncBuiltinESMExports(); f.close(); }
 });
 
@@ -207,7 +218,7 @@ test("mapping database initialization and transactions fail safely and retain re
     assert.equal(db.prepare("SELECT count(*) AS total FROM mappings").get()!.total, 0);
     db.exec("DROP TRIGGER reject_mapping"); vault.flush();
     assert.equal(vault.restore(token), phone);
-    assert.equal(lstatSync(join(directory, "mappings.sqlite")).mode & 0o777, 0o600);
+    if (process.platform !== "win32") assert.equal(lstatSync(join(directory, "mappings.sqlite")).mode & 0o777, 0o600);
     db.close(); vault.close();
     writeFileSync(join(directory, "mappings.sqlite"), "not a sqlite database");
     assert.throws(() => new TokenVault(f.root, "sql"));
@@ -283,7 +294,8 @@ test("error fallback removes strings, numbers and unsafe object keys but retains
 
 test("resource-close errors propagate to the process-level safe fallback rather than returning a partial result", () => {
   const f = fixture();
-  const close = mock.method(TokenVault.prototype, "close", () => { throw new Error("fixture close failure"); });
+  const realClose = TokenVault.prototype.close;
+  const close = mock.method(TokenVault.prototype, "close", function (this: TokenVault) { realClose.call(this); throw new Error("fixture close failure"); });
   try {
     assert.throws(() => run("claude", "PostToolUse", { tool_response: phone }, f.root), /fixture close failure/);
   } finally { close.mock.restore(); f.close(); }
@@ -351,7 +363,7 @@ test("concurrent hook processes publish complete stable mappings without a share
     })));
     assert(outputs.every(out => out === outputs[0]));
     const safe = JSON.parse(outputs[0]).hookSpecificOutput.updatedToolOutput.stdout;
-    assert.equal(new TokenVault(f.root, "concurrent").restore(safe), phone);
+    const reader = new TokenVault(f.root, "concurrent"); try { assert.equal(reader.restore(safe), phone); } finally { reader.close(); }
   } finally { f.close(); }
 });
 

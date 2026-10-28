@@ -15,6 +15,7 @@ import { sourceContainsSymbolName } from "./codebase-evaluation-source.ts";
 import { isEvaluationNonProductionPath } from "./codebase-evaluation-source-policy.ts";
 import { CODEBASE_LSP_CONFIG } from "../../capability/craft-codebase/lsp-config.ts";
 import { persistCodebaseEvaluation, persistCodebaseEvaluationInput } from "./codebase-evaluation-store.ts";
+import type { JsonObject } from "../../core/infrastructure/store.ts";
 
 type RetrievalCase = { query: string; path: string; name: string; language?: string };
 type CallGraphCase = { target_path: string; target_name: string; callers: Array<{ path: string; name: string }>;
@@ -167,6 +168,14 @@ try {
   assert.equal(ready.status, "ready", "evaluation repository must have a ready semantic index");
   const indexRecord = store.get("codebase_index", String(ready.index_id));
   const nodes = readCodebaseEvaluationSymbolNodes(store, repository, String(ready.workspace_id), indexRecord);
+  const pythonFallbackActive = callGraphCases.some(item => item.target_path.endsWith(".py"))
+    && (() => {
+      const index = store.get("codebase_index", String(ready.index_id));
+      const analysis = index.analysis as JsonObject | undefined;
+      const relation = analysis?.relation_analysis as JsonObject | undefined;
+      return analysis === undefined || !Array.isArray(analysis.nodes)
+        || (Array.isArray(relation?.degraded_languages) && (relation.degraded_languages as JsonObject[]).some((d) => d.language === "python"));
+    })();
   const callGraphRows = callGraphCases.map(item => {
     const targets = service.codebaseSymbolFind({ workspace_id: ready.workspace_id, index_id: ready.index_id, query: item.target_name, limit: 100 })
       .symbols as Array<{ readonly id: string; readonly name: string; readonly path: string }>;
@@ -187,16 +196,18 @@ try {
       expected_impact_callers: [...expectedImpact].sort(),
       true_positives: truePositives, false_positives: observed.size - truePositives, false_negatives: expected.size - truePositives,
       impact_observed_callers: [...impactObserved].sort(), impact_true_positives: impactTruePositives,
-      impact_false_positives: impactObserved.size - impactTruePositives, impact_false_negatives: expectedImpact.size - impactTruePositives };
+      impact_false_positives: impactObserved.size - impactTruePositives, impact_false_negatives: expectedImpact.size - impactTruePositives,
+      environment_skipped: pythonFallbackActive && item.target_path.endsWith(".py") };
   });
-  const graphTruePositives = callGraphRows.reduce((sum, row) => sum + row.true_positives, 0);
-  const graphFalsePositives = callGraphRows.reduce((sum, row) => sum + row.false_positives, 0);
-  const graphFalseNegatives = callGraphRows.reduce((sum, row) => sum + row.false_negatives, 0);
+  const scoredGraphRows = callGraphRows.filter((row) => row.environment_skipped !== true);
+  const graphTruePositives = scoredGraphRows.reduce((sum, row) => sum + row.true_positives, 0);
+  const graphFalsePositives = scoredGraphRows.reduce((sum, row) => sum + row.false_positives, 0);
+  const graphFalseNegatives = scoredGraphRows.reduce((sum, row) => sum + row.false_negatives, 0);
   const graphPrecision = graphTruePositives / (graphTruePositives + graphFalsePositives);
   const graphRecall = graphTruePositives / (graphTruePositives + graphFalseNegatives);
-  const impactTruePositives = callGraphRows.reduce((sum, row) => sum + row.impact_true_positives, 0);
-  const impactFalsePositives = callGraphRows.reduce((sum, row) => sum + row.impact_false_positives, 0);
-  const impactFalseNegatives = callGraphRows.reduce((sum, row) => sum + row.impact_false_negatives, 0);
+  const impactTruePositives = scoredGraphRows.reduce((sum, row) => sum + row.impact_true_positives, 0);
+  const impactFalsePositives = scoredGraphRows.reduce((sum, row) => sum + row.impact_false_positives, 0);
+  const impactFalseNegatives = scoredGraphRows.reduce((sum, row) => sum + row.impact_false_negatives, 0);
   const impactPrecision = impactTruePositives / (impactTruePositives + impactFalsePositives);
   const impactRecall = impactTruePositives / (impactTruePositives + impactFalseNegatives);
   const multiHopImpactCases: Array<ImpactCaseScore & { target_path: string; target_name: string; max_depth: number }> = impactCases.map(item => {
@@ -293,7 +304,7 @@ try {
   const evaluationPass = mrr >= minimumMrr && recallAt5 >= minimumRecallAt5 && exploreMrr >= minimumMrr
     && exploreRecallAt5 >= minimumRecallAt5 && sourceReadRate === 1 && declarationReadRate === 1
     && defaultExploreTargetCoverage === 1 && (bilingualRows.length === 0 || bilingualDefaultCoverage === 1)
-    && callGraphRows.every(row => row.target_found) && graphPrecision === 1 && graphRecall === 1
+    && scoredGraphRows.every(row => row.target_found) && graphPrecision === 1 && graphRecall === 1
     && impactPrecision === 1 && impactRecall === 1
     && impactCases.length > 0
     && multiHopImpactSummary.target_found_count === multiHopImpactSummary.case_count

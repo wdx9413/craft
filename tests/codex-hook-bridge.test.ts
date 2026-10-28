@@ -1872,3 +1872,84 @@ test("Hook-mode project identity errors retain Trace and do not retry a busy cen
     await dispose(f);
   }
 });
+
+test("PreCompact captures a bounded resume snapshot without blocking compaction", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    assert.deepEqual(await bridge.handle("context", { cwd: f.root, hook_event_name: "PreCompact" }), {});
+    assert.equal(f.store.list("context_resume_snapshot", 10).length, 0);
+    assert.deepEqual(await bridge.handle("context", { cwd: f.root, session_id: "compact-session", hook_event_name: "PreCompact",
+      files_touched: ["a.ts"], tasks: ["finish"], errors: [], decisions: ["use X"], open_questions: ["next?"] }), {});
+    const snapshots = f.store.list("context_resume_snapshot", 10);
+    assert.equal(snapshots.length, 1);
+    assert.equal((snapshots[0]!.files_touched as unknown[]).length, 1);
+    const projected = f.service.contextExtensionsResolveResume({ session_id: "compact-session" });
+    assert.equal(projected.resume_available, true);
+    assert.match(String(projected.content), /a\.ts/u);
+  } finally { await dispose(f); }
+});
+
+test("Stop surfaces a bounded hint when edits have no verification", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "gap-turn" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "change something" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "gap-edit" });
+    const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert.match(String(stop.systemMessage), /没有可识别的验证结果/u);
+    assert(f.store.events("codex-hook").some(event => event.event_type === "codex_hook.unverified_edit"));
+    const reentered = await bridge.handle("context", { ...base, hook_event_name: "Stop", stop_hook_active: true });
+    assert.equal(reentered.systemMessage, undefined);
+  } finally { await dispose(f); }
+});
+
+test("Stop stays quiet when the last edit was verified", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "verified-gap-turn" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "verify changes" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "verified-gap-edit" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert.equal(stop.systemMessage, undefined);
+  } finally { await dispose(f); }
+});
+
+test("Stop is silent without a journal and still guides when event recording fails", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    const bare = await bridge.handle("context", { cwd: f.root, session_id: "no-journal", hook_event_name: "Stop" });
+    assert.equal(bare.systemMessage, undefined);
+    const base = { cwd: f.root, session_id: "gap-append-failure" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "change something" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "gap-append-edit" });
+    const original = f.store.appendEvent.bind(f.store);
+    Object.defineProperty(f.store, "appendEvent", { configurable: true, value: (stream: string, type: string, event: JsonObject) =>
+      type === "codex_hook.unverified_edit" ? (() => { throw new Error("storage busy"); })() : original(stream, type, event) });
+    const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert.match(String(stop.systemMessage), /没有可识别的验证结果/u);
+  } finally { await dispose(f); }
+});
+
+test("PreCompact tolerates missing arrays, no project scope and a failing snapshot", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    assert.deepEqual(await bridge.handle("context", { session_id: "compact-bare", hook_event_name: "PreCompact" }), {});
+    assert.equal(f.store.list("context_resume_snapshot", 10).length, 1);
+    Object.defineProperty(f.service, "contextExtensionsCheckpointResume", { configurable: true, value: () => { throw new Error("boom"); } });
+    assert.deepEqual(await bridge.handle("context", { cwd: f.root, session_id: "compact-fail", hook_event_name: "PreCompact" }), {});
+  } finally { await dispose(f); }
+});
+
+test("Stop stays quiet when the turn made no edits", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "no-edit-turn" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "just answer" });
+    const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert.equal(stop.systemMessage, undefined);
+  } finally { await dispose(f); }
+});

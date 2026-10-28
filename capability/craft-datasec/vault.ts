@@ -4,16 +4,30 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const TOKEN = /\[CRAFT_DATASEC_[a-z0-9_]+_[a-f0-9]{32}\]/g;
+type PrivateStat = { isDirectory(): boolean; isSymbolicLink(): boolean; isFile(): boolean; mode: number; uid: number };
+
+/** POSIX mode/uid checks are meaningless on Windows, where they are not enforced. */
+export function isPrivateDirectory(stat: Pick<PrivateStat, "isDirectory" | "isSymbolicLink" | "mode" | "uid">,
+  platform: NodeJS.Platform = process.platform, uid: number | undefined = process.getuid?.()): boolean {
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
+  return platform === "win32" || ((stat.mode & 0o077) === 0 && stat.uid === uid);
+}
+
+export function isPrivateFile(stat: Pick<PrivateStat, "isFile" | "mode" | "uid">,
+  platform: NodeJS.Platform = process.platform, uid: number | undefined = process.getuid?.()): boolean {
+  if (!stat.isFile()) return false;
+  return platform === "win32" || ((stat.mode & 0o077) === 0 && stat.uid === uid);
+}
 function privateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
   const stat = lstatSync(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 || stat.uid !== process.getuid!()) throw new Error("Unsafe vault directory");
+  if (!isPrivateDirectory(stat)) throw new Error("Unsafe vault directory");
 }
 function openPrivate(path: string, flags = constants.O_RDONLY): number {
   const fd = openSync(path, flags | constants.O_NOFOLLOW, 0o600);
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile() || (stat.mode & 0o077) !== 0 || stat.uid !== process.getuid!()) throw new Error("Unsafe vault file");
+    if (!isPrivateFile(stat)) throw new Error("Unsafe vault file");
     return fd;
   } catch (error) { closeSync(fd); throw error; }
 }

@@ -3,6 +3,7 @@ import type { ContextContribution, ContextContributionProvider, ContextRequest }
 import { ContextBudget, contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
 import { canonicalJson, stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import { Bm25Index } from "../../common/craft-common-base/src/bm25.ts";
+import { contextFeedbackWeights } from "../../core/context-feedback-weight.ts";
 import { retrievalExcerpt } from "../../common/craft-common-base/src/retrieval-excerpt.ts";
 import { temporalMemorySelect } from "../../common/craft-common-base/src/memory-temporal-policy.ts";
 import { scopeAllows, scopeEnvelope, scopeEnvelopeReceipt, sourceAllows, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
@@ -122,10 +123,12 @@ export class MemoryContribution implements ContextContributionProvider {
     }
     const scores = new Map(searchIndex.score(request.query).map(hit => [hit.id, hit.score]));
     recheck();
+    const feedbackWeights = contextFeedbackWeights(this.store, "memory", available.map(({ memory }) => String(memory.id)));
     const items = available.map(({ memory }) => {
       const confirmedAt = latestMemoryConfirmation(this.store, memory, now.toISOString());
       const usage = usages.get(canonicalJson([memory.id, memory.content_digest])) ?? 0;
-      const weight = memoryDecayWeight({ confirmed_at: confirmedAt ?? memory.observed_at ?? memory.updated_at, now: now.toISOString(), accesses: usage, trust: sourceOf(String(memory.source_id))!.trust === "verified" ? "verified" : "bounded" });
+      const weight = memoryDecayWeight({ confirmed_at: confirmedAt ?? memory.observed_at ?? memory.updated_at, now: now.toISOString(), accesses: usage, trust: sourceOf(String(memory.source_id))!.trust === "verified" ? "verified" : "bounded" })
+        * feedbackWeights.get(String(memory.id))!.penalty;
       return { memory, item: { memory_id: memory.id, memory_version: memory.version, source_id: memory.source_id, content_digest: memory.content_digest,
         sensitivity: memory.sensitivity, status: memory.status, scope: memory.scope, scope_envelope: scopeEnvelopeReceipt(scopeEnvelope(memory.scope_envelope, memory.scope as { kind: string; id: string })),
         ranking_weight: weight, confirmed_at: confirmedAt, execution_context: !historical } satisfies JsonObject };

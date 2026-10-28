@@ -2,7 +2,18 @@ import { lstatSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { canonicalCandidatePath, projectStorageDirectory, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
 import { projectAliases } from "./storage-migration-preflight.ts";
+
+type PartitionScope = { kind?: string; id?: string };
+type PartitionPointer = { scope?: PartitionScope | null; file?: string; record_id?: string };
+type EvidenceRecord = JsonObject & {
+  _knowledge_partition?: PartitionPointer;
+  metadata?: JsonObject;
+  confidence?: unknown;
+  identity_digest?: unknown;
+  source_id?: unknown;
+};
 
 /** Read one ID-ordered page without opening a writer or creating Craft files. */
 export function preflightSessionEvidencePage(paths: CraftPaths, options: { cursor?: string; limit?: number } = {}) {
@@ -19,9 +30,9 @@ export function preflightSessionEvidencePage(paths: CraftPaths, options: { curso
     let affected = 0, blocked = 0;
     const page = rows.slice(0, limit);
     for (const row of page) {
-      const header = JSON.parse(row.payload_json) as Record<string, any>;
+      const header = JSON.parse(row.payload_json) as EvidenceRecord;
       const pointer = header._knowledge_partition;
-      let payload = header;
+      let payload: EvidenceRecord = header;
       if (pointer) {
         const scope = pointer.scope, scopeId = typeof scope?.id === "string" && !scope.id.startsWith("project:") ? `project:${scope.id}` : scope?.id;
         const roots = typeof scopeId === "string" ? aliases.get(scopeId) ?? [] : [];
@@ -36,7 +47,7 @@ export function preflightSessionEvidencePage(paths: CraftPaths, options: { curso
           const item = db.prepare("SELECT payload_json FROM records WHERE kind='evidence' AND id=? AND version=?")
             .get(pointer.record_id ?? row.id, row.version) as { payload_json: string } | undefined;
           if (!item) { blocked++; continue; }
-          payload = JSON.parse(item.payload_json) as Record<string, any>;
+          payload = JSON.parse(item.payload_json) as EvidenceRecord;
           if (payload.metadata?.provenance === "codex_session_program_verification" && payload.metadata?.scope !== scopeId) { blocked++; continue; }
         } catch { blocked++; continue; }
       }
@@ -49,8 +60,8 @@ export function preflightSessionEvidencePage(paths: CraftPaths, options: { curso
         const parent = primary.prepare("SELECT payload_json FROM records WHERE kind='knowledge_source' AND id=? ORDER BY version DESC LIMIT 1")
           .get(payload.source_id) as { payload_json: string } | undefined;
         if (!parent) { blocked++; continue; }
-        const parentScope = (JSON.parse(parent.payload_json) as Record<string, any>)._knowledge_partition?.scope;
-        if (parentScope?.kind === "project" && String(parentScope.id).replace(/^project:/u, "") !== scope.slice("project:".length)) { blocked++; continue; }
+        const parentScope = (JSON.parse(parent.payload_json) as EvidenceRecord)._knowledge_partition?.scope;
+        if (parentScope?.kind === "project" && String(parentScope.id).replace(/^project:/u, "") !== String(scope).slice("project:".length)) { blocked++; continue; }
       }
     }
     return { scanned: page.length, affected, blocked, has_more: rows.length > limit,

@@ -18,6 +18,7 @@ import { installLearningCycleMethods } from "./learning-cycle.ts";
 import { installDecisionContextGateMethods } from "./decision-context-gate.ts";
 import { installQualityProfileMethods } from "./quality-profile.ts";
 import { installCodebaseMethods } from "./codebase.ts";
+import { installContextExtensionsMethods } from "./context-extensions.ts";
 
 /** Thin application use cases that delegate to one owned domain kernel. */
 declare module "../craft-service.ts" {
@@ -236,6 +237,7 @@ export function installKernelDelegateMethods(serviceClass: typeof CraftService):
   installDecisionContextGateMethods(serviceClass);
   installQualityProfileMethods(serviceClass);
   installCodebaseMethods(serviceClass);
+  installContextExtensionsMethods(serviceClass);
   serviceClass.prototype.knowledgeSourceSnapshot = function (args) { return this.legacyKnowledgeMigration.sourceSnapshot(args); };
   serviceClass.prototype.knowledgeSourceDiff = function (args) { return this.legacyKnowledgeMigration.sourceDiff(args); };
   serviceClass.prototype.knowledgeCandidateImport = function (args) { return this.legacyKnowledgeMigrationCandidateImport(args); };

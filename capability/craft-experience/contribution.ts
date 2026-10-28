@@ -18,6 +18,8 @@ import { observeOperation } from "../../common/craft-common-log/src/index.ts";
  * signoff and canary gates make it routeable.
  */
 import type { ContextRequest, ContextContribution, ContextContributionProvider } from "../../common/craft-common-base/src/capability-protocol.ts";
+import { contextFeedbackWeights } from "../../core/context-feedback-weight.ts";
+import { experienceGatePenalty } from "./gate-signals.ts";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
 import { activeProcedure } from "./procedure-release.ts";
@@ -72,20 +74,24 @@ export class ExperienceContribution implements ContextContributionProvider {
     const eligible = scoped.map(latest => activeProcedure(this.store, String(latest.id))).filter((item): item is JsonObject => item !== null);
     if (eligible.length > 10_000) throw new Error("Experience candidate budget exceeded; narrow the scope stack");
     const descriptions = new Map(eligible.map(procedure => [String(procedure.id), this.describe(procedure)]));
+    const feedback = contextFeedbackWeights(this.store, "experience", eligible.map(procedure => String(procedure.id)));
+    const gatePenalty = experienceGatePenalty(this.store, eligible.map(procedure => String(procedure.id)));
     const isRequired = (procedure: JsonObject) => (request.required_refs ?? []).some(ref => {
       const description = descriptions.get(String(procedure.id));
       return Boolean(description && contextAssetMatches(ref, contextAssetRef("experience", description, description.scope as JsonObject)));
     });
     const procedures = eligible
       .map((procedure) => {
+        const weight = feedback.get(String(procedure.id))!.weight * gatePenalty.get(String(procedure.id))!;
         const score = wanted.reduce((sum, term) => sum + Number(String(descriptions.get(String(procedure.id))!.retrieval_text).toLowerCase().includes(term)), 0);
-        return { procedure, score: score + Number(request.candidate_mode === true) };
+        return { procedure, weight, score: (score + Number(request.candidate_mode === true)) * weight };
       })
       .filter((candidate) => candidate.score > 0)
       .sort((left, right) => Number(isRequired(right.procedure)) - Number(isRequired(left.procedure)) || right.score - left.score || String(left.procedure.id).localeCompare(String(right.procedure.id)));
 
     const selected: Array<{ item: JsonObject; reference: string }> = procedures
-      .map((candidate) => ({ item: descriptions.get(String(candidate.procedure.id))!, reference: `procedure:${String(candidate.procedure.id)}@${Number(candidate.procedure.version)}` }));
+      .map((candidate) => ({ item: { ...descriptions.get(String(candidate.procedure.id))!, ranking_weight: candidate.weight },
+        reference: `procedure:${String(candidate.procedure.id)}@${Number(candidate.procedure.version)}` }));
     const items: JsonObject[] = [];
     let usedChars = 0;
     const selectedReferences: string[] = [];

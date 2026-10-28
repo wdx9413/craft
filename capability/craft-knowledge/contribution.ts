@@ -16,6 +16,7 @@ import { KeywordRetrievalPort } from "../../common/craft-common-base/src/keyword
 import { retrievalExcerpt } from "../../common/craft-common-base/src/retrieval-excerpt.ts";
 import { contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
 import { knowledgeClaimPromotionProofVerified } from "../../core/knowledge-evaluation-provenance.ts";
+import { contextFeedbackWeights } from "../../core/context-feedback-weight.ts";
 
 function recordScope(value: unknown): { kind: string; id: string } {
   if (value === "global") return { kind: "global", id: "global" };
@@ -119,9 +120,12 @@ export class KnowledgeContribution implements ContextContributionProvider {
     const ranking = await new KeywordRetrievalPort().search(request.query, matches.map(match => ({ id: String(match.claim.id), body: match.body })));
     guard.assertCurrent();
     const scores = new Map(ranking.hits.map(hit => [hit.id, hit.score]));
+    const feedback = contextFeedbackWeights(this.store, "knowledge", matches.map(match => String(match.claim.id)));
+    const weightOf = (claim: JsonObject): number => feedback.get(String(claim.id))!.weight;
+    const scoreOf = (claim: JsonObject): number => (scores.get(String(claim.id)) ?? 0) * weightOf(claim);
     const isRequired = (item: JsonObject) => (request.required_refs ?? []).some(ref => contextAssetMatches(ref, contextAssetRef("knowledge", item, item.scope as JsonObject)));
     const ranked = matches.filter(match => request.candidate_mode || scores.has(String(match.claim.id)))
-      .sort((a, b) => Number(isRequired(b.claim)) - Number(isRequired(a.claim)) || (scores.get(String(b.claim.id)) ?? 0) - (scores.get(String(a.claim.id)) ?? 0) || String(a.claim.id).localeCompare(String(b.claim.id)));
+      .sort((a, b) => Number(isRequired(b.claim)) - Number(isRequired(a.claim)) || scoreOf(b.claim) - scoreOf(a.claim) || String(a.claim.id).localeCompare(String(b.claim.id)));
 
     const items: JsonObject[] = [];
     let usedChars = 0;
@@ -139,6 +143,7 @@ export class KnowledgeContribution implements ContextContributionProvider {
         evidence_ids: match.claim.evidence_ids,
         source_id: match.claim.source_id,
         reason: match.claim.status === "reviewed" ? "reviewed_bm25" : "candidate_diagnostic_only",
+        ranking_weight: weightOf(match.claim),
       };
       if (request.candidate_mode === true) {
         const { retrieval_text: _retrievalText, ...bounded } = item;

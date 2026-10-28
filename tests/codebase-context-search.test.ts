@@ -374,3 +374,13 @@ test("LSP symbol kinds normalize valid declarations and reject missing or unsupp
   assert.equal(lspDeclarationKind(27), undefined);
   assert.equal(lspDeclarationKind("12"), undefined);
 });
+
+test("Codebase usage weight boosts or demotes an otherwise equal symbol", () => {
+  const nodes = [symbol("a", "session", "src/a.ts"), symbol("b", "session", "src/b.ts")];
+  const plain = new CodeSymbolSearchIndex(nodes);
+  assert.deepEqual(plain.rank("session", 2).map(item => item.node.id), ["a", "b"]);
+  const boosted = new CodeSymbolSearchIndex(nodes, undefined, undefined, new Map([["b", 2]]));
+  assert.equal(boosted.rank("session", 2)[0]!.node.id, "b");
+  const demoted = new CodeSymbolSearchIndex(nodes, undefined, undefined, new Map([["a", -2]]));
+  assert.equal(demoted.rank("session", 2)[0]!.node.id, "b");
+});

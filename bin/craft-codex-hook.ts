@@ -30,9 +30,9 @@ async function main(): Promise<void> {
   const event = typeof input.hook_event_name === "string" ? input.hook_event_name : "";
   let diagnostic: ReturnType<typeof beginHookRuntimeDiagnostic> | undefined;
   try {
-    if (["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"].includes(event))
+    if (["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd", "PreCompact"].includes(event))
       diagnostic = beginHookRuntimeDiagnostic({ data_root: craftPaths().root, request_id: requestId, member: component,
-        event: event as "SessionStart" | "UserPromptSubmit" | "PostToolUse" | "Stop" | "SessionEnd",
+        event: event as "SessionStart" | "UserPromptSubmit" | "PostToolUse" | "Stop" | "SessionEnd" | "PreCompact",
         ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}) });
   } catch { /* Diagnostics must never delay or prevent the Host Hook. */ }
   // Context has no SessionStart work: its bridge deliberately returns an empty

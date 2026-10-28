@@ -998,6 +998,7 @@
       "include": [
         "capability/craft-experience/capability.ts",
         "capability/craft-experience/contribution.ts",
+        "capability/craft-experience/gate-signals.ts",
         "capability/craft-experience/evaluation-model-profile.ts",
         "capability/craft-experience/workflow-evolution.ts"
       ],
@@ -1007,6 +1008,7 @@
         "tests/component-procedure-graph.test.ts",
         "tests/capability-experience-package.test.ts",
         "tests/experience-contribution.test.ts",
+        "tests/experience-gate-signals.test.ts",
         "tests/component-integration.test.ts",
         "tests/component-hookless.test.ts",
         "tests/procedure-composition.test.ts",
@@ -2168,6 +2170,27 @@
       ],
       "tests": [
         "tests/project-storage-paths.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-extensions",
+      "include": [
+        "core/context-extensions.ts",
+        "capability/craft-codebase/usage-signals.ts"
+      ],
+      "tests": [
+        "tests/context-extensions.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-feedback-weight",
+      "include": [
+        "core/context-feedback-weight.ts"
+      ],
+      "tests": [
+        "tests/context-feedback-weight.test.ts"
       ],
       "branches": true
     }

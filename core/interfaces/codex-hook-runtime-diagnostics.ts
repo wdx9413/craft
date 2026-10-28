@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, openSync, writeSync, closeSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-export type HookRuntimeEvent = "SessionStart" | "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "Stop" | "SessionEnd";
+export type HookRuntimeEvent = "SessionStart" | "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "Stop" | "SessionEnd" | "PreCompact";
 export type HookRuntimeMember = "context" | "knowledge" | "memory" | "experience" | "datasec";
 
 export interface HookRuntimeTiming {

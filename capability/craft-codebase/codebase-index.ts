@@ -1,5 +1,6 @@
 import { observeOperation } from "../../common/craft-common-log/src/index.ts";
 import { CodeSymbolSearchIndex, codeContextCandidates } from "./context-search.ts";
+import { codebaseUsageWeights } from "./usage-signals.ts";
 import { matchDefinitionEdges } from "./definition-query.ts";
 import { buildControlFlowGraph } from "./control-flow.ts";
 import { buildDataFlowGraph } from "./data-flow.ts";
@@ -940,13 +941,15 @@ export class CodebaseIndexKernel {
     return nodes;
   }
   private symbolSearch(index: JsonObject): CodeSymbolSearchIndex {
+    const usage = codebaseUsageWeights(this.store, String(index.id));
     const shardIds = Array.isArray(index.node_shard_ids) ? index.node_shard_ids as string[] : [];
     const payloadDigest = shardIds.length
       ? index.graph_storage === PROJECT_GRAPH_STORAGE ? this.projectGraphStore(index).recordsFingerprint(shardIds)
         : this.store.latestRecordsDigest("codebase_index_shard", shardIds)
       : stableDigest(Array.isArray(index.nodes) ? index.nodes : []);
     const fingerprint = stableDigest({ index_id: index.id, identity_digest: index.identity_digest, node_digest: index.node_digest,
-      node_shard_ids: shardIds, shard_digests: index.shard_digests, payload_digest: payloadDigest });
+      node_shard_ids: shardIds, shard_digests: index.shard_digests, payload_digest: payloadDigest,
+      usage_digest: stableDigest([...usage.entries()].sort()) });
     const cached = this.#symbolSearchCache.get(String(index.id));
     if (cached?.fingerprint === fingerprint) {
       this.#symbolSearchCache.delete(String(index.id));
@@ -955,16 +958,17 @@ export class CodebaseIndexKernel {
     }
     const symbols = this.loadNodes(index).filter(node => node.kind === "symbol");
     const searchContext = this.symbolSearchContext(index, symbols);
-    const search = new CodeSymbolSearchIndex(symbols, searchContext.identifiers, searchContext.enclosingTypes);
+    const search = new CodeSymbolSearchIndex(symbols, searchContext.identifiers, searchContext.enclosingTypes, usage);
     this.#symbolSearchCache.set(String(index.id), { fingerprint, search });
     while (this.#symbolSearchCache.size > 2) this.#symbolSearchCache.delete(this.#symbolSearchCache.keys().next().value as string);
     return search;
   }
   /** Reuse the all-node lexical index for repeated Context queries on this immutable graph. */
   private contextSearch(index: JsonObject, nodes: readonly Node[]): CodeSymbolSearchIndex {
-    const key = `${String(index.id)}:${String(index.graph_digest)}`;
+    const usage = codebaseUsageWeights(this.store, String(index.id));
+    const key = `${String(index.id)}:${String(index.graph_digest)}:${stableDigest([...usage.entries()].sort()).slice(-12)}`;
     if (this.#contextSearchCache?.key === key) return this.#contextSearchCache.search;
-    const search = new CodeSymbolSearchIndex(nodes);
+    const search = new CodeSymbolSearchIndex(nodes, undefined, undefined, usage);
     this.#contextSearchCache = { key, search };
     return search;
   }

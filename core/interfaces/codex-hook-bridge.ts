@@ -67,7 +67,7 @@ function experienceHookProjection(item: JsonObject): JsonObject {
     .filter(key => item[key] !== undefined).map(key => [key, item[key]]));
 }
 const CONTEXT_MEMBERS: readonly ComponentHookMember[] = ["knowledge", "memory", "experience"];
-type HookEvent = "SessionStart" | "SessionEnd" | "UserPromptSubmit" | "PostToolUse" | "Stop";
+type HookEvent = "SessionStart" | "SessionEnd" | "UserPromptSubmit" | "PostToolUse" | "Stop" | "PreCompact";
 type HookInput = JsonObject & {
   hook_event_name?: string;
   cwd?: string;
@@ -396,7 +396,7 @@ export class CodexHookBridge {
 
   async handle(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
     const rawEvent = text(input.hook_event_name);
-    const event = rawEvent && ["SessionStart", "SessionEnd", "UserPromptSubmit", "PostToolUse", "Stop"].includes(rawEvent) ? rawEvent : "unknown";
+    const event = rawEvent && ["SessionStart", "SessionEnd", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact"].includes(rawEvent) ? rawEvent : "unknown";
     // Resolve and bind the Git project identity once per Hook request. The old
     // path repeated synchronous `git config` calls in turn correlation,
     // retrieval, scenario classification, and journal persistence.
@@ -439,11 +439,12 @@ export class CodexHookBridge {
         }
         if (event === "UserPromptSubmit") return await this.prompt(member, input, projectScope);
         if (event === "PostToolUse") return this.tool(input, projectScope);
+        if (event === "PreCompact") return this.preCompact(input, projectScope);
         if (event === "Stop") {
           // Experience owns task finalization. It also records the one Context
           // usage receipt, so invoking the other two no-op stop handlers only
           // duplicates feedback, activation proofs, and lifecycle writes.
-          this.stop("experience", input, projectScope);
+          return this.stop("experience", input, projectScope);
         }
         return {};
       }
@@ -600,7 +601,21 @@ export class CodexHookBridge {
     return {};
   }
 
+  /** Persist a bounded, content-free resume snapshot before the Host compacts. Best-effort. */
+  private preCompact(input: HookInput, projectScope: HookProjectScope | null): JsonObject {
+    const sessionId = text(input.session_id);
+    if (!sessionId) return {};
+    try {
+      this.service.contextExtensionsCheckpointResume({ session_id: sessionId,
+        ...(projectScope ? { scope: `${projectScope.kind}:${projectScope.id}` } : {}),
+        files_touched: input.files_touched, tasks: input.tasks, errors: input.errors,
+        decisions: input.decisions, open_questions: input.open_questions });
+    } catch { /* Compaction must never be blocked by a resume-snapshot failure. */ }
+    return {};
+  }
+
   private stop(member: ComponentHookMember, input: HookInput, projectScope: HookProjectScope | null): JsonObject {
+    const journal = this.journal.find(input, undefined, projectScope);
     const finalized = member === "experience" ? this.service.store.transaction(() => {
       const result = this.learning.finalize(input, projectScope);
       const goalArgs = experienceTaskGoalArgs(this.service, input, projectScope);
@@ -614,7 +629,24 @@ export class CodexHookBridge {
       turn_id: text(input.turn_id), memory_written: false, observation_written: finalized !== null,
       plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
     this.lifecycle(member, "Stop", input);
-    return {};
+    const guidance = this.verificationGapGuidance(input, journal);
+    return guidance ? { systemMessage: guidance } : {};
+  }
+
+  /**
+   * A turn that edited files but never produced a verification signal cannot be
+   * recorded as passed or failed. Surface a bounded, content-free hint instead
+   * of silently leaving `verification_outcome` null. `stop_hook_active` prevents
+   * a Host that re-enters Stop from looping on the same hint.
+   */
+  private verificationGapGuidance(input: HookInput, journal: JsonObject | null): string | null {
+    if (!journal || journal.has_edit !== true || journal.verification_outcome !== null || input.stop_hook_active === true) return null;
+    try {
+      this.service.store.appendEvent("codex-hook", "codex_hook.unverified_edit", { member: "experience",
+        session_id: input.session_id, turn_id: journal.turn_id,
+        reason: "edit_without_verification", content_stored: false });
+    } catch { /* The hint must never block Stop. */ }
+    return "Craft：本轮修改了文件，但最后一次编辑后没有可识别的验证结果。请运行相关测试后再结束，以便记录为已验证；否则该回合只会作为未验证观察。";
   }
 
   /** Record that exact Context assets were shown and the turn's observed outcome, without calling them helpful. */

@@ -1296,6 +1296,21 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_a2a_message_send", "Send a digest-only A2A message through the standard message/send operation.", ["endpoint", "message_digest"], false, ["request_id", "context_id"]),
   tool("craft_a2a_message_stream", "Request a digest-only A2A streaming message operation.", ["endpoint", "message_digest"], false, ["request_id", "context_id"]),
   tool("craft_a2a_task_list", "List remote A2A tasks without importing raw content.", ["endpoint"], false, ["request_id", "page_token"]),
+  tool("craft_context_routing_render", "Render the per-client routing block that tells a Host to keep large tool output out of context and use the Context extensions instead.", [], true, ["client"]),
+  tool("craft_context_ephemeral_record", "Store a bounded, session-scoped, purgeable ephemeral index. It is never promoted to Knowledge and expires on read after its TTL.", ["session_id", "items"], false, ["source", "ttl_seconds", "now", "index_id"]),
+  tool("craft_context_ephemeral_search", "Search a session-scoped ephemeral index with BM25. Expired indexes are removed on read; missing and expired indexes are reported, not fabricated.", ["session_id", "query"], true, ["source", "limit", "now", "index_id"]),
+  tool("craft_context_ephemeral_purge", "Permanently remove session-scoped ephemeral content for one session, or for one source when provided.", ["session_id"], false, ["source", "index_id"]),
+  tool("craft_context_output_capture", "Keep a large tool result out of context: when it exceeds max_chars, index it in the session ephemeral store and return a bounded preview plus query guidance.", ["tool_name", "content"], false, ["session_id", "max_chars", "ttl_seconds"]),
+  tool("craft_context_compute", "Run model-authored javascript, python or shell analysis in a bounded subprocess and return only bounded stdout. Requires allow_execution=true. This is a bounded subprocess, not a security sandbox: it cannot deny network; use the Docker sandbox ticket path for strong isolation.", ["language", "code", "allow_execution"], false, ["timeout_ms", "output_limit"]),
+  tool("craft_context_resume_checkpoint", "Capture a bounded, content-free resume snapshot (files, tasks, errors, decisions, open questions) before compaction.", ["session_id"], false, ["scope", "files_touched", "tasks", "errors", "decisions", "open_questions", "now"]),
+  tool("craft_context_resume_get", "Read the latest content-free resume snapshot for one session.", ["session_id"], true),
+  tool("craft_context_resume_resolve", "Project the resume snapshot into a bounded text block for injection after compaction.", ["session_id"], true, ["max_chars"]),
+  tool("craft_context_stats", "Report bounded Context savings from existing receipts: selected items, used characters, omissions, deduplication, feedback outcomes and an explicitly estimated token count.", [], true),
+  tool("craft_context_health", "Read-only Context plane readiness: store access, retrieval adapters, receipts, ephemeral indexes and resume snapshots.", [], true),
+  tool("craft_context_correction_list", "List bounded Context correction tasks that were reported incorrect or stale, optionally filtered by status and member.", [], true, ["status", "member", "limit"]),
+  tool("craft_context_correction_decide", "Resolve one pending correction task as confirmed or dismissed. It never changes source status; a confirmed correction keeps its ranking penalty.", ["task_id", "decision"], false, ["reason", "now"]),
+  tool("craft_codebase_symbol_usage_record", "Record one outcome-linked use of a codebase symbol (read, passed or failed) so later retrieval can rank symbols by observed value.", ["index_id", "symbol_id"], false, ["outcome", "now"]),
+  tool("craft_codebase_symbol_usage_get", "Read the net per-symbol usage weight for one codebase index.", ["index_id"], true),
 ];
 
 const RETIRED_PUBLIC_TOOL_NAMES = new Set([

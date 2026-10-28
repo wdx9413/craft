@@ -108,7 +108,7 @@ export class ScopeIdentityKernel {
     // A scope stack is a read order, not an ownership tree.  Work-local scopes
     // form one lane; the explicitly named personal lane is appended separately
     // below.  Team/organization scopes are never discovered by scanning data.
-    if (["task", "session", "team", "organization", "user", "global"].includes(requested.kind)) attempted.push(requested);
+    if (["task", "session", "team", "organization", "user", "global", "workspace"].includes(requested.kind)) attempted.push(requested);
     if (requested.kind === "project" || requested.kind === "workspace" || requested.kind === "task" || requested.kind === "session") {
       const project = requested.kind === "project" ? requested : this.projectFromArgs(args);
       if (project) {

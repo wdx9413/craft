@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import test from "node:test";
 import { CraftService } from "../core/service.ts";
 import { KnowledgeClaimGovernance } from "../capability/craft-knowledge/claim-governance.ts";
@@ -90,7 +90,7 @@ test("session evidence repair refuses unsafe and corrupted backups and propagate
     const evidence = f.service.knowledgeSessionEvidenceRecord(input()).evidence as JsonObject;
     f.store.save("evidence", String(evidence.id), { ...evidence, confidence: "confirmed" });
     const directory = join(projectStorageDirectory(f.store.paths, f.root), "knowledge", "backups");
-    await symlink(f.root, directory);
+    await symlink(f.root, directory, "junction");
     assert.throws(() => repairSessionEvidencePage(f.store, { apply: true }), /regular directory/u);
     await rm(directory);
     const failure = Object.assign(new Error("link failure"), { code: "EIO" });
@@ -306,7 +306,7 @@ test("stores sanitized verification evidence as a project Knowledge fragment rea
     assert.equal(saved.sanitized_content_stored, true);
     assert.equal(saved.raw_content_stored, false);
     const fragment = f.store.get("knowledge_fragment", String(saved.fragment_id));
-    assert.equal(String((fragment.content_ref as JsonObject).path).startsWith(join(projectStorageDirectory(f.store.paths, f.root), "knowledge", "md") + "/"), true);
+    assert.equal(String((fragment.content_ref as JsonObject).path).startsWith(join(projectStorageDirectory(f.store.paths, f.root), "knowledge", "md") + sep), true);
     assert.equal((fragment.content_ref as JsonObject).scope, "project:demo");
     const claim = f.service.knowledgeClaimSave({ claim_id: "session-claim", kind: "fact", title: "已验证的修复",
       content: "定向验证通过。", scope: "project:demo", source_id: saved.source_id, evidence_ids: [evidence.id] }).claim as JsonObject;

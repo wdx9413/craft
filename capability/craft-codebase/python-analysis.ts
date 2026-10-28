@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import type { RepositoryFile } from "./repository-files.ts";
 import { pythonFileUnitDigest, type PythonFileUnit } from "./python-incremental.ts";
+import { analyzePythonFallback } from "./python-fallback.ts";
 
 const MAX_INPUT_CHARS = 24_000_000;
 const MAX_OUTPUT_BYTES = 64_000_000;
@@ -53,7 +54,9 @@ export function analyzePythonCheckpoint(files: readonly RepositoryFile[], option
     return { analysis };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    const reason = code === "ENOENT" ? "python_runtime_unavailable" : code === "ETIMEDOUT" ? "analysis_timed_out" : "analysis_failed";
+    if (code === "ENOENT") return { analysis: analyzePythonFallback(files),
+      diagnostic: { language: "python", status: "partial", reason: "python_runtime_unavailable_regex_fallback" } };
+    const reason = code === "ETIMEDOUT" ? "analysis_timed_out" : "analysis_failed";
     return { diagnostic: { language: "python", status: "unavailable", reason } };
   }
 }

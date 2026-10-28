@@ -42,6 +42,7 @@ const GENERIC_TASK_TERMS = new Set([...ACTION_TERMS, "api", "endpoint", "handler
 const GENERIC_SYMBOL_IDENTIFIERS = new Set([...GENERIC_TASK_TERMS, "a", "after", "any", "before", "by", "conversation", "extract", "file", "for", "from", "id", "import", "in", "into", "is", "it", "module", "name", "of", "on", "or", "path", "request", "result", "the", "to", "turn", "type", "valid", "value", "with"]);
 const CONTEXT_BM25_WEIGHT = 0.15;
 const CONTEXT_MATCH_SCORE = 8;
+const CODE_USAGE_BOOST = 6;
 
 function identifierTerms(value: string): string[] {
   const expanded = value.replace(/([A-Z]+)([A-Z][a-z])/gu, "$1 $2").replace(/([a-z0-9])([A-Z])/gu, "$1 $2").replace(/[_./\\-]+/gu, " ");
@@ -67,9 +68,11 @@ export class CodeSymbolSearchIndex {
   readonly #contextTermsById = new Map<string, ReadonlySet<string>>();
   readonly #partialNamesByTrigram = new Map<string, Set<string>>();
   readonly #methodNames = new Set<string>();
+  readonly #usage: ReadonlyMap<string, number>;
 
   constructor(nodes: readonly JsonObject[], searchContext: ReadonlyMap<string, string> = new Map(),
-    enclosingTypeContext: ReadonlyMap<string, string> = new Map()) {
+    enclosingTypeContext: ReadonlyMap<string, string> = new Map(), usage: ReadonlyMap<string, number> = new Map()) {
+    this.#usage = usage;
     for (const node of nodes) {
       const id = String(node.id ?? "");
       if (!id || this.#byId.has(id)) continue;
@@ -162,7 +165,7 @@ export class CodeSymbolSearchIndex {
       const actionConflictPenalty = queryActionTerms.size > 0 && symbolActionTerms.length > 0
         && !symbolActionTerms.some(term => queryActionTerms.has(term)) ? 32 : 0;
       return [hit.id, { node, score: hit.score + (contextBm25.get(hit.id) ?? 0) * CONTEXT_BM25_WEIGHT + fieldMatch + domainMatches * 30 + ownerDomainMatch + contextMatches * CONTEXT_MATCH_SCORE + explicitContextMatches * 32 + structureMatch + declarationMatch + actionMatch + exactIdentifierMatch + exactWordMatch + namedMethodMatch + constructorMatch + namedActionMatch + ticketNameMatch - genericNamePenalty - compositeNamePenalty - testPathPenalty
-        - actionConflictPenalty + (name === lowered ? 20 : name.startsWith(lowered) ? 5 : name.includes(lowered) ? 2 : 0) }] as const;
+        - actionConflictPenalty + (name === lowered ? 20 : name.startsWith(lowered) ? 5 : name.includes(lowered) ? 2 : 0) + (this.#usage.get(String(hit.id)) ?? 0) * CODE_USAGE_BOOST }] as const;
     }));
     // Preserve partial-name discovery such as `ensureRepo` -> `ensureRepository`.
     const characters = [...lowered];
