@@ -73,11 +73,13 @@ function artifact(runner: string, command: string, output: string, callId: strin
 }
 
 /** Extract only digest-pinned success facts from exact Codex command completion records. */
-export function extractCodexSessionVerificationArtifacts(records: readonly CodexTaskTranscriptRecord[]): JsonObject[] {
+export function createCodexSessionVerificationCollector() {
   const calls = new Map<string, { runner: string; command_digest: string }>();
-  const outputs = new Map<string, string>();
+  const outputs = new Map<string, { digest: string; passed: string[] }>();
   const artifacts: JsonObject[] = [];
-  for (const record of records) {
+  let stopped = false;
+  function add(record: CodexTaskTranscriptRecord): void {
+    if (stopped) return;
     if (record.record_type === "event_msg" && record.payload.type === "item_completed") {
       const item = record.payload.item;
       if (item && typeof item === "object" && !Array.isArray(item)) {
@@ -95,27 +97,37 @@ export function extractCodexSessionVerificationArtifacts(records: readonly Codex
           }
         }
       }
-      if (artifacts.length === 8) break;
-      continue;
+      if (artifacts.length === 8) stopped = true;
+      return;
     }
-    if (record.record_type !== "response_item") continue;
+    if (record.record_type !== "response_item") return;
     const payload = record.payload;
     const callId = payload.call_id;
-    if (typeof callId !== "string" || !callId.trim() || callId.length > 160) continue;
+    if (typeof callId !== "string" || !callId.trim() || callId.length > 160) return;
     if (payload.type === "custom_tool_call" && payload.name === "exec") {
       const runner = testRunner(payload.input);
       if (runner) calls.set(callId, { runner, command_digest: stableDigest(payload.input) });
     } else if (payload.type === "custom_tool_call_output") {
       const text = outputText(payload.output);
-      if (text) outputs.set(callId, text);
+      if (text) outputs.set(callId, { digest: stableDigest(text), passed: /Process exited with code 0\s*$/imu.test(text)
+        ? ["javascript", "python", "go", "rust", "java-maven", "java-gradle", "dotnet"].filter(runner => successfulSummary(runner, text)) : [] });
     }
   }
-  for (const [callId, call] of calls) {
-    const output = outputs.get(callId);
-    if (!output || !/Process exited with code 0\s*$/imu.test(output) || !successfulSummary(call.runner, output)) continue;
-    artifacts.push({ runner: call.runner, command_digest: call.command_digest, result_digest: stableDigest(output),
-      call_digest: stableDigest(callId), exit_code: 0, summary_kind: "tests_passed", content_stored: false });
-    if (artifacts.length === 8) break;
+  function finish(): JsonObject[] {
+    for (const [callId, call] of calls) {
+      const output = outputs.get(callId);
+      if (!output || !output.passed.includes(call.runner)) continue;
+      artifacts.push({ runner: call.runner, command_digest: call.command_digest, result_digest: output.digest,
+        call_digest: stableDigest(callId), exit_code: 0, summary_kind: "tests_passed", content_stored: false });
+      if (artifacts.length === 8) break;
+    }
+    return artifacts;
   }
-  return artifacts;
+  return { add, finish };
+}
+
+export function extractCodexSessionVerificationArtifacts(records: readonly CodexTaskTranscriptRecord[]): JsonObject[] {
+  const collector = createCodexSessionVerificationCollector();
+  for (const record of records) collector.add(record);
+  return collector.finish();
 }

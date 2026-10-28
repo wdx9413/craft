@@ -6,7 +6,7 @@ import { atomicPrivateJson, craftPaths, dataRoot } from "../common/craft-common-
 import { projectIdentityFromRoot } from "./scope-identity.ts";
 import { codexTaskGoalDigest } from "./codex-task-prose.ts";
 import { stableDigest } from "./digest.ts";
-import { extractCodexSessionVerificationArtifacts, type CodexTaskTranscriptRecord } from "./codex-session-verification.ts";
+import { extractCodexSessionVerificationArtifacts, createCodexSessionVerificationCollector } from "./codex-session-verification.ts";
 import type { JsonObject } from "./infrastructure/store.ts";
 
 const STATE_SCHEMA = "craft.codex-session-collection.v1";
@@ -14,6 +14,7 @@ const DEFAULT_MAX_FILES = 25;
 const DEFAULT_MAX_BYTES = 20 * 1024 * 1024;
 const MAX_LINE_BYTES = 64 * 1024 * 1024;
 const MAX_TASK_EXCERPT_BYTES = 8 * 1024 * 1024;
+const MAX_TASK_STREAM_BYTES = 128 * 1024 * 1024;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 
 export interface CodexSessionCollectionOptions {
@@ -726,23 +727,47 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
   if (!canonicalSource.startsWith(`${canonicalRoot}${sep}`)) throw new Error("Codex task source escaped the sessions root");
   const info = await lstat(sourcePath);
   if (info.isSymbolicLink() || !info.isFile() || task.source_end_byte <= task.source_start_byte
-    || task.source_end_byte > info.size || task.source_end_byte - task.source_start_byte > MAX_TASK_EXCERPT_BYTES) {
+    || task.source_end_byte > info.size || task.source_end_byte - task.source_start_byte > MAX_TASK_STREAM_BYTES) {
     return { status: "ineligible", reason: "task_source_span_invalid_or_oversized", raw_content_stored: false };
   }
-  const buffer = Buffer.alloc(task.source_end_byte - task.source_start_byte);
-  const readRange = rangeReader ?? (async (path: string, target: Buffer, start: number) => {
-    const handle = await open(path, "r");
-    try { return (await handle.read(target, 0, target.length, start)).bytesRead; }
-    finally { await handle.close(); }
-  });
-  if (await readRange(sourcePath, buffer, task.source_start_byte) !== buffer.length) {
-    return { status: "ineligible", reason: "task_source_changed_during_read", raw_content_stored: false };
+  // Large spans are processed a bounded chunk at a time below. Small spans
+  // retain the original injected-reader contract.
+  const spanBytes = task.source_end_byte - task.source_start_byte;
+  const buffer = Buffer.alloc(Math.min(spanBytes, MAX_TASK_EXCERPT_BYTES));
+  async function* lines(): AsyncGenerator<string> {
+    const handle = rangeReader ? null : await open(sourcePath, "r");
+    try {
+    if (handle) {
+      const opened = await handle.stat();
+      if (opened.dev !== info.dev || opened.ino !== info.ino || !opened.isFile()) throw new Error("task_source_changed_during_read");
+    }
+    let offset = task.source_start_byte, pending = Buffer.alloc(0);
+    while (offset < task.source_end_byte) {
+      const size = Math.min(buffer.length, task.source_end_byte - offset);
+      const block = buffer.subarray(0, size);
+      const bytesRead = rangeReader ? await rangeReader(sourcePath, block, offset) : (await handle!.read(block, 0, size, offset)).bytesRead;
+      if (bytesRead !== size) throw new Error("task_source_changed_during_read");
+      offset += size;
+      const combined = pending.length > 0;
+      const bytes = combined ? Buffer.concat([pending, block]) : block;
+      let start = 0, end: number;
+      while ((end = bytes.indexOf(10, start)) >= 0) {
+        if (end - start > MAX_LINE_BYTES) throw new Error("task_source_line_oversized");
+        let line = bytes.subarray(start, end);
+        if (line.at(-1) === 13) line = line.subarray(0, -1);
+        yield line.toString("utf8");
+        start = end + 1;
+      }
+      pending = combined ? bytes.subarray(start) : Buffer.from(bytes.subarray(start));
+      if (pending.length > MAX_LINE_BYTES) throw new Error("task_source_line_oversized");
+    }
+    if (pending.length) yield pending.toString("utf8");
+    } finally { if (handle) await handle.close(); }
   }
-  const lines = buffer.toString("utf8").split(/\r?\n/u);
   let rollingDigest = hash(`${task.session_id}\0${task.turn_id}`);
   let taskGoal: string | null = null, taskResult: string | null = null;
-  const verificationRecords: CodexTaskTranscriptRecord[] = [];
-  for (const line of lines) {
+  const verificationCollector = createCodexSessionVerificationCollector();
+  try { for await (const line of lines()) {
     if (!line) continue;
     const lineBytes = Buffer.from(line);
     let parsed: unknown;
@@ -753,9 +778,9 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
     const recordTurnId = typeof payload?.turn_id === "string" ? payload.turn_id : task.turn_id;
     if (recordType === "response_item" && payload
       && (payloadType === "custom_tool_call" || payloadType === "custom_tool_call_output")) {
-      verificationRecords.push({ record_type: "response_item", payload });
+      verificationCollector.add({ record_type: "response_item", payload });
     } else if (recordType === "event_msg" && payload && recordTurnId === task.turn_id && payloadType === "item_completed") {
-      verificationRecords.push({ record_type: "event_msg", payload });
+      verificationCollector.add({ record_type: "event_msg", payload });
     }
     if (recordType && payload && recordTurnId === task.turn_id && recordType !== "session_meta" && recordType !== "turn_context"
       && !(recordType === "event_msg" && payloadType === "task_started")) {
@@ -766,9 +791,14 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
     if (payload.role === "user" && !taskGoal) taskGoal = sanitizedTaskProse(content, 1_000);
     if (payload.role === "assistant" && payload.phase === "final_answer") taskResult = sanitizedTaskProse(content, 1_000);
   }
+  } catch (error) {
+    if (error instanceof Error && ["task_source_changed_during_read", "task_source_line_oversized"].includes(error.message))
+      return { status: "ineligible", reason: error.message, raw_content_stored: false };
+    throw error;
+  }
   if (`sha256:${rollingDigest}` !== task.source_ref) return { status: "ineligible", reason: "task_source_digest_mismatch", raw_content_stored: false };
   if (!taskGoal || !taskResult) return { status: "ineligible", reason: "sanitized_task_summary_unavailable", raw_content_stored: false };
-  const verificationArtifacts = extractCodexSessionVerificationArtifacts(verificationRecords);
+  const verificationArtifacts = verificationCollector.finish();
   if (transcriptVerified && (verificationArtifacts.length !== task.verification_artifact_count
     || `sha256:${hash(JSON.stringify(verificationArtifacts))}` !== task.verification_artifact_digest)) {
     return { status: "ineligible", reason: "transcript_test_evidence_digest_mismatch", raw_content_stored: false };

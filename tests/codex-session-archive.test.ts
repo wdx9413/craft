@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { execFileSync } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -35,6 +37,92 @@ async function fixture() {
   };
   return { root, sessions, project, state, file, record, event, response, turn, writeSession };
 }
+
+test("reads a long turn with independently verified terminal outcome", async () => {
+  const f = await fixture();
+  try {
+    const lines = f.turn("long-turn", "检查长任务的来源与摘要", "已经完成长任务来源检查");
+    lines.splice(2, 0, f.event({ type: "diagnostic", data: "x".repeat(9 * 1024 * 1024) }));
+    lines.splice(2, 0, f.response({ type: "custom_tool_call", name: "exec", call_id: "long-test", input: "node --test" }));
+    lines.splice(4, 0, f.response({ type: "custom_tool_call_output", call_id: "long-test", output: "# pass 1\nProcess exited with code 0" }));
+    await f.writeSession(lines);
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    await reconcileCodexSessionTaskEvidence([{ evidence_id: "long-evidence", session_id: "session-a", turn_id: "long-turn",
+      context_receipt_id: "long-receipt", verification_ref_digest: `sha256:${"a".repeat(64)}`,
+      terminal_identity_digest: `sha256:${"b".repeat(64)}`, verification_outcome: "passed", verified: true, content_stored: false }], options);
+    const task = Object.values(JSON.parse(await readFile(f.state, "utf8")).tasks as Record<string, CodexSessionTaskIndex>)[0]!;
+    const result = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+    assert.equal(result.status, "ready", JSON.stringify(result));
+    assert.equal(result.verification_outcome, "passed");
+    assert.equal(result.raw_content_stored, false);
+    assert.equal((result.verification_artifacts as JsonObject[]).length, 1);
+    const source = await readFile(f.file);
+    let reads = 0;
+    const interrupted = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition }, process.env,
+      async (_path, target, start) => {
+        reads++;
+        if (reads === 2) return 0;
+        return source.copy(target, 0, start, start + target.length);
+      });
+    assert.equal(reads, 2);
+    assert.equal(interrupted.reason, "task_source_changed_during_read");
+    reads = 0;
+    const altered = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition }, process.env,
+      async (_path, target, start) => {
+        const count = source.copy(target, 0, start, start + target.length);
+        if (++reads === 2) target[0] = target[0] === 120 ? 121 : 120;
+        return count;
+      });
+    assert.equal(altered.reason, "task_source_digest_mismatch");
+    await assert.rejects(readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition }, process.env,
+      async () => { throw new Error("unexpected read failure"); }), /unexpected read failure/u);
+    await appendFile(f.file, Buffer.alloc(66 * 1024 * 1024));
+    const largeState = JSON.parse(await readFile(f.state, "utf8"));
+    largeState.tasks[task.task_id].source_end_byte = task.source_start_byte + 65 * 1024 * 1024;
+    await writeFile(f.state, JSON.stringify(largeState));
+    for (const finalNewline of [false, true]) {
+      const oversized = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition }, process.env,
+        async (_path, target, start) => {
+          target.fill(120);
+          if (finalNewline && start - task.source_start_byte >= 64 * 1024 * 1024) target[100] = 10;
+          return target.length;
+        });
+      assert.equal(oversized.reason, "task_source_line_oversized");
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("reads CRLF session records with the same source digest as the collector", async () => {
+  const f = await fixture();
+  try {
+    await f.writeSession(f.turn("crlf-turn", "核查会话记录的来源摘要", "已经完成会话来源摘要检查"));
+    const contents = await readFile(f.file, "utf8");
+    await writeFile(f.file, contents.replace(/\n/gu, "\r\n"));
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    await reconcileCodexSessionTaskEvidence([{ evidence_id: "crlf-evidence", session_id: "session-a", turn_id: "crlf-turn",
+      context_receipt_id: "crlf-receipt", verification_ref_digest: `sha256:${"a".repeat(64)}`,
+      terminal_identity_digest: `sha256:${"b".repeat(64)}`, verification_outcome: "passed", verified: true, content_stored: false }], options);
+    const task = Object.values(JSON.parse(await readFile(f.state, "utf8")).tasks as Record<string, CodexSessionTaskIndex>)[0]!;
+    assert.equal((await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition })).status, "ready");
+    const originalOpen = fsPromises.open;
+    try {
+      fsPromises.open = async (...args: Parameters<typeof originalOpen>) => {
+        if (String(args[0]) === f.file) {
+          await rename(f.file, `${f.file}.old`);
+          await writeFile(f.file, contents.replace(/\n/gu, "\r\n"));
+        }
+        return originalOpen(...args);
+      };
+      syncBuiltinESMExports();
+      const changed = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+      assert.equal(changed.reason, "task_source_changed_during_read");
+    } finally { fsPromises.open = originalOpen; syncBuiltinESMExports(); }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+
 
 test("discovers active and archived Host sessions without colliding source paths or copying text", async () => {
   const f = await fixture();
