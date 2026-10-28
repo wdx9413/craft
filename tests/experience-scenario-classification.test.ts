@@ -28,7 +28,7 @@ function fixture(options: { response?: string; ticket?: JsonObject | null; reque
     if (name === "craft_experience_scenario_classification_request_get") return { request: options.request ?? { id: "scenario_classification_1", version: 1, status: "awaiting_model",
       context, identity_digest: "sha256:" + "b".repeat(64) }, taxonomy: options.taxonomy ?? { catalog_version: 0, scenarios: [] } };
     if (name === "craft_learning_cycle_finalize") return { status: options.finalizeStatus ?? "observed",
-      observation: { id: context.observation_id, scenario_signature: { schema: "craft.scenario-signature.v1", project: "project:craft" } },
+      observation: { id: context.observation_id, scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "project", id: "project:craft" } } },
       scenario_catalog: { scenario_key: "validation.repair", status: "candidate", catalog_version: 1 } };
     if (name === "craft_experience_scenario_classification_request_complete") return options.completionEmpty ? {} : { request: { id: "scenario_classification_1", version: 2, status: "classified" } };
     if (name === "craft_evaluation_model_ticket_complete" || name.startsWith("craft_trace_")) return {};
@@ -284,8 +284,12 @@ test("keeps classification retryable when finalize omits the exact observation a
 
 test("rejects a classification receipt for another project or unavailable scene", async () => {
   for (const overrides of [
-    { scenario_signature: { schema: "craft.scenario-signature.v1", project: "user:project:craft" } },
+    { scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "user", id: "project:craft" } } },
+    { scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "project", id: "project:other" } } },
     { scenario_signature: { schema: "craft.scenario-signature.v1", project: "project:other" } },
+    { scenario_signature: { schema: "craft.scenario-signature.v1", project: null } },
+    { scenario_signature: { schema: "craft.scenario-signature.v1", project: 42 } },
+    { scenario_signature: { schema: "craft.scenario-signature.v1", project: [] } },
   ]) {
     const f = fixture();
     const client: ExperienceScenarioClassificationClient = { async call(name, args) {
@@ -303,6 +307,17 @@ test("rejects a classification receipt for another project or unavailable scene"
   } };
   const result = await runExperienceScenarioClassificationOnce({ client, providers: [provider], transport: unavailable.transport });
   assert.equal((result.outcomes as JsonObject[])[0]?.status, "failed");
+});
+
+test("accepts a legacy string project scope when linking a classified observation", async () => {
+  const f = fixture();
+  const client: ExperienceScenarioClassificationClient = { async call(name, args) {
+    const result = await f.client.call(name, args);
+    return name === "craft_learning_cycle_finalize" ? { ...result,
+      observation: { id: context.observation_id, scenario_signature: { schema: "craft.scenario-signature.v1", project: "project:craft" } } } : result;
+  } };
+  const result = await runExperienceScenarioClassificationOnce({ client, providers: [provider], transport: f.transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
 });
 
 test("rejects malformed tool envelopes, identifiers, digests, and task context", async () => {

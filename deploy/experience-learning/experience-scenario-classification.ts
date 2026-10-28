@@ -31,6 +31,13 @@ function digest(value: unknown, name: string): string {
   if (typeof value !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(value)) throw new Error(`${name} must be a SHA-256 digest`);
   return value;
 }
+function projectScopeMatches(value: unknown, expectedScope: string): boolean {
+  if (typeof value === "string") return value === expectedScope;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const project = value as JsonObject;
+  if (project.kind !== "project" || typeof project.id !== "string") return false;
+  return project.id.replace(/^project:/u, "") === expectedScope.replace(/^project:/u, "");
+}
 function summary(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim() || value.length > 320 || /[\r\n\0]/u.test(value) || SECRET.test(value)) throw new Error(`${name} must be a bounded sanitized summary`);
   return value.trim();
@@ -172,7 +179,7 @@ export async function runExperienceScenarioClassificationOnce(deps: ExperienceSc
         && (catalog.status === "candidate" || catalog.status === "active")
         && Number.isSafeInteger(catalog.catalog_version);
       if (observation?.id !== context.observation_id || signature?.schema !== "craft.scenario-signature.v1"
-        || signature.project !== scope || !classifiedScene) {
+        || !projectScopeMatches(signature.project, scope) || !classifiedScene) {
         throw new Error("Experience classification did not bind to the exact verified Observation and catalog entry");
       }
       observationId = String(context.observation_id);
