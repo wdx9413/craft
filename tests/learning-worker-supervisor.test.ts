@@ -50,7 +50,9 @@ test("worker supervisor starts one worker per free component and skips overlappi
       return child;
     }) as unknown as typeof import("node:child_process").spawn;
     const stopExperience = await startWorker(f, { mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
-    assert.equal(await startWorker(f, { mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker }), undefined);
+    const stopDuplicate = await startWorker(f, { mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
+    assert.equal(typeof stopDuplicate, "function");
+    await stopDuplicate?.();
     const stopKnowledge = await startWorker(f, { mode: "component-knowledge-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
     const stopContext = await startWorker(f, { mode: "component-context-agent", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker, on_skip: value => skips.push(value) });
     assert.equal(launches.length, 2);
@@ -61,6 +63,7 @@ test("worker supervisor starts one worker per free component and skips overlappi
     assert.deepEqual(JSON.parse(launches[1]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "knowledge"]);
     assert.equal(launches[1]!.env.CRAFT_LEARNING_COMPONENTS, "knowledge");
     assert.equal(launches[1]!.env.CRAFT_LEARNING_COMPONENT_LOCKS_HELD, "knowledge");
+    await stopContext?.();
     await Promise.all([stopExperience?.(), stopKnowledge?.()]);
     const stopContextAfterRelease = await startWorker(f, { mode: "component-context-agent", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
     assert.deepEqual(JSON.parse(launches[2]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--surface", "component-context-complete"]);
@@ -89,9 +92,9 @@ test("worker supervisor serializes concurrent MCP sessions and releases all comp
       on_skip: (reason: string) => skips.push(reason) };
     const [first, second] = await Promise.all([startWorker(f, opts), startWorker(f, opts)]);
     assert.equal(launches.length, 1);
-    assert.equal([first, second].filter(Boolean).length, 1);
+    assert.equal([first, second].filter(Boolean).length, 2);
     assert.deepEqual(skips, ["worker_already_running"]);
-    await (first ?? second)?.();
+    await Promise.all([first?.(), second?.()]);
     const knowledge = await startWorker(f, { ...opts, mode: "component-knowledge-daily" });
     const experience = await startWorker(f, { ...opts, mode: "component-experience-daily" });
     assert.equal(launches.length, 3, "both disjoint component workers may start after the combined worker releases its locks");
@@ -276,8 +279,9 @@ test("worker supervisor releases earlier component locks when a later lock is oc
     }) as unknown as typeof import("node:child_process").spawn;
     const context = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker,
       on_skip: reason => skips.push(reason) });
-    assert.equal(context, undefined);
+    assert.equal(typeof context, "function");
     assert.deepEqual(skips, ["worker_already_running"]);
+    await context?.();
     const experience = await startWorker(f, { mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
     assert.equal(launches.length, 1, "the partial Experience lock must have been released");
     await experience?.();
@@ -445,5 +449,90 @@ test("worker supervisor launches TypeScript MCP without recursion and settles a 
     assert.equal(launch?.env.CRAFT_EXPERIENCE_MCP_COMMAND, process.execPath);
     assert.deepEqual(launch?.stdio, ["ignore", "ignore", "inherit"], "worker diagnostics reach MCP stderr while stdout stays off the protocol stream");
     await stop?.();
+  } finally { await f.close(); }
+});
+
+
+test("waiting supervisor takes ownership after release and cancels cleanly", async () => {
+  const f = await fixture(); const children: ChildProcess[] = [];
+  const spawnWorker = (() => {
+    const child = new EventEmitter() as ChildProcess;
+    child.kill = () => { queueMicrotask(() => child.emit("exit", 0)); return true; };
+    children.push(child); return child;
+  }) as typeof import("node:child_process").spawn;
+  try {
+    const opts = { mode: "component-knowledge-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker, restart_base_delay_ms: 5, on_skip: () => {} };
+    const owner = await startWorker(f, opts);
+    const waiting = await startWorker(f, opts);
+    assert.equal(children.length, 1);
+    await new Promise(resolve => setTimeout(resolve, 12));
+    assert.equal(children.length, 1);
+    await owner?.();
+    for (let i = 0; i < 100 && children.length < 2; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(children.length, 2);
+    await waiting?.();
+    const cancelOwner = await startWorker(f, opts);
+    const cancelled = await startWorker(f, opts);
+    await cancelled?.(); await cancelOwner?.();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(children.length, 3);
+  } finally { await f.close(); }
+});
+
+
+test("waiting supervisor reports lock errors and releases an acquisition racing shutdown", async () => {
+  const f = await fixture(); const failures: string[] = [];
+  try {
+    let calls = 0;
+    const failRetry: typeof acquireLearningWorkerLocks = async () => {
+      if (++calls === 1) return null;
+      throw new Error("storage unavailable");
+    };
+    const failed = await startWorker(f, { mode: "component-knowledge-daily", server_entrypoint: f.server,
+      restart_base_delay_ms: 1, acquire_locks: failRetry, on_skip: () => {}, on_failure: reason => failures.push(reason) });
+    for (let i = 0; i < 100 && !failures.length; i++) await new Promise(resolve => setTimeout(resolve, 2));
+    assert.deepEqual(failures, ["worker_lock_unavailable"]);
+    await failed?.();
+
+    let completeAcquire!: (release: () => Promise<void>) => void;
+    let acquired = false, released = false, launches = 0; calls = 0;
+    const delayed: typeof acquireLearningWorkerLocks = async () => {
+      if (++calls === 1) return null;
+      acquired = true;
+      return await new Promise(resolve => { completeAcquire = resolve; });
+    };
+    const waiting = await startWorker(f, { mode: "component-knowledge-daily", server_entrypoint: f.server,
+      restart_base_delay_ms: 1, acquire_locks: delayed, on_skip: () => {},
+      spawn_process: (() => { launches++; return new EventEmitter(); }) as unknown as typeof import("node:child_process").spawn });
+    for (let i = 0; i < 100 && !acquired; i++) await new Promise(resolve => setTimeout(resolve, 2));
+    assert.equal(acquired, true);
+    const stopping = waiting!();
+    completeAcquire(async () => { released = true; });
+    await stopping;
+    assert.equal(released, true);
+    assert.equal(launches, 0);
+  } finally { await f.close(); }
+});
+
+
+test("waiting supervisor hands off a real worker process after lock release", async () => {
+  const f = await fixture();
+  try {
+    const opts = { mode: "component-knowledge-daily", server_entrypoint: f.server, env: {}, restart_base_delay_ms: 5,
+      shutdown_timeout_ms: 500, on_skip: () => {} };
+    const owner = await startWorker(f, opts);
+    const waiting = await startWorker(f, opts);
+    const path = join(f.root, "runtime", "learning-worker-knowledge.lock.json");
+    const before = JSON.parse(await readFile(path, "utf8")).owner_id;
+    await owner?.();
+    let after = before;
+    for (let i = 0; i < 100 && after === before; i++) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      try { after = JSON.parse(await readFile(path, "utf8")).owner_id; } catch { /* Wait for the next acquisition. */ }
+    }
+    assert.notEqual(after, before);
+    await waiting?.();
+    const release = await acquireLearningWorkerLocks(join(f.root, "runtime"), ["knowledge"]);
+    assert.ok(release); await release();
   } finally { await f.close(); }
 });

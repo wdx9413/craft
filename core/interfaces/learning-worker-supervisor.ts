@@ -15,6 +15,7 @@ export interface LearningWorkerSupervisorOptions {
   restart_base_delay_ms?: number;
   exists?: (path: string) => boolean;
   spawn_process?: typeof spawn;
+  acquire_locks?: typeof acquireLearningWorkerLocks;
   on_failure?: (reason: string) => void;
   on_skip?: (reason: string) => void;
 }
@@ -54,19 +55,16 @@ export async function startContextLearningWorker(options: LearningWorkerSupervis
   if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 60_000) throw new Error("shutdown_timeout_ms must be between 1 and 60000");
   const restartBase = options.restart_base_delay_ms ?? 1_000;
   if (!Number.isSafeInteger(restartBase) || restartBase < 1 || restartBase > 30_000) throw new Error("restart_base_delay_ms must be between 1 and 30000");
+  const acquireLocks = options.acquire_locks ?? acquireLearningWorkerLocks;
   let releaseLocks: (() => Promise<void>) | null;
   try {
-    releaseLocks = await acquireLearningWorkerLocks(craftPaths(dataRoot(options.env)).runtimeDir, component.learning.split(","), { runtime_version: CRAFT_RELEASE_VERSION });
+    releaseLocks = await acquireLocks(craftPaths(dataRoot(options.env)).runtimeDir, component.learning.split(","), { runtime_version: CRAFT_RELEASE_VERSION });
   } catch {
     options.on_failure?.("worker_lock_unavailable");
     return undefined;
   }
-  if (!releaseLocks) {
-    if (options.on_skip) options.on_skip("worker_already_running");
-    else process.stderr.write("Craft learning worker skipped (worker_already_running).\n");
-    return undefined;
-  }
   let child: ChildProcess | undefined, childEnded = true, stopping = false, restartTimer: NodeJS.Timeout | undefined, restartCount = 0;
+  let lockTimer: NodeJS.Timeout | undefined, lockRetry: Promise<void> | undefined, lockRetryCount = 0;
   let releasePromise: Promise<void> | undefined;
   const releaseOwnership = (): Promise<void> => releasePromise ??= (async () => {
     try { await releaseLocks?.(); }
@@ -111,11 +109,37 @@ export async function startContextLearningWorker(options: LearningWorkerSupervis
       reportAndRestart(`worker_exit_${String(code)}`);
     });
   };
-  startChild();
+  const scheduleLockRetry = () => {
+    const delay = Math.min(30_000, restartBase * 2 ** Math.min(lockRetryCount, 5));
+    lockRetryCount += 1;
+    lockTimer = setTimeout(() => {
+      lockTimer = undefined;
+      lockRetry = (async () => {
+        try {
+          releaseLocks = await acquireLocks(craftPaths(dataRoot(options.env)).runtimeDir, component.learning.split(","), { runtime_version: CRAFT_RELEASE_VERSION });
+          if (stopping) { await releaseOwnership(); return; }
+          if (releaseLocks) startChild();
+          else scheduleLockRetry();
+        } catch {
+          options.on_failure?.("worker_lock_unavailable");
+          if (!stopping) scheduleLockRetry();
+        }
+      })();
+    }, delay);
+    lockTimer.unref();
+  };
+  if (releaseLocks) startChild();
+  else {
+    if (options.on_skip) options.on_skip("worker_already_running");
+    else process.stderr.write("Craft learning worker waiting (worker_already_running).\n");
+    scheduleLockRetry();
+  }
   return async () => {
     if (stopping) { await releasePromise; return; }
     stopping = true;
     if (restartTimer) { clearTimeout(restartTimer); restartTimer = undefined; }
+    if (lockTimer) { clearTimeout(lockTimer); lockTimer = undefined; }
+    await lockRetry;
     try {
       if (child && !childEnded) {
         const current = child;

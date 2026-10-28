@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.12.120",
+  "version": "0.12.121",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -108,13 +108,13 @@
     "tesseract.js": "^7.0.0",
     "yaml": "^2.9.0",
     "typescript": ">=5.8 <7",
-    "craft-common-store-local": "0.12.120",
-    "craft-common-base": "0.12.120",
-    "craft-common-log": "0.12.120",
-    "@craft/capability-knowledge": "0.12.120",
-    "@craft/capability-memory": "0.12.120",
-    "@craft/capability-experience": "0.12.120",
-    "@craft/capability-codebase": "0.12.120"
+    "craft-common-store-local": "0.12.121",
+    "craft-common-base": "0.12.121",
+    "craft-common-log": "0.12.121",
+    "@craft/capability-knowledge": "0.12.121",
+    "@craft/capability-memory": "0.12.121",
+    "@craft/capability-experience": "0.12.121",
+    "@craft/capability-codebase": "0.12.121"
   },
   "packageManager": "pnpm@11.19.0"
 }
