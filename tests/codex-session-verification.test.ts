@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { stableDigest } from "../core/digest.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { extractCodexSessionVerificationArtifacts, type CodexTaskTranscriptRecord } from "../core/codex-session-verification.ts";
+import { createCodexSessionVerificationCollector, extractCodexSessionVerificationArtifacts, type CodexTaskTranscriptRecord } from "../core/codex-session-verification.ts";
 
 const call = (id: string, input: unknown, name = "exec"): CodexTaskTranscriptRecord => ({ record_type: "response_item",
   payload: { type: "custom_tool_call", call_id: id, name, input } });
@@ -13,6 +13,43 @@ const completedCommand = (id: string, command: unknown, aggregated_output: unkno
     aggregated_output, exit_code: 0, status: "completed", ...overrides } },
 });
 const successfulOutput = (summary: string) => [{ type: "text", text: "Process exited with code 0" }, { type: "text", text: summary }];
+
+test("duplicate call or output identifiers cannot create verification artifacts", () => {
+  const passed = successfulOutput("Tests 1 passed (1)");
+  assert.deepEqual(extractCodexSessionVerificationArtifacts([
+    call("duplicate-call", "pnpm test"), call("duplicate-call", "echo unrelated"), output("duplicate-call", passed),
+    call("duplicate-output", "pnpm test"), output("duplicate-output", passed), output("duplicate-output", passed),
+    call("empty-first", "pnpm test"), output("empty-first", null), output("empty-first", passed),
+    call("invalid-first", "echo unrelated"), call("invalid-first", "pnpm test"), output("invalid-first", passed),
+    call("other-tool-first", "pnpm test", "terminal"), call("other-tool-first", "pnpm test"), output("other-tool-first", passed),
+  ]), []);
+  assert.equal(extractCodexSessionVerificationArtifacts([output("unique", passed), call("unique", "pnpm test")]).length, 1);
+});
+
+test("bounds custom call tracking and preserves structured command evidence on overflow", () => {
+  const passed = successfulOutput("Tests 1 passed (1)");
+  for (const overflowOutputs of [false, true]) {
+    const records = [call("match", "pnpm test"), output("match", passed)];
+    for (let index = 0; index < 4096; index++) {
+      records.push(overflowOutputs ? output(`overflow-${index}`, "unmatched") : call(`overflow-${index}`, "echo unrelated"));
+    }
+    records.push(call("late", "pnpm test"), output("late", passed), completedCommand("structured", "pnpm test", "Tests 1 passed (1)"));
+    const artifacts = extractCodexSessionVerificationArtifacts(records);
+    assert.equal(artifacts.length, 1);
+    assert.equal(artifacts[0]?.call_digest, stableDigest("structured"));
+  }
+});
+
+test("continues checking overflow after the structured artifact limit", () => {
+  const records = Array.from({ length: 8 }, (_, index) => completedCommand(`structured-${index}`, "pnpm test", "Tests 1 passed (1)"));
+  assert.equal(extractCodexSessionVerificationArtifacts([...records, call("extra", "pnpm test"),
+    output("extra", successfulOutput("Tests 1 passed (1)"))]).length, 8);
+  for (let index = 0; index < 4097; index++) records.push(call(`call-${index}`, "echo ok"));
+  const collector = createCodexSessionVerificationCollector();
+  for (const record of records) collector.add(record);
+  assert.equal(collector.finish().length, 8);
+  assert.equal(collector.customCallsOverflowed(), true);
+});
 
 test("accepts only paired, successful test-runner calls with a passing summary", () => {
   const artifacts = extractCodexSessionVerificationArtifacts([
@@ -76,6 +113,29 @@ test("accepts Codex structured CommandExecution completions without storing comm
   const capped = extractCodexSessionVerificationArtifacts(Array.from({ length: 10 }, (_, index) =>
     completedCommand(`command-${index}`, command, summary)));
   assert.equal(capped.length, 8);
+});
+
+test("deduplicates structured command completions and paired records by call identifier", () => {
+  const record = completedCommand("same", "pnpm test", "Tests 1 passed (1)");
+  const artifacts = extractCodexSessionVerificationArtifacts([record, record, call("same", "pnpm test"),
+    output("same", successfulOutput("Tests 1 passed (1)"))]);
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0]?.call_digest, stableDigest("same"));
+});
+
+test("rejects conflicting or excessive structured command identifiers", () => {
+  for (const second of [completedCommand("same", "go test ./...", "ok example/pkg 0.01s"),
+    completedCommand("same", "pnpm test", "Tests 1 failed (1)", { exit_code: 1 })]) {
+    const collector = createCodexSessionVerificationCollector();
+    collector.add(completedCommand("same", "pnpm test", "Tests 1 passed (1)"));
+    collector.add(second);
+    assert.equal(collector.structuredCallsConflicted(), true);
+    assert.deepEqual(collector.finish(), []);
+  }
+  const collector = createCodexSessionVerificationCollector();
+  for (let index = 0; index < 4097; index++) collector.add(completedCommand(`id-${index}`, "echo ok", ""));
+  assert.equal(collector.structuredCallsOverflowed(), true);
+  assert.deepEqual(collector.finish(), []);
 });
 
 test("unwraps only bounded login-shell command arrays used by Codex CommandExecution records", () => {

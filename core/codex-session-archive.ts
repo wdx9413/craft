@@ -798,6 +798,9 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
   }
   if (`sha256:${rollingDigest}` !== task.source_ref) return { status: "ineligible", reason: "task_source_digest_mismatch", raw_content_stored: false };
   if (!taskGoal || !taskResult) return { status: "ineligible", reason: "sanitized_task_summary_unavailable", raw_content_stored: false };
+  if (verificationCollector.structuredCallsConflicted()) return { status: "ineligible", reason: "task_structured_call_conflict", raw_content_stored: false };
+  if (verificationCollector.structuredCallsOverflowed()) return { status: "ineligible", reason: "task_structured_call_tracking_limit_exceeded", raw_content_stored: false };
+  if (verificationCollector.customCallsOverflowed()) return { status: "ineligible", reason: "task_custom_call_tracking_limit_exceeded", raw_content_stored: false };
   const verificationArtifacts = verificationCollector.finish();
   if (transcriptVerified && (verificationArtifacts.length !== task.verification_artifact_count
     || `sha256:${hash(JSON.stringify(verificationArtifacts))}` !== task.verification_artifact_digest)) {

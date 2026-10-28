@@ -281,6 +281,77 @@ test("indexes digest-only evidence from completed Codex shell test commands for 
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("task excerpt agrees with the index when command completion is repeated", async () => {
+  const f = await fixture();
+  try {
+    const turn = f.turn("duplicate-turn", "整理项目测试验证流程", "依赖调整后通过测试");
+    const completed = f.event({ type: "item_completed", turn_id: "duplicate-turn", item: { type: "CommandExecution", id: "test", command: "pnpm test",
+      aggregated_output: "Tests 1 passed (1)", exit_code: 0, status: "completed" } });
+    turn.splice(turn.length - 1, 0, completed, completed);
+    await f.writeSession(turn);
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    const state = JSON.parse(await readFile(f.state, "utf8")) as { tasks: Record<string, CodexSessionTaskIndex> };
+    const task = Object.values(state.tasks)[0]!;
+    assert.equal(task.verification_artifact_count, 1);
+    const excerpt = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+    assert.equal(excerpt.status, "ready");
+    assert.equal((excerpt.verification_artifacts as JsonObject[]).length, 1);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("task excerpt rejects conflicting structured command records", async () => {
+  const f = await fixture();
+  try {
+    const turn = f.turn("conflict-turn", "整理项目测试验证流程", "依赖调整后通过测试");
+    const item = { type: "CommandExecution", id: "test", command: "pnpm test", aggregated_output: "Tests 1 passed (1)", exit_code: 0, status: "completed" };
+    turn.splice(turn.length - 1, 0, f.event({ type: "item_completed", turn_id: "conflict-turn", item }),
+      f.event({ type: "item_completed", turn_id: "conflict-turn", item: { ...item, exit_code: 1 } }));
+    await f.writeSession(turn);
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    const state = JSON.parse(await readFile(f.state, "utf8")) as { tasks: Record<string, CodexSessionTaskIndex> };
+    const task = Object.values(state.tasks)[0]!;
+    const excerpt = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+    assert.deepEqual(excerpt, { status: "ineligible", reason: "task_structured_call_conflict", raw_content_stored: false });
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("task excerpt reports structured call tracking overflow explicitly", async () => {
+  const f = await fixture();
+  try {
+    const turn = f.turn("structured-overflow-turn", "整理项目测试验证流程", "依赖调整后通过测试");
+    turn.splice(turn.length - 1, 0, ...Array.from({ length: 4097 }, (_, index) => f.event({ type: "item_completed", turn_id: "structured-overflow-turn",
+      item: { type: "CommandExecution", id: `command-${index}`, command: index ? "echo ok" : "pnpm test",
+        aggregated_output: "Tests 1 passed (1)", exit_code: 0, status: "completed" } })));
+    await f.writeSession(turn);
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    const state = JSON.parse(await readFile(f.state, "utf8")) as { tasks: Record<string, CodexSessionTaskIndex> };
+    const task = Object.values(state.tasks)[0]!;
+    const excerpt = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+    assert.deepEqual(excerpt, { status: "ineligible", reason: "task_structured_call_tracking_limit_exceeded", raw_content_stored: false });
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("task excerpt reports custom call tracking overflow explicitly", async () => {
+  const f = await fixture();
+  try {
+    const turn = f.turn("overflow-turn", "整理项目测试验证流程", "依赖调整后通过测试");
+    turn.splice(turn.length - 1, 0,
+      f.event({ type: "item_completed", turn_id: "overflow-turn", item: { type: "CommandExecution", id: "test", command: "pnpm test",
+        aggregated_output: "Tests 1 passed (1)", exit_code: 0, status: "completed" } }),
+      ...Array.from({ length: 4097 }, (_, index) => f.response({ type: "custom_tool_call", name: "exec", call_id: `call-${index}`, input: "echo ok" })));
+    await f.writeSession(turn);
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    const state = JSON.parse(await readFile(f.state, "utf8")) as { tasks: Record<string, CodexSessionTaskIndex> };
+    const task = Object.values(state.tasks)[0]!;
+    const excerpt = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+    assert.deepEqual(excerpt, { status: "ineligible", reason: "task_custom_call_tracking_limit_exceeded", raw_content_stored: false });
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("sanitizes Chinese and English credential labels before returning task excerpts", async () => {
   const f = await fixture();
   try {

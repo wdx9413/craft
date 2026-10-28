@@ -8,6 +8,7 @@ export interface CodexTaskTranscriptRecord {
 
 const MAX_COMMAND_CHARS = 16_000;
 const MAX_OUTPUT_CHARS = 1_000_000;
+const MAX_CUSTOM_CALL_IDS = 4096;
 
 function commandScript(commandValue: unknown): string | null {
   if (typeof commandValue === "string") return commandValue;
@@ -76,15 +77,27 @@ function artifact(runner: string, command: string, output: string, callId: strin
 export function createCodexSessionVerificationCollector() {
   const calls = new Map<string, { runner: string; command_digest: string }>();
   const outputs = new Map<string, { digest: string; passed: string[] }>();
+  const seenCalls = new Set<string>();
+  const seenOutputs = new Set<string>();
+  const ambiguous = new Set<string>();
+  const structuredCalls = new Map<string, string>();
   const artifacts: JsonObject[] = [];
-  let stopped = false;
+  let customOverflow = false;
+  let structuredConflict = false;
+  let structuredOverflow = false;
   function add(record: CodexTaskTranscriptRecord): void {
-    if (stopped) return;
     if (record.record_type === "event_msg" && record.payload.type === "item_completed") {
       const item = record.payload.item;
       if (item && typeof item === "object" && !Array.isArray(item)) {
         const commandItem = item as JsonObject;
         if (commandItem.type === "CommandExecution") {
+          if (typeof commandItem.id === "string" && commandItem.id.length > 0 && commandItem.id.length <= 160) {
+            const digest = stableDigest(commandItem);
+            const previous = structuredCalls.get(commandItem.id);
+            if (previous !== undefined && previous !== digest) structuredConflict = true;
+            if (previous === undefined && structuredCalls.size >= MAX_CUSTOM_CALL_IDS) structuredOverflow = true;
+            else if (previous === undefined) structuredCalls.set(commandItem.id, digest);
+          }
           const command = commandItem.command;
           const script = commandScript(command);
           const runner = testRunner(command);
@@ -93,37 +106,53 @@ export function createCodexSessionVerificationCollector() {
           const callId = commandItem.id;
           if (runner && script && commandItem.status === "completed" && exitCode === 0 && output) {
             const itemArtifact = artifact(runner, script, output, typeof callId === "string" ? callId : stableDigest({ command, output }));
-            if (itemArtifact) artifacts.push(itemArtifact);
+            if (itemArtifact && artifacts.length < 8 && !artifacts.some(existing => existing.call_digest === itemArtifact.call_digest)) artifacts.push(itemArtifact);
           }
         }
       }
-      if (artifacts.length === 8) stopped = true;
       return;
     }
     if (record.record_type !== "response_item") return;
+    if (customOverflow) return;
     const payload = record.payload;
     const callId = payload.call_id;
     if (typeof callId !== "string" || !callId.trim() || callId.length > 160) return;
-    if (payload.type === "custom_tool_call" && payload.name === "exec") {
+    if ((payload.type === "custom_tool_call" && !seenCalls.has(callId) && seenCalls.size >= MAX_CUSTOM_CALL_IDS)
+      || (payload.type === "custom_tool_call_output" && !seenOutputs.has(callId) && seenOutputs.size >= MAX_CUSTOM_CALL_IDS)) {
+      customOverflow = true;
+      calls.clear(); outputs.clear(); seenCalls.clear(); seenOutputs.clear(); ambiguous.clear();
+      return;
+    }
+    if (payload.type === "custom_tool_call") {
+      if (seenCalls.has(callId)) { ambiguous.add(callId); return; }
+      seenCalls.add(callId);
+      if (payload.name !== "exec") return;
       const runner = testRunner(payload.input);
       if (runner) calls.set(callId, { runner, command_digest: stableDigest(payload.input) });
     } else if (payload.type === "custom_tool_call_output") {
+      if (seenOutputs.has(callId)) { ambiguous.add(callId); return; }
+      seenOutputs.add(callId);
       const text = outputText(payload.output);
       if (text) outputs.set(callId, { digest: stableDigest(text), passed: /Process exited with code 0\s*$/imu.test(text)
         ? ["javascript", "python", "go", "rust", "java-maven", "java-gradle", "dotnet"].filter(runner => successfulSummary(runner, text)) : [] });
     }
   }
   function finish(): JsonObject[] {
+    if (structuredConflict || structuredOverflow) return [];
     for (const [callId, call] of calls) {
+      if (artifacts.length >= 8) break;
+      if (ambiguous.has(callId)) continue;
       const output = outputs.get(callId);
       if (!output || !output.passed.includes(call.runner)) continue;
+      if (artifacts.some(existing => existing.call_digest === stableDigest(callId))) continue;
       artifacts.push({ runner: call.runner, command_digest: call.command_digest, result_digest: output.digest,
         call_digest: stableDigest(callId), exit_code: 0, summary_kind: "tests_passed", content_stored: false });
       if (artifacts.length === 8) break;
     }
     return artifacts;
   }
-  return { add, finish };
+  return { add, finish, customCallsOverflowed: () => customOverflow,
+    structuredCallsConflicted: () => structuredConflict, structuredCallsOverflowed: () => structuredOverflow };
 }
 
 export function extractCodexSessionVerificationArtifacts(records: readonly CodexTaskTranscriptRecord[]): JsonObject[] {
