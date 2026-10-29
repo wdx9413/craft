@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { ObjectTraceArchiveStore, type TraceArchiveBundle, type TraceObjectBackend } from "../core/trace-archive-store.ts";
 import { TraceArchiveStorageKernel } from "../core/trace-archive-storage.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
@@ -37,6 +38,78 @@ function terminal(trace: TraceKernel, id: string): void {
 
 function bundle(): TraceArchiveBundle {
   return { trace_id: "local", trace_version: 1, archived_at: "2030-01-01T00:00:00.000Z", trace: { id: "local" }, events: [], feedback: [] };
+}
+
+test("Trace retention that is not due does not request the primary writer", async () => {
+  const f = await fixture();
+  const writer = new DatabaseSync(f.store.paths.databaseFile);
+  try {
+    f.store.create("maintenance_component", "trace_retention", { next_run_at: "2030-01-02T00:00:00.000Z" });
+    f.store.database.exec("PRAGMA busy_timeout=1");
+    writer.exec("BEGIN IMMEDIATE");
+    assert.equal(f.trace.maintain({ now: "2030-01-01T00:00:00.000Z" }).status, "not_due");
+    assert.throws(() => f.trace.maintain({ now: "2030-01-03T00:00:00.000Z" }), /locked/u);
+  } finally { writer.exec("ROLLBACK"); writer.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Trace retention rechecks its schedule after another worker claims it", async () => {
+  const f = await fixture();
+  const transaction = f.store.transaction.bind(f.store);
+  let injected = false;
+  try {
+    f.store.transaction = ((operation) => {
+      if (!injected) {
+        injected = true;
+        f.store.create("maintenance_component", "trace_retention", { next_run_at: "2030-01-02T00:00:00.000Z" });
+      }
+      return transaction(operation);
+    }) as typeof f.store.transaction;
+    assert.equal(f.trace.maintain({ now: "2030-01-01T00:00:00.000Z" }).status, "not_due");
+  } finally { f.store.transaction = transaction; f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("legacy Trace retention scans children before reserving the primary writer", async () => {
+  const f = await fixture();
+  const probe = new DatabaseSync(f.store.paths.databaseFile);
+  probe.exec("PRAGMA busy_timeout=0");
+  const now = "2020-01-01T00:00:00.000Z";
+  f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+    .run("trace", "legacy-lock", 1, JSON.stringify({ task_id: "task", status: "completed", last_event_at: now }), now, now);
+  const list = f.store.listTraceChildren.bind(f.store);
+  let scans = 0;
+  f.store.listTraceChildren = ((kind, id) => {
+    probe.exec("BEGIN IMMEDIATE; ROLLBACK"); scans++;
+    return list(kind, id);
+  }) as typeof f.store.listTraceChildren;
+  try {
+    assert.equal(f.trace.retentionSweep({ now: "2030-01-01T00:00:00.000Z" }).archived, 1);
+    assert.equal(scans, 3);
+    assert.equal(f.store.find("trace", "legacy-lock"), null);
+  } finally { f.store.listTraceChildren = list; probe.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+for (const connection of ["other", "same", "shard"] as const) {
+  test(`legacy Trace retention preserves records after ${connection} connection changes its snapshot`, async () => {
+    const f = await fixture();
+    const writer = new DatabaseSync(f.store.paths.databaseFile);
+    const now = "2020-01-01T00:00:00.000Z";
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("trace", "legacy-race", 1, JSON.stringify({ task_id: "task", status: "completed", last_event_at: now }), now, now);
+    const write = f.archives.write.bind(f.archives);
+    f.archives.write = value => {
+      const pointer = write(value);
+      if (connection === "shard") f.store.traceShards.create("trace_event", "late-event", { trace_id: "legacy-race" });
+      else (connection === "same" ? f.store.database : writer).prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        .run("trace_event", "late-event", 1, JSON.stringify({ trace_id: "legacy-race" }), now, now);
+      return pointer;
+    };
+    try {
+      assert.equal(f.trace.retentionSweep({ now: "2030-01-01T00:00:00.000Z" }).deleted, 0);
+      assert(f.store.find("trace", "legacy-race"));
+      assert(f.store.find("trace_event", "late-event"));
+      assert.equal(f.store.find("trace_archive", "legacy-race"), null);
+    } finally { f.archives.write = write; writer.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+  });
 }
 
 test("archive storage configuration rejects malformed or unsafe plugin declarations and preserves the built-in fallback", async () => {

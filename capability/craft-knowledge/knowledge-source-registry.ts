@@ -20,6 +20,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import type { ContentRef } from "../../common/craft-common-store-local/src/content-store.ts";
 import { noCredentialAssignment, parseScope, text } from "../../common/craft-common-base/src/validation.ts";
 import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 import { operationErrorCode } from "../../common/craft-common-log/src/operation.ts";
@@ -361,6 +362,32 @@ export class KnowledgeSourceRegistry {
     }
     const sourceSupportsByClaim = new Map<string, JsonObject>();
     for (const support of sourceSupports) sourceSupportsByClaim.set(String(support.claim_id), support);
+    // Fragment content is immutable and independently version-locked. Stage it
+    // before reserving the central writer; only publish its reference in the
+    // atomic metadata transaction below.
+    const prepared = new Map<string, { excerpt: string; location: number; end: number; id: string; contentRef?: ContentRef }[]>();
+    const knownRevision = this.store.find("knowledge_source_revision", revisionId);
+    if (knownRevision && knownRevision.source_revision_digest !== revisionDigest) throw new Error("Knowledge revision identity conflict");
+    for (const doc of selected) {
+      const parts: { excerpt: string; location: number; end: number; id: string; contentRef?: ContentRef }[] = [];
+      for (let start = 0, ordinal = 0; start < doc.body.length; ordinal++) {
+        let end = Math.min(start + maxChars, doc.body.length);
+        if (end < doc.body.length) {
+          const boundary = doc.body.lastIndexOf("\n\n", end);
+          if (boundary > start + maxChars / 2) end = Math.min(end, boundary + 2);
+        }
+        const excerpt = doc.body.slice(start, end), location = start; start = end;
+        if (!excerpt.trim()) continue;
+        const id = `knowledge_fragment_${stableDigest([doc.id, doc.digest, maxChars, ordinal, excerpt]).slice(-24)}`;
+        const contentRef = this.store.find("knowledge_fragment", id) ? undefined : this.store.contentStore.writeSync({
+          kind: "knowledge", record_id: id, version: 1, scope: `${(source.scope as JsonObject).kind}:${(source.scope as JsonObject).id}`,
+          status: "candidate", sensitivity: "internal", source_id: String(source.id), body: excerpt,
+          ...(sourceProjectRoot ? { project_root: sourceProjectRoot } : {}),
+        });
+        parts.push({ excerpt, location, end, id, contentRef });
+      }
+      prepared.set(doc.id, parts);
+    }
     return this.store.transaction(() => {
       const existing = this.store.find("knowledge_source_revision", revisionId);
       if (existing && existing.source_revision_digest !== revisionDigest) throw new Error("Knowledge revision identity conflict");
@@ -398,20 +425,10 @@ export class KnowledgeSourceRegistry {
           const data = { source_id: source.id, root_digest: stableDigest(root), path: doc.path, content_digest: doc.digest, status: "current" };
           if (document) this.store.save("knowledge_document", doc.id, data); else this.store.create("knowledge_document", doc.id, data);
         }
-        for (let start = 0, ordinal = 0; start < doc.body.length; ordinal++) {
-          let end = Math.min(start + maxChars, doc.body.length);
-          // Prefer paragraph/heading boundaries, retaining exact source offsets.
-          if (end < doc.body.length) {
-            const boundary = doc.body.lastIndexOf("\n\n", end);
-            if (boundary > start + maxChars / 2) end = Math.min(end, boundary + 2);
-          }
-          const excerpt = doc.body.slice(start, end), location = start; start = end;
-          if (!excerpt.trim()) continue;
-          const fragmentId = `knowledge_fragment_${stableDigest([doc.id, doc.digest, maxChars, ordinal, excerpt]).slice(-24)}`;
+        for (const { excerpt, location, end, id: fragmentId, contentRef } of prepared.get(doc.id)!) {
           let fragment = this.store.find("knowledge_fragment", fragmentId);
           if (!fragment) {
-            const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: fragmentId, version: 1, scope: `${(source.scope as JsonObject).kind}:${(source.scope as JsonObject).id}`, status: "candidate", sensitivity: "internal", source_id: String(source.id), body: excerpt,
-              ...(sourceProjectRoot ? { project_root: sourceProjectRoot } : {}) });
+            if (!contentRef) throw new Error(`Concurrent removal detected for knowledge_fragment: ${fragmentId}`);
             fragment = this.store.create("knowledge_fragment", fragmentId, { source_id: source.id, source_revision_id: revision.id, document_id: doc.id, document_digest: doc.digest, path: doc.path, locator: `${doc.path}#chars=${location}-${end}`, content_ref: contentRef, content_digest: digest(excerpt), status: "current", immutable: true });
           }
           const evidenceId = `evidence_${fragmentId}`;

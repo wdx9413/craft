@@ -136,8 +136,12 @@ export class ContextWorkingSetKernel {
   claimEmission(args: JsonObject, resolved: JsonObject): JsonObject[] {
     const refs = Array.isArray(resolved.asset_refs) ? resolved.asset_refs as JsonObject[] : [];
     if (!args.session_id || !args.turn_id) return refs;
+    if (!refs.length) return [];
     const identity = { session_id: args.session_id, turn_id: args.turn_id, query_digest: stableDigest(args.query), scope: { kind: args.scope_kind, id: args.scope_id } };
     const emissionId = `context_emission_${stableDigest(identity).slice(-24)}`;
+    const existing = this.store.find("context_emission", emissionId);
+    const emitted = Array.isArray(existing?.asset_refs) ? existing.asset_refs as JsonObject[] : [];
+    if (refs.every(ref => emitted.some(previous => contextAssetMatches(previous, ref)))) return [];
     return this.store.transaction(() => {
       const prior = this.store.find("context_emission", emissionId);
       const previous = Array.isArray(prior?.asset_refs) ? prior.asset_refs as JsonObject[] : [];

@@ -163,6 +163,54 @@ test("Knowledge ingestion reads source-wide collections before acquiring the wri
   } finally { await f.close(); }
 });
 
+test("Knowledge fragment files are written without the primary writer lock", async () => {
+  const f = await fixture();
+  const probe = new DatabaseSync(f.store.paths.databaseFile);
+  probe.exec("PRAGMA busy_timeout=0");
+  const write = f.store.contentStore.writeSync.bind(f.store.contentStore);
+  let writes = 0;
+  try {
+    const root = join(f.root, "file-lock-source"); await mkdir(root);
+    await writeFile(join(root, "a.md"), "A source fragment with useful content.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    sources.sourceRegister({ source_id: "file-lock-source", kind: "readme", label: "File lock", ...f.scope,
+      locator: root, content_digest: "initial", trust: "bounded", access: "read_only" });
+    f.store.contentStore.writeSync = input => {
+      probe.exec("BEGIN IMMEDIATE; ROLLBACK");
+      writes++;
+      return write(input);
+    };
+    assert.equal(sources.sourceIngest({ source_id: "file-lock-source" }).status, "completed");
+    assert.equal(writes, 1);
+    assert.equal(sources.sourceIngest({ source_id: "file-lock-source" }).status, "completed");
+    assert.equal(writes, 1);
+  } finally { f.store.contentStore.writeSync = write; probe.close(); await f.close(); }
+});
+
+test("Knowledge ingestion rejects a fragment removed after preparation", async () => {
+  const f = await fixture();
+  const transaction = f.store.transaction.bind(f.store);
+  try {
+    const root = join(f.root, "fragment-race-source"); await mkdir(root);
+    await writeFile(join(root, "a.md"), `${"a".repeat(70)}\n\n${"b".repeat(80)}`);
+    const sources = new KnowledgeSourceRegistry(f.store);
+    sources.sourceRegister({ source_id: "fragment-race-source", kind: "readme", label: "Fragment race", ...f.scope,
+      locator: root, content_digest: "initial", trust: "bounded", access: "read_only" });
+    const first = sources.sourceIngest({ source_id: "fragment-race-source", max_chars_per_fragment: 100 });
+    const fragments = first.fragments as JsonObject[];
+    assert.equal(fragments.length, 2);
+    let injected = false;
+    f.store.transaction = ((operation) => {
+      if (!injected) {
+        injected = true;
+        f.store.database.prepare("DELETE FROM records WHERE kind='knowledge_fragment' AND id=?").run(String(fragments[0]!.id));
+      }
+      return transaction(operation);
+    }) as typeof f.store.transaction;
+    assert.throws(() => sources.sourceIngest({ source_id: "fragment-race-source", max_chars_per_fragment: 100 }), /Concurrent removal detected for knowledge_fragment/u);
+  } finally { f.store.transaction = transaction; await f.close(); }
+});
+
 test("Knowledge ingestion does not reuse a shared candidate that changed after the read snapshot", async () => {
   const f = await fixture();
   try {

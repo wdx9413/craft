@@ -227,9 +227,14 @@ export class TraceKernel {
     if (!Number.isFinite(nowMs)) throw new Error("now must be an ISO timestamp");
     const limit = Number(args.limit ?? 20);
     if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error("maintenance limit must be an integer between 1 and 20");
+    const dueAt = (previous: JsonObject | null): number => previous?.next_retry_at || previous?.next_run_at
+      ? Date.parse(String(previous.next_retry_at ?? previous.next_run_at)) : Date.parse(String(previous?.last_success_at ?? "")) + 3_600_000;
+    const previous = this.store.find("maintenance_component", "trace_retention");
+    const nextDue = dueAt(previous);
+    if (Number.isFinite(nextDue) && nextDue > nowMs) return { status: "not_due", maintenance: previous };
     const claim = this.store.transaction(() => {
       const previous = this.store.find("maintenance_component", "trace_retention");
-      const due = previous?.next_retry_at || previous?.next_run_at ? Date.parse(String(previous.next_retry_at ?? previous.next_run_at)) : Date.parse(String(previous?.last_success_at ?? "")) + 3_600_000;
+      const due = dueAt(previous);
       if (Number.isFinite(due) && due > nowMs) return { status: "not_due" as const, maintenance: previous };
       const maintenance = this.store.save("maintenance_component", "trace_retention", { status: "running", claim_id: randomUUID(), last_attempt_at: now,
         last_success_at: previous?.last_success_at ?? null, next_retry_at: new Date(nowMs + 60_000).toISOString(),
@@ -268,9 +273,18 @@ export class TraceKernel {
     const archives: string[] = []; let deleted = 0;
     for (const trace of candidates) {
       const traceId = String(trace.id);
+      const legacy = this.store.database.prepare("SELECT 1 FROM records WHERE kind='trace' AND id=? LIMIT 1").get(traceId) !== undefined;
+      const primaryRevision = () => ({
+        data: Number(this.store.database.prepare("PRAGMA data_version").get()!.data_version),
+        local: Number(this.store.database.prepare("SELECT total_changes() AS n").get()!.n),
+      });
+      const before = legacy ? primaryRevision() : null;
       const events = this.store.listTraceChildren("trace_event", traceId);
       const feedback = this.store.listTraceChildren("trace_feedback", traceId);
       const telemetry = this.store.listTraceChildren("telemetry_event", traceId);
+      const shardChildren = (kind: "trace_event" | "trace_feedback" | "telemetry_event") => this.store.traceShards.children(kind, traceId);
+      const legacyOnly = legacy && ["trace_event", "trace_feedback", "telemetry_event"].every(kind =>
+        shardChildren(kind as "trace_event" | "trace_feedback" | "telemetry_event").length === 0);
       const existing = this.store.find("trace_archive", traceId);
       const archive = existing ? this.archivePointer(existing) : this.archives.write({ trace_id: String(trace.id), trace_version: Number(trace.version), archived_at: now, trace, events, feedback, ...(telemetry.length ? { telemetry_events: telemetry } : {}) });
       // Verify durable bytes even when retrying a previously published archive pointer.
@@ -286,8 +300,12 @@ export class TraceKernel {
       };
       const removed = this.store.traceTransaction(traceId, () => {
         const currentTrace = this.store.find("trace", traceId);
-        if (!currentTrace || Number(currentTrace.version) !== Number(trace.version)
-          || !unchanged("trace_event", events) || !unchanged("trace_feedback", feedback) || !unchanged("telemetry_event", telemetry)) return false;
+        if (!currentTrace || Number(currentTrace.version) !== Number(trace.version)) return false;
+        if (legacyOnly && before) {
+          const current = primaryRevision();
+          if (current.data !== before.data || current.local !== before.local
+            || ["trace_event", "trace_feedback", "telemetry_event"].some(kind => shardChildren(kind as "trace_event" | "trace_feedback" | "telemetry_event").length > 0)) return false;
+        } else if (!unchanged("trace_event", events) || !unchanged("trace_feedback", feedback) || !unchanged("telemetry_event", telemetry)) return false;
         const currentArchive = this.store.find("trace_archive", traceId);
         if (!currentArchive) this.store.create("trace_archive", traceId, { trace_id: trace.id, trace_version: trace.version, task_id: trace.task_id, status: trace.status, archived_at: now, last_event_at: trace.last_event_at ?? trace.updated_at, event_count: events.length, feedback_count: feedback.length, archive_backend_id: archive.backend_id ?? "local", archive_storage: archive.storage, archive_locator: archive.locator, archive_uri: archive.uri, archive_format: archive.format, content_digest: archive.content_digest, bytes: archive.bytes });
         else if (currentArchive.content_digest !== archive.content_digest) throw new Error("Trace archive idempotency conflict");

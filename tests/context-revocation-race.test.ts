@@ -11,7 +11,6 @@ import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { ContextAccessChangedError, ContextReadGuard, assertContextReadCurrent } from "../core/context-access-guard.ts";
 import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
 import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
-import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 const scope = { scope_kind: "project", scope_id: "race" };
 const owner = { principal_id: "owner", tenant_id: "tenant" };
@@ -121,15 +120,19 @@ for (const member of ["knowledge", "experience"] as const) {
       try {
         if (member === "knowledge") {
           f.store.create("knowledge_document", "doc", { scope: "project:race", status: "current", content_digest: "doc" });
-          const claim = f.store.create("knowledge_claim", "claim", { source_id: "source", document_id: "doc", document_digest: "doc", scope: "project:race", status: "candidate", content: "alpha private claim", content_digest: "claim", evidence_ids: [], scope_envelope: f.memory.scope_envelope });
-          attachVerifiedPromotionFixture(f.store, claim);
+          f.store.create("knowledge_claim", "claim", { source_id: "source", document_id: "doc", document_digest: "doc", scope: "project:race", status: "candidate", content: "alpha private claim", content_digest: "claim", evidence_ids: [], scope_envelope: f.memory.scope_envelope });
         } else {
           f.store.create("experience_procedure", "procedure", { scope: "project:race", scope_envelope: f.memory.scope_envelope, routeable: true, lifecycle: "routeable", procedure_kind: "prompt", trigger: "alpha", title: "alpha", acceptance_ref: "accept", content_digest: "procedure", definition_digest: "one" });
           f.store.create("experience_release", "procedure", { status: "active", record_version: 1, definition_digest: "one" });
           f.store.save("experience_procedure", "procedure", { ...payload(f.store.get("experience_procedure", "procedure")), routeable: false, lifecycle: "candidate", definition_digest: "two" });
         }
         const reader = member === "knowledge" ? new KnowledgeContribution(f.store) : new ExperienceContribution(f.store), gate = barrier();
-        const kernel = new ContextResolutionKernel(f.store, [{ member, async contribute(request) { const cached = await reader.contribute(request); assert(cached.items.length); await gate.wait(); return cached; } }]);
+        // The task-effect gate currently excludes reviewed Knowledge from execution.
+        // Exercise the same read fence through the diagnostic candidate path.
+        const kernel = new ContextResolutionKernel(f.store, [{ member, async contribute(request) {
+          const cached = member === "knowledge" ? await (reader as KnowledgeContribution).search(request, true) : await reader.contribute(request);
+          assert(cached.items.length); await gate.wait(); return cached;
+        } }]);
         const pending = kernel.resolve({ ...scope, ...owner, query: "alpha", members: [member], allow_partial: true }); const denied = assert.rejects(pending, /changed during recall/, `${member} ${mode}`); await gate.started;
         const kind = mode === "source" ? "knowledge_source" : mode === "document" ? "knowledge_document" : mode === "release" ? "experience_release" : member === "knowledge" ? "knowledge_claim" : "experience_procedure";
         const id = mode === "source" ? "source" : mode === "document" ? "doc" : member === "knowledge" ? "claim" : "procedure";
@@ -144,11 +147,10 @@ for (const member of ["knowledge", "experience"] as const) {
 test("direct Knowledge search rechecks its awaited result", async () => {
   const f = await fixture();
   try {
-    const claim = f.store.create("knowledge_claim", "claim", { source_id: "source", scope: "project:race", status: "candidate", content: "alpha", evidence_ids: [], scope_envelope: f.memory.scope_envelope });
-    attachVerifiedPromotionFixture(f.store, claim);
+    f.store.create("knowledge_claim", "claim", { source_id: "source", scope: "project:race", status: "candidate", content: "alpha", evidence_ids: [], scope_envelope: f.memory.scope_envelope });
     const reader = new KnowledgeContribution(f.store), gate = barrier();
     const kernel = new ContextResolutionKernel(f.store, [{ member: "knowledge", contribute: request => reader.contribute(request), async search(request, candidates) { const cached = await reader.search(request, candidates); await gate.wait(); return cached; } }]);
-    const pending = kernel.searchKnowledge({ ...scope, ...owner, query: "alpha" }); const denied = assert.rejects(pending, /changed during recall/); await gate.started;
+    const pending = kernel.searchKnowledge({ ...scope, ...owner, query: "alpha", include_candidates: true }); const denied = assert.rejects(pending, /changed during recall/); await gate.started;
     f.writer.save("knowledge_source", "source", { ...payload(f.writer.get("knowledge_source", "source")), status: "revoked" }); gate.release(); await denied;
   } finally { await f.close(); }
 });

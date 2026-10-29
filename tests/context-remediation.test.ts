@@ -581,6 +581,28 @@ test("Hook emissions reuse matching turn material, upgrade code and invalidate a
   } finally { f.close(); }
 });
 
+test("empty and previously emitted Context refs do not wait for the primary writer", async () => {
+  const f = await fixture();
+  const args = { query: "lock test", scope_kind: f.scope.kind, scope_id: f.scope.id, session_id: "lock-session", turn_id: "lock-turn" };
+  const ref = contextAssetRef("memory", { memory_id: "lock-memory", memory_version: 1 }, f.scope);
+  const next = contextAssetRef("memory", { memory_id: "new-memory", memory_version: 1 }, f.scope);
+  const writer = new DatabaseSync(f.store.paths.databaseFile);
+  try {
+    assert.deepEqual(f.service.contextWorkingSets.claimEmission(args, { asset_refs: [ref] }), [ref]);
+    f.store.database.exec("PRAGMA busy_timeout=1");
+    writer.exec("BEGIN IMMEDIATE");
+    assert.deepEqual(f.service.contextWorkingSets.claimEmission(args, { asset_refs: [] }), []);
+    assert.deepEqual(f.service.contextWorkingSets.claimEmission(args, { asset_refs: [ref] }), []);
+    assert.throws(() => f.service.contextWorkingSets.claimEmission(args, { asset_refs: [ref, next] }), /locked/u);
+    writer.exec("ROLLBACK");
+    assert.deepEqual(f.service.contextWorkingSets.claimEmission(args, { asset_refs: [ref, next] }), [next]);
+    assert.deepEqual(f.service.contextWorkingSets.claimEmission(args, { asset_refs: [ref, next] }), []);
+  } finally {
+    try { writer.exec("ROLLBACK"); } catch { /* already released */ }
+    writer.close(); f.close();
+  }
+});
+
 test("Procedure get and disabled Skill export can materialize the qualified release beside a test candidate", async () => {
   const { ProcedureStore } = await import("../capability/craft-experience/procedure-projection.ts");
   const f = await invocationFixture();
