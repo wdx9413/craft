@@ -140,6 +140,12 @@ test("Context failures identify safe input fields and the failing budget stage",
     assert.equal(limited.result.structuredContent.error_code, "LIMIT_EXCEEDED");
     assert.equal(limited.result.structuredContent.stage, "budget_validation");
     assert.equal(limited.result.structuredContent.details.budget, "max_items");
+    for (const [field, value] of [["max_items", 4], ["max_chars", 1201]] as const) {
+      const response = await server.handle({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "craft_context_open", arguments: { project_root: f.repo, query: "alpha", include_codebase: false, [field]: value } } }) as any;
+      assert.equal(response.result.structuredContent.error_code, "LIMIT_EXCEEDED");
+      assert.equal(response.result.structuredContent.stage, "budget_validation");
+      assert.equal(response.result.structuredContent.details.budget, field);
+    }
     await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: "false" }), /include_codebase/);
     await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", index_depth: "unknown" }), /index_depth/);
     await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", task_kind: "unknown" }), /task_kind/);

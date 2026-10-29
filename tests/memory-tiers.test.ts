@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -11,6 +11,219 @@ import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
 import { MemoryCapture } from "../capability/craft-memory/memory-capture.ts";
 import { MemoryContribution } from "../capability/craft-memory/contribution.ts";
+
+test("idempotent Memory capture restores a project observation after an interrupted write", async t => {
+  const root = mkdtempSync(join(tmpdir(), "craft-memory-retry-")), project = join(root, "project");
+  mkdirSync(project);
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const service = new CraftService(store);
+    service.knowledgeMemoryInstallBuiltins();
+    store.create("scope_alias", "project", { scope: { kind: "project", id: "retry-project" }, alias_kind: "path", alias: project, status: "active" });
+    const args = { session_id: "retry-session", project_scope_id: "retry-project", project_root: project,
+      topic: "retry-fact", kind: "preference", content: "保留经过核验的项目约定" };
+    const create = store.create.bind(store);
+    const injected = t.mock.method(store, "create", (kind: string, id: string, payload: JsonObject) => {
+      if (kind === "memory_observation") throw new Error("injected observation failure");
+      return create(kind, id, payload);
+    });
+    assert.throws(() => service.memoryCaptureObservedFact(args), /injected observation failure/u);
+    injected.mock.restore();
+    assert.equal(store.list("memory_observation", 100).length, 0);
+    const retried = service.memoryCaptureObservedFact(args);
+    assert.equal(retried.already_retained, true);
+    assert.deepEqual(retried.promotions, []);
+    assert.equal(store.list("memory_observation", 100).length, 1);
+    service.memoryCaptureObservedFact(args);
+    assert.equal(store.list("memory_observation", 100).length, 1);
+    assert.throws(() => service.memoryCaptureObservedFact({ ...args, candidate_id: "different-candidate" }), /observation intent idempotency conflict/u);
+    const remove = store.remove.bind(store);
+    const interrupted = t.mock.method(store, "remove", (kind: string, id: string) => {
+      if (kind === "memory_candidate") throw new Error("injected cleanup interruption");
+      return remove(kind, id);
+    });
+    assert.throws(() => service.memorySessionArchive({ session_id: args.session_id }), /injected cleanup interruption/u);
+    interrupted.mock.restore();
+    assert.equal(store.list("memory_ledger", 10, row => (row.scope as JsonObject)?.kind === "session").length, 0);
+    service.memorySessionArchive({ session_id: args.session_id });
+    assert.equal(store.list("memory_observation", 100).length, 1);
+    const withoutRoot = { ...args, session_id: "without-root", project_root: undefined, topic: "other-fact", content: "另一个约定" };
+    service.memoryCaptureObservedFact(withoutRoot);
+    assert.equal(service.memoryCaptureObservedFact(withoutRoot).already_retained, true);
+    const withoutProject = { session_id: "without-project", topic: "temporary", content: "会话临时约定" };
+    service.memoryCaptureUserStatement(withoutProject);
+    assert.equal(service.memoryCaptureUserStatement(withoutProject).already_retained, true);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("session archive restores a committed project observation after capture interruption", async t => {
+  const root = mkdtempSync(join(tmpdir(), "craft-memory-archive-observation-")), project = join(root, "project");
+  mkdirSync(project);
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const service = new CraftService(store);
+    service.knowledgeMemoryInstallBuiltins();
+    store.create("scope_alias", "project", { scope: { kind: "project", id: "archive-project" }, alias_kind: "path", alias: project, status: "active" });
+    const args = { session_id: "archive-session", project_scope_id: "archive-project", project_root: project,
+      topic: "archive-fact", kind: "preference", content: "会话归档前保留项目观察", valid_until: "2999-01-01T00:00:00.000Z" };
+    const create = store.create.bind(store);
+    const injected = t.mock.method(store, "create", (kind: string, id: string, payload: JsonObject) => {
+      if (kind === "memory_observation") throw new Error("injected observation failure");
+      return create(kind, id, payload);
+    });
+    assert.throws(() => service.memoryCaptureObservedFact(args), /injected observation failure/u);
+    injected.mock.restore();
+    assert.equal(store.list("memory_observation", 100).length, 0);
+    const displaced = join(root, "project-unavailable");
+    renameSync(project, displaced);
+    try {
+      assert.throws(() => service.memorySessionArchive({ session_id: args.session_id }), /project.*(root|registered|unavailable)/iu);
+      assert.equal(store.list("memory_observation_intent", 100).length, 1);
+      assert.equal(store.list("memory_ledger", 10, row => (row.scope as JsonObject)?.kind === "session").length, 1);
+    } finally { renameSync(displaced, project); }
+    service.memorySessionArchive({ session_id: args.session_id });
+    const observations = store.list("memory_observation", 100);
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0]!.project_id, args.project_scope_id);
+    assert.equal(observations[0]!.valid_until, args.valid_until);
+    assert.equal(store.list("memory_observation_intent", 100).length, 0);
+    assert.equal(service.memorySessionArchive({ session_id: args.session_id }).idempotent, true);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("session archive recovers an observation without a topic", async t => {
+  const root = mkdtempSync(join(tmpdir(), "craft-memory-archive-no-topic-")), project = join(root, "project");
+  mkdirSync(project);
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const service = new CraftService(store);
+    service.knowledgeMemoryInstallBuiltins();
+    store.create("scope_alias", "project", { scope: { kind: "project", id: "no-topic-project" }, alias_kind: "path", alias: project, status: "active" });
+    const create = store.create.bind(store);
+    const fault = t.mock.method(store, "create", (kind: string, id: string, payload: JsonObject) => {
+      if (kind === "memory_observation") throw new Error("interrupted");
+      return create(kind, id, payload);
+    });
+    assert.throws(() => service.memoryCaptureObservedFact({ session_id: "no-topic-session", project_scope_id: "no-topic-project", project_root: project,
+      content: "不带主题的会话事实" }), /interrupted/u);
+    fault.mock.restore();
+    assert.equal(service.memorySessionArchive({ session_id: "no-topic-session" }).status, "archived");
+    assert.equal(store.list("memory_observation", 10)[0]?.topic, "");
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("session archive does not restore an observation from revoked session Memory", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-memory-archive-revoked-")), project = join(root, "project");
+  mkdirSync(project);
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const service = new CraftService(store);
+    service.knowledgeMemoryInstallBuiltins();
+    store.create("scope_alias", "project", { scope: { kind: "project", id: "revoked-project" }, alias_kind: "path", alias: project, status: "active" });
+    service.memoryCaptureObservedFact({ session_id: "revoked-session", project_scope_id: "revoked-project", project_root: project, content: "已经撤销的事实" });
+    const intent = store.list("memory_observation_intent", 10)[0]!;
+    const candidate = store.get("memory_candidate", String(intent.candidate_id));
+    const memory = store.get("memory_ledger", String(candidate.ledger_memory_id));
+    const observation = store.list("memory_observation", 10)[0]!;
+    store.remove("memory_observation", String(observation.id));
+    store.save("memory_ledger", String(memory.id), { ...memory, status: "revoked" });
+    assert.equal(service.memorySessionArchive({ session_id: "revoked-session" }).status, "archived");
+    assert.equal(store.list("memory_observation", 10).length, 0);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("session archive refuses mismatched observation intents without deleting session Memory", async () => {
+  for (const [field, value] of [["content_digest", "wrong"], ["kind", "wrong"], ["topic", "wrong"], ["evidence_id", "wrong"], ["project_id", "wrong"]] as const) {
+    const root = mkdtempSync(join(tmpdir(), "craft-memory-invalid-intent-")), project = join(root, "project");
+    mkdirSync(project);
+    const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+    try {
+      const service = new CraftService(store);
+      service.knowledgeMemoryInstallBuiltins();
+      store.create("scope_alias", "project", { scope: { kind: "project", id: "intent-project" }, alias_kind: "path", alias: project, status: "active" });
+      service.memoryCaptureObservedFact({ session_id: "intent-session", project_scope_id: "intent-project", project_root: project,
+        topic: "intent-fact", kind: "preference", content: "归档验证项目观察" });
+      const intent = store.list("memory_observation_intent", 10)[0]!;
+      store.save("memory_observation_intent", String(intent.id), { ...intent, [field]: value });
+      assert.throws(() => service.memorySessionArchive({ session_id: "intent-session" }), /SESSION_ARCHIVE_OBSERVATION_UNVERIFIED/u);
+      assert.equal(store.list("memory_ledger", 10, row => (row.scope as JsonObject)?.kind === "session").length, 1);
+      assert.equal(store.list("memory_observation_intent", 10).length, 1);
+    } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("session archive rejects an altered existing observation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-memory-altered-observation-")), project = join(root, "project");
+  mkdirSync(project);
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const service = new CraftService(store);
+    service.knowledgeMemoryInstallBuiltins();
+    store.create("scope_alias", "project", { scope: { kind: "project", id: "observation-project" }, alias_kind: "path", alias: project, status: "active" });
+    service.memoryCaptureObservedFact({ session_id: "observation-session", project_scope_id: "observation-project", project_root: project,
+      topic: "observation-fact", content: "归档前核对既有观察" });
+    const observation = store.list("memory_observation", 10)[0]!;
+    store.save("memory_observation", String(observation.id), { ...observation, content_digest: "tampered" });
+    assert.throws(() => service.memorySessionArchive({ session_id: "observation-session" }), /existing observation identity changed/u);
+    assert.equal(store.list("memory_observation_intent", 10).length, 1);
+    assert.equal(store.list("memory_ledger", 10, row => (row.scope as JsonObject)?.kind === "session").length, 1);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("session archive fails closed when committed Memory or its capture Evidence is missing or altered", async () => {
+  for (const missing of ["evidence", "memory", "evidence_changed", "memory_changed", "candidate_evidence"]) {
+    const root = mkdtempSync(join(tmpdir(), "craft-memory-archive-missing-")), project = join(root, "project");
+    mkdirSync(project);
+    const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+    try {
+      const service = new CraftService(store);
+      service.knowledgeMemoryInstallBuiltins();
+      store.create("scope_alias", "project", { scope: { kind: "project", id: "missing-project" }, alias_kind: "path", alias: project, status: "active" });
+      service.memoryCaptureObservedFact({ session_id: "missing-session", project_scope_id: "missing-project", project_root: project,
+        topic: "missing-fact", content: "归档前核验支持证据" });
+      const intent = store.list("memory_observation_intent", 10)[0]!;
+      const candidate = store.get("memory_candidate", String(intent.candidate_id));
+      if (missing === "evidence") store.remove("evidence", String(intent.evidence_id));
+      else if (missing === "memory") store.remove("memory_ledger", String(candidate.ledger_memory_id));
+      else if (missing === "evidence_changed") {
+        const evidence = store.get("evidence", String(intent.evidence_id));
+        store.save("evidence", String(intent.evidence_id), { ...evidence, metadata: { capture_digest: "changed" } });
+      } else if (missing === "memory_changed") {
+        const memory = store.get("memory_ledger", String(candidate.ledger_memory_id));
+        store.save("memory_ledger", String(memory.id), { ...memory, content_digest: "changed" });
+      } else store.save("memory_candidate", String(candidate.id), { ...candidate, evidence_ids: [] });
+      assert.throws(() => service.memorySessionArchive({ session_id: "missing-session" }), /SESSION_ARCHIVE_OBSERVATION_UNVERIFIED/u);
+      assert.equal(store.list("memory_observation_intent", 10).length, 1);
+      assert.equal(store.find("memory_candidate", String(candidate.id))?.status, "approved");
+    } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("session archive refuses candidate and Memory references from another session", async () => {
+  for (const changed of ["candidate", "memory"]) {
+    const root = mkdtempSync(join(tmpdir(), "craft-memory-foreign-session-")), project = join(root, "project");
+    mkdirSync(project);
+    const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+    try {
+      const service = new CraftService(store);
+      service.knowledgeMemoryInstallBuiltins();
+      store.create("scope_alias", "project", { scope: { kind: "project", id: "foreign-project" }, alias_kind: "path", alias: project, status: "active" });
+      const base = { project_scope_id: "foreign-project", project_root: project, topic: "foreign-fact", content: "按会话验证来源" };
+      service.memoryCaptureObservedFact({ ...base, session_id: "first-session" });
+      service.memoryCaptureObservedFact({ ...base, session_id: "second-session" });
+      const intents = store.list("memory_observation_intent", 10);
+      const first = intents.find(item => (item.scope as JsonObject).id === "first-session")!;
+      const second = intents.find(item => (item.scope as JsonObject).id === "second-session")!;
+      const candidate = store.get("memory_candidate", String(first.candidate_id));
+      const otherCandidate = store.get("memory_candidate", String(second.candidate_id));
+      if (changed === "candidate") store.save("memory_observation_intent", String(first.id), { ...first, candidate_id: otherCandidate.id });
+      else store.save("memory_candidate", String(candidate.id), { ...candidate, ledger_memory_id: otherCandidate.ledger_memory_id });
+      assert.throws(() => service.memorySessionArchive({ session_id: "first-session" }), /session scope changed/u);
+      assert.equal(store.listSessionMemoryPage("memory_observation_intent", "first-session").records.length, 1);
+      assert.equal(store.listSessionMemoryPage("memory_observation_intent", "second-session").records.length, 1);
+    } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+  }
+});
 
 test("Memory begins in a session, promotes by repeat counts, and archive removes only temporary content", async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), "craft-memory-tiers-"));

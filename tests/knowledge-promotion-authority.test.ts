@@ -44,7 +44,26 @@ test("public review retains evidenced negative transitions without granting prom
   assert.throws(() => f.service.knowledgeClaimReview({ claim_id: "claim", status: "candidate", reviewer: "user", reason: "恢复" }), /unsupported/u);
 });
 
-test("unproven historical reviewed labels are quarantined before assessment", async t => {
+test("Claim review uses version checks and preserves concurrent changes", async t => {
+  const f = await fixture(t);
+  const initial = f.store.get("knowledge_claim", "claim");
+  assert.throws(() => f.service.knowledgeClaimReview({ claim_id: "claim", status: "stale", reviewer: "worker", reason: "conflict", expected_version: 0 }), /expected_version/u);
+  const changed = f.service.knowledgeClaimReview({ claim_id: "claim", status: "disputed", reviewer: "worker", reason: "conflict", expected_version: initial.version }).claim as JsonObject;
+  assert.equal(changed.status, "disputed");
+  assert.throws(() => f.service.knowledgeClaimReview({ claim_id: "claim", status: "stale", reviewer: "worker", reason: "conflict", expected_version: initial.version }), /Concurrent update/u);
+  const response = await f.server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_knowledge_claim_review",
+    arguments: { claim_id: "claim", status: "stale", reviewer: "worker", reason: "conflict", expected_version: initial.version } } }) as JsonObject;
+  assert.equal((response.result as JsonObject).isError, true);
+  const update = f.store.updateIfVersion.bind(f.store);
+  f.store.updateIfVersion = (kind, id, version, payload) => {
+    f.store.save(kind, id, { ...f.store.get(kind, id), status: "expired" });
+    return update(kind, id, version, payload);
+  };
+  assert.throws(() => f.service.knowledgeClaimReview({ claim_id: "claim", status: "stale", reviewer: "worker", reason: "conflict" }), /Concurrent update/u);
+  assert.equal(f.store.get("knowledge_claim", "claim").status, "expired");
+});
+
+test("unproven historical reviewed labels stay excluded while verification is unavailable", async t => {
   const f = await fixture(t);
   const claim = f.store.get("knowledge_claim", "claim");
   f.store.save("knowledge_claim", "claim", { ...claim, status: "reviewed", review: { reviewer: "human", source_digest: "caller-asserted" } });
@@ -55,8 +74,8 @@ test("unproven historical reviewed labels are quarantined before assessment", as
   const result = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "probe", claim_ids: ["claim"], auto_promote: false });
   const assessment = (result.assessments as JsonObject[])[0]!;
   const quarantined = f.store.get("knowledge_claim", "claim");
-  assert.equal(quarantined.status, "candidate");
-  assert.equal((quarantined.review as JsonObject).qualification_status, "legacy_promotion_quarantined");
+  assert.equal(quarantined.status, "reviewed");
+  assert.equal((quarantined.review as JsonObject).reviewer, "human");
   assert.equal(assessment.promoted, false);
   assert((assessment.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
   assert.equal(((await f.service.knowledgeSearchScoped({ query: "晋升越权回归事实", scope_kind: "project", scope_id: "probe" })).hits as unknown[]).length, 0);

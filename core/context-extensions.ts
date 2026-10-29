@@ -1,8 +1,11 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bm25Index } from "../common/craft-common-base/src/bm25.ts";
+import { retrievalExcerpt } from "../common/craft-common-base/src/retrieval-excerpt.ts";
+import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
 import { codebaseUsageWeights, recordCodebaseSymbolUsage } from "../capability/craft-codebase/usage-signals.ts";
 import { payload, stableDigest } from "./digest.ts";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
@@ -33,7 +36,12 @@ function boundedInteger(value: unknown, name: string, min: number, max: number):
 function stringList(value: unknown, name: string, limit: number): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
-  return value.slice(0, limit).map((item) => nonEmpty(item, name));
+  if (value.length > limit) throw new Error(`${name} exceeds the item limit`);
+  const items = value.map((item) => nonEmpty(item, name));
+  if (items.some(item => item.length > 2_000) || items.reduce((total, item) => total + item.length, 0) > 8_000) {
+    throw new Error(`${name} exceeds the character limit`);
+  }
+  return items;
 }
 
 function isoNow(value: unknown): string {
@@ -42,12 +50,21 @@ function isoNow(value: unknown): string {
   return now;
 }
 
-function ephemeralId(sessionId: string, source: string): string {
-  return `context_ephemeral_${stableDigest({ session_id: sessionId, source }).slice(-32)}`;
+function ephemeralId(sessionId: string, host: string, source: string): string {
+  return `context_ephemeral_${stableDigest({ session_scope_id: sessionStorageScopeId(host, sessionId), source }).slice(-32)}`;
 }
 
-function resumeId(sessionId: string): string {
-  return `context_resume_${stableDigest({ session_id: sessionId }).slice(-32)}`;
+function resumeId(sessionId: string, host: string): string {
+  return `context_resume_${stableDigest({ session_scope_id: sessionStorageScopeId(host, sessionId) }).slice(-32)}`;
+}
+
+function assertEphemeralOwner(record: JsonObject, sessionId: string, host: string, source: string): void {
+  if (record.session_id !== sessionId || record.session_host !== host || record.session_scope_id !== sessionStorageScopeId(host, sessionId) || record.source !== source) throw new Error("ephemeral index scope mismatch");
+}
+
+function assertSessionActive(store: CraftStore, scopeId: string): void {
+  const digest = createHash("sha256").update(scopeId).digest("hex");
+  if (store.find("memory_session_archive", `memory_session_archive_${digest.slice(-32)}`, undefined, false)) throw new Error("SESSION_ARCHIVED: session Context is unavailable");
 }
 
 export function computeEnv(cwd: string, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -97,11 +114,11 @@ export class ContextExtensionsKernel {
     const client = args.client === undefined ? "codex" : nonEmpty(args.client, "client");
     const content = [
       "<context_window_protection>",
-      "  Raw tool output stays out of the conversation. Compute in the sandbox and print only the answer.",
+      "  Keep raw tool output out of the conversation. Compute runs in a bounded subprocess, not a security sandbox; print only the answer.",
       `  - Compute: craft_context_compute(language, code, allow_execution=true)`,
-      `  - Capture a large result: craft_context_output_capture(tool_name, content, session_id)`,
-      `  - Query captured data: craft_context_ephemeral_search(session_id, source, query)`,
-      `  - Resume after compaction: craft_context_resume_resolve(session_id)`,
+      `  - Capture a large result: craft_context_output_capture(tool_name, content, session_id, session_host)`,
+      `  - Query captured data: craft_context_ephemeral_search(session_id, session_host, source, query)`,
+      `  - Resume after compaction: craft_context_resume_resolve(session_id, session_host)`,
       `  - Prove savings: craft_context_stats()`,
       "  Do not paste large raw data into the conversation. Write to a file or capture it, then query it.",
       "</context_window_protection>",
@@ -113,6 +130,8 @@ export class ContextExtensionsKernel {
   /** P1-1: store a bounded, session-scoped, purgeable index. Never promoted to Knowledge. */
   recordEphemeral(args: JsonObject): JsonObject {
     const sessionId = nonEmpty(args.session_id, "session_id");
+    const host = nonEmpty(args.session_host, "session_host");
+    const sessionScopeId = sessionStorageScopeId(host, sessionId);
     const source = args.source === undefined ? "default" : nonEmpty(args.source, "source");
     if (!Array.isArray(args.items) || args.items.length === 0) throw new Error("items must be a non-empty array");
     if (args.items.length > MAX_EPHEMERAL_ITEMS) throw new Error("items exceeds the ephemeral index item limit");
@@ -132,12 +151,16 @@ export class ContextExtensionsKernel {
     const ttlSeconds = boundedInteger(args.ttl_seconds ?? DEFAULT_TTL_SECONDS, "ttl_seconds", 1, MAX_TTL_SECONDS);
     const createdAt = isoNow(args.now);
     const expiresAt = new Date(Date.parse(createdAt) + ttlSeconds * 1_000).toISOString();
-    const indexId = String(args.index_id ?? ephemeralId(sessionId, source));
-    const identityDigest = stableDigest({ session_id: sessionId, source, items });
-    const payload = { session_id: sessionId, source, items, item_count: items.length, total_chars: totalChars,
+    const indexId = String(args.index_id ?? ephemeralId(sessionId, host, source));
+    const identityDigest = stableDigest({ session_scope_id: sessionScopeId, source, items });
+    const payload = { session_id: sessionId, session_host: host, session_scope_id: sessionScopeId, source, items, item_count: items.length, total_chars: totalChars,
       expires_at: expiresAt, identity_digest: identityDigest, content_free: false, ephemeral: true };
-    const existing = this.store.find(EPHEMERAL_KIND, indexId, undefined, false);
-    const record = existing ? this.store.save(EPHEMERAL_KIND, indexId, payload) : this.store.create(EPHEMERAL_KIND, indexId, payload);
+    const record = this.store.transaction(() => {
+      assertSessionActive(this.store, sessionScopeId);
+      const existing = this.store.find(EPHEMERAL_KIND, indexId, undefined, false);
+      if (existing) assertEphemeralOwner(existing, sessionId, host, source);
+      return existing ? this.store.save(EPHEMERAL_KIND, indexId, payload) : this.store.create(EPHEMERAL_KIND, indexId, payload);
+    });
     return { index_id: record.id, session_id: sessionId, source, item_count: items.length, total_chars: totalChars,
       expires_at: expiresAt, identity_digest: identityDigest, ephemeral: true };
   }
@@ -145,36 +168,73 @@ export class ContextExtensionsKernel {
   /** P1-1: BM25 search over an ephemeral index; expired indexes are removed on read. */
   searchEphemeral(args: JsonObject): JsonObject {
     const sessionId = nonEmpty(args.session_id, "session_id");
+    const host = nonEmpty(args.session_host, "session_host");
+    assertSessionActive(this.store, sessionStorageScopeId(host, sessionId));
     const source = args.source === undefined ? "default" : nonEmpty(args.source, "source");
     const query = nonEmpty(args.query, "query");
     const limit = boundedInteger(args.limit ?? 5, "limit", 1, 50);
-    const indexId = String(args.index_id ?? ephemeralId(sessionId, source));
-    const record = this.store.find(EPHEMERAL_KIND, indexId, undefined, false);
+    const indexId = String(args.index_id ?? ephemeralId(sessionId, host, source));
+    let record = this.store.find(EPHEMERAL_KIND, indexId, undefined, false);
     if (!record) return { hits: [], reason: "index_missing", index_id: indexId, execution_context: false };
+    assertEphemeralOwner(record, sessionId, host, source);
     if (Date.parse(String(record.expires_at)) <= Date.parse(isoNow(args.now))) {
-      this.store.remove(EPHEMERAL_KIND, indexId);
-      return { hits: [], reason: "index_expired", index_id: indexId, execution_context: false };
+      record = this.store.transaction(() => {
+        const current = this.store.find(EPHEMERAL_KIND, indexId, undefined, false);
+        if (!current) return null;
+        assertEphemeralOwner(current, sessionId, host, source);
+        if (Date.parse(String(current.expires_at)) > Date.parse(isoNow(args.now))) return current;
+        this.store.remove(EPHEMERAL_KIND, indexId);
+        return null;
+      });
+      if (!record) return { hits: [], reason: "index_expired", index_id: indexId, execution_context: false };
     }
     const items = (Array.isArray(record.items) ? record.items : []) as JsonObject[];
+    if (args.read_item_id !== undefined) {
+      const digest = nonEmpty(args.identity_digest, "identity_digest");
+      if (record.identity_digest !== digest) throw new Error("ephemeral index changed; search again");
+      const itemId = nonEmpty(args.read_item_id, "read_item_id");
+      const item = items.find(candidate => String(candidate.id) === itemId);
+      if (!item) throw new Error("ephemeral item not found");
+      const body = String(item.text ?? "");
+      const excerpt = retrievalExcerpt(body, query, 400);
+      const start = boundedInteger(args.read_start, "read_start", 0, body.length);
+      const end = boundedInteger(args.read_end, "read_end", start, body.length);
+      const maxChars = boundedInteger(args.max_chars ?? 8_000, "max_chars", 1, 8_000);
+      if (excerpt.source_start !== start || excerpt.source_end !== end) throw new Error("requested range must match the search excerpt");
+      if (end - start > maxChars) throw new Error("required excerpt exceeds max_chars; increase the budget or inspect the source directly");
+      return { index_id: indexId, item_id: itemId, content: body.slice(start, end), source_start: start, source_end: end,
+        reason: "expanded", execution_context: false };
+    }
     const index = new Bm25Index();
     for (const item of items) index.add(String(item.id), `${String(item.title ?? "")} ${String(item.text ?? "")}`.trim());
     const hits = index.score(query).slice(0, limit).map((hit) => {
       const item = items.find((candidate) => String(candidate.id) === hit.id)!;
+      const excerpt = retrievalExcerpt(String(item.text ?? ""), query, 400);
       return { id: hit.id, score: hit.score, title: item.title ?? null, source: item.source ?? source,
-        preview: String(item.text ?? "").slice(0, 400) };
+        preview: excerpt.text, excerpt_reason: excerpt.reason, source_start: excerpt.source_start, source_end: excerpt.source_end };
     });
-    return { hits, index_id: indexId, reason: hits.length ? "matched" : "no_match", execution_context: false };
+    return { hits, index_id: indexId, identity_digest: record.identity_digest ?? null, reason: hits.length ? "matched" : "no_match", execution_context: false };
   }
 
   /** P1-1: permanently remove session-scoped ephemeral content. */
   purgeEphemeral(args: JsonObject): JsonObject {
     const sessionId = nonEmpty(args.session_id, "session_id");
+    const host = nonEmpty(args.session_host, "session_host");
+    const sessionScopeId = sessionStorageScopeId(host, sessionId);
     const source = args.source === undefined ? null : nonEmpty(args.source, "source");
-    const ids = source === null
-      ? this.store.list(EPHEMERAL_KIND, SCAN_LIMIT, (item) => String(item.session_id) === sessionId, false).map((item) => String(item.id))
-      : [String(args.index_id ?? ephemeralId(sessionId, source))];
-    let removed = 0;
-    for (const id of ids) removed += this.store.remove(EPHEMERAL_KIND, id);
+    const removed = this.store.transaction(() => {
+      const ids = source === null
+        ? this.store.list(EPHEMERAL_KIND, SCAN_LIMIT, (item) => item.session_id === sessionId && item.session_host === host && item.session_scope_id === sessionScopeId, false).map((item) => String(item.id))
+        : [String(args.index_id ?? ephemeralId(sessionId, host, source))];
+      let count = 0;
+      for (const id of ids) {
+        const record = this.store.find(EPHEMERAL_KIND, id, undefined, false);
+        if (!record) continue;
+        assertEphemeralOwner(record, sessionId, host, source ?? String(record.source));
+        count += this.store.remove(EPHEMERAL_KIND, id);
+      }
+      return count;
+    });
     return { removed, session_id: sessionId, source, execution_context: false };
   }
 
@@ -184,11 +244,12 @@ export class ContextExtensionsKernel {
     const limit = boundedInteger(args.max_chars ?? 8_000, "max_chars", 1, 100_000);
     if (content.length <= limit) return { action: "pass", bytes: content.length, execution_context: false };
     const toolName = args.tool_name === undefined ? "tool" : nonEmpty(args.tool_name, "tool_name");
-    const sessionId = args.session_id === undefined ? "default" : nonEmpty(args.session_id, "session_id");
-    const indexed = this.recordEphemeral({ session_id: sessionId, source: toolName,
+    const sessionId = nonEmpty(args.session_id, "session_id");
+    const host = nonEmpty(args.session_host, "session_host");
+    const indexed = this.recordEphemeral({ session_id: sessionId, session_host: host, source: toolName,
       items: [{ id: "output", text: content, title: toolName }], ...(args.ttl_seconds === undefined ? {} : { ttl_seconds: args.ttl_seconds }) });
     return { action: "indexed", bytes: content.length, limit, index_id: indexed.index_id, source: toolName,
-      preview: content.slice(0, Math.min(limit, 2_000)),
+      preview: "", preview_reason: "requires_search",
       guidance: `Output exceeded ${limit} characters and was indexed. Query it with craft_context_ephemeral_search(source="${toolName}").`,
       execution_context: false };
   }
@@ -222,45 +283,59 @@ export class ContextExtensionsKernel {
     }
   }
 
-  /** P1-2: capture a bounded, content-free resume snapshot before compaction. */
+  /** P1-2: capture a bounded resume snapshot before compaction. */
   checkpointResume(args: JsonObject): JsonObject {
     const sessionId = nonEmpty(args.session_id, "session_id");
+    const host = nonEmpty(args.session_host, "session_host");
+    const sessionScopeId = sessionStorageScopeId(host, sessionId);
     const scope = args.scope === undefined ? null : nonEmpty(args.scope, "scope");
-    const snapshot = { session_id: sessionId, scope, captured_at: isoNow(args.now),
+    const snapshot = { session_id: sessionId, session_host: host, session_scope_id: sessionScopeId, scope, captured_at: isoNow(args.now),
       files_touched: stringList(args.files_touched, "files_touched", 100),
       tasks: stringList(args.tasks, "tasks", 100),
       errors: stringList(args.errors, "errors", 100),
       decisions: stringList(args.decisions, "decisions", 100),
       open_questions: stringList(args.open_questions, "open_questions", 100),
-      content_free: true };
-    const id = resumeId(sessionId);
-    const existing = this.store.find(RESUME_KIND, id, undefined, false);
-    const record = existing ? this.store.save(RESUME_KIND, id, snapshot) : this.store.create(RESUME_KIND, id, snapshot);
-    return { snapshot: record, resume_id: record.id, content_free: true, execution_context: false };
+      content_free: false };
+    const id = resumeId(sessionId, host);
+    const record = this.store.transaction(() => {
+      assertSessionActive(this.store, sessionScopeId);
+      const existing = this.store.find(RESUME_KIND, id, undefined, false);
+      if (existing && (existing.session_id !== sessionId || existing.session_host !== host || existing.session_scope_id !== sessionScopeId)) throw new Error("resume snapshot scope mismatch");
+      return existing ? this.store.save(RESUME_KIND, id, snapshot) : this.store.create(RESUME_KIND, id, snapshot);
+    });
+    return { snapshot: record, resume_id: record.id, content_free: false, execution_context: false };
   }
 
   /** P1-2: read the latest resume snapshot for one session. */
   getResume(args: JsonObject): JsonObject {
     const sessionId = nonEmpty(args.session_id, "session_id");
-    const record = this.store.find(RESUME_KIND, resumeId(sessionId), undefined, false);
-    return { resume_id: resumeId(sessionId), snapshot: record ?? null, resume_available: record !== null, execution_context: false };
+    const host = nonEmpty(args.session_host, "session_host");
+    assertSessionActive(this.store, sessionStorageScopeId(host, sessionId));
+    const id = resumeId(sessionId, host);
+    const record = this.store.find(RESUME_KIND, id, undefined, false);
+    if (record && (record.session_id !== sessionId || record.session_host !== host || record.session_scope_id !== sessionStorageScopeId(host, sessionId))) throw new Error("resume snapshot scope mismatch");
+    return { resume_id: id, snapshot: record ?? null, resume_available: record !== null, execution_context: false };
   }
 
   /** P1-2: project the resume snapshot into a bounded text block for injection. */
   resolveResume(args: JsonObject): JsonObject {
     const sessionId = nonEmpty(args.session_id, "session_id");
+    const host = nonEmpty(args.session_host, "session_host");
+    assertSessionActive(this.store, sessionStorageScopeId(host, sessionId));
     const maxChars = boundedInteger(args.max_chars ?? 1_200, "max_chars", 1, 8_000);
-    const record = this.store.find(RESUME_KIND, resumeId(sessionId), undefined, false);
+    const record = this.store.find(RESUME_KIND, resumeId(sessionId, host), undefined, false);
     if (!record) return { content: "", resume_available: false, truncated: false, execution_context: false };
+    if (record.session_id !== sessionId || record.session_host !== host || record.session_scope_id !== sessionStorageScopeId(host, sessionId)) throw new Error("resume snapshot scope mismatch");
     const section = (label: string, key: string): string => {
       const values = Array.isArray(record[key]) ? (record[key] as unknown[]).map(String) : [];
       return values.length ? `${label}: ${values.join(" | ")}` : "";
     };
     const body = [section("Files", "files_touched"), section("Tasks", "tasks"), section("Errors", "errors"),
       section("Decisions", "decisions"), section("Open", "open_questions")].filter(Boolean).join("\n");
-    const content = body.length > maxChars ? body.slice(0, maxChars) : body;
+    const content = body.length > maxChars ? "" : body;
     return { content, resume_available: true, truncated: body.length > maxChars,
-      captured_at: record.captured_at ?? null, content_free: true, execution_context: false };
+      ...(body.length > maxChars ? { reason: "requires_expansion", resume_id: resumeId(sessionId, host) } : {}),
+      captured_at: record.captured_at ?? null, content_free: false, execution_context: false };
   }
 
   /** P1-3: report bounded Context savings from existing receipts. */

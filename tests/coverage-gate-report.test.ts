@@ -112,6 +112,7 @@ test("separates a blocked spawn from a coverage gap", () => {
   const blocked = detectEnvironmentBlocker("Error: spawn EPERM\n  at child_process");
   assert.equal(typeof blocked, "string");
   assert.match(String(blocked), /spawn EPERM/u);
+  assert.match(String(detectEnvironmentBlocker("Error: listen EPERM: operation not permitted")), /listen EPERM/u);
   assert.match(String(blocked), /sandbox denied a child process/u);
 
   // The real message from a denied spawnSync, copied verbatim. The executable path

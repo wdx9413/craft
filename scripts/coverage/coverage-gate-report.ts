@@ -93,6 +93,10 @@ const ENVIRONMENT_BLOCKERS: Array<{ pattern: RegExp; reason: string }> = [
     pattern: /spawn\w*[^\n]*EPERM/u,
     reason: "spawn EPERM: the sandbox denied a child process, so the covering test aborted before exercising this code",
   },
+  {
+    pattern: /listen\s+EPERM\b/u,
+    reason: "listen EPERM: the sandbox denied local socket binding, so listener tests did not exercise the intended behavior",
+  },
 ];
 
 /** The first environment blocker present in a run's output, or null. */

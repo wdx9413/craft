@@ -51,6 +51,51 @@ function patchCopy(t: TestContext, after: (from: string, to: string) => void): (
   return () => { t.mock.restoreAll(); syncBuiltinESMExports(); };
 }
 
+test("retained quarantine preserves the source until old writers have stopped", () => {
+  const f = fixture();
+  try {
+    const source = join(f.legacy, "retained"); mkdirSync(source);
+    writeFileSync(join(source, "memory.md"), "fixture");
+    const entries = [entry("retained", "unidentified_session")];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = quarantineLegacySessionMemory(f.paths, f.legacy, entries, { retain_source: true });
+      assert.equal(result.quarantined, 1);
+      assert.equal(result.blocked.length, 0);
+      assert.equal(readFileSync(join(source, "memory.md"), "utf8"), "fixture");
+      const parent = dirname(target(f.paths, "retained"));
+      const snapshots = readdirSync(parent).filter(name => name.startsWith(`${target(f.paths, "retained").split("/").at(-1)}-`));
+      assert.equal(snapshots.length, 1);
+      assert.equal(readFileSync(join(parent, snapshots[0]!, "payload", "memory.md"), "utf8"), "fixture");
+    }
+    writeFileSync(join(source, "memory.md"), "updated fixture");
+    const updated = quarantineLegacySessionMemory(f.paths, f.legacy, entries, { retain_source: true });
+    assert.equal(updated.quarantined, 1);
+    assert.equal(updated.blocked.length, 0);
+    const parent = dirname(target(f.paths, "retained"));
+    const contents = readdirSync(parent).map(name => readFileSync(join(parent, name, "payload", "memory.md"), "utf8")).sort();
+    assert.deepEqual(contents, ["fixture", "updated fixture"]);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("quarantine does not publish when the source changes between snapshots", t => {
+  const f = fixture();
+  const source = join(f.legacy, "changing"), file = join(source, "memory.md");
+  mkdirSync(source); writeFileSync(file, "first");
+  const original = fs.readdirSync;
+  let sourceReads = 0;
+  t.mock.method(fs, "readdirSync", ((path: Parameters<typeof fs.readdirSync>[0], options?: unknown) => {
+    if (String(path) === source && ++sourceReads === 2) writeFileSync(file, "second");
+    return original(path, options as never);
+  }) as typeof fs.readdirSync);
+  syncBuiltinESMExports();
+  try {
+    const result = quarantineLegacySessionMemory(f.paths, f.legacy, [entry("changing", "unidentified_session")], { retain_source: true });
+    assert.equal(result.blocked[0]?.reason, "quarantine_source_changed");
+    assert.equal(readFileSync(file, "utf8"), "second");
+    assert.deepEqual(readdirSync(dirname(target(f.paths, "changing"))), []);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test("uncertain session Memory is copied, verified, retired, and safely resumed", () => {
   const f = fixture();
   try {

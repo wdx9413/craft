@@ -3,7 +3,7 @@ import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { ensureProjectStorageDirectory, isLegacySafeSessionId, parseSessionStorageScopeId, projectStorageDirectory, sessionStorageScopeId } from "../../common/craft-common-store-local/src/paths.ts";
-import { canonicalJson } from "../../common/craft-common-base/src/digest.ts";
+import { canonicalJson, digestJson } from "../../common/craft-common-base/src/digest.ts";
 import { temporalMemorySelect } from "../../common/craft-common-base/src/memory-temporal-policy.ts";
 
 function legacyDirectSessionDirectory(sessionId: string): string { return join("/tmp", ".craft_data", "memory", sessionId); }
@@ -59,7 +59,7 @@ export class MemoryFileStore {
     const aliases = this.store.list("scope_alias", 10_000, item => item.status === "active" && item.alias_kind === "path"
       && (item.scope as JsonObject | undefined)?.kind === "project" && (item.scope as JsonObject | undefined)?.id === scope.id, false);
     const roots = [...new Set(aliases.map(item => String(item.alias)).filter(value => isAbsolute(value) && existsDirectory(value)).map(value => realpathSync(value)))];
-    if (roots.length > 1) throw new Error("Project Memory storage root is ambiguous");
+    if (roots.length > 1 || roots.length > 0 && aliases.some(item => typeof item.alias === "string" && isAbsolute(item.alias) && !existsDirectory(item.alias))) throw new Error("Project Memory storage root is ambiguous");
     const root = roots[0];
     if (!root) return null;
     if (projectRoot && (!isAbsolute(projectRoot) || !existsDirectory(projectRoot) || realpathSync(projectRoot) !== root))
@@ -68,6 +68,11 @@ export class MemoryFileStore {
   }
 
   sync(scope: { kind: string; id: string }, projectRoot?: string): JsonObject {
+    if (scope.kind === "session") return this.store.withSessionMemoryWriteGuard(scope.id, () => this.syncLocked(scope, projectRoot));
+    return this.syncLocked(scope, projectRoot);
+  }
+
+  private syncLocked(scope: { kind: string; id: string }, projectRoot?: string): JsonObject {
     if (scope.kind === "session") scope = { ...scope, id: this.store.resolveSessionStorageScopeId(scope.id) };
     const path = this.pathFor(scope, projectRoot);
     if (!path) return { status: "unavailable", reason: "scope_path_unavailable", count: 0 };
@@ -119,21 +124,167 @@ export class MemoryFileStore {
   archiveSession(sessionId: string, host?: string): JsonObject {
     if (typeof sessionId !== "string" || !sessionId.trim()) throw new Error("session_id must not be empty");
     const scopeId = host ? sessionStorageScopeId(host, sessionId) : this.store.resolveSessionStorageScopeId(sessionId);
+    return this.store.withSessionMemoryWriteGuard(scopeId, () => this.archiveSessionLocked(sessionId, host, Infinity));
+  }
+
+  /** Persist a Host-bound request before an external worker is started. */
+  queueSessionArchive(sessionId: string, host: string, options: { retry_reconciled?: boolean } = {}): JsonObject {
+    if (typeof sessionId !== "string" || !sessionId.trim()) throw new Error("session_id must not be empty");
+    const scopeId = sessionStorageScopeId(host, sessionId);
+    this.store.bindSessionStorageHost(sessionId, host);
+    const archiveId = sessionArchiveId(scopeId), sessionDigest = createHash("sha256").update(scopeId).digest("hex");
+    const existing = this.store.find("memory_session_archive", archiveId);
+    if (existing?.status === "archived") return { ...existing, idempotent: true };
+    if (existing && existing.status !== "archiving") throw new Error("Session archive state is invalid");
+    if (existing && (existing.session_scope_id !== undefined && existing.session_scope_id !== scopeId
+      || existing.session_id !== undefined && existing.session_id !== sessionId || existing.session_host !== undefined && existing.session_host !== host)) {
+      throw new Error("Session archive request identity conflicts");
+    }
+    if (existing?.session_scope_id === scopeId && existing.session_id === sessionId && existing.session_host === host
+      && (existing.retry_state !== "requires_reconciliation" || options.retry_reconciled !== true)) return { ...existing, idempotent: true };
+    const payload = { ...(existing ?? {}), status: "archiving", session_digest: sessionDigest, session_scope_id: scopeId, session_id: sessionId, session_host: host,
+      retry_state: "ready", next_retry_at: null, consecutive_failures: 0, content_free: true };
+    const queued = existing ? this.store.save("memory_session_archive", archiveId, payload) : this.store.create("memory_session_archive", archiveId, payload);
+    return { ...queued, idempotent: false };
+  }
+
+  /** Run one page per pending request; failures remain queued for a later retry. */
+  runQueuedArchiveSteps(limit = 1): JsonObject {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new Error("archive queue limit must be between 1 and 50");
+    const now = Date.now();
+    const pending = this.store.list("memory_session_archive", limit, row => {
+      const retryAt = typeof row.next_retry_at === "string" ? Date.parse(row.next_retry_at) : Number.NaN;
+      return row.status === "archiving" && typeof row.session_id === "string" && typeof row.session_host === "string"
+        && row.retry_state !== "requires_reconciliation" && (!Number.isFinite(retryAt) || retryAt <= now);
+    }, false);
+    const outcomes: JsonObject[] = [];
+    for (const job of pending) {
+      try {
+        const scopeId = sessionStorageScopeId(String(job.session_host), String(job.session_id));
+        if (job.session_scope_id !== scopeId || job.id !== sessionArchiveId(scopeId)) throw new Error("Session archive request identity conflicts");
+        const result = this.archiveSessionStep(String(job.session_id), String(job.session_host), 1);
+        outcomes.push({ archive_id: job.id, status: result.status });
+      } catch (error) {
+        let backoffRecorded = false;
+        const needsReconciliation = error instanceof Error && /SESSION_ARCHIVE_OBSERVATION_UNVERIFIED|archive request identity conflicts|archive (?:inventory|Context cleanup) checkpoint is invalid|Context partition (?:digest mismatch|record is missing|database is unavailable)|Memory partition database is unavailable/u.test(error.message);
+        const contextFailure = error instanceof Error && error.message.startsWith("Context partition ")
+          ? error.message.includes("digest mismatch") ? "context_digest_mismatch"
+            : error.message.includes("record is missing") ? "context_record_missing"
+              : error.message.includes("database is unavailable") ? "context_database_missing" : null
+          : null;
+        try {
+          const current = this.store.find("memory_session_archive", String(job.id));
+          if (current?.status === "archiving") {
+            const failures = Math.min(Number(current.consecutive_failures ?? 0) + 1, 20);
+            this.store.save("memory_session_archive", String(job.id), { ...current, consecutive_failures: failures,
+              retry_state: needsReconciliation ? "requires_reconciliation" : "backoff",
+              next_retry_at: new Date(now + Math.min(300_000, 1_000 * 2 ** (failures - 1))).toISOString(), last_error_type: error instanceof Error ? error.name : "unknown", last_error_code: contextFailure });
+            backoffRecorded = true;
+          }
+        } catch { /* A concurrent write or unavailable store leaves the durable request intact. */ }
+        outcomes.push({ archive_id: job.id, status: "failed", error_type: error instanceof Error ? error.name : "unknown", backoff_recorded: backoffRecorded, needs_reconciliation: needsReconciliation });
+      }
+    }
+    return { attempted: pending.length, outcomes, content_free: true };
+  }
+
+  /** Process bounded pages so an external worker can yield between durable checkpoints. */
+  archiveSessionStep(sessionId: string, host?: string, maxPages = 1): JsonObject {
+    if (typeof sessionId !== "string" || !sessionId.trim()) throw new Error("session_id must not be empty");
+    if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 100) throw new Error("max_pages must be between 1 and 100");
+    const scopeId = host ? sessionStorageScopeId(host, sessionId) : this.store.resolveSessionStorageScopeId(sessionId);
+    return this.store.withSessionMemoryWriteGuard(scopeId, () => this.archiveSessionLocked(sessionId, host, maxPages));
+  }
+
+  private archiveSessionLocked(sessionId: string, host: string | undefined, pageBudget: number): JsonObject {
+    const scopeId = host ? sessionStorageScopeId(host, sessionId) : this.store.resolveSessionStorageScopeId(sessionId);
     const parsed = parseSessionStorageScopeId(scopeId);
     const legacySessionId = host ? sessionId : scopeId;
     const directory = this.store.sessionStorageRoot(scopeId);
     const scope = { kind: "session", id: scopeId };
     const sessionDigest = createHash("sha256").update(scope.id).digest("hex");
     const archiveId = sessionArchiveId(scope.id);
-    const prior = this.store.find("memory_session_archive", archiveId);
-    if (prior) return { ...prior, idempotent: true };
+    let prior = this.store.find("memory_session_archive", archiveId);
+    if (prior?.status === "archived") return { ...prior, idempotent: true };
+    if (prior && prior.status !== "archiving") throw new Error("Session archive state is invalid");
     if (sessionProjectionState(join(directory, "memory"), scope.id, this.store.paths.root) === "foreign") throw new Error("Session Memory directory belongs to another session");
     const legacyDirectory = legacySessionDirectory(legacySessionId);
     const legacyOwned = sessionProjectionState(legacyDirectory, legacySessionId, join("/tmp", ".craft_data")) === "owned";
-    const memories = this.store.listScoped("memory_ledger", [scope], 10_000);
-    const candidates = this.store.listScoped("memory_candidate", [scope], 10_000);
-    const confirmations = this.store.listScoped("memory_confirmation", [scope], 10_000);
-    for (const memory of memories) {
+    prior ??= this.store.create("memory_session_archive", archiveId, { status: "archiving", session_digest: sessionDigest, content_free: true });
+    let pages = 0;
+    const pending = () => ({ ...prior, status: "archiving", content_deleted: false, pages_processed: pages, idempotent: false });
+    if (prior.inventory_complete !== true) {
+      const kinds = ["memory_ledger", "memory_candidate", "memory_confirmation", "memory_observation_intent"];
+      let index = Number(prior.inventory_index ?? 0), cursor = String(prior.inventory_cursor ?? "");
+      const counts: Record<string, number> = { ...(prior.inventory_counts as Record<string, number> | undefined) };
+      if (!Number.isSafeInteger(index) || index < 0 || index >= kinds.length) throw new Error("Session archive inventory checkpoint is invalid");
+      while (index < kinds.length) {
+        const kind = kinds[index]!;
+        const page = this.store.listSessionMemoryPage(kind, scope.id, cursor, 500);
+        counts[kind] = Number(counts[kind] ?? 0) + page.records.length;
+        if (page.has_more) cursor = page.next_cursor!;
+        else { index++; cursor = ""; }
+        prior = this.store.save("memory_session_archive", archiveId, { ...prior, status: "archiving", content_free: true,
+          inventory_index: index, inventory_cursor: cursor, inventory_counts: counts, inventory_complete: index === kinds.length,
+          ...(index === kinds.length ? { memory_count: counts.memory_ledger, candidate_count: counts.memory_candidate, confirmation_count: counts.memory_confirmation } : {}) });
+        if (++pages >= pageBudget && index < kinds.length) return pending();
+      }
+      if (pages >= pageBudget) return pending();
+    }
+    if (prior.observations_complete !== true) {
+    let cursor = typeof prior.observation_cursor === "string" ? prior.observation_cursor : "";
+    for (;;) {
+    const page = this.store.listSessionMemoryPage("memory_observation_intent", scope.id, cursor, 500);
+    for (const intent of page.records) {
+      const candidate = typeof intent.candidate_id === "string" ? this.store.find("memory_candidate", intent.candidate_id, undefined, false) : null;
+      if (!candidate || candidate.status !== "approved" || typeof candidate.ledger_memory_id !== "string") continue;
+      if (canonicalJson(candidate.scope) !== canonicalJson(scope)) throw new Error("SESSION_ARCHIVE_OBSERVATION_UNVERIFIED: candidate session scope changed");
+      if (candidate.content_digest !== intent.content_digest || candidate.kind !== intent.kind || (candidate.topic ?? "") !== intent.topic
+        || !Array.isArray(candidate.evidence_ids) || !candidate.evidence_ids.includes(intent.evidence_id)) throw new Error("SESSION_ARCHIVE_OBSERVATION_UNVERIFIED: capture identity does not match candidate");
+      const captureIdentity = { kind: intent.kind, scope_kind: "session", scope_id: scope.id, project_scope_id: intent.project_id, topic: intent.capture_topic, content_digest: intent.content_digest };
+      if (digestJson(captureIdentity) !== intent.capture_digest) throw new Error("SESSION_ARCHIVE_OBSERVATION_UNVERIFIED: capture scope identity changed");
+      const evidence = typeof intent.evidence_id === "string" ? this.store.find("evidence", intent.evidence_id) : null;
+      if (!evidence || (evidence.metadata as JsonObject | undefined)?.capture_digest !== intent.capture_digest) throw new Error("SESSION_ARCHIVE_OBSERVATION_UNVERIFIED: capture evidence is unavailable or changed");
+      const memory = this.store.find("memory_ledger", candidate.ledger_memory_id, undefined, false);
+      if (!memory || memory.content_digest !== candidate.content_digest) throw new Error("SESSION_ARCHIVE_OBSERVATION_UNVERIFIED: committed Memory is unavailable or changed");
+      if (canonicalJson(memory.scope) !== canonicalJson(scope)) throw new Error("SESSION_ARCHIVE_OBSERVATION_UNVERIFIED: Memory session scope changed");
+      if (memory.status !== "active") continue;
+      if (typeof intent.project_id !== "string" || !intent.project_id || typeof candidate.content_digest !== "string") throw new Error("SESSION_ARCHIVE_OBSERVATION_UNVERIFIED: project identity is unavailable");
+      const identity = { content_digest: candidate.content_digest, project_id: intent.project_id, session_digest: digestJson(scope.id), kind: candidate.kind, topic: candidate.topic ?? "" };
+      const observationId = `memory_observation_${digestJson(identity).slice(-32)}`;
+      const existing = this.store.find("memory_observation", observationId);
+      if (existing && (existing.content_digest !== identity.content_digest || existing.project_id !== identity.project_id
+        || existing.session_digest !== identity.session_digest || existing.kind !== identity.kind || existing.topic !== identity.topic
+        || (existing.scope as JsonObject | undefined)?.kind !== "project" || (existing.scope as JsonObject | undefined)?.id !== identity.project_id
+        || !Array.isArray(existing.evidence_ids) || !existing.evidence_ids.includes(intent.evidence_id))) {
+        throw new Error("SESSION_ARCHIVE_OBSERVATION_UNVERIFIED: existing observation identity changed");
+      }
+      if (!existing) this.store.create("memory_observation", observationId, {
+        ...identity, scope: { kind: "project", id: intent.project_id }, evidence_ids: candidate.evidence_ids ?? [], observed_at: candidate.observed_at,
+        ...(typeof candidate.valid_until === "string" ? { valid_until: candidate.valid_until } : {}), content_free: true, status: "active",
+      });
+    }
+    prior = this.store.save("memory_session_archive", archiveId, { ...prior, status: "archiving", content_free: true,
+      observation_cursor: page.next_cursor, observations_complete: !page.has_more });
+    pages++;
+    if (pages >= pageBudget) return pending();
+    if (!page.has_more) break;
+    cursor = page.next_cursor!;
+    }
+    }
+    for (const kind of ["memory_ledger", "memory_candidate", "memory_confirmation", "memory_observation_intent"]) {
+    for (;;) {
+    const page = this.store.listSessionMemoryPage(kind, scope.id, "", 500);
+    if (!page.records.length) break;
+    if (kind !== "memory_ledger") {
+      for (let offset = 0; offset < page.records.length; offset += 50) {
+        const batch = page.records.slice(offset, offset + 50);
+        this.store.transaction(() => { for (const record of batch) this.store.remove(kind, String(record.id)); });
+      }
+      if (++pages >= pageBudget) return pending();
+      continue;
+    }
+    for (const memory of page.records) {
       const ref = memory.content_ref as JsonObject | undefined;
       const path = typeof ref?.path === "string" ? resolve(ref.path) : "";
       const base = resolve(this.store.paths.memoryContentDir);
@@ -141,20 +292,44 @@ export class MemoryFileStore {
       if (path && contentPath !== "" && contentPath !== ".." && !contentPath.startsWith(`..${sep}`) && !isAbsolute(contentPath)) {
         try { unlinkSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
       }
-      this.store.remove("memory_ledger", String(memory.id));
+      this.store.remove(kind, String(memory.id));
     }
-    for (const candidate of candidates) this.store.remove("memory_candidate", String(candidate.id));
-    for (const confirmation of confirmations) this.store.remove("memory_confirmation", String(confirmation.id));
+    if (++pages >= pageBudget) return pending();
+    }
+    }
+    if (host && prior.context_cleanup_complete !== true) {
+      const kinds = ["context_ephemeral_index", "context_resume_snapshot"];
+      let index = Number(prior.context_cleanup_index ?? 0), cursor = String(prior.context_cleanup_cursor ?? "");
+      if (!Number.isSafeInteger(index) || index < 0 || index >= kinds.length || prior.context_cleanup_cursor !== undefined && typeof prior.context_cleanup_cursor !== "string") throw new Error("Session archive Context cleanup checkpoint is invalid");
+      while (index < kinds.length) {
+        const kind = kinds[index]!;
+        const page = this.store.listSessionContextPage(kind, sessionId, host, cursor, 100);
+        prior = this.store.transaction(() => {
+          for (const record of page.records) {
+            if (record.session_scope_id === scopeId && record.session_host === host && record.session_id === sessionId) this.store.remove(kind, String(record.id));
+          }
+          if (page.has_more) cursor = page.next_cursor!;
+          else { index++; cursor = ""; }
+          return this.store.save("memory_session_archive", archiveId, { ...prior, context_cleanup_index: index,
+            context_cleanup_cursor: cursor, context_cleanup_complete: index === kinds.length });
+        });
+        if (++pages >= pageBudget) return pending();
+      }
+    }
     this.store.closeMemoryScope(scope);
+    if (host) {
+      this.store.closeContextScope(scope);
+      rmSync(join(directory, "context"), { recursive: true, force: true });
+    }
     rmSync(join(directory, "memory"), { recursive: true, force: true });
     if (legacyOwned) rmSync(legacyDirectory, { recursive: true, force: true });
     if (!parsed && isLegacySafeSessionId(scope.id)) {
       const legacyDirect = legacyDirectSessionDirectory(scope.id);
       if (sessionProjectionState(legacyDirect, scope.id, join("/tmp", ".craft_data")) === "owned") rmSync(legacyDirect, { recursive: true, force: true });
     }
-    const archived = this.store.create("memory_session_archive", archiveId, { status: "archived", session_digest: sessionDigest,
-      memory_count: memories.length, candidate_count: candidates.length, confirmation_count: confirmations.length, content_deleted: true, archived_at: new Date().toISOString() });
-    this.store.appendEvent("memory-session", "memory.session_archived", { session_digest: sessionDigest, memory_count: memories.length, candidate_count: candidates.length, content_deleted: true });
+    const archived = this.store.save("memory_session_archive", archiveId, { status: "archived", session_digest: sessionDigest,
+      memory_count: prior.memory_count, candidate_count: prior.candidate_count, confirmation_count: prior.confirmation_count, content_deleted: true, archived_at: new Date().toISOString() });
+    this.store.appendEvent("memory-session", "memory.session_archived", { session_digest: sessionDigest, memory_count: prior.memory_count, candidate_count: prior.candidate_count, content_deleted: true });
     return { ...archived, content_deleted: true, idempotent: false };
   }
 }

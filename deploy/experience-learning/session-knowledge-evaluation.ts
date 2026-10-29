@@ -6,7 +6,7 @@ import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
 import { generatedTextLanguageInstruction } from "../../core/config.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
-import { codexSessionTaskBatch, readCodexSessionTaskExcerpt, type CodexSessionCollectionOptions } from "../../core/codex-session-archive.ts";
+import { codexSessionTaskBatch, readCodexSessionTaskExcerpt, requestCodexSessionSourceRecheck, type CodexSessionCollectionOptions } from "../../core/codex-session-archive.ts";
 import { redactKnowledgeModelText } from "./knowledge-classification.ts";
 import type { ExperienceLearningClient } from "./worker.ts";
 import { recordSessionVerificationEvidence } from "./session-verification-evidence.ts";
@@ -17,7 +17,7 @@ const OUTPUT_SCHEMA = { type: "object", properties: {
   expected_claim_ids: { type: "array", items: { type: "string", minLength: 1, maxLength: 160 }, maxItems: 8 },
 }, required: ["decision", "expected_claim_ids"], additionalProperties: false };
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
-interface EvaluationState { processed_task_ids: string[]; trace_ids_by_task: Record<string, string>; last_attempted_task_id?: string; legacy_unknown_outcomes?: number;
+interface EvaluationState { processed_task_ids: string[]; trace_ids_by_task: Record<string, string>; last_attempted_task_id?: string; legacy_unknown_outcomes?: number; legacy_untraced_tasks?: number;
   uncertain_calls: Record<string, { trace_id: string; input_digest: string }> }
 export interface SessionKnowledgeEvaluationDependencies {
   client: ExperienceLearningClient;
@@ -48,6 +48,7 @@ function readState(path: string): EvaluationState {
       || value.processed_task_ids.some(id => typeof id !== "string" || !id.trim() || id.length > 160)
       || value.last_attempted_task_id !== undefined && (typeof value.last_attempted_task_id !== "string" || !value.last_attempted_task_id.trim() || value.last_attempted_task_id.length > 160)
       || value.legacy_unknown_outcomes !== undefined && (!Number.isSafeInteger(value.legacy_unknown_outcomes) || Number(value.legacy_unknown_outcomes) < 0 || Number(value.legacy_unknown_outcomes) > 50_000)
+      || value.legacy_untraced_tasks !== undefined && (!Number.isSafeInteger(value.legacy_untraced_tasks) || Number(value.legacy_untraced_tasks) < 0 || Number(value.legacy_untraced_tasks) > 50_000)
       || !traces || typeof traces !== "object" || Array.isArray(traces) || Object.keys(traces).length > 50_000
       || !uncertain || typeof uncertain !== "object" || Array.isArray(uncertain) || Object.keys(uncertain).length > 50_000
       || Object.entries(uncertain as Record<string, unknown>).some(([id, raw]) => {
@@ -59,7 +60,7 @@ function readState(path: string): EvaluationState {
       || Object.entries(traces as Record<string, unknown>).some(([taskId, traceId]) => !taskId.trim() || taskId.length > 160
         || typeof traceId !== "string" || !/^trace[-_][A-Za-z0-9_-]{1,160}$/u.test(traceId))) throw new Error("Knowledge evaluation state is invalid");
     return { processed_task_ids: [...new Set(value.processed_task_ids as string[])], trace_ids_by_task: traces as Record<string, string>, last_attempted_task_id: value.last_attempted_task_id as string | undefined,
-      legacy_unknown_outcomes: value.legacy_unknown_outcomes as number | undefined, uncertain_calls: uncertain as EvaluationState["uncertain_calls"] };
+      legacy_unknown_outcomes: value.legacy_unknown_outcomes as number | undefined, legacy_untraced_tasks: value.legacy_untraced_tasks as number | undefined, uncertain_calls: uncertain as EvaluationState["uncertain_calls"] };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { processed_task_ids: [], trace_ids_by_task: {}, uncertain_calls: {} };
     throw error;
@@ -70,7 +71,7 @@ async function writeState(path: string, state: EvaluationState): Promise<void> {
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   await atomicPrivateJson(path, { schema: SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000),
     trace_ids_by_task: Object.fromEntries(Object.entries(state.trace_ids_by_task).slice(-50_000)),
-    last_attempted_task_id: state.last_attempted_task_id, legacy_unknown_outcomes: state.legacy_unknown_outcomes,
+    last_attempted_task_id: state.last_attempted_task_id, legacy_unknown_outcomes: state.legacy_unknown_outcomes, legacy_untraced_tasks: state.legacy_untraced_tasks,
     uncertain_calls: state.uncertain_calls, updated_at: new Date().toISOString() });
 }
 function parseOutput(value: string): JsonObject {
@@ -97,7 +98,8 @@ async function completedEvaluation(client: ExperienceLearningClient, task: JsonO
       && event.actor === "knowledge-session-evaluation-worker");
     const request = matching("model.request"), completed = matching("model.completed"), output = matching("knowledge.evaluation_case_candidate");
     if (request.length !== 1 || completed.length !== 1 || output.length !== 1) return null;
-    if (!Array.isArray(request[0].input_refs) || request[0].input_refs.length !== 1 || request[0].input_refs[0] !== call.input_digest
+    if (request[0].data_digest !== stableDigest({ purpose: "knowledge_held_out_label", input_digest: call.input_digest, source_ref: task.source_ref, content_stored: false })
+      || !Array.isArray(request[0].input_refs) || request[0].input_refs.length !== 1 || request[0].input_refs[0] !== call.input_digest
       || !Array.isArray(output[0].output_refs) || !Number.isSafeInteger(request[0].sequence) || !Number.isSafeInteger(completed[0].sequence)
       || !Number.isSafeInteger(output[0].sequence) || request[0].sequence >= completed[0].sequence || completed[0].sequence >= output[0].sequence) return null;
     const refs = output[0].output_refs as unknown[];
@@ -133,15 +135,20 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
   const processed = new Set(state.processed_task_ids);
   const legacyUnknown = (batch.tasks as JsonObject[]).filter(item => typeof item.task_id === "string"
     && processed.has(item.task_id) && item.verification_outcome === null).length;
-  const diagnosticChanged = (state.legacy_unknown_outcomes ?? 0) !== legacyUnknown;
+  const legacyUntraced = state.processed_task_ids.filter(id => !state.trace_ids_by_task[id] && !state.uncertain_calls[id]).length;
+  const diagnosticChanged = (state.legacy_unknown_outcomes ?? 0) !== legacyUnknown || (state.legacy_untraced_tasks ?? 0) !== legacyUntraced;
   if (diagnosticChanged) state.legacy_unknown_outcomes = legacyUnknown;
+  if (diagnosticChanged) state.legacy_untraced_tasks = legacyUntraced;
   const pending = (batch.tasks as JsonObject[]).filter(item => typeof item.task_id === "string" && !processed.has(item.task_id));
   const previous = pending.findIndex(item => item.task_id === state.last_attempted_task_id);
   const task = pending[(previous + 1) % pending.length];
   if (!task) {
     if (diagnosticChanged) await writeState(path, state);
     return legacyUnknown ? { status: "waiting_for_legacy_outcome_evidence", processed: 0,
-      legacy_unknown_outcomes: legacyUnknown, raw_content_stored: false } : { status: "idle", processed: 0, raw_content_stored: false };
+      legacy_unknown_outcomes: legacyUnknown, ...(legacyUntraced ? { legacy_untraced_tasks: legacyUntraced } : {}), raw_content_stored: false }
+      : legacyUntraced ? { status: "waiting_for_legacy_trace_reconciliation", processed: 0, legacy_untraced_tasks: legacyUntraced, raw_content_stored: false }
+      : Number(batch.excluded_source_recheck_pending) > 0 ? { status: "waiting_for_source_recheck", processed: 0, source_recheck_pending: batch.excluded_source_recheck_pending, raw_content_stored: false }
+      : { status: "idle", processed: 0, raw_content_stored: false };
   }
   // Advance before waiting or calling the model. An unavailable project must not
   // starve later tasks, and pending tasks must remain eligible for a future retry.
@@ -152,6 +159,15 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
     const taskId = String(task.task_id), call = state.uncertain_calls[taskId]!;
     const decision = await completedEvaluation(deps.client, task, call);
     if (decision) {
+      let current: JsonObject;
+      try { current = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(taskId, { ...deps.archive_options, expected_partition: "held_out" }, deps.env); }
+      catch { return { status: "waiting_for_source_revalidation", processed: 0, reason: "archive_unavailable", raw_content_stored: false }; }
+      if (current.status !== "ready" || current.source_ref !== task.source_ref || current.session_id !== task.session_id
+        || current.turn_id !== task.turn_id || current.project_scope_id !== task.project_scope_id
+        || (current.verification_outcome ?? null) !== (task.verification_outcome ?? null)
+        || JSON.stringify(current.evidence_ids) !== JSON.stringify(task.verification_evidence_ids)) {
+        return { status: "waiting_for_source_revalidation", processed: 0, reason: "archive_changed", raw_content_stored: false };
+      }
       state.processed_task_ids.push(taskId); state.trace_ids_by_task[taskId] = call.trace_id;
       delete state.uncertain_calls[taskId]; await writeState(path, state);
       return { status: "completed_call_reconciled", processed: 1, decision, trace_id: call.trace_id, raw_content_stored: false };
@@ -165,9 +181,13 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
   const excerpt = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(task.task_id, { ...deps.archive_options, expected_partition: "held_out" }, deps.env);
   const evidenceIds = Array.isArray(excerpt.evidence_ids) ? excerpt.evidence_ids : [];
   if (excerpt.status !== "ready" || excerpt.session_id !== task.session_id || excerpt.turn_id !== task.turn_id
+    || excerpt.source_ref !== task.source_ref
     || excerpt.project_scope_id !== task.project_scope_id || excerpt.verification_source !== task.verification_source
     || (excerpt.verification_outcome ?? null) !== (task.verification_outcome ?? null)
     || JSON.stringify(evidenceIds) !== JSON.stringify(task.verification_evidence_ids)) {
+    if (excerpt.reason === "task_source_digest_mismatch" && typeof task.task_id === "string" && typeof task.source_ref === "string") {
+      try { await requestCodexSessionSourceRecheck(task.task_id, task.source_ref, deps.archive_options, deps.env); } catch { /* A later poll retries a busy or unavailable index. */ }
+    }
     // The indexed task and its excerpt may be read across a concurrent
     // reconciliation. Keep it pending for a later consistent snapshot.
     return { status: "waiting_for_consistent_excerpt", processed: 0, reason: "held_out_excerpt_unavailable", raw_content_stored: false };
@@ -176,8 +196,7 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
     reason: "terminal_task_outcome_unverified", raw_content_stored: false };
   const verificationArtifacts = Array.isArray(excerpt.verification_artifacts) ? excerpt.verification_artifacts : [];
   if (!verificationArtifacts.length) {
-    state.processed_task_ids.push(String(task.task_id)); await writeState(path, state);
-    return { status: "skipped", processed: 1, reason: "verifiable_test_result_unavailable", raw_content_stored: false };
+    return { status: "waiting_for_verification_artifacts", processed: 0, reason: "verifiable_test_result_unavailable", raw_content_stored: false };
   }
   const listed = await deps.client.call("craft_knowledge_claim_list", { limit: 1_000, scope_kind: "project", scope_id: task.project_scope_id.slice("project:".length) });
   const candidates = (Array.isArray(listed.claims) ? listed.claims as JsonObject[] : []).filter(claim => claim.status === "candidate" && claim.scope === task.project_scope_id).slice(0, 12);
@@ -222,6 +241,7 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
   const traceId = String(object(started.trace, "Knowledge evaluation Trace").id ?? "");
   if (!traceId) throw new Error("Knowledge evaluation Trace has no id");
   if (!/^trace[-_][A-Za-z0-9_-]{1,160}$/u.test(traceId)) throw new Error("Knowledge evaluation Trace id is invalid");
+  let archiveRejected = false;
   try {
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.request", actor: "knowledge-session-evaluation-worker",
       source: "codex-cli-learning-transport", trust: "observed", operation_id: String(task.task_id), input_refs: [inputDigest], model_fingerprint: fingerprint,
@@ -243,9 +263,25 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
       usage: response.usage, data: { response_digest: stableDigest(response.text) }, summary: "Codex Host 返回了留出评测标签候选" });
     let caseId: string | null = null, caseEvidenceId: string | null = null, evaluationEligible: boolean | null = null;
     let runId: string | null = null, resultBinding: string | null = null, transcriptCheckStatus: unknown = "not_reported";
+    if (output.decision === "skip") {
+      const latestExcerpt = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(task.task_id,
+        { ...deps.archive_options, expected_partition: "held_out" }, deps.env);
+      if (latestExcerpt.status !== "ready" || stableDigest(latestExcerpt) !== stableDigest(excerpt)) {
+        archiveRejected = true; throw new Error("held-out Evidence changed during model execution");
+      }
+    }
     if (output.decision === "labeled") {
       const verificationEvidence = await recordSessionVerificationEvidence(deps.client, task, excerpt);
       if (!verificationEvidence) throw new Error("held-out test Evidence is unavailable");
+      if (verificationEvidence.transcript_check_status !== "transcript_matched"
+        || !Object.hasOwn(verificationEvidence, "transcript_check_outcome") || verificationEvidence.transcript_check_outcome !== (task.verification_outcome ?? null)) {
+        archiveRejected = true; throw new Error("held-out Evidence archive verification is unavailable or mismatched");
+      }
+      const latestExcerpt = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(task.task_id,
+        { ...deps.archive_options, expected_partition: "held_out" }, deps.env);
+      if (latestExcerpt.status !== "ready" || stableDigest(latestExcerpt) !== stableDigest(excerpt)) {
+        archiveRejected = true; throw new Error("held-out Evidence changed during model execution");
+      }
       caseEvidenceId = String(verificationEvidence.id);
       transcriptCheckStatus = verificationEvidence.transcript_check_status;
       const caseIdDigest = stableDigest({ task_id: task.task_id, candidate_claim_refs: candidateClaimRefs });
@@ -282,9 +318,10 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
     return { status: caseId ? "case_candidate_created" : "case_skipped", processed: 1, task_id: task.task_id, case_id: caseId,
       trace_id: traceId, label_source: "model_candidate", evaluation_eligible: evaluationEligible, independent_adjudication_required: Boolean(caseId), raw_content_stored: false };
   } catch (error) {
+    if (archiveRejected) { delete state.uncertain_calls[String(task.task_id)]; await writeState(path, state); }
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.failed", actor: "knowledge-session-evaluation-worker",
       source: "craft-knowledge", trust: "observed", operation_id: String(task.task_id), model_fingerprint: fingerprint,
-      data: { failure_kind: safeFailureKind(error), input_digest: inputDigest, result_state: state.uncertain_calls[String(task.task_id)] ? "unknown" : "not_dispatched" },
+      data: { failure_kind: safeFailureKind(error), input_digest: inputDigest, result_state: archiveRejected ? "discarded" : state.uncertain_calls[String(task.task_id)] ? "unknown" : "not_dispatched" },
       summary: "留出评测标签处理未完成，调用状态待核对" });
     await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "failed", summary: "留出评测标签处理未完成" });
     throw error;

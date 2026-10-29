@@ -62,7 +62,7 @@ function snapshotTree(root: string): { directories: string[]; files: Set<string>
 }
 
 async function verifiedPeer(database: DatabaseSync, paths: CraftPaths, projectRoot: string,
-  checkpointId: string, file: SnapshotFile): Promise<{ path: string; checkpoint_id: string } | null> {
+  checkpointId: string, file: SnapshotFile): Promise<{ path: string; checkpoint_id: string; workspace_id: string; workspace_snapshot: string } | null> {
   const rows = database.prepare("SELECT id,payload_json FROM records WHERE kind='workspace_checkpoint' AND id<>? ORDER BY id")
     .all(checkpointId) as Array<{ id: string; payload_json: string }>;
   for (const row of rows) {
@@ -78,16 +78,23 @@ async function verifiedPeer(database: DatabaseSync, paths: CraftPaths, projectRo
         const item = value as Partial<SnapshotFile>;
         return item.path === file.path && item.digest === file.digest && item.size_bytes === file.size_bytes;
       })) continue;
-    const workspaceRows = database.prepare("SELECT payload_json FROM records WHERE kind='workspace' AND id=?")
-      .all(peerWorkspaceId) as Array<{ payload_json: string }>;
-    const workspaceOwnsProject = workspaceRows.some(value => {
+    const workspaceSnapshot = String((database.prepare("SELECT json_group_array(payload_json) AS snapshot FROM (SELECT payload_json FROM records WHERE kind='workspace' AND id=? ORDER BY version)")
+      .get(peerWorkspaceId) as { snapshot: string }).snapshot);
+    const workspaceRows = (JSON.parse(workspaceSnapshot) as string[]).map(payload_json => ({ payload_json }));
+    let unavailablePeerRoot = false;
+    const peerRoots = new Set(workspaceRows.flatMap(value => {
       try {
         const item = JSON.parse(value.payload_json) as Record<string, unknown>;
-        return item.state_revision === payload.state_revision && typeof item.root_path === "string"
-          && realpathSync(item.root_path) === projectRoot;
-      } catch { return false; }
-    });
-    if (!workspaceOwnsProject) continue;
+        if (item.state_revision !== payload.state_revision) return [];
+        if (typeof item.root_path !== "string") { unavailablePeerRoot = true; return []; }
+        try {
+          const root = realpathSync(item.root_path);
+          if (lstatSync(root).isDirectory()) return [root];
+        } catch { /* matching historical root is unavailable */ }
+        unavailablePeerRoot = true; return [];
+      } catch { return []; }
+    }));
+    if (unavailablePeerRoot || peerRoots.size !== 1 || !peerRoots.has(projectRoot)) continue;
     if (typeof payload.snapshot_root !== "string") continue;
     const expected = [join(projectStorageDirectory(paths, projectRoot), "codebase", "snapshots", peerWorkspaceId, row.id),
       join(projectRoot, ".craft_data", "codebase", "snapshots", peerWorkspaceId, row.id),
@@ -97,7 +104,7 @@ async function verifiedPeer(database: DatabaseSync, paths: CraftPaths, projectRo
       if (!expected.some(path => canonicalCandidatePath(path) === canonicalCandidatePath(payload.snapshot_root as string))) continue;
       const path = checkedFile(payload.snapshot_root, file.path);
       if (lstatSync(path).size === file.size_bytes && await fileDigest(path) === file.digest) {
-        return { path, checkpoint_id: row.id };
+        return { path, checkpoint_id: row.id, workspace_id: peerWorkspaceId, workspace_snapshot: workspaceSnapshot };
       }
     } catch { /* try another exact peer */ }
   }
@@ -131,10 +138,17 @@ async function verifiedGitHistory(projectRoot: string, file: SnapshotFile, backu
   return null;
 }
 
-async function updateCheckpointWithRetry(database: DatabaseSync, entry: CodebaseMigrationEntry, expected: string, next: string): Promise<number> {
-  const statement = database.prepare("UPDATE records SET payload_json=? WHERE kind='workspace_checkpoint' AND id=? AND version=? AND payload_json=?");
+async function updateCheckpointWithRetry(database: DatabaseSync, entry: CodebaseMigrationEntry, expected: string, next: string, workspaceSnapshot: string, peerSnapshots: string, root: string, rootIdentity: { dev: number; ino: number }): Promise<number> {
+  const statement = database.prepare(`UPDATE records SET payload_json=? WHERE kind='workspace_checkpoint' AND id=? AND version=? AND payload_json=?
+    AND (SELECT json_group_array(payload_json) FROM (SELECT payload_json FROM records WHERE kind='workspace' AND id=? ORDER BY version))=?
+    AND NOT EXISTS (SELECT 1 FROM json_each(?) AS peer WHERE
+      (SELECT json_group_array(payload_json) FROM (SELECT payload_json FROM records WHERE kind='workspace' AND id=json_extract(peer.value,'$.id') ORDER BY version)) != json_extract(peer.value,'$.snapshot'))`);
   for (let attempt = 0; ; attempt++) {
-    try { return Number(statement.run(next, entry.id, entry.version, expected).changes); }
+    try {
+      const rootStat = lstatSync(root);
+      if (realpathSync(root) !== root || !rootStat.isDirectory() || rootStat.dev !== rootIdentity.dev || rootStat.ino !== rootIdentity.ino) throw new Error("project_root_changed_or_missing");
+      return Number(statement.run(next, entry.id, entry.version, expected, entry.workspace_id, workspaceSnapshot, peerSnapshots).changes);
+    }
     catch (error) {
       const retryable = error instanceof Error && /database is locked|SQLITE_BUSY|SQLITE_LOCKED/iu.test(error.message);
       if (!retryable || attempt >= 2) throw error;
@@ -160,6 +174,7 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
   const backupRoot = join(store.paths.backupsDir, "codebase-storage-migration");
   regularDirectory(backupRoot);
   let backupDirectory: string;
+  let backupHasWorkspace = false;
   if (options.backup_directory) {
     backupDirectory = resolve(options.backup_directory);
     if (dirname(backupDirectory) !== backupRoot) throw new Error("Codebase migration backup is outside its data root");
@@ -170,9 +185,10 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
       throw new Error("Codebase migration backup is unsafe");
     }
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    backupHasWorkspace = manifest.backup_scope === "checkpoint_and_workspace_rows";
     const covered = Array.isArray(manifest.checkpoint_ids) ? new Set(manifest.checkpoint_ids.map(item => JSON.stringify(item))) : new Set<string>();
     if (manifest.schema !== "craft.codebase-storage-backup.v1" || manifest.central_database !== store.paths.databaseFile
-      || manifest.backup !== databasePath || manifest.backup_scope !== undefined && manifest.backup_scope !== "checkpoint_rows"
+      || manifest.backup !== databasePath || manifest.backup_scope !== undefined && !["checkpoint_rows", "checkpoint_and_workspace_rows"].includes(String(manifest.backup_scope))
       || entries.some(item => !covered.has(JSON.stringify([item.id, item.version])))) {
       throw new Error("Codebase migration backup identity does not match this page");
     }
@@ -194,8 +210,10 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
     const backupPath = join(backupDirectory, "craft.db");
     const snapshot = new DatabaseSync(backupPath);
     const backedUpEntries: typeof entries = [];
+    let readTransaction = false;
     try {
       snapshot.exec("CREATE TABLE records(kind TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(kind,id,version))");
+      store.database.exec("BEGIN"); readTransaction = true;
       const readCheckpoint = store.database.prepare("SELECT kind,id,version,payload_json,created_at,updated_at FROM records WHERE kind='workspace_checkpoint' AND id=? AND version=?");
       const writeCheckpoint = snapshot.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)");
       for (const entry of entries) {
@@ -204,7 +222,14 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
         writeCheckpoint.run(row.kind, row.id, row.version, row.payload_json, row.created_at, row.updated_at);
         backedUpEntries.push(entry);
       }
-    } finally { snapshot.close(); }
+      const readWorkspace = store.database.prepare("SELECT kind,id,version,payload_json,created_at,updated_at FROM records WHERE kind='workspace' AND id=? ORDER BY version");
+      for (const workspaceId of new Set(backedUpEntries.map(entry => entry.workspace_id))) {
+        for (const row of readWorkspace.all(workspaceId) as Array<{ kind: string; id: string; version: number; payload_json: string; created_at: string; updated_at: string }>) {
+          writeCheckpoint.run(row.kind, row.id, row.version, row.payload_json, row.created_at, row.updated_at);
+        }
+      }
+      store.database.exec("COMMIT"); readTransaction = false;
+    } finally { if (readTransaction) store.database.exec("ROLLBACK"); snapshot.close(); }
     const check = new DatabaseSync(backupPath, { readOnly: true });
     try {
       if (String((check.prepare("PRAGMA quick_check").get() as { quick_check: string }).quick_check) !== "ok") {
@@ -212,9 +237,10 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
       }
     } finally { check.close(); }
     writeFileSync(join(backupDirectory, "manifest.json"), `${JSON.stringify({ schema: "craft.codebase-storage-backup.v1",
-      backup_scope: "checkpoint_rows", central_database: store.paths.databaseFile, backup: backupPath,
+      backup_scope: "checkpoint_and_workspace_rows", central_database: store.paths.databaseFile, backup: backupPath,
       checkpoint_ids: backedUpEntries.map(item => [item.id, item.version]) })}\n`,
     { mode: 0o600, flag: "wx" });
+    backupHasWorkspace = true;
   }
   let migrated = 0, alreadyCurrent = 0;
   const blocked: Array<{ id: string; version: number; reason: string }> = [];
@@ -222,28 +248,51 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
   for (const [index, entry] of entries.entries()) {
     try {
       const pendingRecovered: typeof recovered = [];
+      const peerSnapshots: Array<{ id: string; snapshot: string }> = [];
       if (!/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u.test(entry.id)
         || !Number.isSafeInteger(entry.version) || entry.version < 1) throw new Error("checkpoint_identity_invalid");
       if (!/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u.test(entry.workspace_id)) throw new Error("workspace_id_invalid");
       const row = store.database.prepare("SELECT payload_json FROM records WHERE kind='workspace_checkpoint' AND id=? AND version=?")
         .get(entry.id, entry.version) as { payload_json: string } | undefined;
       if (!row) throw new Error("checkpoint_missing");
+      const backup = new DatabaseSync(join(backupDirectory, "craft.db"), { readOnly: true });
+      try {
+        const saved = backup.prepare("SELECT payload_json FROM records WHERE kind='workspace_checkpoint' AND id=? AND version=?")
+          .get(entry.id, entry.version) as { payload_json: string } | undefined;
+        if (!saved || saved.payload_json !== row.payload_json) throw new Error("checkpoint_differs_from_backup");
+      } finally { backup.close(); }
       const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
       if (payload.snapshot_root !== entry.source_root || payload.workspace_id !== entry.workspace_id || !Array.isArray(payload.entries)) {
         throw new Error("checkpoint_changed");
       }
       const target = entry.target_root!;
-      const workspaceRows = store.database.prepare("SELECT payload_json FROM records WHERE kind='workspace' AND id=?")
-        .all(entry.workspace_id) as Array<{ payload_json: string }>;
+      const workspaceSnapshot = String((store.database.prepare("SELECT json_group_array(payload_json) AS snapshot FROM (SELECT payload_json FROM records WHERE kind='workspace' AND id=? ORDER BY version)")
+        .get(entry.workspace_id) as { snapshot: string }).snapshot);
+      if (backupHasWorkspace) {
+        const backup = new DatabaseSync(join(backupDirectory, "craft.db"), { readOnly: true });
+        try {
+          const saved = (backup.prepare("SELECT json_group_array(payload_json) AS snapshot FROM (SELECT payload_json FROM records WHERE kind='workspace' AND id=? ORDER BY version)")
+            .get(entry.workspace_id) as { snapshot: string }).snapshot;
+          if (saved !== workspaceSnapshot) throw new Error("workspace_differs_from_backup");
+        } finally { backup.close(); }
+      }
+      const workspaceRows = (JSON.parse(workspaceSnapshot) as string[]).map(payload_json => ({ payload_json }));
+      let unavailableRoot = false;
       const roots = [...new Set(workspaceRows.flatMap(value => {
         try {
           const item = JSON.parse(value.payload_json) as Record<string, unknown>;
-          return item.state_revision === payload.state_revision && typeof item.root_path === "string"
-            ? [realpathSync(item.root_path)] : [];
+          if (item.state_revision !== payload.state_revision) return [];
+          if (typeof item.root_path !== "string") { unavailableRoot = true; return []; }
+          try {
+            const root = realpathSync(item.root_path);
+            if (lstatSync(root).isDirectory()) return [root];
+          } catch { /* matching historical root is unavailable */ }
+          unavailableRoot = true; return [];
         } catch { return []; }
       }))];
-      if (roots.length !== 1) throw new Error("project_root_changed_or_missing");
+      if (roots.length !== 1 || unavailableRoot) throw new Error("project_root_changed_or_missing");
       const root = roots[0]!;
+      const rootStat = lstatSync(root), rootIdentity = { dev: rootStat.dev, ino: rootStat.ino };
       const projectDirectory = projectStorageDirectory(store.paths, root);
       if (target !== join(projectDirectory, "codebase", "snapshots", entry.workspace_id, entry.id)
         || ensureProjectStorageDirectory(store.paths, root) !== projectDirectory) {
@@ -280,6 +329,7 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
           const git = peer ? null : await verifiedGitHistory(root, file, backupDirectory);
           if (!peer && !git) throw new Error("verified_source_unavailable");
           copySource = (peer ?? git)!.path;
+          if (peer) peerSnapshots.push({ id: peer.workspace_id, snapshot: peer.workspace_snapshot });
           pendingRecovered.push({ id: entry.id, path: file.path, from_checkpoint_id: peer?.checkpoint_id ?? null,
             from_git_commit: git?.commit ?? null, digest: file.digest });
         }
@@ -313,9 +363,17 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
         } else writeFileSync(receiptPath, receipt, { mode: 0o600, flag: "wx" });
       }
       const next = JSON.stringify({ ...payload, snapshot_root: target });
-      const changed = await updateCheckpointWithRetry(store.database, entry, row.payload_json, next);
+      const changed = await updateCheckpointWithRetry(store.database, entry, row.payload_json, next, workspaceSnapshot, JSON.stringify(peerSnapshots), root, rootIdentity);
       if (changed === 1) { migrated++; recovered.push(...pendingRecovered); }
       else {
+        const currentWorkspace = (store.database.prepare("SELECT json_group_array(payload_json) AS snapshot FROM (SELECT payload_json FROM records WHERE kind='workspace' AND id=? ORDER BY version)")
+          .get(entry.workspace_id) as { snapshot: string }).snapshot;
+        if (currentWorkspace !== workspaceSnapshot) throw new Error("workspace_changed_concurrently");
+        for (const peer of peerSnapshots) {
+          const current = (store.database.prepare("SELECT json_group_array(payload_json) AS snapshot FROM (SELECT payload_json FROM records WHERE kind='workspace' AND id=? ORDER BY version)")
+            .get(peer.id) as { snapshot: string }).snapshot;
+          if (current !== peer.snapshot) throw new Error("peer_workspace_changed_concurrently");
+        }
         const latest = store.database.prepare("SELECT payload_json FROM records WHERE kind='workspace_checkpoint' AND id=? AND version=?")
           .get(entry.id, entry.version) as { payload_json: string } | undefined;
         if (latest?.payload_json !== next) throw new Error("checkpoint_changed_concurrently");

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { stableDigest } from "../core/digest.ts";
+import fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -210,6 +213,207 @@ async function fixture() {
   };
   return { store, reader, claim, async close() { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
+
+test("Knowledge file verification budget retains later virtual and already verified documents", async () => {
+  const f = await fixture();
+  const dir = await mkdtemp(join(tmpdir(), "craft-knowledge-verify-budget-"));
+  try {
+    f.store.create("knowledge_source", "file-source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", locator: dir });
+    const rootDigest = stableDigest(await realpath(dir));
+    const text = "alpha verified fact\n", digest = `sha256:${createHash("sha256").update(text).digest("hex")}`;
+    for (let i = 0; i < 13; i++) {
+      const suffix = String(i).padStart(2, "0"), document = `file-document-${suffix}`;
+      await writeFile(join(dir, `${suffix}.md`), text);
+      f.store.create("knowledge_document", document, { source_id: "file-source", path: `${suffix}.md`, root_digest: rootDigest, content_digest: digest, status: "current" });
+      f.claim(`a-file-${suffix}`, { status: "candidate", source_id: "file-source", document_id: document, document_digest: digest });
+    }
+    f.claim("z-reuse", { status: "candidate", source_id: "file-source", document_id: "file-document-00", document_digest: digest });
+    f.claim("z-virtual", { status: "candidate" });
+    f.store.create("knowledge_source", "virtual-source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", locator: "craft://session/evidence" });
+    for (let i = 0; i < 13; i++) {
+      const id = `virtual-document-${i}`;
+      f.store.create("knowledge_document", id, { source_id: "virtual-source", root_digest: "session-digest", content_digest: digest, status: "current" });
+      f.claim(`zz-virtual-${i}`, { status: "candidate", source_id: "virtual-source", document_id: id, document_digest: digest });
+    }
+    const result = await f.reader.search({ ...request, max_items: 40, max_chars: 50_000 }, true);
+    const ids = result.items.map(item => item.claim_id);
+    assert.equal(ids.includes("a-file-12"), false);
+    assert.equal(ids.includes("z-reuse"), true);
+    assert.equal(ids.includes("z-virtual"), true);
+    assert.equal(ids.filter(id => String(id).startsWith("zz-virtual-")).length, 13);
+    assert.equal(result.diagnostics?.verification_budget_omitted_count, 1);
+  } finally { await f.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("Knowledge verifies nested source provenance and rejects paths outside the source root", async () => {
+  const f = await fixture(), dir = await mkdtemp(join(tmpdir(), "craft-knowledge-nested-source-"));
+  try {
+    const root = await realpath(dir), nested = join(root, "nested", "deeper");
+    await mkdir(nested, { recursive: true });
+    const text = "alpha nested fact\n", digest = `sha256:${createHash("sha256").update(text).digest("hex")}`;
+    await writeFile(join(nested, "fact.md"), text);
+    f.store.create("knowledge_source", "nested-source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", locator: root });
+    const document = { source_id: "nested-source", path: "nested/deeper/fact.md", root_digest: stableDigest(root), content_digest: digest, status: "current" };
+    f.store.create("knowledge_document", "nested-document", document);
+    f.claim("nested-claim", { status: "candidate", source_id: "nested-source", document_id: "nested-document", document_digest: digest });
+    assert.equal((await f.reader.search(request, true)).items.length, 1);
+    f.store.save("knowledge_document", "nested-document", { ...document, root_digest: stableDigest(join(root, "unrelated")) });
+    assert.equal((await f.reader.search(request, true)).items.length, 0);
+    const outside = join(dir, "..", `${Date.now()}-outside.md`);
+    await writeFile(outside, text);
+    try {
+      f.store.save("knowledge_document", "nested-document", { ...document, path: `../${outside.split("/").at(-1)}` });
+      assert.equal((await f.reader.search(request, true)).items.length, 0);
+    } finally { await rm(outside, { force: true }); }
+  } finally { await f.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("Knowledge validates a file source and rejects missing or mismatched root digests", async t => {
+  const f = await fixture(), dir = await mkdtemp(join(tmpdir(), "craft-knowledge-file-source-"));
+  try {
+    const path = await realpath(dir), file = join(path, "source.md"), text = "alpha local source\n";
+    await writeFile(file, text);
+    const digest = `sha256:${createHash("sha256").update(text).digest("hex")}`;
+    f.store.create("knowledge_source", "single-file-source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", locator: file });
+    const data = { source_id: "single-file-source", path: ".", root_digest: stableDigest(file), content_digest: digest, status: "current" };
+    f.store.create("knowledge_document", "single-file-doc", data);
+    f.claim("single-file-claim", { status: "candidate", source_id: "single-file-source", document_id: "single-file-doc", document_digest: digest });
+    assert.equal((await f.reader.search(request, true)).items.length, 1);
+    const originalOpen = fsPromises.open;
+    let opens = 0, release!: () => void, notify!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; }), started = new Promise<void>(resolve => { notify = resolve; });
+    const fault = t.mock.method(fsPromises, "open", async (...args: Parameters<typeof fsPromises.open>) => {
+      if (String(args[0]) === file) { opens++; notify(); await gate; }
+      return Reflect.apply(originalOpen, fsPromises, args);
+    });
+    try {
+      const requests = Array.from({ length: 4 }, () => f.reader.search(request, true));
+      await started;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      release();
+      assert((await Promise.all(requests)).every(result => result.items.length === 1));
+      assert.equal(opens, 1);
+      assert.equal((await f.reader.search(request, true)).items.length, 1);
+      assert.equal(opens, 2, "completed verification is not cached");
+    } finally { release(); fault.mock.restore(); }
+    {
+      let unblock!: () => void, signal!: () => void, failedOpens = 0;
+      const hold = new Promise<void>(resolve => { unblock = resolve; }), opened = new Promise<void>(resolve => { signal = resolve; });
+      const fault = t.mock.method(fsPromises, "open", async (...args: Parameters<typeof fsPromises.open>) => {
+        if (String(args[0]) === file) { failedOpens++; signal(); await hold; throw Object.assign(new Error("injected read failure"), { code: "EIO" }); }
+        return Reflect.apply(originalOpen, fsPromises, args);
+      });
+      try {
+        const requests = Array.from({ length: 2 }, () => f.reader.search(request, true));
+        await opened; await new Promise<void>(resolve => setImmediate(resolve)); unblock();
+        const failed = await Promise.all(requests);
+        assert.equal(failedOpens, 1);
+        assert(failed.every(result => result.items.length === 0 && result.diagnostics?.verification_rejected_count === 1));
+      } finally { unblock(); fault.mock.restore(); }
+      assert.equal((await f.reader.search(request, true)).items.length, 1, "failed verification does not poison later calls");
+    }
+    {
+      let unblock!: () => void, signal!: () => void;
+      const hold = new Promise<void>(resolve => { unblock = resolve; }), opened = new Promise<void>(resolve => { signal = resolve; });
+      const paused = t.mock.method(fsPromises, "open", async (...args: Parameters<typeof fsPromises.open>) => {
+        if (String(args[0]) === file) { signal(); await hold; }
+        return Reflect.apply(originalOpen, fsPromises, args);
+      });
+      try {
+        const requests = Array.from({ length: 2 }, () => f.reader.search(request, true).then(() => "returned", error => String(error)));
+        await opened; await new Promise<void>(resolve => setImmediate(resolve));
+        f.store.save("knowledge_source", "single-file-source", { scope: { kind: "global", id: "global" }, status: "disabled", trust: "verified", locator: file });
+        unblock();
+        for (const result of await Promise.all(requests)) assert.match(result, /Context authorization or material state changed/u);
+      } finally { unblock(); paused.mock.restore(); }
+      f.store.save("knowledge_source", "single-file-source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", locator: file });
+    }
+    f.store.save("knowledge_document", "single-file-doc", { ...data, root_digest: "wrong" });
+    assert.equal((await f.reader.search(request, true)).items.length, 0);
+    const { root_digest: _removed, ...missingRoot } = data;
+    f.store.save("knowledge_document", "single-file-doc", missingRoot);
+    assert.equal((await f.reader.search(request, true)).items.length, 0);
+    const { path: _path, ...missingPath } = data;
+    f.store.save("knowledge_document", "single-file-doc", missingPath);
+    assert.equal((await f.reader.search(request, true)).items.length, 0);
+    const claim = f.store.get("knowledge_claim", "single-file-claim");
+    f.store.save("knowledge_document", "single-file-doc", { ...data, content_digest: null });
+    f.store.save("knowledge_claim", "single-file-claim", { ...claim, document_digest: null });
+    assert.equal((await f.reader.search(request, true)).items.length, 0);
+    f.store.save("knowledge_claim", "single-file-claim", { ...f.store.get("knowledge_claim", "single-file-claim"), document_digest: digest });
+    f.store.save("knowledge_document", "single-file-doc", data);
+    await writeFile(file, "x".repeat(2_000_001));
+    assert.equal((await f.reader.search(request, true)).items.length, 0);
+    await writeFile(file, text);
+    const link = join(path, "link.md"); await symlink(file, link);
+    f.store.save("knowledge_source", "single-file-source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", locator: link });
+    assert.equal((await f.reader.search(request, true)).items.length, 0);
+  } finally { await f.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("Knowledge file verification saturation fails closed and recovers after in-flight reads", { timeout: 15_000 }, async t => {
+  const f = await fixture(), dir = await mkdtemp(join(tmpdir(), "craft-knowledge-saturation-"));
+  let release!: () => void;
+  try {
+    const root = await realpath(dir), text = "alpha fact\n", digest = `sha256:${createHash("sha256").update(text).digest("hex")}`;
+    for (let i = 0; i < 65; i++) {
+      const source = `saturation-source-${i}`, document = `saturation-document-${i}`, name = `${i}.md`;
+      await writeFile(join(root, name), text);
+      f.store.create("knowledge_source", source, { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", locator: root });
+      f.store.create("knowledge_document", document, { source_id: source, path: name, root_digest: stableDigest(root), content_digest: digest, status: "current" });
+      f.claim(`saturation-claim-${i}`, { status: "candidate", source_id: source, document_id: document, document_digest: digest });
+    }
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let notify!: () => void, opens = 0;
+    const allOpen = new Promise<void>(resolve => { notify = resolve; }), original = fsPromises.open;
+    const fault = t.mock.method(fsPromises, "open", async (...args: Parameters<typeof fsPromises.open>) => {
+      if (String(args[0]).startsWith(`${root}/`)) { if (++opens === 64) notify(); await gate; }
+      return Reflect.apply(original, fsPromises, args);
+    });
+    try {
+      const pending = Array.from({ length: 64 }, (_, i) => f.reader.search({ ...request, source_ids: [`saturation-source-${i}`] }, true));
+      await allOpen;
+      const rejected = await f.reader.search({ ...request, source_ids: ["saturation-source-64"] }, true);
+      assert.equal(rejected.items.length, 0);
+      assert.equal(rejected.diagnostics?.verification_budget_omitted_count, 1);
+      release();
+      assert((await Promise.all(pending)).every(item => item.items.length === 1));
+      assert.equal((await f.reader.search({ ...request, source_ids: ["saturation-source-64"] }, true)).items.length, 1);
+    } finally { release(); fault.mock.restore(); }
+  } finally { release?.(); await f.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("concurrent file verifications do not share results across different content digests", { timeout: 15_000 }, async t => {
+  const f = await fixture(), dir = await mkdtemp(join(tmpdir(), "craft-knowledge-isolation-"));
+  let release!: () => void;
+  try {
+    const root = await realpath(dir), file = join(root, "source.md"), body = "alpha fact\n";
+    await writeFile(file, body);
+    const actual = `sha256:${createHash("sha256").update(body).digest("hex")}`, wrong = `sha256:${"0".repeat(64)}`;
+    for (const [i, digest] of [actual, wrong].entries()) {
+      const source = `isolated-source-${i}`, document = `isolated-doc-${i}`;
+      f.store.create("knowledge_source", source, { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", locator: file });
+      f.store.create("knowledge_document", document, { source_id: source, path: ".", root_digest: stableDigest(file), content_digest: digest, status: "current" });
+      f.claim(`isolated-claim-${i}`, { status: "candidate", source_id: source, document_id: document, document_digest: digest });
+    }
+    let count = 0, notify!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; }), opened = new Promise<void>(resolve => { notify = resolve; });
+    const original = fsPromises.open;
+    const fault = t.mock.method(fsPromises, "open", async (...args: Parameters<typeof fsPromises.open>) => {
+      if (String(args[0]) === file) { if (++count === 2) notify(); await gate; }
+      return Reflect.apply(original, fsPromises, args);
+    });
+    try {
+      const first = f.reader.search({ ...request, source_ids: ["isolated-source-0"] }, true);
+      const second = f.reader.search({ ...request, source_ids: ["isolated-source-1"] }, true);
+      await opened; release();
+      const [good, bad] = await Promise.all([first, second]);
+      assert.equal(good.items.length, 1);
+      assert.equal(bad.items.length, 0);
+      assert.equal(bad.diagnostics?.verification_rejected_count, 1);
+    } finally { release(); fault.mock.restore(); }
+  } finally { release?.(); await f.close(); await rm(dir, { recursive: true, force: true }); }
+});
 
 test("Knowledge contribution fails closed for invalid request time and malformed or expired claim validity", async () => {
   const f = await fixture();

@@ -1,13 +1,161 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { stableDigest } from "../common/craft-common-base/src/digest.ts";
 import { craftPaths, projectStorageDirectory, sessionStorageDirectory, sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
 import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
-import { StorageMigrationPreflightReader, storageMigrationPreflight } from "../core/storage-migration-preflight.ts";
+import { projectAliases, StorageMigrationPreflightReader, storageMigrationPreflight } from "../core/storage-migration-preflight.ts";
+
+test("preflight CLI reports identity status counts for its page", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-preflight-cli-"));
+  const paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  try {
+    const now = new Date().toISOString();
+    const insert = store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,1,?,?,?)");
+    insert.run("memory_candidate", "missing", JSON.stringify({ _memory_partition: { file: join(root, "missing.db"), scope: { kind: "project", id: "project:missing" } } }), now, now);
+    insert.run("memory_candidate", "missing2", JSON.stringify({ _memory_partition: { file: join(root, "missing2.db"), scope: { kind: "project", id: "project:missing" } } }), now, now);
+    insert.run("memory_candidate", "global", JSON.stringify({ _memory_partition: { file: join(root, "global.db"), scope: { kind: "global", id: "global" } } }), now, now);
+    const output = JSON.parse(execFileSync(process.execPath, ["--experimental-strip-types", "scripts/storage-migration-preflight.ts", `--data-root=${paths.root}`], { encoding: "utf8" })) as Record<string, unknown>;
+    const entries = output.entries as Array<Record<string, unknown>>;
+    const expected = entries.reduce<Record<string, number>>((counts, entry) => {
+      if (typeof entry.project_identity_status === "string") counts[entry.project_identity_status] = (counts[entry.project_identity_status] ?? 0) + 1;
+      return counts;
+    }, {});
+    assert.ok(Object.keys(expected).length > 0);
+    assert.deepEqual(output.project_identity_status_counts, expected);
+    const script = ["--experimental-strip-types", "scripts/storage-migration-preflight.ts", `--data-root=${paths.root}`];
+    const first = JSON.parse(execFileSync(process.execPath, [...script, "--limit=1"], { encoding: "utf8" })) as Record<string, unknown>;
+    assert.equal(first.has_more, true);
+    assert.equal(first.pagination_consistency, "single_page_only");
+    assert.equal(typeof first.next_cursor, "string");
+    const next = JSON.parse(execFileSync(process.execPath, [...script, "--limit=1", `--cursor=${first.next_cursor}`], { encoding: "utf8" })) as Record<string, unknown>;
+    assert.notDeepEqual(first.entries, next.entries);
+    assert.equal(next.pagination_consistency, "single_page_only");
+    const legacyCursor = Buffer.from(JSON.stringify("z")).toString("base64url");
+    const legacy = JSON.parse(execFileSync(process.execPath, [...script, `--legacy-cursor=${legacyCursor}`], { encoding: "utf8" })) as Record<string, unknown>;
+    assert.ok(legacy.legacy_session_memory);
+    const defaultStore = await new CraftStore(craftPaths(join(root, ".craft_data"))).open();
+    try {
+      const defaultOutput = JSON.parse(execFileSync(process.execPath, ["--experimental-strip-types", "scripts/storage-migration-preflight.ts"],
+        { encoding: "utf8", env: { ...process.env, HOME: root } })) as Record<string, unknown>;
+      assert.deepEqual(defaultOutput.entries, []);
+    } finally { defaultStore.close(); }
+    assert.throws(() => execFileSync(process.execPath, [...script, "--bad"], { stdio: "pipe" }), /Command failed/u);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("unpartitioned Knowledge inventory respects Evidence ownership", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-preflight-knowledge-owner-"));
+  const paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  try {
+    const now = new Date().toISOString();
+    const insert = store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,1,?,?,?)");
+    const records: Array<[string, string, unknown]> = [
+      ["knowledge_source", "source", {}], ["wiki_page", "wiki", {}], ["knowledge_memory_item", "memory", {}],
+      ["evidence", "knowledge-owner", { metadata: { capability_owner: "knowledge" } }],
+      ["evidence", "fragment", { source_type: "knowledge_fragment" }],
+      ["evidence", "codex", { metadata: { provenance: "codex_session_program_verification" } }],
+      ["evidence", "review", { source_type: "host_model_review", metadata: { review_id: "knowledge_host_review_1" } }],
+      ["evidence", "memory-owner", { source_type: "knowledge_fragment", metadata: { capability_owner: "memory" } }],
+      ["evidence", "experience-owner", { source_type: "knowledge_fragment", metadata: { capability_owner: "experience" } }],
+      ["evidence", "unowned", {}],
+    ];
+    for (const [kind, id, payload] of records) insert.run(kind, id, JSON.stringify(payload), now, now);
+    const reader = new StorageMigrationPreflightReader(paths);
+    try { assert.equal(reader.readPage().unpartitioned_knowledge_versions, 6); }
+    finally { reader.close(); }
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("paged inventory rejects concurrent changes instead of mixing cached aliases and newer records", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-preflight-concurrent-")), paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  try {
+    for (const id of ["first", "second"]) store.create("memory_ledger", id, { scope: { kind: "global", id: "global" }, status: "active", content: id });
+    const reader = new StorageMigrationPreflightReader(paths);
+    try {
+      const first = reader.readPage({ max_records: 1 });
+      assert.equal(first.has_more, true);
+      assert.ok(first.next_cursor);
+      store.create("memory_ledger", "third", { scope: { kind: "global", id: "global" }, status: "active", content: "third" });
+      assert.throws(() => reader.readPage({ max_records: 1, cursor: first.next_cursor! }), /database changed; restart inventory/u);
+    } finally { reader.close(); }
+    assert.equal(storageMigrationPreflight(paths, { max_records: 10 }).examined, 3);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("inventory rejects writes during metadata initialization and while reading a page", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-preflight-race-")), paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  try {
+    store.create("memory_ledger", "first", { scope: { kind: "global", id: "global" }, status: "active", content: "first" });
+    let trigger = "SELECT DISTINCT kind FROM records", nextId = "during-init";
+    DatabaseSync.prototype.prepare = function (sql: string) {
+      if (trigger && this !== store.database && sql.startsWith(trigger)) {
+        trigger = "";
+        store.create("memory_ledger", nextId, { scope: { kind: "global", id: "global" }, status: "active", content: nextId });
+      }
+      return originalPrepare.call(this, sql);
+    };
+    assert.throws(() => new StorageMigrationPreflightReader(paths), /database changed; restart inventory/u);
+    const reader = new StorageMigrationPreflightReader(paths);
+    try {
+      trigger = "SELECT kind,id,version,payload_json FROM records";
+      nextId = "during-page";
+      assert.throws(() => reader.readPage(), /database changed; restart inventory/u);
+    } finally { reader.close(); }
+    assert.equal(storageMigrationPreflight(paths, { max_records: 10 }).examined, 3);
+  } finally { DatabaseSync.prototype.prepare = originalPrepare; store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("preflight checks scoped partition paths without treating unknown scopes as global", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-preflight-scopes-")), paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  try {
+    const insert = store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,1,?,'now','now')");
+    const put = (domain: "memory" | "knowledge" | "experience", id: string, kind: string, scopeId: string, file: string) => {
+      mkdirSync(dirname(file), { recursive: true });
+      if (file !== paths.memoryDatabaseFile) writeFileSync(file, "fixture");
+      insert.run(`${domain}_candidate`, id, JSON.stringify({ [`_${domain}_partition`]: { file, scope: { kind, id: scopeId } } }));
+    };
+    for (const domain of ["memory", "knowledge", "experience"] as const) {
+      const key = domain === "memory" ? "team-id" : "team:team-id";
+      const digest = createHash("sha256").update(key).digest("hex").slice(0, 24);
+      put(domain, `${domain}-team`, "team", "team-id", join(paths.root, domain, "scopes", `team-${digest}`, `${domain}.db`));
+    }
+    put("memory", "task", "task", "task-1", join(paths.runtimeDir, "memory-tasks", "task-1", "memory.db"));
+    put("memory", "invalid-task", "task", "../escape", paths.memoryDatabaseFile);
+    put("memory", "unknown", "unknown", "id", paths.memoryDatabaseFile);
+    put("memory", "wrong-global", "workspace", "workspace-id", paths.memoryDatabaseFile);
+    const statuses = Object.fromEntries(storageMigrationPreflight(paths).entries.map(item => [item.id, item.status]));
+    assert.deepEqual(statuses, { "experience-team": "current", "knowledge-team": "current", "memory-team": "current",
+      task: "current", "invalid-task": "pointer_out_of_scope", unknown: "pointer_out_of_scope", "wrong-global": "pointer_out_of_scope" });
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("migration preflight excludes superseded aliases and project identities", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-preflight-versions-")), project = join(root, "project");
+  mkdirSync(project);
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const scope = { kind: "project", id: "project:old" };
+    const alias = { status: "active", alias_kind: "path", alias: project, alias_digest: stableDigest(project), scope };
+    store.create("scope_alias", "old-alias", alias);
+    store.save("scope_alias", "old-alias", { ...alias, status: "retired" });
+    const identity = { canonical_scope: scope, local_path_alias: project, project_kind: "local_fingerprint", remote_digest: null };
+    store.create("project_identity", scope.id, { ...identity, identity_digest: stableDigest({ canonical: scope, project_kind: identity.project_kind, remote_digest: null }) });
+    store.save("project_identity", scope.id, { ...identity, identity_digest: "invalid" });
+    assert.equal(projectAliases(store.database).has(scope.id), false);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test("storage preflight pages current, legacy, blocked and missing pointers without changing files", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-storage-preflight-"));
@@ -19,10 +167,14 @@ test("storage preflight pages current, legacy, blocked and missing pointers with
     const alias = (id: string, scopeId: string, path: string) => store.create("scope_alias", id,
       { status: "active", alias_kind: "path", alias: path, alias_digest: stableDigest(path), scope: { kind: "project", id: scopeId } });
     alias("project", "project:demo", project);
-    alias("ambig-a", "project:ambig", project);
-    alias("ambig-b", "project:ambig", other);
     store.create("memory_ledger", "current-global", { scope: { kind: "global", id: "global" }, status: "active", content: "global" });
     store.create("memory_ledger", "legacy-project", { scope: { kind: "project", id: "project:demo" }, status: "active", content: "project" });
+    // Simulate conflicting historical aliases after the valid record was written.
+    // Current writes must reject this conflict; the read-only inventory must report it.
+    alias("ambig-a", "project:ambig", project);
+    alias("ambig-b", "project:ambig", other);
+    alias("ambig-missing-a", "project:partly-missing", project);
+    alias("ambig-missing-b", "project:partly-missing", join(root, "missing-project"));
     const addPointer = (id: string, scope: { kind: string; id: string }, file: string) => {
       const now = new Date().toISOString();
       store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
@@ -30,8 +182,14 @@ test("storage preflight pages current, legacy, blocked and missing pointers with
     };
     addPointer("missing-root", { kind: "project", id: "project:missing" }, join(root, "none.db"));
     addPointer("ambiguous-root", { kind: "project", id: "project:ambig" }, join(root, "none.db"));
+    addPointer("partly-missing-root", { kind: "project", id: "project:partly-missing" }, join(root, "none.db"));
     addPointer("unbound-session", { kind: "session", id: `unbound-${randomUUID()}` }, join(root, "none.db"));
     addPointer("outside-pointer", { kind: "project", id: "project:demo" }, join(root, "outside.db"));
+    const canonicalId = `project:${createHash("sha256").update(realpathSync(project)).digest("hex")}`;
+    alias("canonical", canonicalId, project);
+    const canonicalFile = join(projectStorageDirectory(paths, project), "memory", "memory.db");
+    addPointer("canonical-project", { kind: "project", id: canonicalId }, canonicalFile);
+    addPointer("canonical-project-unprefixed", { kind: "project", id: canonicalId.slice("project:".length) }, canonicalFile);
     const missingLegacy = join(other, ".craft_data", "memory", "memory.db");
     alias("other", "project:other", other);
     addPointer("missing-file", { kind: "project", id: "project:other" }, missingLegacy);
@@ -47,13 +205,14 @@ test("storage preflight pages current, legacy, blocked and missing pointers with
       database.prepare("UPDATE records SET payload_json=? WHERE kind='memory_ledger' AND id='legacy-project'").run(JSON.stringify(payload));
     } finally { database.close(); }
     const seen = new Map<string, string>();
+    const identityStatus = new Map<string, string | null>();
     let cursor: string | undefined;
     const reader = new StorageMigrationPreflightReader(paths);
     try {
       do {
         const page = reader.readPage({ max_records: 2, ...(cursor ? { cursor } : {}) });
         assert(page.entries.length <= 2);
-        for (const entry of page.entries) seen.set(entry.id, entry.status);
+        for (const entry of page.entries) { seen.set(entry.id, entry.status); identityStatus.set(entry.id, entry.project_identity_status); }
         cursor = page.next_cursor ?? undefined;
         assert.equal(page.unpartitioned_knowledge_versions, 0);
         assert.equal(page.codebase_checkpoint_versions, 0);
@@ -65,9 +224,17 @@ test("storage preflight pages current, legacy, blocked and missing pointers with
     assert.equal(seen.get("legacy-project"), "legacy_ready");
     assert.equal(seen.get("missing-root"), "missing_root");
     assert.equal(seen.get("ambiguous-root"), "ambiguous_root");
+    assert.equal(seen.get("partly-missing-root"), "ambiguous_root");
     assert.equal(seen.get("unbound-session"), "unbound_session");
     assert.equal(seen.get("outside-pointer"), "pointer_out_of_scope");
     assert.equal(seen.get("missing-file"), "missing_file");
+    assert.equal(identityStatus.get("legacy-project"), "migration_required");
+    assert.equal(identityStatus.get("canonical-project"), "current");
+    assert.equal(identityStatus.get("canonical-project-unprefixed"), "current");
+    assert.equal(identityStatus.get("ambiguous-root"), "unresolved");
+    assert.equal(identityStatus.get("partly-missing-root"), "unresolved");
+    assert.equal(identityStatus.get("missing-root"), "unresolved");
+    assert.equal(identityStatus.get("current-global"), null);
     assert.throws(() => storageMigrationPreflight(paths, { max_records: 0 }), /max_records/u);
     assert.throws(() => storageMigrationPreflight(paths, { cursor: "bad!" }), /cursor is invalid/u);
     assert.throws(() => storageMigrationPreflight(paths, { cursor: Buffer.from("[]").toString("base64url") }), /cursor is invalid/u);
@@ -179,7 +346,7 @@ test("storage preflight handles empty stores, invalid aliases and malformed phys
     renameSync(shared, saved); symlinkSync(saved, shared);
     put("linked", { _memory_partition: { file: shared, scope: { kind: "global", id: "global" } } });
     const statuses = Object.fromEntries(storageMigrationPreflight(paths).entries.map(item => [item.id, item.status]));
-    assert.deepEqual(statuses, { linked: "missing_file", malformed: "pointer_out_of_scope", project: "current" });
+    assert.deepEqual(statuses, { linked: "missing_file", malformed: "pointer_out_of_scope", project: "ambiguous_root" });
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { contextFeedbackWeights } from "../core/context-feedback-weight.ts";
+import { contextFeedbackEvidenceCurrent, contextFeedbackWeights } from "../core/context-feedback-weight.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 
@@ -14,7 +14,9 @@ async function openStore(): Promise<{ store: CraftStore; root: string }> {
 }
 
 function helpful(store: CraftStore, id: string, member: string, target: string, verified = true): void {
-  store.create("context_feedback", id, { outcome: "helpful", evidence_verified: verified,
+  const evidence = store.create("evidence", `evidence-${id}`, { source_type: "program", confidence: "confirmed", metadata: { context_receipt_id: `receipt-${id}`, verdict: "passed" } });
+  store.create("context_feedback", id, { outcome: "helpful", evidence_verified: verified, usage_stage: "used",
+    receipt_id: `receipt-${id}`, verified_evidence_refs: [{ id: evidence.id, version: evidence.version }],
     asset_refs: [{ member, id: target, version: 1, digest: "sha256:" + "a".repeat(64) }] });
 }
 
@@ -31,12 +33,41 @@ test("feedback weights are neutral with no ids or no signals", async () => {
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("stale or unbound evidence no longer increases feedback weight", async () => {
+  const { store, root } = await openStore();
+  try {
+    helpful(store, "current", "knowledge", "k1");
+    store.create("context_feedback", "legacy", { outcome: "helpful", evidence_verified: true, asset_refs: [{ member: "knowledge", id: "k1" }] });
+    assert.equal(contextFeedbackWeights(store, "knowledge", ["k1"]).get("k1")!.positive, 1);
+    const evidence = store.get("evidence", "evidence-current");
+    store.save("evidence", "evidence-current", { ...evidence, confidence: "rejected" });
+    assert.equal(contextFeedbackWeights(store, "knowledge", ["k1"]).get("k1")!.positive, 0);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("feedback rejects incomplete or mismatched evidence bindings", async () => {
+  const { store, root } = await openStore();
+  try {
+    helpful(store, "bound", "knowledge", "k1");
+    const feedback = store.get("context_feedback", "bound");
+    for (const patch of [{ usage_stage: "shown" }, { usage_stage: "selected" }, { receipt_id: "" }, { receipt_id: undefined }, { verified_evidence_refs: [] }, { verified_evidence_refs: [null] },
+      { verified_evidence_refs: [{ id: "missing", version: 1 }] }, { verified_evidence_refs: [{ id: "evidence-bound" }] }, { receipt_id: "other" }]) {
+      assert.equal(contextFeedbackEvidenceCurrent(store, { ...feedback, ...patch }), false);
+    }
+    const evidence = store.get("evidence", "evidence-bound");
+    store.save("evidence", "evidence-bound", { ...evidence, record_origin: "caller_asserted" });
+    assert.equal(contextFeedbackEvidenceCurrent(store, feedback), false);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("verified helpful feedback raises the weight and unverified feedback is ignored", async () => {
   const { store, root } = await openStore();
   try {
     helpful(store, "f1", "knowledge", "k1");
     helpful(store, "f2", "knowledge", "k1");
     helpful(store, "f3", "knowledge", "k1", false);
+    const first = store.get("context_feedback", "f1");
+    store.create("context_feedback", "duplicate", { ...first, asset_refs: [...(first.asset_refs as object[]), null, ...(first.asset_refs as object[])] });
     const weight = contextFeedbackWeights(store, "knowledge", ["k1"]).get("k1")!;
     assert.equal(weight.positive, 2);
     assert.equal(weight.weight, 1.4);

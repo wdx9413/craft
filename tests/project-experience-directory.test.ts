@@ -44,6 +44,7 @@ test("project Experience directory resolves only the registered shared project p
     assert.equal(projectExperienceContentDirectory(f.store, "bad"), null);
     assert.equal(projectExperienceContentDirectory(f.store, "project:bad/id"), null);
     assert.equal(experienceDataDirectory(f.store, "global"), f.store.paths.experienceDir);
+    assert.equal(experienceDataDirectory(f.store, "global", true), f.store.paths.experienceDir);
     assert.equal(experienceDataDirectory(f.store, "project:test"), projectData);
     assert.equal(experienceDataDirectory(f.store, "project:test", true), projectData);
     assert.equal(projectExperienceDirectory(f.store, "project:test", f.project, true), projectData);
@@ -51,9 +52,12 @@ test("project Experience directory resolves only the registered shared project p
     assert.equal(projectPathAliasDigest(f.store, "project:test", f.project), stableDigest(f.project));
     assert.throws(() => projectPathAliasDigest(f.store, "project:test", f.clone), /not registered/u);
     assert.throws(() => projectExperienceDirectory(f.store, "invalid", f.project), /scope is invalid/u);
-    assert.equal(experienceDataDirectory(f.store, "tenant:test"), f.store.paths.experienceDir);
+    assert.throws(() => experienceDataDirectory(f.store, "tenant:test"), /scope must be global or project/u);
     assert.throws(() => experienceDataDirectory(f.store, "project:missing"), /not registered/u);
-    assert.equal(experienceDataDirectory(f.store, "bad"), f.store.paths.experienceDir);
+    assert.throws(() => experienceDataDirectory(f.store, "bad"), /scope is malformed/u);
+    assert.throws(() => experienceDataDirectory(f.store, "bad", true), /scope is malformed/u);
+    assert.throws(() => experienceDataDirectory(f.store, "session:test", true), /scope must be global or project/u);
+    assert.throws(() => experienceDataDirectory(f.store, "session:test"), /scope must be global or project/u);
     assert.throws(() => projectExperienceDirectory(f.store, "project:missing"), /not registered/u);
     assert.throws(() => projectExperienceDirectory(f.store, "project:test", f.clone), /not registered/u);
     assert.throws(() => projectPathAliasDigest(f.store, "invalid", f.project), /scope is invalid/u);

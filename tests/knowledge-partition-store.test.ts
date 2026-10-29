@@ -22,6 +22,22 @@ function sharedPayloads(store: CraftStore, kinds: string[]) {
   return store.database.prepare("SELECT payload_json FROM records WHERE kind IN (SELECT value FROM json_each(?))").all(JSON.stringify(kinds)).map(row => String(row.payload_json));
 }
 
+test("project partitions fail closed when one real root is bound to different project scopes", async () => {
+  const f = await fixture();
+  try {
+    const link = join(f.root, "project-link"); symlinkSync(f.project, link);
+    f.store.create("scope_alias", "same-scope", { scope: { kind: "project", id: "project:demo" }, alias_kind: "path", alias: link, status: "active" });
+    f.store.create("scope_alias", "inactive-other", { scope: { kind: "project", id: "other" }, alias_kind: "path", alias: f.project, status: "inactive" });
+    f.store.create("scope_alias", "bad-digest", { scope: { kind: "project", id: "other" }, alias_kind: "path", alias: f.project, alias_digest: "invalid", status: "active" });
+    f.store.create("scope_alias", "missing-other", { scope: { kind: "project", id: "ghost" }, alias_kind: "path", alias: join(f.root, "missing"), status: "active" });
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('scope_alias','malformed',1,'{','now','now')").run();
+    f.store.create("knowledge_claim", "before-conflict", { scope: "project:demo", status: "candidate" });
+    f.store.create("scope_alias", "other-scope", { scope: { kind: "project", id: "other" }, alias_kind: "path", alias: link, status: "active" });
+    assert.throws(() => f.store.create("knowledge_claim", "cross-scope", { scope: "project:demo", status: "candidate" }), /PROJECT_SCOPE_CONFLICT/u);
+    assert.throws(() => f.store.create("knowledge_claim", "cross-scope-other", { scope: "project:other", status: "candidate" }), /PROJECT_SCOPE_CONFLICT/u);
+  } finally { cleanup(f); }
+});
+
 test("Knowledge candidates, task evidence and evaluations stay in their project capability database", async () => {
   const f = await fixture();
   try {
@@ -187,6 +203,28 @@ test("Knowledge migration is bounded, repeatable and leaves unavailable projects
     assert.equal(existsSync(backupDir), true);
     for (const max_records of [0, -1, 501, 1.5]) assert.throws(() => f.store.reconcileKnowledgeStorage({ max_records }), /max_records/u);
     for (const cursor of ["!", "e30", Buffer.from('[1,2,3]').toString("base64url")]) assert.throws(() => f.store.reconcileKnowledgeStorage({ cursor }), /cursor is invalid/u);
+  } finally { cleanup(f); }
+});
+
+test("records-only Knowledge migration paginates without entering content retirement", async () => {
+  const f = await fixture();
+  try {
+    const now = new Date().toISOString();
+    for (const [id, scope] of [["known", "project:demo"], ["unknown", "project:missing"]]) {
+      f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('knowledge_claim',?,1,?,?,?)")
+        .run(id, JSON.stringify({ scope, content: id }), now, now);
+    }
+    assert.throws(() => f.store.reconcileKnowledgeStorage({ records_only: "yes" as never }), /records_only must be boolean/u);
+    const contentCursor = Buffer.from(JSON.stringify(["content_scan", "", 1])).toString("base64url");
+    assert.throws(() => f.store.reconcileKnowledgeStorage({ records_only: true, cursor: contentCursor }), /cursor is invalid/u);
+    const first = f.store.reconcileKnowledgeStorage({ records_only: true, max_records: 1 });
+    assert.equal(first.migrated, 1); assert.equal(first.has_more, true);
+    const second = f.store.reconcileKnowledgeStorage({ records_only: true, max_records: 1, cursor: String(first.next_cursor) });
+    assert.equal(second.status, "partial"); assert.equal(second.has_more, false); assert.equal(second.next_cursor, null);
+    assert.equal((second.blocked as JsonObject[]).length, 1);
+    f.store.database.prepare("DELETE FROM records WHERE kind='knowledge_claim' AND id='unknown'").run();
+    const empty = f.store.reconcileKnowledgeStorage({ records_only: true });
+    assert.equal(empty.status, "completed"); assert.equal(empty.has_more, false);
   } finally { cleanup(f); }
 });
 

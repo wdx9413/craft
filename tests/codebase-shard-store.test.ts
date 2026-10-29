@@ -12,6 +12,43 @@ import { migrateCodebaseGraphShards } from "../scripts/codebase-graph-shard-migr
 import { compactCentralDb } from "../scripts/compact-central-db.ts";
 import { CodebaseShardStore, type GraphRow } from "../common/craft-common-store-local/src/codebase-shards.ts";
 
+test("Codebase shard reads do not initialize a malformed database and can later write through a separate connection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-codebase-shard-read-only-"));
+  const id = "missing-schema", shard = createHash("sha256").update(id).digest()[0]! % 16;
+  const directory = join(root, "codebase", "legacy-graph-v1"), file = join(directory, `${shard.toString(16).padStart(2, "0")}.db`);
+  await mkdir(directory, { recursive: true });
+  const malformed = new DatabaseSync(file); malformed.exec("CREATE TABLE unrelated(value TEXT)"); malformed.close();
+  const shards = new CodebaseShardStore(root);
+  try {
+    assert.throws(() => shards.raw("codebase_index_shard", id), /records are unavailable/u);
+    const inspect = new DatabaseSync(file, { readOnly: true });
+    try { assert.equal(inspect.prepare("SELECT name FROM sqlite_master WHERE name='records'").get(), undefined); }
+    finally { inspect.close(); }
+    assert.equal(shards.save("codebase_index_shard", id, { label: "first" }).version, 1);
+    assert.equal(shards.find("codebase_index_shard", id)?.label, "first");
+    assert.equal(shards.save("codebase_index_shard", id, { label: "second" }).version, 2);
+    assert.equal(shards.find("codebase_index_shard", id)?.label, "second");
+  } finally { shards.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Codebase shard reads remain available while another connection holds a writer transaction", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-codebase-shard-concurrent-read-"));
+  const id = "concurrent-shard", shard = createHash("sha256").update(id).digest()[0]! % 16;
+  const shards = new CodebaseShardStore(root);
+  try {
+    shards.save("codebase_index_shard", id, { label: "before" });
+    const file = join(shards.directory, `${shard.toString(16).padStart(2, "0")}.db`);
+    const writer = new DatabaseSync(file);
+    try {
+      writer.exec("BEGIN IMMEDIATE");
+      writer.prepare("UPDATE records SET payload_json=? WHERE id=?").run(JSON.stringify({ label: "uncommitted" }), id);
+      assert.equal(shards.find("codebase_index_shard", id)?.label, "before");
+      writer.exec("COMMIT");
+      assert.equal(shards.find("codebase_index_shard", id)?.label, "uncommitted");
+    } finally { writer.close(); }
+  } finally { shards.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("legacy Codebase graph migration keeps every version and its digest", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-codebase-shards-"));
   const paths = craftPaths(root);

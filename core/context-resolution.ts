@@ -251,6 +251,8 @@ export class ContextResolutionKernel {
         continue;
       }
       for (const ref of contribution.read_refs ?? []) guard.track(ref.kind, ref.id, ref.version);
+      if (contributor.member === "knowledge" && contribution.diagnostics?.source_verification_incomplete === true)
+        contributorFailures.push({ member: contributor.member, reason: "source_verification_incomplete" });
       for (const item of contribution.items) guard.contribution(contribution.member, item);
       if (contributor.member === "memory") memoryPart = contribution;
       else recalled.push(contribution);
@@ -391,10 +393,11 @@ export class ContextResolutionKernel {
     const members = this.members(args.members);
     if (members && (!Array.isArray(receipt.members) || (receipt.members as string[]).some(member => !members.has(member as "knowledge" | "memory" | "experience")))) throw new Error("Feedback receipt belongs to another component");
     const evidenceIds = sortedUniqueList(args.evidence_ids, "evidence_ids"); evidenceIds.forEach(id => this.store.get("evidence", id));
-    const evidenceVerified = evidenceIds.some(id => {
+    const verifiedEvidenceRefs = evidenceIds.flatMap(id => {
       const evidence = this.store.get("evidence", id), meta = evidence.metadata as JsonObject | undefined;
-      return evidence.source_type === "program" && evidence.confidence === "confirmed" && meta?.context_receipt_id === receipt.id && meta?.verdict === "passed";
+      return evidence.record_origin !== "caller_asserted" && evidence.source_type === "program" && evidence.confidence === "confirmed" && meta?.context_receipt_id === receipt.id && meta?.verdict === "passed" ? [{ id: evidence.id, version: evidence.version }] : [];
     });
+    const evidenceVerified = verifiedEvidenceRefs.length > 0;
     const availableRefs: JsonObject[] = Array.isArray(receipt.asset_refs) ? receipt.asset_refs as JsonObject[] : [
       ...(receipt.memory_refs as JsonObject[]).map(ref => ({ member: "memory", id: ref.memory_id, version: ref.memory_version, digest: ref.content_digest })),
       ...((receipt.contributions as JsonObject[] | undefined) ?? []).flatMap(part => (part.references as JsonObject[]).map(ref => ({ member: part.member, ...ref }))),
@@ -415,7 +418,7 @@ export class ContextResolutionKernel {
     const turnOutcome = args.turn_outcome === undefined ? null : text(args.turn_outcome, "turn_outcome");
     if (turnOutcome !== null && !["passed", "failed", "abandoned", "unverified"].includes(turnOutcome)) throw new Error("Unsupported Context turn outcome");
     if (outcome === "unrated" && (usageStage !== "shown" || turnOutcome === null)) throw new Error("Unrated automatic Context observations require shown usage and a turn outcome");
-    const identity = { token_measurement: tokenMeasurement, token_provenance: "host_reported", asset_refs: refs, usage_stage: usageStage, ...(turnOutcome ? { turn_outcome: turnOutcome } : {}), evidence_verified: evidenceVerified, memory_refs: refs.filter(ref => ref.member === "memory").map(ref => ({ memory_id: ref.id, memory_version: ref.version, content_digest: ref.digest })), receipt_id: receipt.id, receipt_digest: receipt.identity_digest, scope: receipt.scope, outcome, evidence_ids: evidenceIds, provenance: "host_reported", changes_source_status: false };
+    const identity = { token_measurement: tokenMeasurement, token_provenance: "host_reported", asset_refs: refs, usage_stage: usageStage, ...(turnOutcome ? { turn_outcome: turnOutcome } : {}), evidence_verified: evidenceVerified, verified_evidence_refs: verifiedEvidenceRefs, memory_refs: refs.filter(ref => ref.member === "memory").map(ref => ({ memory_id: ref.id, memory_version: ref.version, content_digest: ref.digest })), receipt_id: receipt.id, receipt_digest: receipt.identity_digest, scope: receipt.scope, outcome, evidence_ids: evidenceIds, provenance: "host_reported", changes_source_status: false };
     const id = String(args.feedback_id ?? `context_feedback_${stableDigest(identity).slice(-24)}`); const existing = this.store.find("context_feedback", id);
     if (existing) { if (existing.identity_digest !== stableDigest(identity)) throw new Error("Context feedback idempotency conflict"); return { feedback: existing, idempotent: true }; }
     return this.store.transaction(() => {

@@ -40,23 +40,24 @@ export function projectKnowledgeContentDirectory(store: CraftStore, scope: strin
   const id = parsed.id.startsWith("project:") ? parsed.id : `project:${parsed.id}`;
   if (!/^project:[A-Za-z0-9_-]{1,96}$/u.test(id)) return null;
 
+  let unavailable = false;
   const aliases = store.list("scope_alias", 10_000, item => item.status === "active" && item.alias_kind === "path"
     && (item.scope as Record<string, unknown> | undefined)?.kind === "project"
     && (item.scope as Record<string, unknown> | undefined)?.id === id)
     .filter(item => typeof item.alias === "string" && isAbsolute(item.alias) && item.alias_digest === stableDigest(item.alias))
-    .map(item => { try { return realpathSync(item.alias as string); } catch { return ""; } })
+    .map(item => { try { return realpathSync(item.alias as string); } catch { unavailable = true; return ""; } })
     .filter(Boolean);
   const identity = store.find("project_identity", id);
   const canonical = identity?.canonical_scope as Record<string, unknown> | undefined;
   if (identity && canonical?.kind === "project" && canonical.id === id
     && identity.identity_digest === stableDigest({ canonical, project_kind: identity.project_kind, remote_digest: identity.remote_digest })
     && typeof identity.local_path_alias === "string" && isAbsolute(identity.local_path_alias)) {
-    try { aliases.push(realpathSync(identity.local_path_alias)); } catch { /* an unavailable project identity remains unbound */ }
+    try { aliases.push(realpathSync(identity.local_path_alias)); } catch { unavailable = true; }
   }
   const roots = [...new Set(aliases)];
   const requested = options.project_root === undefined ? undefined : realpathSync(resolve(options.project_root));
   if (requested && !roots.includes(requested)) throw new Error("Project root is not registered for this Knowledge scope");
-  if (roots.length > 1) throw new Error("Project root is ambiguous for this Knowledge scope");
+  if (roots.length > 1 || roots.length > 0 && unavailable) throw new Error("Project root is ambiguous for this Knowledge scope");
 
   const target = options.reference_path === undefined ? undefined : canonicalCandidatePath(options.reference_path);
   const root = roots[0];

@@ -172,7 +172,8 @@ export class KnowledgeClaimGovernance {
     if (status === "reviewed") throw new Error("Formal Knowledge promotion requires managed Host review and independent effectiveness evaluation");
     if (!KNOWLEDGE_REVIEW_EXIT_STATUSES.has(status)) throw new Error("Knowledge claim review status is unsupported");
     const reviewer = text(args.reviewer, "reviewer"); const reason = assertNoSecret(document(args.reason, "reason"), "reason");
-    const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status,
+    const expectedVersion = args.expected_version === undefined ? Number(claim.version) : finiteInteger(args.expected_version, "expected_version", 1);
+    const saved = this.store.updateIfVersion("knowledge_claim", String(claim.id), expectedVersion, { ...recordPayload(claim), status,
       review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
     const scenarioCatalog = updateKnowledgeScenarioClaim(knowledgeDirectoryForScope(this.store, String(claim.scope ?? "global"), {
       ...((claim.content_ref as JsonObject | undefined)?.path ? { reference_path: String((claim.content_ref as JsonObject).path) } : {}),

@@ -7,8 +7,86 @@ import test from "node:test";
 import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
 import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
 import { WorkspaceState } from "../core/workspace.ts";
-import { codebaseStoragePreflight } from "../core/codebase-storage-preflight.ts";
+import { DatabaseSync } from "node:sqlite";
+import { codebaseStoragePreflight, CodebaseStoragePreflightReader } from "../core/codebase-storage-preflight.ts";
 import { migrateCodebaseSnapshots } from "../core/codebase-storage-migration.ts";
+
+test("Codebase paged inventory rejects commits between and during pages", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-codebase-preflight-race-")), paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  try {
+    const insert = store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('workspace_checkpoint',?,1,'{}','now','now')");
+    insert.run("one"); insert.run("two");
+    const reader = new CodebaseStoragePreflightReader(paths);
+    try {
+      const page = reader.readPage({ max_records: 1 });
+      assert.ok(page.next_cursor);
+      insert.run("three");
+      assert.throws(() => reader.readPage({ max_records: 1, cursor: page.next_cursor! }), /database changed; restart inventory/u);
+    } finally { reader.close(); }
+    const next = new CodebaseStoragePreflightReader(paths);
+    try {
+      let triggered = false;
+      DatabaseSync.prototype.prepare = function (sql: string) {
+        if (!triggered && this !== store.database && sql.startsWith("SELECT id,version,payload_json FROM records")) {
+          triggered = true; insert.run("four");
+        }
+        return originalPrepare.call(this, sql);
+      };
+      assert.throws(() => next.readPage(), /database changed; restart inventory/u);
+      assert.equal(triggered, true);
+    } finally { DatabaseSync.prototype.prepare = originalPrepare; next.close(); }
+    const recovered = new CodebaseStoragePreflightReader(paths);
+    try { assert.equal(recovered.readPage().examined, 4); }
+    finally { recovered.close(); }
+  } finally { DatabaseSync.prototype.prepare = originalPrepare; store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Codebase inventory closes its monitoring connection if version lookup fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-codebase-monitor-failure-")), paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  const originalPrepare = DatabaseSync.prototype.prepare, originalClose = DatabaseSync.prototype.close;
+  let failedDatabase: DatabaseSync | undefined, closed = false;
+  try {
+    DatabaseSync.prototype.prepare = function (sql: string) {
+      if (this !== store.database && sql === "PRAGMA data_version") { failedDatabase = this; throw new Error("version unavailable"); }
+      return originalPrepare.call(this, sql);
+    };
+    DatabaseSync.prototype.close = function () {
+      if (this === failedDatabase) closed = true;
+      return originalClose.call(this);
+    };
+    assert.throws(() => new CodebaseStoragePreflightReader(paths), /version unavailable/u);
+    assert.equal(closed, true);
+  } finally {
+    DatabaseSync.prototype.prepare = originalPrepare; DatabaseSync.prototype.close = originalClose;
+    store.close(); rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Codebase preflight isolates non-object JSON records and empty pages", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-codebase-preflight-json-"));
+  const paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  try {
+    assert.deepEqual(codebaseStoragePreflight(paths).entries, []);
+    const insert = store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,1,?,'now','now')");
+    insert.run("workspace", "null-workspace", "null");
+    insert.run("workspace", "array-workspace", "[]");
+    insert.run("workspace", "broken-workspace", "{");
+    insert.run("workspace", "scalar-workspace", "7");
+    insert.run("workspace", "revisionless-workspace", "{}");
+    insert.run("workspace_checkpoint", "null-checkpoint", "null");
+    insert.run("workspace_checkpoint", "array-checkpoint", "[]");
+    for (const id of ["null-workspace", "array-workspace", "broken-workspace", "scalar-workspace", "revisionless-workspace"]) insert.run("workspace_checkpoint", `checkpoint-${id}`,
+      JSON.stringify({ workspace_id: id, state_revision: 1, snapshot_root: "/missing", entries: [] }));
+    const statuses = Object.fromEntries(codebaseStoragePreflight(paths).entries.map(item => [item.id, item.status]));
+    assert.deepEqual(statuses, { "array-checkpoint": "invalid_checkpoint", "checkpoint-array-workspace": "missing_workspace",
+      "checkpoint-broken-workspace": "missing_workspace", "checkpoint-null-workspace": "missing_workspace",
+      "checkpoint-revisionless-workspace": "missing_workspace", "checkpoint-scalar-workspace": "missing_workspace", "null-checkpoint": "invalid_checkpoint" });
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test("Codebase preflight pages current, old project and missing Workspace revisions", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-preflight-"));
@@ -122,11 +200,17 @@ test("Codebase preflight fails closed for missing, ambiguous and unsafe historic
     put("workspace", "ambiguous", 1, { state_revision: 1, root_path: a });
     put("workspace", "ambiguous", 2, { state_revision: 1, root_path: b });
     put("workspace", "removed", 1, { state_revision: 1, root_path: join(root, "gone") });
+    put("workspace", "partly-removed", 1, { state_revision: 1, root_path: a });
+    put("workspace", "partly-removed", 2, { state_revision: 1, root_path: join(root, "gone") });
+    put("workspace", "root-unspecified", 1, { state_revision: 1, root_path: a });
+    put("workspace", "root-unspecified", 2, { state_revision: 1 });
     const checkpoint = (id: string, workspace_id: string, snapshot_root: string, state_revision = 1) =>
       put("workspace_checkpoint", id, 1, { workspace_id, snapshot_root, state_revision, entries: [] });
     checkpoint("no-workspace", "unknown", join(root, "x"));
     checkpoint("no-root", "removed", join(root, "x"));
     checkpoint("ambiguous", "ambiguous", join(root, "x"));
+    checkpoint("partly-removed", "partly-removed", join(root, "x"));
+    checkpoint("root-unspecified", "root-unspecified", join(root, "x"));
     checkpoint("outside", "present", join(root, "outside"));
     checkpoint("missing-snapshot", "present", join(a, ".craft_data", "codebase", "snapshots", "present", "missing-snapshot"));
     put("workspace_checkpoint", "invalid", 1, { workspace_id: "present", snapshot_root: "", entries: "bad" });
@@ -135,7 +219,7 @@ test("Codebase preflight fails closed for missing, ambiguous and unsafe historic
     checkpoint("current", "present", current);
     const statuses = Object.fromEntries(codebaseStoragePreflight(paths, { max_records: 20 }).entries.map(item => [item.id, item.status]));
     assert.deepEqual(statuses, { ambiguous: "ambiguous_root", current: "current", invalid: "invalid_checkpoint",
-      "missing-snapshot": "missing_snapshot", "no-root": "missing_root", "no-workspace": "missing_workspace", outside: "source_out_of_scope" });
+      "missing-snapshot": "missing_snapshot", "no-root": "missing_root", "no-workspace": "missing_workspace", outside: "source_out_of_scope", "partly-removed": "ambiguous_root", "root-unspecified": "ambiguous_root" });
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -166,7 +250,7 @@ test("Codebase preflight rejects malformed records, non-directory roots and link
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("Codebase migration recovers from an exact peer file in another Workspace of the same project", async () => {
+test("Codebase migration recovers from an exact peer file in another Workspace of the same project", async t => {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-cross-workspace-recovery-"));
   const paths = craftPaths(join(root, "data")), project = join(root, "project");
   mkdirSync(project); writeFileSync(join(project, "a.ts"), "export const a = 1;\n");
@@ -187,6 +271,40 @@ test("Codebase migration recovers from an exact peer file in another Workspace o
       .run(JSON.stringify({ ...original, snapshot_root: legacy }));
     writeFileSync(join(legacy, "a.ts"), "changed-size\n");
     const entry = codebaseStoragePreflight(paths, { max_records: 10 }).entries.find(item => item.id === "old-checkpoint")!;
+    const peer = store.database.prepare("SELECT payload_json FROM records WHERE kind='workspace_checkpoint' AND id='peer-checkpoint'").get() as { payload_json: string };
+    const peerRevision = (JSON.parse(peer.payload_json) as { state_revision: number }).state_revision;
+    const maximum = store.database.prepare("SELECT MAX(version) AS version FROM records WHERE kind='workspace' AND id='peer-repo'").get() as { version: number };
+    const extraVersion = maximum.version + 1;
+    store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('workspace','peer-repo',?,?,'now','now')")
+      .run(extraVersion, JSON.stringify({ state_revision: peerRevision, root_path: join(root, "unavailable") }));
+    const ambiguous = await migrateCodebaseSnapshots(store, [entry], { recover_verified_peer: true });
+    assert.equal(ambiguous.migrated, 0);
+    assert.deepEqual(ambiguous.blocked.map(item => item.reason), ["verified_source_unavailable"]);
+    store.database.prepare("UPDATE records SET payload_json=? WHERE kind='workspace' AND id='peer-repo' AND version=?")
+      .run(JSON.stringify({ state_revision: peerRevision }), extraVersion);
+    const unspecified = await migrateCodebaseSnapshots(store, [entry], { recover_verified_peer: true });
+    assert.deepEqual(unspecified.blocked.map(item => item.reason), ["verified_source_unavailable"]);
+    store.database.prepare("DELETE FROM records WHERE kind='workspace' AND id='peer-repo' AND version=?").run(extraVersion);
+    const prepare = DatabaseSync.prototype.prepare;
+    let changed = false;
+    const mocked = t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, query: string, ...values: unknown[]) {
+      const statement = Reflect.apply(prepare, this, [query, ...values]);
+      if (!query.startsWith("UPDATE records SET payload_json=? WHERE kind='workspace_checkpoint'")) return statement;
+      return { run: (...args: unknown[]) => {
+        if (!changed) {
+          changed = true;
+          Reflect.apply(prepare, this, ["INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('workspace','peer-repo',?,?,'now','now')"])
+            .run(extraVersion, JSON.stringify({ state_revision: peerRevision, root_path: join(root, "unavailable") }));
+        }
+        return Reflect.apply(statement.run, statement, args);
+      } } as never;
+    });
+    try {
+      const raced = await migrateCodebaseSnapshots(store, [entry], { recover_verified_peer: true });
+      assert.equal(raced.migrated, 0);
+      assert.deepEqual(raced.blocked.map(item => item.reason), ["peer_workspace_changed_concurrently"]);
+    } finally { mocked.mock.restore(); }
+    store.database.prepare("DELETE FROM records WHERE kind='workspace' AND id='peer-repo' AND version=?").run(extraVersion);
     const result = await migrateCodebaseSnapshots(store, [entry], { recover_verified_peer: true });
     assert.equal(result.migrated, 1);
     assert.deepEqual(result.blocked, []);

@@ -111,7 +111,35 @@ test("keeps publisher signatures separate from capability activation and makes d
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("accepts only observed two-Host/two-Case five-trial evidence before default activation", async () => {
+test("runtime acceptance projects legacy eligible records as unverified", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("runtime_acceptance_evaluation", "legacy-eval", { status: "eligible", candidate_default_activation_permitted: true });
+    f.store.create("runtime_acceptance_plan", "legacy-plan", { latest_evaluation_id: "legacy-eval" });
+    const result = f.service.runtimeAcceptanceGet({ plan_id: "legacy-plan" }).evaluation as JsonObject;
+    assert.equal(result.status, "inconclusive"); assert.equal(result.recorded_status, "eligible");
+    assert.equal(result.candidate_default_activation_permitted, false);
+    assert.equal(result.inconclusive_reason, "candidate_execution_binding_unverified");
+    assert.equal(f.store.get("runtime_acceptance_evaluation", "legacy-eval").candidate_default_activation_permitted, true);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("runtime acceptance rejects reused and stale observations", async () => {
+  const f = await fixture();
+  try {
+    f.service.runtimeAcceptancePlan({ plan_id: "evidence-check", case_ids: ["one", "two"], host_ids: ["codex"], baseline_harness: "base", candidate_harness: "candidate", environment_fingerprint: "env", budget_fingerprint: "budget", trials_per_pair: 3, observer_kind: "workspace" });
+    f.store.create("host_session", "evidence-session", { host_id: "codex", environment_fingerprint: "env", trace_id: "trace" });
+    f.store.create("outcome_observation", "evidence-observation", { host_id: "codex", trace_id: "trace", observer_id: "observer", observer_kind: "workspace", verdict: "passed" });
+    const record = (caseId: string) => f.service.runtimeAcceptanceRecord({ plan_id: "evidence-check", host_id: "codex", case_id: caseId, arm: "candidate", harness: "candidate", trial_index: 1, environment_fingerprint: "env", budget_fingerprint: "budget", host_session_id: "evidence-session", observation_id: "evidence-observation" });
+    record("one"); record("two");
+    assert.throws(() => f.service.runtimeAcceptanceEvaluate({ plan_id: "evidence-check" }), /distinct sessions and observations/);
+    const observation = f.store.get("outcome_observation", "evidence-observation");
+    f.store.save("outcome_observation", "evidence-observation", { ...observation, verdict: "failed" });
+    assert.throws(() => f.service.runtimeAcceptanceEvaluate({ plan_id: "evidence-check" }), /evidence changed or is unbound/);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("winning observed trials cannot activate an unverified candidate", async () => {
   const f = await fixture();
   try {
     const plan = f.service.runtimeAcceptancePlan({ plan_id: "plan", case_ids: ["code", "file"], host_ids: ["codex", "other"], baseline_harness: "single", candidate_harness: "retrieval", environment_fingerprint: "env", budget_fingerprint: "budget", trials_per_pair: 5, observer_kind: "workspace" }).plan as JsonObject;
@@ -120,7 +148,7 @@ test("accepts only observed two-Host/two-Case five-trial evidence before default
       const observationId = `obs-${sessionId}`; f.store.create("outcome_observation", observationId, { trace_id: `trace-${sessionId}`, host_id: host, observer_id: "observer", observer_kind: "workspace", verdict: arm === "candidate" ? "passed" : "failed" });
       f.service.runtimeAcceptanceRecord({ plan_id: plan.id, host_id: host, case_id: caseId, arm, harness: arm === "candidate" ? "retrieval" : "single", trial_index: trial, environment_fingerprint: "env", budget_fingerprint: "budget", host_session_id: sessionId, observation_id: observationId });
     }
-    const result = f.service.runtimeAcceptanceEvaluate({ plan_id: plan.id }).evaluation as JsonObject; assert.equal(result.status, "eligible"); assert.equal(result.candidate_default_activation_permitted, true); assert.equal((f.service.runtimeAcceptanceGet({ plan_id: plan.id }).records as JsonObject[]).length, 40);
+    const result = f.service.runtimeAcceptanceEvaluate({ plan_id: plan.id }).evaluation as JsonObject; assert.equal(result.status, "inconclusive"); assert.equal(result.candidate_default_activation_permitted, false); assert.equal(result.inconclusive_reason, "candidate_execution_binding_unverified"); assert.equal((f.service.runtimeAcceptanceGet({ plan_id: plan.id }).records as JsonObject[]).length, 40);
     assert.throws(() => f.service.runtimeAcceptanceRecord({ plan_id: plan.id, host_id: "codex", case_id: "code", arm: "candidate", harness: "retrieval", trial_index: 1, environment_fingerprint: "env", budget_fingerprint: "budget", host_session_id: "x", observation_id: "x" }), /not collecting/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

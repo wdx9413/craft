@@ -169,14 +169,14 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_codebase_symbol_read: { max_lines: "integer", max_bytes: "integer", continuation: "string" },
   craft_codebase_definition_find: { offset: "integer", limit: "integer" },
   craft_codebase_impact_query: { max_depth: "integer" },
-  craft_context_ephemeral_record: { items: "array", session_id: "string", source: "string", ttl_seconds: "integer", now: "string", index_id: "string" },
-  craft_context_ephemeral_search: { session_id: "string", source: "string", query: "string", limit: "integer", now: "string", index_id: "string" },
-  craft_context_ephemeral_purge: { session_id: "string", source: "string", index_id: "string" },
-  craft_context_output_capture: { tool_name: "string", content: "string", session_id: "string", max_chars: "integer", ttl_seconds: "integer" },
+  craft_context_ephemeral_record: { items: "array", session_id: "string", session_host: "string", source: "string", ttl_seconds: "integer", now: "string", index_id: "string" },
+  craft_context_ephemeral_search: { session_id: "string", session_host: "string", source: "string", query: "string", limit: "integer", now: "string", index_id: "string", read_item_id: "string", read_start: "integer", read_end: "integer", max_chars: "integer", identity_digest: "string" },
+  craft_context_ephemeral_purge: { session_id: "string", session_host: "string", source: "string", index_id: "string" },
+  craft_context_output_capture: { tool_name: "string", content: "string", session_id: "string", session_host: "string", max_chars: "integer", ttl_seconds: "integer" },
   craft_context_compute: { language: "string", code: "string", timeout_ms: "integer", output_limit: "integer", allow_execution: "boolean" },
-  craft_context_resume_checkpoint: { session_id: "string", scope: "string", files_touched: "array", tasks: "array", errors: "array", decisions: "array", open_questions: "array", now: "string" },
-  craft_context_resume_get: { session_id: "string" },
-  craft_context_resume_resolve: { session_id: "string", max_chars: "integer" },
+  craft_context_resume_checkpoint: { session_id: "string", session_host: "string", scope: "string", files_touched: "array", tasks: "array", errors: "array", decisions: "array", open_questions: "array", now: "string" },
+  craft_context_resume_get: { session_id: "string", session_host: "string" },
+  craft_context_resume_resolve: { session_id: "string", session_host: "string", max_chars: "integer" },
   craft_context_stats: {},
   craft_context_health: {},
   craft_context_routing_render: { client: "string" },
@@ -188,7 +188,8 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
 
 const objectSchema = (toolName: string, required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
   properties: Object.fromEntries([...required, ...optional].map((name) => [name, toolName === "craft_context_open" && (name === "max_chars" || name === "max_items")
-    ? { type: "integer", description: `Range: 1 to ${name === "max_chars" ? DEFAULT_CONTEXT_MAX_CHARS : DEFAULT_CONTEXT_MAX_ITEMS}; omit to use the default.` }
+    ? { type: "integer", minimum: 1, maximum: name === "max_chars" ? DEFAULT_CONTEXT_MAX_CHARS : DEFAULT_CONTEXT_MAX_ITEMS,
+      description: `Range: 1 to ${name === "max_chars" ? DEFAULT_CONTEXT_MAX_CHARS : DEFAULT_CONTEXT_MAX_ITEMS}; omit to use the default.` }
     : ENUMS_BY_TOOL[toolName]?.[name]
     ? { type: "string", enum: [...ENUMS_BY_TOOL[toolName][name]!] }
     : TYPES_BY_TOOL[toolName]?.[name] ? { type: TYPES_BY_TOOL[toolName][name] } : schemaFor(name)])), required,

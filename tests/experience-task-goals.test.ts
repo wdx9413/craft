@@ -3,13 +3,17 @@ import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGoal, type ExperienceTaskGoalArgs } from "../core/experience-task-goals.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-task-goal-"));
   const experienceDir = join(root, "experience");
   await mkdir(experienceDir, { recursive: true });
-  const args: ExperienceTaskGoalArgs = { experience_dir: experienceDir, scope: "project:fixture", session_id: "session-one", turn_id: "turn-one",
+  const args: ExperienceTaskGoalArgs = { experience_dir: experienceDir, scope: "project:fixture", session_host: "codex", session_id: "session-one", turn_id: "turn-one",
     task_goal: "Classify a verified project change" };
   return { root, experienceDir, args };
 }
@@ -32,11 +36,100 @@ test("Experience task goals are project scoped, idempotent, and deleted after us
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("Experience goals with identical session and turn IDs are isolated by Host", async () => {
+  const f = await fixture();
+  try {
+    const claude = { ...f.args, session_host: "claude" as const, task_goal: "Classify another verified change" };
+    storeExperienceTaskGoal(f.args);
+    storeExperienceTaskGoal(claude);
+    assert.equal(readExperienceTaskGoal(f.args), f.args.task_goal);
+    assert.equal(readExperienceTaskGoal(claude), claude.task_goal);
+    deleteExperienceTaskGoal(f.args);
+    assert.equal(readExperienceTaskGoal(claude), claude.task_goal);
+    assert.equal((await readdir(join(f.experienceDir, "scenario-classification", "pending"))).length, 1);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("concurrent processes can idempotently create the same Experience task goal", { timeout: 20_000 }, async () => {
+  const f = await fixture();
+  try {
+    const moduleUrl = pathToFileURL(join(process.cwd(), "core", "experience-task-goals.ts")).href;
+    const code = `import { storeExperienceTaskGoal } from ${JSON.stringify(moduleUrl)}; storeExperienceTaskGoal(JSON.parse(process.env.CRAFT_TEST_GOAL));`;
+    const attempts = Array.from({ length: 12 }, () => new Promise<void>((resolveExit, reject) => {
+      const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", code],
+        { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, CRAFT_TEST_GOAL: JSON.stringify(f.args) } });
+      let stderr = ""; child.stderr.on("data", chunk => { stderr += String(chunk); });
+      child.once("error", reject);
+      child.once("exit", code => code === 0 ? resolveExit() : reject(new Error(stderr)));
+    }));
+    await Promise.all(attempts);
+    assert.equal(readExperienceTaskGoal(f.args), f.args.task_goal);
+    assert.equal((await readdir(join(f.experienceDir, "scenario-classification", "pending"))).length, 1);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Experience goal publication handles concurrent creation and rejects conflicting or failed writes", async t => {
+  const f = await fixture();
+  const error = (code: string) => Object.assign(new Error(code), { code });
+  const originalLink = fs.linkSync;
+  try {
+    t.mock.method(fs, "linkSync", ((source, destination) => {
+      originalLink(source, destination);
+      throw error("EEXIST");
+    }) as typeof fs.linkSync);
+    syncBuiltinESMExports();
+    storeExperienceTaskGoal(f.args);
+    assert.equal(readExperienceTaskGoal(f.args), f.args.task_goal);
+    deleteExperienceTaskGoal(f.args);
+    t.mock.restoreAll(); syncBuiltinESMExports();
+
+    t.mock.method(fs, "linkSync", ((_source, destination) => {
+      fs.writeFileSync(destination, JSON.stringify({ identity_digest: "other" }));
+      throw error("EEXIST");
+    }) as typeof fs.linkSync);
+    syncBuiltinESMExports();
+    assert.throws(() => storeExperienceTaskGoal(f.args), /idempotency conflict/u);
+    deleteExperienceTaskGoal(f.args);
+    t.mock.restoreAll(); syncBuiltinESMExports();
+
+    t.mock.method(fs, "linkSync", (() => { throw error("EACCES"); }) as typeof fs.linkSync);
+    syncBuiltinESMExports();
+    assert.throws(() => storeExperienceTaskGoal(f.args), /EACCES/u);
+    assert.deepEqual(await readdir(join(f.experienceDir, "scenario-classification", "pending")), []);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Experience goal directory creation checks a concurrent replacement", async t => {
+  const f = await fixture();
+  const originalMkdir = fs.mkdirSync;
+  const error = (code: string) => Object.assign(new Error(code), { code });
+  const queue = join(f.experienceDir, "scenario-classification");
+  try {
+    t.mock.method(fs, "mkdirSync", ((path, options) => { originalMkdir(path, options); throw error("EEXIST"); }) as typeof fs.mkdirSync);
+    syncBuiltinESMExports();
+    storeExperienceTaskGoal(f.args);
+    assert.equal(readExperienceTaskGoal(f.args), f.args.task_goal);
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    await rm(queue, { recursive: true });
+
+    t.mock.method(fs, "mkdirSync", ((path) => { fs.writeFileSync(path, "not a directory"); throw error("EEXIST"); }) as typeof fs.mkdirSync);
+    syncBuiltinESMExports();
+    assert.throws(() => storeExperienceTaskGoal(f.args), /regular directories/u);
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    await rm(queue);
+
+    t.mock.method(fs, "mkdirSync", (() => { throw error("EACCES"); }) as typeof fs.mkdirSync);
+    syncBuiltinESMExports();
+    assert.throws(() => storeExperienceTaskGoal(f.args), /EACCES/u);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("Experience task goals reject invalid scope, identity, secret, and oversized summaries", async () => {
   const f = await fixture();
   try {
     for (const args of [
       { ...f.args, scope: "global" }, { ...f.args, session_id: " " }, { ...f.args, turn_id: " " },
+      { ...f.args, session_host: "unknown" as "codex" },
       { ...f.args, task_goal: "token=abcdefghijk" }, { ...f.args, task_goal: "x".repeat(321) },
     ]) assert.throws(() => storeExperienceTaskGoal(args), /invalid|sanitized/u);
     assert.throws(() => readExperienceTaskGoal({ ...f.args, scope: "global" }), /identity is invalid/u);

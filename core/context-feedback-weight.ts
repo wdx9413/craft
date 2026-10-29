@@ -16,6 +16,19 @@ export interface ContextFeedbackWeight {
   readonly negative: number;
 }
 
+/** Historical feedback without a current, bound program receipt is not proof. */
+export function contextFeedbackEvidenceCurrent(store: CraftStore, feedback: JsonObject): boolean {
+  if (feedback.evidence_verified !== true || !["used", "verified"].includes(String(feedback.usage_stage)) || typeof feedback.receipt_id !== "string" || !feedback.receipt_id || !Array.isArray(feedback.verified_evidence_refs) || !feedback.verified_evidence_refs.length) return false;
+  return (feedback.verified_evidence_refs as JsonObject[]).some(ref => {
+    if (!ref || typeof ref.id !== "string" || !Number.isSafeInteger(ref.version)) return false;
+    const evidence = store.find("evidence", ref.id, undefined, false);
+    const metadata = evidence?.metadata as JsonObject | undefined;
+    return evidence !== null && evidence.version === ref.version && evidence.record_origin !== "caller_asserted"
+      && evidence.source_type === "program" && evidence.confidence === "confirmed"
+      && metadata?.context_receipt_id === feedback.receipt_id && metadata?.verdict === "passed";
+  });
+}
+
 /**
  * Ranking weight derived from observed Context usage.
  *
@@ -30,10 +43,15 @@ export function contextFeedbackWeights(store: CraftStore, member: string, ids: r
   const result = new Map<string, ContextFeedbackWeight>();
   if (wanted.size === 0) return result;
   const positive = new Map<string, number>(), negative = new Map<string, number>();
+  const counted = new Set<string>();
   for (const item of store.list("context_feedback", 10_000,
     (value) => value.outcome === "helpful" && value.evidence_verified === true, false)) {
+    if (!contextFeedbackEvidenceCurrent(store, item)) continue;
     for (const ref of Array.isArray(item.asset_refs) ? item.asset_refs as JsonObject[] : []) {
-      if (ref.member === member && typeof ref.id === "string" && wanted.has(ref.id)) positive.set(ref.id, (positive.get(ref.id) ?? 0) + 1);
+      if (ref && ref.member === member && typeof ref.id === "string" && wanted.has(ref.id)) {
+        const key = JSON.stringify([item.receipt_id, ref.id]);
+        if (!counted.has(key)) { counted.add(key); positive.set(ref.id, (positive.get(ref.id) ?? 0) + 1); }
+      }
     }
   }
   for (const task of store.list("context_correction_task", 10_000,

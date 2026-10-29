@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { text } from "./validation.ts";
 import { digestJson, payload } from "./digest.ts";
+import { assertDeliveryEvaluationCurrent } from "./delivery-evaluation.ts";
 
 const ROLES = new Set(["primary", "diagnostic_research", "independent_evaluator", "remote_readonly"]);
 
@@ -38,6 +39,7 @@ export class HarnessTopologyKernel {
     if (topology.mode !== "candidate") throw new Error("Only candidate harness topology can be promoted");
     const evaluation = this.store.get("delivery_evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
     if (evaluation.status !== "eligible_for_signoff") throw new Error("Harness topology requires an eligible paired evaluation");
+    assertDeliveryEvaluationCurrent(this.store, evaluation);
     const evidenceIds = strings(args.evidence_ids, "evidence_ids"); confirmed(this.store, evidenceIds);
     if (topology.lifecycle === "routing_eligible") return { topology, idempotent: true };
     if (topology.lifecycle !== "shadow_only") throw new Error("Harness topology is not promotable");
@@ -47,7 +49,11 @@ export class HarnessTopologyKernel {
   select(args: JsonObject): JsonObject {
     const task = this.store.get("task", text(args.task_id, "task_id")); const baseline = this.store.get("harness_topology", text(args.baseline_topology_id, "baseline_topology_id"));
     if (baseline.task_id !== task.id || baseline.mode !== "baseline" || baseline.lifecycle !== "active") throw new Error("Harness baseline is not active for this task");
-    const candidates = this.store.list("harness_topology", 1000, (item) => item.task_id === task.id && item.mode === "candidate" && item.lifecycle === "routing_eligible").sort((left, right) => String(left.id).localeCompare(String(right.id)));
+    const candidates = this.store.list("harness_topology", 1000, (item) => item.task_id === task.id && item.mode === "candidate" && item.lifecycle === "routing_eligible").filter(item => {
+      const evaluation = typeof item.evaluation_run_id === "string" ? this.store.find("delivery_evaluation_run", item.evaluation_run_id) : null;
+      if (!evaluation || evaluation.version !== item.evaluation_run_version || evaluation.status !== "eligible_for_signoff") return false;
+      try { assertDeliveryEvaluationCurrent(this.store, evaluation); return true; } catch { return false; }
+    }).sort((left, right) => String(left.id).localeCompare(String(right.id)));
     const chosen = candidates[0] ?? baseline; const identity = { task_id: task.id, baseline_topology_id: baseline.id, baseline_version: baseline.version, selected_topology_id: chosen.id, selected_version: chosen.version };
     const selectionId = String(args.selection_id ?? `harness_topology_selection_${digestJson(identity).slice(-16)}`); const existing = this.store.find("harness_topology_selection", selectionId); const selectionDigest = digestJson(identity);
     if (existing) { if (existing.selection_digest !== selectionDigest) throw new Error("Harness topology selection idempotency conflict"); return { selection: existing, topology: chosen, idempotent: true }; }

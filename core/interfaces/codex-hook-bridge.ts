@@ -24,6 +24,7 @@ import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGo
 import { sanitizeCodexTaskGoal } from "../codex-task-prose.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import { HookSignalSanitizer, nestedText, type HookSignal } from "./codex-hook-signal-sanitizer.ts";
+import { queueHookMaintenance } from "./memory-archive-worker.ts";
 export { HookSignalSanitizer } from "./codex-hook-signal-sanitizer.ts";
 
 type ComponentHookMember = "knowledge" | "memory" | "experience";
@@ -88,6 +89,7 @@ function text(value: unknown): string | null {
 }
 
 function hookHost(input: HookInput): "codex" | "claude" {
+  if (input.session_host === "codex" || input.session_host === "claude") return input.session_host;
   return /claude/iu.test(text(input.source) ?? "") ? "claude" : "codex";
 }
 
@@ -128,7 +130,7 @@ export function sanitizedExperienceTaskGoal(value: unknown): string | null {
 function experienceTaskGoalArgs(service: CraftService, input: HookInput, scope: HookProjectScope | null) {
   const root = text(input.cwd), sessionId = text(input.session_id), turnId = text(input.turn_id);
   if (!root || !sessionId || !turnId || !scope) return null;
-  return { experience_dir: projectExperienceDirectory(service.store, scope.id, root, true), scope: scope.id, session_id: sessionId, turn_id: turnId };
+  return { experience_dir: projectExperienceDirectory(service.store, scope.id, root, true), scope: scope.id, session_host: hookHost(input), session_id: sessionId, turn_id: turnId };
 }
 
 type Signal = HookSignal;
@@ -199,15 +201,16 @@ export class HookTurnJournal {
     const scope = projectScope === undefined ? codexProjectScope(input.cwd) : projectScope; const turn = this.turn(input);
     if (!scope || !turn) return null;
     const journalId = this.journalId(scope, turn, input);
+    const matched = this.find(input, false, scope);
     const legacyRow = this.service.store.database.prepare("SELECT 1 FROM records WHERE kind='codex_hook_turn' AND id=? LIMIT 1")
-      .get(journalId) !== undefined;
+      .get(typeof matched?.id === "string" ? matched.id : journalId) !== undefined;
     if (process.env.CRAFT_HOOK_MODE === "1" && !legacyRow) {
       const prior = this.find(input, false, scope);
       if (prior?.closed_at) return prior;
       const signalId = signal.id;
       return this.service.store.traceTransaction(signalId, () => {
         const existing = this.service.store.traceShards.find("codex_hook_signal", signalId, undefined, signalId);
-        return existing ?? this.service.store.create("codex_hook_signal", signalId, { scope, session_id: text(input.session_id) ?? "unknown",
+        return existing ?? this.service.store.create("codex_hook_signal", signalId, { scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown",
           turn_id: turn, trace_id: signalId, signal: signal as unknown as JsonObject,
           observed_at_ms: performance.timeOrigin + performance.now(), content_stored: false });
       });
@@ -228,7 +231,7 @@ export class HookTurnJournal {
         && new Set(verifications.map(item => String(item.scenario_key))).size === 1 ? String(verifications[0]!.scenario_key) : null;
       const coarseScenarioKey = scenarioKey && verifications.every(item => (item.coarse_scenario_key ?? null) === (verifications[0]!.coarse_scenario_key ?? null))
         ? text(verifications[0]!.coarse_scenario_key) : null;
-      const next = { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, trace_id: currentId, signals,
+      const next = { scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown", turn_id: turn, trace_id: currentId, signals,
         has_edit: signals.some((item) => item.kind === "edit"),
         verification_outcome: !outcomes.length || outcomes.includes("unknown") ? null : outcomes.includes("failed") ? "failed" : "passed",
         edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest,
@@ -248,7 +251,7 @@ export class HookTurnJournal {
     const existing = this.find(input, false, scope);
     const id = existing ? String(existing.id) : this.journalId(scope, turn, input);
     const prior = existing ?? this.findById(id);
-    this.service.store.save("codex_hook_turn", id, { ...(prior ?? { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals: [], has_edit: false, verification_outcome: null, content_stored: false }), trace_id: String(prior?.trace_id ?? id), context_receipt_id: receipt.id, content_free: true });
+    this.service.store.save("codex_hook_turn", id, { ...(prior ?? { scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals: [], has_edit: false, verification_outcome: null, content_stored: false }), trace_id: String(prior?.trace_id ?? id), context_receipt_id: receipt.id, content_free: true });
   }
 
   find(input: HookInput, includePendingSignals = process.env.CRAFT_HOOK_MODE === "1", projectScope?: HookProjectScope | null): JsonObject | null {
@@ -256,10 +259,11 @@ export class HookTurnJournal {
     if (!scope || !turn) return null;
     const journalId = this.journalId(scope, turn, input);
     const current = this.findById(journalId);
-    const legacy = current ? null : this.findById(`codex_hook_turn_${digest({ scope, turn }).slice(-20)}`);
-    const journal = current ?? (legacy && (legacy.session_id ?? "unknown") === (text(input.session_id) ?? "unknown") ? legacy : null);
+    const legacy = current ? null : this.findById(`codex_hook_turn_${digest({ scope, session_id: text(input.session_id) ?? "unknown", turn }).slice(-20)}`)
+      ?? this.findById(`codex_hook_turn_${digest({ scope, turn }).slice(-20)}`);
+    const journal = current ?? (legacy && legacy.session_host === hookHost(input) && (legacy.session_id ?? "unknown") === (text(input.session_id) ?? "unknown") ? legacy : null);
     const pending = includePendingSignals ? this.service.store.traceShards.hookSignalsForTurn(
-      scope.kind, scope.id, text(input.session_id) ?? "unknown", turn, 10_000) : [];
+      scope.kind, scope.id, text(input.session_id) ?? "unknown", turn, 10_000, hookHost(input)) : [];
     if (journal && pending.length === 0) return { ...payload(journal), id: String(journal.id),
       signals: Array.isArray(journal.signals) ? journal.signals as JsonObject[] : [] };
     const merged = new Map<string, JsonObject>();
@@ -279,7 +283,7 @@ export class HookTurnJournal {
       && new Set(verifications.map(item => String(item.scenario_key))).size === 1 ? String(verifications[0]!.scenario_key) : null;
     const coarseScenarioKey = scenarioKey && verifications.every(item => (item.coarse_scenario_key ?? null) === (verifications[0]!.coarse_scenario_key ?? null))
       ? text(verifications[0]!.coarse_scenario_key) : null;
-    return { ...(journal ? payload(journal) : { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, trace_id: journalId }),
+    return { ...(journal ? payload(journal) : { scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown", turn_id: turn, trace_id: journalId }),
       id: String(journal?.id ?? journalId), signals, has_edit: signals.some(item => item.kind === "edit"),
       verification_outcome: !outcomes.length || outcomes.includes("unknown") ? null : outcomes.includes("failed") ? "failed" : "passed",
       edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest,
@@ -300,14 +304,14 @@ export class HookTurnJournal {
     const existing = this.find(input, undefined, scope);
     const journalId = existing ? String(existing.id) : this.journalId(scope, turn, input);
     if (existing?.closed_at) return;
-    const next = { ...(existing ? payload(existing) : { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn,
+    const next = { ...(existing ? payload(existing) : { scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown", turn_id: turn,
       signals: [], has_edit: false, verification_outcome: null, content_stored: false }), trace_id: String(existing?.trace_id ?? journalId), closed_at: new Date().toISOString() };
     if (existing) this.service.store.save("codex_hook_turn", journalId, next);
     else this.service.store.create("codex_hook_turn", journalId, next);
   }
 
   private journalId(scope: { kind: "project"; id: string }, turn: string, input: HookInput): string {
-    return `codex_hook_turn_${digest({ scope, session_id: text(input.session_id) ?? "unknown", turn }).slice(-20)}`;
+    return `codex_hook_turn_${digest({ scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown", turn }).slice(-20)}`;
   }
 
   private turn(input: HookInput): string | null {
@@ -390,8 +394,10 @@ export class CodexHookBridge {
   readonly signals: HookSignalSanitizer;
   readonly journal: HookTurnJournal;
   readonly learning: HookLearningCoordinator;
-  constructor(service: CraftService) {
+  readonly launchArchiveWorker?: () => void;
+  constructor(service: CraftService, launchArchiveWorker?: () => void) {
     this.service = service; this.signals = new HookSignalSanitizer(); this.journal = new HookTurnJournal(service); this.learning = new HookLearningCoordinator(service, this.journal);
+    this.launchArchiveWorker = launchArchiveWorker;
   }
 
   async handle(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
@@ -408,13 +414,30 @@ export class CodexHookBridge {
         ? codexProjectScope(input.cwd)
         : (this.service.scopeIdentityResolveProject({ project_root: input.cwd }).identity as JsonObject).canonical_scope as HookProjectScope
       : null;
+    const dispatchScope = () => {
+      try { return resolveProjectScope(); }
+      catch (error) {
+        // Session cleanup is Host-scoped and does not require a project root.
+        // Preserve the original identity failure; never route project work to
+        // a guessed scope. A queued archive still validates its own evidence.
+        const sessionId = text(input.session_id);
+        if (event === "SessionEnd" && (member === "context" || member === "memory") && sessionId && this.launchArchiveWorker) {
+          try {
+            this.service.store.bindSessionStorageHost(sessionId, hookHost(input));
+            this.service.memoryGovernance.ledger.files.queueSessionArchive(sessionId, hookHost(input));
+          } catch { /* The original failure remains the diagnostic result. */ }
+          finally { try { this.launchArchiveWorker(); } catch { /* Preserve the original identity failure. */ } }
+        }
+        throw error;
+      }
+    };
     // PostToolUse fires for every tool. In the short-lived Host adapter the
     // content-free hook-runtime ledger is the call receipt; avoid creating and
     // finalizing a separate SQLite Trace for each signal. This removes four
     // extra writer transactions from the highest-volume Hook event.
-    if (process.env.CRAFT_HOOK_MODE === "1" && event === "PostToolUse") return await this.dispatch(member, input, resolveProjectScope());
+    if (process.env.CRAFT_HOOK_MODE === "1" && event === "PostToolUse") return await this.dispatch(member, input, dispatchScope());
     const captured = await new ComponentTraceKernel(this.service.trace, "hook").capture({ requestId: hookRequestId(), component: "craft-hook",
-      operation: `handle.${member}.${event}`, input: { member, hook_event: event }, handler: () => this.dispatch(member, input, resolveProjectScope()) });
+      operation: `handle.${member}.${event}`, input: { member, hook_event: event }, handler: () => this.dispatch(member, input, dispatchScope()) });
     if (!captured.ok) {
       // The original error is recorded in the Trace shard and the Hook runtime
       // journal. Retrying a central write here only waits on the same lock again.
@@ -458,7 +481,7 @@ export class CodexHookBridge {
   private correlateTurn(input: HookInput, event: HookEvent | null, scope: HookProjectScope | null): HookInput {
     const sessionId = text(input.session_id);
     if (!scope || !sessionId) return input;
-    const sessionKey = `context_hook_session_${stableDigest({ scope, session_id: sessionId }).slice(-24)}`;
+    const sessionKey = `context_hook_session_${stableDigest({ scope, session_host: hookHost(input), session_id: sessionId }).slice(-24)}`;
     // PostToolUse only reads the pending turn. Opening an IMMEDIATE transaction
     // here made every edit/verification Hook compete for SQLite's single writer
     // before HookTurnJournal.record opened its own write transaction.
@@ -478,7 +501,7 @@ export class CodexHookBridge {
         turnId ??= `hook_turn_${sessionKey.slice(-24)}_${sequence}`;
         if (!pending.includes(turnId)) pending = [...pending, turnId];
         ambiguous ||= pending.length > 1;
-        this.service.store.save("context_hook_session", sessionKey, { trace_id: sessionKey, scope, session_id: sessionId, sequence, last_turn_id: turnId, pending_turn_ids: pending, ambiguous, content_free: true });
+        this.service.store.save("context_hook_session", sessionKey, { trace_id: sessionKey, scope, session_host: hookHost(input), session_id: sessionId, sequence, last_turn_id: turnId, pending_turn_ids: pending, ambiguous, content_free: true });
       } else if (event === "Stop") {
         // Overlapping turns stay ambiguous until all are closed; a delayed event
         // must never be attributed to whichever turn happens to remain.
@@ -559,7 +582,7 @@ export class CodexHookBridge {
       let available: HookEmissionCandidate[] = candidateRefs ?? candidates.map(candidate => ({ candidate, ref: null }));
       available = available.map(entry => ({ ...entry, candidate: { ...entry.candidate, output: { ...entry.candidate.output } } }));
       const response = (selected: JsonObject[]) => JSON.stringify({ source: `craft-${member}`, scope, receipt_id: receipt?.id ?? null,
-        session_id: text(input.session_id), turn_id: text(input.turn_id), memory_capture: captureSummary, selected });
+        ...(captureSummary ? { memory_capture: captureSummary } : {}), selected });
       let selected = available.map(entry => entry.candidate.output);
       let additionalContext = response(selected);
       while (selected.length > 0 && estimateTokens(additionalContext) > HOOK_ADDITIONAL_CONTEXT_BUDGET[member]) {
@@ -594,19 +617,20 @@ export class CodexHookBridge {
   }
 
   private tool(input: HookInput, projectScope: HookProjectScope | null): JsonObject {
-    const captured = this.signals.signal(input); if (!captured) return {};
+    const rawSignal = this.signals.signal(input); if (!rawSignal) return {};
+    const captured = { ...rawSignal, id: `codex_hook_signal_${stableDigest({ host: hookHost(input), scope: projectScope, session_id: text(input.session_id), turn_id: text(input.turn_id), signal_id: rawSignal.id }).slice(-20)}` };
     const scenario = projectScope ? projectScenarioKey(input, captured, this.service, projectScope) : null;
     this.journal.record(input, scenario ? { ...captured, scenario_key: scenario.scenario_key,
       ...(scenario.coarse_scenario_key ? { coarse_scenario_key: scenario.coarse_scenario_key } : {}) } : captured, projectScope);
     return {};
   }
 
-  /** Persist a bounded, content-free resume snapshot before the Host compacts. Best-effort. */
+  /** Persist a bounded resume snapshot before the Host compacts. Best-effort. */
   private preCompact(input: HookInput, projectScope: HookProjectScope | null): JsonObject {
     const sessionId = text(input.session_id);
     if (!sessionId) return {};
     try {
-      this.service.contextExtensionsCheckpointResume({ session_id: sessionId,
+      this.service.contextExtensionsCheckpointResume({ session_id: sessionId, session_host: hookHost(input),
         ...(projectScope ? { scope: `${projectScope.kind}:${projectScope.id}` } : {}),
         files_touched: input.files_touched, tasks: input.tasks, errors: input.errors,
         decisions: input.decisions, open_questions: input.open_questions });
@@ -670,31 +694,44 @@ export class CodexHookBridge {
    * lifecycle hook can never masquerade as a Knowledge/Memory retrieval.
    */
   private lifecycle(member: ComponentHookMember, event: HookEvent, input: HookInput, scheduleMaintenance = true): JsonObject {
-    const readiness = this.service.componentReadinessGet({ component: member });
+    // A lifecycle signal does not require a full readiness scan. In particular,
+    // counting every Memory candidate here makes SessionEnd scale with the
+    // entire data set and can exceed the Host Hook deadline.
     const scope = codexProjectScope(input.cwd);
-    this.service.store.appendEvent("codex-hook", "codex_hook.lifecycle", {
-      member,
-      event,
-      scope,
-      session_id: text(input.session_id) ?? "unknown",
-      turn_id: text(input.turn_id),
-      source: text(input.source),
-      reason: text(input.reason),
-      stop_hook_active: input.stop_hook_active === true,
-      readiness_state: readiness.state,
-      usage: { kind: "readiness_only", component_used: false, context_resolved: false },
-    });
-    this.service.activationProofRecord({ host: hookHost(input), component: member, event, session_id: text(input.session_id) ?? "unknown",
-      turn_id: text(input.turn_id), memory_written: false, observation_written: false,
-      plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
-    if (event === "SessionEnd" && member === "memory" && text(input.session_id)) {
-      try {
-        this.service.store.bindSessionStorageHost(text(input.session_id)!, hookHost(input));
-        this.service.memorySessionArchive({ session_id: text(input.session_id), session_host: hookHost(input) });
+    try {
+      if (event === "SessionEnd" && member === "memory" && text(input.session_id)) {
+        try {
+          this.service.store.bindSessionStorageHost(text(input.session_id)!, hookHost(input));
+          if (this.launchArchiveWorker) {
+            this.service.memoryGovernance.ledger.files.queueSessionArchive(text(input.session_id)!, hookHost(input));
+          } else this.service.memorySessionArchive({ session_id: text(input.session_id), session_host: hookHost(input) });
+        }
+        catch (error) { this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, event, error_type: error instanceof Error ? error.name : "unknown" }); }
       }
-      catch (error) { this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, event, error_type: error instanceof Error ? error.name : "unknown" }); }
+      if (event === "SessionEnd" && scheduleMaintenance && text(input.session_id)) {
+        const leaseId = `hook-${member}-${stableDigest({ host: hookHost(input), member, session_id: text(input.session_id) }).slice(-32)}`;
+        if (this.launchArchiveWorker) queueHookMaintenance(this.service.store, leaseId);
+        else this.service.memoryMaintenanceSchedule({ stage: "light", lease_id: leaseId });
+      }
+      this.service.store.appendEvent("codex-hook", "codex_hook.lifecycle", {
+        member,
+        event,
+        scope,
+        session_id: text(input.session_id) ?? "unknown",
+        turn_id: text(input.turn_id),
+        source: text(input.source),
+        reason: text(input.reason),
+        stop_hook_active: input.stop_hook_active === true,
+        readiness_state: "not_evaluated",
+        usage: { kind: "readiness_only", component_used: false, context_resolved: false },
+      });
+      this.service.activationProofRecord({ host: hookHost(input), component: member, event, session_id: text(input.session_id) ?? "unknown",
+        turn_id: text(input.turn_id), memory_written: false, observation_written: false,
+        plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
+    } finally {
+      // Failed telemetry or maintenance enqueue must not strand a queued archive.
+      if (event === "SessionEnd" && this.launchArchiveWorker) this.launchArchiveWorker();
     }
-    if (event === "SessionEnd" && scheduleMaintenance) this.service.memoryMaintenanceSchedule({ stage: "light", lease_id: `codex-${member}-${text(input.session_id) ?? "unknown"}` });
     return {};
   }
 }

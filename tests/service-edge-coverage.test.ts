@@ -29,7 +29,6 @@ test("service facades exercise defaults, compatibility views, and model validati
     const claim = service.workbenchKnowledgeClaimSave({ kind: "fact", content: "bounded fact", scope: "global" });
     assert.equal((claim.claim as JsonObject).status, "candidate");
     assert.equal((service.knowledgeClaimReview({ claim_id: (claim.claim as JsonObject).id, status: "disputed", reviewer: "r", reason: "source changed" }).claim as JsonObject).status, "disputed");
-    service.scopeAliasBind({ scope_kind: "project", scope_id: "studio", alias_kind: "path", alias: root });
     const studioIdentity = (service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject).canonical_scope as JsonObject;
     const studioId = String(studioIdentity.id);
     const reviewSource = service.knowledgeSourceRegister({ source_id: "studio-review-source", kind: "custom", label: "studio review", scope_kind: "project", scope_id: studioId, locator: "offline://studio", content_digest: "sha256:studio", trust: "bounded", access: "read_only" }).source as JsonObject;

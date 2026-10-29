@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -27,6 +28,199 @@ async function fixture() {
 }
 
 function digest(value: string): string { return `sha256:${createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex")}`; }
+
+test("idempotent content writes reject a changed scope or body", async () => {
+  const f = await fixture();
+  try {
+    const content = new MarkdownContentStore(f.paths);
+    const input = { kind: "knowledge", record_id: "scope-check", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source", body: "stable body" } as const;
+    const ref = content.writeSync(input);
+    assert.equal((await content.write(input)).path, ref.path);
+    const raw = await readFile(ref.path, "utf8");
+    await writeFile(ref.path, raw.replace('scope: "global"', 'scope: "project:other"'));
+    assert.throws(() => content.writeSync(input), /scope conflict/u);
+    await assert.rejects(content.write(input), /scope conflict/u);
+    await writeFile(ref.path, raw.slice(0, raw.lastIndexOf("stable body")) + "changed body");
+    assert.throws(() => content.writeSync(input), /digest drifted/u);
+    await assert.rejects(content.write(input), /digest drifted/u);
+    await writeFile(ref.path, raw);
+    assert.equal(content.writeSync(input).path, ref.path);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("content rewrites reject scope drift, body drift and an occupied destination", async () => {
+  const f = await fixture();
+  try {
+    const content = new MarkdownContentStore(f.paths);
+    const input = { kind: "knowledge", record_id: "rewrite-guard", version: 1, title: "first", scope: "global", status: "candidate", sensitivity: "internal", source_id: "source", body: "body" } as const;
+    const ref = content.writeSync(input), raw = await readFile(ref.path, "utf8");
+    await writeFile(ref.path, raw.replace('scope: "global"', 'scope: "project:other"'));
+    assert.throws(() => content.rewriteSync({ ...input, current_path: ref.path }), /scope conflict/u);
+    await writeFile(ref.path, raw.slice(0, raw.lastIndexOf("body")) + "changed");
+    assert.throws(() => content.rewriteSync({ ...input, current_path: ref.path }), /digest drifted/u);
+    await writeFile(ref.path, raw);
+    const target = content.namedPathFor("knowledge", input.record_id, input.version, "second", undefined, input.scope);
+    await writeFile(target, "existing");
+    assert.throws(() => content.rewriteSync({ ...input, title: "second", current_path: ref.path }), /destination conflicts/u);
+    assert.equal(await readFile(target, "utf8"), "existing");
+    assert.equal((await content.read(ref)).body, "body");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("concurrent writes to the same content path never overwrite a competing body", async () => {
+  const f = await fixture();
+  try {
+    const content = new MarkdownContentStore(f.paths);
+    const input = { kind: "knowledge", record_id: "concurrent", version: 1, title: "same title", scope: "global", status: "candidate", sensitivity: "internal", source_id: "source" } as const;
+    const results = await Promise.allSettled([content.write({ ...input, body: "first" }), content.write({ ...input, body: "second" })]);
+    assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+    assert.equal(results.filter(result => result.status === "rejected").length, 1);
+    const winner = results.find(result => result.status === "fulfilled") as PromiseFulfilledResult<Awaited<ReturnType<typeof content.write>>>;
+    assert(["first", "second"].includes((await content.read(winner.value)).body));
+    const repeated = { ...input, record_id: "same-body", body: "same" };
+    const [left, right] = await Promise.all([content.write(repeated), content.write(repeated)]);
+    assert.equal(left.path, right.path);
+    assert.equal((await content.read(left)).body, "same");
+    const differentTitles = { ...input, record_id: "different-titles" };
+    const distinct = await Promise.allSettled([content.write({ ...differentTitles, title: "first", body: "one" }), content.write({ ...differentTitles, title: "second", body: "two" })]);
+    assert.equal(distinct.filter(result => result.status === "fulfilled").length, 1);
+    assert.equal(distinct.filter(result => result.status === "rejected").length, 1);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("content lookup fails closed when a directory cannot be scanned", async () => {
+  const f = await fixture();
+  const original = fs.readdirSync;
+  try {
+    const content = new MarkdownContentStore(f.paths);
+    const input = { kind: "knowledge", record_id: "scan-failure", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source", body: "body" } as const;
+    fs.readdirSync = (() => { throw Object.assign(new Error("scan denied"), { code: "EACCES" }); }) as typeof fs.readdirSync;
+    syncBuiltinESMExports();
+    assert.throws(() => content.writeSync(input), /scan denied/u);
+    await assert.rejects(content.write(input), /scan denied/u);
+    fs.readdirSync = (() => { throw Object.assign(new Error("missing directory"), { code: "ENOENT" }); }) as typeof fs.readdirSync;
+    syncBuiltinESMExports();
+    const ref = content.writeSync(input);
+    assert.equal(content.readSync(ref).body, "body");
+  } finally { fs.readdirSync = original; syncBuiltinESMExports(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("content lookup rejects multiple files for one version", async () => {
+  const f = await fixture();
+  try {
+    const content = new MarkdownContentStore(f.paths);
+    const input = { kind: "knowledge", record_id: "duplicate", version: 1, title: "first", scope: "global", status: "candidate", sensitivity: "internal", source_id: "source", body: "body" } as const;
+    const ref = content.writeSync(input);
+    const duplicate = content.namedPathFor("knowledge", input.record_id, input.version, "second", undefined, input.scope);
+    await writeFile(duplicate, await readFile(ref.path));
+    assert.throws(() => content.writeSync(input), /multiple files/u);
+    assert.throws(() => content.writeSync({ ...input, title: "third" }), /multiple files/u);
+    await assert.rejects(content.write({ ...input, title: "third" }), /multiple files/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Experience content lookup skips the internal version lock directory", async () => {
+  const f = await fixture();
+  const original = fs.readdirSync;
+  try {
+    const content = new MarkdownContentStore(f.paths);
+    const input = { kind: "experience", record_id: "lock-scan", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source", body: "flow", folder: "graphs" } as const;
+    fs.readdirSync = ((path, options) => {
+      if (String(path).endsWith(".version-locks")) throw new Error("lock directory was scanned");
+      return original(path, options as never);
+    }) as typeof fs.readdirSync;
+    syncBuiltinESMExports();
+    const ref = content.writeSync(input);
+    assert.equal(content.writeSync(input).path, ref.path);
+  } finally { fs.readdirSync = original; syncBuiltinESMExports(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("content version lock fails fast and recovers after an owner exits", async () => {
+  const f = await fixture();
+  try {
+    const content = new MarkdownContentStore(f.paths);
+    const input = { kind: "knowledge", record_id: "lock-recovery", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source", body: "body" } as const;
+    const directory = join(dirname(content.pathFor("knowledge", input.record_id, input.version, undefined, input.scope)), ".version-locks");
+    await mkdir(directory, { recursive: true });
+    const shard = createHash("sha256").update(JSON.stringify([input.kind, input.record_id, input.version])).digest("hex").slice(0, 2);
+    const file = join(directory, `${shard}.db`);
+    const ref = content.writeSync(input);
+    const holder = new DatabaseSync(file);
+    try { holder.exec("BEGIN IMMEDIATE"); assert.throws(() => content.writeSync(input), /busy; retry/u);
+      assert.throws(() => content.relocateSync(ref, input.scope), /busy; retry/u); }
+    finally { holder.close(); }
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", 'import { DatabaseSync } from "node:sqlite"; const db = new DatabaseSync(process.argv[1]); db.exec("BEGIN IMMEDIATE"); process.exit(0);', file], { encoding: "utf8", timeout: 10_000 });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(content.readSync(content.writeSync(input)).body, "body");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("content version lock rejects unsafe paths and propagates SQLite failures", async () => {
+  const f = await fixture();
+  const originalExec = DatabaseSync.prototype.exec;
+  try {
+    const content = new MarkdownContentStore(f.paths);
+    const input = { kind: "knowledge", record_id: "lock-failure", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source", body: "body" } as const;
+    const directory = dirname(content.pathFor("knowledge", input.record_id, input.version, undefined, input.scope));
+    await mkdir(directory, { recursive: true });
+    const locks = join(directory, ".version-locks");
+    await symlink(f.root, locks);
+    assert.throws(() => content.writeSync(input), /lock directory is unsafe/u);
+    await unlink(locks); await mkdir(locks);
+    const shard = createHash("sha256").update(JSON.stringify([input.kind, input.record_id, input.version])).digest("hex").slice(0, 2);
+    const lock = join(locks, `${shard}.db`);
+    await symlink(join(f.root, "missing"), lock);
+    assert.throws(() => content.writeSync(input), /lock file is unsafe/u);
+    await unlink(lock);
+    DatabaseSync.prototype.exec = function (sql: string) { if (sql === "BEGIN IMMEDIATE") throw new Error("injected sqlite failure"); return originalExec.call(this, sql); };
+    assert.throws(() => content.writeSync(input), /injected sqlite failure/u);
+  } finally { DatabaseSync.prototype.exec = originalExec; f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("content publication rechecks a concurrent destination and propagates link failures", async () => {
+  const f = await fixture();
+  const originalLink = fs.linkSync;
+  try {
+    const content = new MarkdownContentStore(f.paths);
+    const input = { kind: "knowledge", record_id: "link-race", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source", body: "body" } as const;
+    fs.linkSync = ((from, to) => { originalLink(from, to); throw Object.assign(new Error("already exists"), { code: "EEXIST" }); }) as typeof fs.linkSync;
+    syncBuiltinESMExports();
+    const ref = content.writeSync(input);
+    assert.equal(content.readSync(ref).body, "body");
+    fs.linkSync = (() => { throw Object.assign(new Error("link failed"), { code: "EIO" }); }) as typeof fs.linkSync;
+    syncBuiltinESMExports();
+    assert.throws(() => content.writeSync({ ...input, record_id: "link-error" }), /link failed/u);
+  } finally { fs.linkSync = originalLink; syncBuiltinESMExports(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("content relocation refuses a differently named existing version", async () => {
+  const f = await fixture();
+  try {
+    const content = f.store.contentStore;
+    const input = { kind: "knowledge", record_id: "relocation-collision", version: 1, title: "current", scope: "global", status: "candidate", sensitivity: "internal", source_id: "source", body: "body" } as const;
+    const ref = content.writeSync(input);
+    const legacy = content.legacyPathFor("knowledge", input.record_id, input.version);
+    await mkdir(dirname(legacy), { recursive: true });
+    await writeFile(legacy, (await readFile(ref.path, "utf8")).replace('title: "current"', 'title: "old title"'));
+    assert.throws(() => content.relocateSync({ ...ref, path: legacy }, input.scope), /destination conflicts/u);
+    assert.equal((await content.read(ref)).body, "body");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("independent processes cannot publish different bodies for one content version", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-content-multiprocess-"));
+  try {
+    const source = 'import {craftPaths} from "./core/infrastructure/paths.ts"; import {MarkdownContentStore} from "./core/infrastructure/content-store.ts"; try { new MarkdownContentStore(craftPaths(process.argv[1])).writeSync({kind:"knowledge",record_id:"race",version:1,scope:"global",status:"candidate",sensitivity:"internal",source_id:"source",title:process.argv[2],body:process.argv[2]}); } catch { process.exitCode=2; }';
+    const run = (title: string) => new Promise<number | null>((resolve, reject) => {
+      const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", source, root, title], { stdio: "ignore" });
+      child.once("error", reject); child.once("close", resolve);
+    });
+    const statuses = await Promise.all([run("first"), run("second")]);
+    assert.equal(statuses.filter(status => status === 0).length, 1);
+    assert.equal(statuses.filter(status => status === 2).length, 1);
+    assert.equal((await readdir(join(root, "knowledge", "md"))).filter(name => name.endsWith(".md")).length, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("MarkdownContentStore writes self-describing content and verifies its digest", async () => {
   const f = await fixture();
@@ -639,11 +833,11 @@ test("legacy source rehydration rejects missing, unsafe, stale, and malformed so
 test("content migration relocates old content references into the domain directory", async () => {
   const f = await fixture();
   const content = f.store.contentStore;
-  const current = content.writeSync({ kind: "memory", record_id: "old-ref", version: 1, scope: "task", status: "active", sensitivity: "internal", source_id: "legacy", body: "old reference" });
+  const current = content.writeSync({ kind: "memory", record_id: "old-ref", version: 1, scope: "global", status: "active", sensitivity: "internal", source_id: "legacy", body: "old reference" });
   const oldPath = content.legacyPathFor("memory", "old-ref", 1);
   await mkdir(dirname(oldPath), { recursive: true });
   await writeFile(oldPath, await readFile(current.path, "utf8"), "utf8");
-  f.store.create("memory_ledger", "old-ref", { scope: "task", content_ref: { ...current, path: oldPath } });
+  f.store.create("memory_ledger", "old-ref", { scope: "global", content_ref: { ...current, path: oldPath } });
   const result = new ContentMigrationKernel(f.store).migrate();
   assert.equal(result.migrated, 1);
   assert.match(String((f.store.rawRecords("memory_ledger")[0]!.payload.content_ref as Record<string, unknown>).path), /memory[\\/]md[\\/]old-reference--[a-f0-9]{12}\.v1\.md$/);

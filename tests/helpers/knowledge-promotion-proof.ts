@@ -28,17 +28,17 @@ export function attachVerifiedPromotionFixture(store: CraftStore, claim: JsonObj
   const caseId = `fixture-case-${suffix}`, caseIdentity = stableDigest({ case_id: caseId, claim_id: claimId });
   const sourceEvidenceId = `fixture-source-evidence-${suffix}`;
   store.create("evidence", sourceEvidenceId, { confidence: "confirmed", source_type: "receipt", claim: "Independent held out task receipt.",
-    metadata: { source_session_id: `heldout-session-${suffix}`, task_id: `heldout-task-${suffix}` } });
+    metadata: { source_session_id: `heldout-session-${suffix}`, task_id: `heldout-task-${suffix}`, source_ref_digest: stableDigest(`heldout-${suffix}`) } });
   const originalEvidenceIds = Array.isArray(candidate.evidence_ids) ? [...new Set(candidate.evidence_ids.filter((value): value is string => typeof value === "string"))] : [];
   const claimEvidenceId = originalEvidenceIds[0] ?? `fixture-claim-evidence-${suffix}`;
   if (originalEvidenceIds.length) for (const evidenceId of originalEvidenceIds) {
     const current = store.find("evidence", evidenceId);
-    const metadata = { ...((current?.metadata as JsonObject | undefined) ?? {}), source_session_id: `source-session-${suffix}`, task_id: `source-task-${suffix}` };
+    const metadata = { ...((current?.metadata as JsonObject | undefined) ?? {}), source_session_id: `source-session-${suffix}`, task_id: `source-task-${suffix}`, source_ref_digest: stableDigest(`source-${suffix}`) };
     if (current) { const { version: _version, ...body } = current; store.save("evidence", evidenceId, { ...body, confidence: "confirmed", metadata }); }
     else store.create("evidence", evidenceId, { confidence: "confirmed", source_type: "receipt", claim: "Independent candidate source evidence.", metadata });
   } else {
     store.create("evidence", claimEvidenceId, { confidence: "confirmed", source_type: "receipt", claim: "Independent candidate source evidence.",
-      metadata: { source_session_id: `source-session-${suffix}`, task_id: `source-task-${suffix}` } });
+      metadata: { source_session_id: `source-session-${suffix}`, task_id: `source-task-${suffix}`, source_ref_digest: stableDigest(`source-${suffix}`) } });
   }
   const adjudicationId = `fixture-adjudication-${suffix}`;
   store.create("knowledge_evaluation_case", caseId, { identity_digest: caseIdentity, expected_claim_ids: [claimId],
@@ -50,6 +50,8 @@ export function attachVerifiedPromotionFixture(store: CraftStore, claim: JsonObj
   const runId = `fixture-effectiveness-${suffix}`;
   store.create("knowledge_evaluation_run", runId, { mode: "candidate_shadow", status: "eligible", case_ids: [caseId],
     case_refs: [{ case_id: caseId, case_version: 1, identity_digest: caseIdentity }],
+    candidate_source_refs: [{ claim_id: claimId, source_id: source.id, source_version: source.version,
+      source_digest: source.content_digest, source_status: source.status, source_trust: source.trust }],
       candidate_claim_refs: [{ claim_id: claimId, claim_version: candidate.version, identity_digest: candidate.identity_digest ?? null,
       content_digest: candidate.content_digest ?? null }], metrics: { provenance_eligible: true } });
   const reviewId = `fixture-promotion-review-${suffix}`;

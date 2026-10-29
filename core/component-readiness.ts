@@ -1,8 +1,9 @@
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { CRAFT_RELEASE_VERSION } from "./version.ts";
-import { lstatSync, readFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { learningWorkerDiagnostic } from "./learning-worker-diagnostic.ts";
+import { knowledgeTaskEffectEvidenceVerified } from "./knowledge-evaluation-provenance.ts";
 
 const COMPONENTS = new Set(["knowledge", "memory", "experience"]);
 
@@ -24,21 +25,59 @@ function countByStatus(store: CraftStore, kind: string): Record<string, number> 
   return counts;
 }
 
+function readDiagnosticState(directory: string, name: string): JsonObject {
+  const parent = lstatSync(directory);
+  if (parent.isSymbolicLink() || !parent.isDirectory()) throw new Error("diagnostic directory is invalid");
+  const fd = openSync(join(directory, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error("diagnostic state is invalid");
+    const buffer = Buffer.alloc(stat.size + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const count = readSync(fd, buffer, length, buffer.length - length, null);
+      if (!count) break;
+      length += count;
+    }
+    const after = fstatSync(fd);
+    if (length !== stat.size || after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs) {
+      throw new Error("diagnostic state changed during read");
+    }
+    return JSON.parse(buffer.subarray(0, length).toString("utf8")) as JsonObject;
+  } finally { closeSync(fd); }
+}
+
+/** Summarize persisted recovery state without returning task identifiers. */
+function knowledgeCandidateDiagnostic(directory: string): JsonObject {
+  try {
+    const value = readDiagnosticState(directory, "session-candidate-state.json");
+    if (!value || value.schema !== "craft.knowledge-session-candidate-state.v1") return { status: "unavailable" };
+    const plain = (input: unknown) => Boolean(input && typeof input === "object" && !Array.isArray(input));
+    const skips = value.terminal_skips === undefined ? {} : value.terminal_skips;
+    const traces = value.trace_ids_by_task === undefined ? {} : value.trace_ids_by_task;
+    const uncertain = value.uncertain_calls === undefined ? {} : value.uncertain_calls;
+    if (![skips, traces, uncertain].every(plain) || [skips, traces, uncertain].some(item => Object.keys(item as object).length > 50_000)) return { status: "unavailable" };
+    const skipMap = skips as JsonObject, traceMap = traces as JsonObject, uncertainMap = uncertain as JsonObject;
+    return { status: "last_recorded", measurement_scope: "persisted_candidate_state",
+      uncertain_calls: Object.keys(uncertainMap).length,
+      conflicting_skips: Object.keys(skipMap).filter(id => Object.hasOwn(traceMap, id) || Object.hasOwn(uncertainMap, id)).length };
+  } catch (error) { return { status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "not_observed" : "unavailable" }; }
+}
+
 /** Read only the bounded, content-free projection of the last evaluation state. */
 function knowledgeEvaluationDiagnostic(directory: string): JsonObject {
   try {
-    const parent = lstatSync(directory);
-    if (parent.isSymbolicLink() || !parent.isDirectory()) return { status: "unavailable" };
-    const path = join(directory, "session-evaluation-state.json"), stat = lstatSync(path);
-    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 8 * 1024 * 1024) return { status: "unavailable" };
-    const value = JSON.parse(readFileSync(path, "utf8")) as JsonObject;
+    const value = readDiagnosticState(directory, "session-evaluation-state.json");
     if (!value || value.schema !== "craft.knowledge-session-evaluation-state.v1" || value.legacy_unknown_outcomes === undefined)
       return { status: "not_observed" };
     if (!Number.isSafeInteger(value.legacy_unknown_outcomes) || Number(value.legacy_unknown_outcomes) < 0
       || Number(value.legacy_unknown_outcomes) > 50_000 || typeof value.updated_at !== "string"
+      || value.legacy_untraced_tasks !== undefined && (!Number.isSafeInteger(value.legacy_untraced_tasks)
+        || Number(value.legacy_untraced_tasks) < 0 || Number(value.legacy_untraced_tasks) > 50_000)
       || value.updated_at.length > 64 || !Number.isFinite(Date.parse(value.updated_at))) return { status: "unavailable" };
     return { status: "last_recorded", measurement_scope: "eligible_held_out_batch_only",
-      legacy_unknown_outcomes: value.legacy_unknown_outcomes, updated_at: value.updated_at };
+      legacy_unknown_outcomes: value.legacy_unknown_outcomes,
+      ...(value.legacy_untraced_tasks === undefined ? {} : { legacy_untraced_tasks: value.legacy_untraced_tasks, legacy_untraced_scope: "processed_state" }), updated_at: value.updated_at };
   } catch (error) { return { status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "not_observed" : "unavailable" }; }
 }
 
@@ -91,7 +130,8 @@ export class ComponentReadinessKernel {
       host_attachment: observed === null ? "this_mcp_process_replied; compare this release with the Host cache when another conversation cannot see it"
         : missing.length ? "bundle_or_surface_mismatch" : "surface_matches",
       execution_proof: execution,
-      observability: { data_root: this.store.paths.root, ...(name === "knowledge" ? { learning_evaluation: knowledgeEvaluationDiagnostic(this.store.paths.knowledgeDir) } : {}),
+      observability: { data_root: this.store.paths.root, ...(name === "knowledge" ? { learning_evaluation: knowledgeEvaluationDiagnostic(this.store.paths.knowledgeDir),
+        learning_candidates: knowledgeCandidateDiagnostic(this.store.paths.knowledgeDir) } : {}),
         ...(name === "knowledge" || name === "experience" ? { learning_worker: learningWorkerDiagnostic(this.store.paths.runtimeDir, name, CRAFT_RELEASE_VERSION) } : {}),
         trace_retention: this.store.find("maintenance_component", "trace_retention") ?? { status: "not_observed" },
         telemetry_events: this.store.count("telemetry_event"), usage_records: this.store.count("usage_ledger"),
@@ -106,12 +146,15 @@ export class ComponentReadinessKernel {
     const claims = countByStatus(this.store, "knowledge_claim");
     const receipts = this.store.count("context_resolution_receipt");
     const evaluationCases = this.store.count("knowledge_evaluation_case");
+    const taskEffectGateAvailable = knowledgeTaskEffectEvidenceVerified();
     const state = activeSources === 0 ? "bootstrap_required"
-      : (claims.reviewed ?? 0) === 0 ? "evidence_review_pending" : "ready";
+      : (claims.reviewed ?? 0) === 0 ? "evidence_review_pending" : taskEffectGateAvailable ? "ready" : "effect_evaluation_pending";
     return {
       component: "knowledge", state, counts: { active_sources: activeSources, claims, context_receipts: receipts, evaluation_cases: evaluationCases },
+      task_effect_gate: taskEffectGateAvailable ? "available" : "unavailable",
       next_action: state === "bootstrap_required" ? "install_or_register_a_scoped_source"
         : state === "evidence_review_pending" ? "search_or_draft_evidence_backed_claims_then_review_them"
+          : state === "effect_evaluation_pending" ? "implement_and_collect_independent_task_effect_evidence"
           : "resolve_a_bounded_context_receipt_for_the_current_scope",
       model_effect_proven: false,
       usage: {

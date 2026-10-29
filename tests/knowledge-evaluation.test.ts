@@ -10,6 +10,31 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { adjudicateKnowledgeCase } from "./helpers/knowledge-evaluation-adjudication.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
+test("candidate shadow status rejects regression even with eligible provenance and relaxed thresholds", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-regression-gate-"));
+  const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  try {
+    const sourceEvidence = store.create("evidence", "claim-source", { confidence: "confirmed", metadata: { source_session_id: "source", task_id: "source-task", source_ref_digest: `sha256:${"a".repeat(64)}` } });
+    const heldEvidence = store.create("evidence", "held-source", { confidence: "confirmed", metadata: { source_session_id: "held", task_id: "held-task", source_ref_digest: `sha256:${"b".repeat(64)}` } });
+    const candidate = store.create("knowledge_claim", "candidate-gate", { status: "candidate", scope: "global", evidence_ids: [sourceEvidence.id] });
+    const refs = [{ claim_id: candidate.id, claim_version: candidate.version, identity_digest: null, content_digest: null }];
+    const case_ = store.create("knowledge_evaluation_case", "held-gate", { query: "rule", scope: "global", identity_digest: "case-identity", expected_claim_ids: [candidate.id], candidate_claim_refs: refs,
+      source_session_id: "held", source_task_id: "held-task", source_evidence_ids: [heldEvidence.id], evaluation_channel: "real_session", dataset_partition: "held_out", sanitized: true, label_source: "host_adjudicated", adjudication_id: "adjudication-gate" });
+    store.create("knowledge_evaluation_adjudication", "adjudication-gate", { execution_origin: "managed_codex_cli", case_id: case_.id, status: "adjudicated", result_case_version: case_.version, result_case_identity_digest: case_.identity_digest, decision: "accepted", expected_claim_ids: [candidate.id] });
+    let regress = false;
+    service.wikiContextCompile = (args: JsonObject) => ({ included: args.candidate_claim_ids && regress ? [] : [{ claim_id: candidate.id, claim_version: candidate.version }], partial: false });
+    const input = { mode: "candidate_shadow", case_ids: [case_.id], candidate_claim_ids: [candidate.id], min_recall: 0, min_evidence_coverage: 0, min_candidate_precision: 0 };
+    const passing = service.knowledgeEvaluationRun(input).run as JsonObject;
+    assert.equal((passing.metrics as JsonObject).provenance_eligible, true);
+    assert.equal(passing.status, "eligible");
+    regress = true;
+    const failing = service.knowledgeEvaluationRun(input).run as JsonObject;
+    assert.equal((failing.metrics as JsonObject).provenance_eligible, true);
+    assert.equal((failing.metrics as JsonObject).regressed_case_count, 1);
+    assert.equal(failing.status, "insufficient");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("knowledge retrieval evaluation does not change routing", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-eval-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
@@ -17,7 +42,7 @@ test("knowledge retrieval evaluation does not change routing", async () => {
     await assert.rejects(Promise.resolve().then(() => service.knowledgeEvaluationRun({})), /at least/);
     service.knowledgeSourceRegister({ source_id: "alpha-source", kind: "project_note", label: "Alpha source", trust: "verified", scope_kind: "global", scope_id: "global", locator: "fixture", content_digest: "alpha-source-v1" });
     const evidence = service.evidenceRecord({ source_type: "program", claim: "Observed.", confidence: "confirmed", metadata: { source_session_id: "claim-session", task_id: "claim-task" } }); const claim = service.knowledgeClaimSave({ claim_id: "alpha", kind: "fact", content: "alpha rule", scope: "global", source_id: "alpha-source", evidence_ids: [evidence.id] }).claim as JsonObject; attachVerifiedPromotionFixture(store, claim);
-    const evaluationEvidence = service.evidenceRecord({ source_type: "program", claim: "Independent held-out result.", confidence: "confirmed", metadata: { source_session_id: "evaluation-session", task_id: "evaluation-task" } });
+    const evaluationEvidence = service.evidenceRecord({ source_type: "program", claim: "Independent held-out result.", confidence: "confirmed", metadata: { source_session_id: "evaluation-session", task_id: "evaluation-task", source_ref_digest: `sha256:${"e".repeat(64)}` } });
     const provenance = { source_session_id: "evaluation-session", source_task_id: "evaluation-task", source_evidence_ids: [evaluationEvidence.id], evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "model_candidate", sanitized: true };
     const saved = service.knowledgeEvaluationCaseSave({ case_id: "case", query: "alpha", expected_claim_ids: [claim.id], ...provenance }).case as JsonObject; assert.equal(String((service.knowledgeEvaluationCaseSave({ query: "alpha", expected_claim_ids: [claim.id] }).case as JsonObject).id).startsWith("knowledge_evaluation_case_"), true); assert.equal((service.knowledgeEvaluationCaseSave({ case_id: "case", query: "alpha", expected_claim_ids: [claim.id], ...provenance }) as JsonObject).idempotent, true); await assert.rejects(Promise.resolve().then(() => service.knowledgeEvaluationCaseSave({ case_id: "case", query: "other", expected_claim_ids: [claim.id], ...provenance })), /idempotency/);
     const modelLabeled = service.knowledgeEvaluationCaseSave({ case_id: "model-labeled", query: "alpha", expected_claim_ids: [claim.id], ...provenance, label_source: "model_candidate" }).case as JsonObject;
@@ -200,6 +225,81 @@ test("Knowledge adjudication API is idempotent, rejects stale or forged traces, 
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("Knowledge reports truncated retrieval and refuses to evaluate an incomplete corpus", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-evaluation-limit-"));
+  const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  try {
+    const candidate = store.create("knowledge_claim", "candidate", { status: "candidate", kind: "fact", scope: "global", content: "unique rule" });
+    const case_ = service.knowledgeEvaluationCaseSave({ query: "unique rule", scope: "global", expected_claim_ids: [candidate.id] }).case as JsonObject;
+    const list = store.list.bind(store);
+    store.list = ((kind: string, ...args: Parameters<CraftStore["list"]> extends [string, ...infer T] ? T : never) =>
+      kind === "knowledge_claim" ? Array.from({ length: 10_001 }, (_, id) => ({ id: `c${id}`, status: "candidate" })) : list(kind, ...args)) as CraftStore["list"];
+    const compiled = service.wikiContextCompile({ query: "unique rule" });
+    assert.equal(compiled.partial, true);
+    assert.equal((compiled.bundle as JsonObject).partial, true);
+    assert.throws(() => service.knowledgeEvaluationRun({ run_id: "partial-run", mode: "candidate_shadow", case_ids: [case_.id], candidate_claim_ids: [candidate.id] }), /corpus is incomplete/u);
+    assert.equal(store.find("knowledge_evaluation_run", "partial-run"), null);
+    store.list = ((kind: string, ...args: Parameters<CraftStore["list"]> extends [string, ...infer T] ? T : never) =>
+      kind === "knowledge_evaluation_case" ? Array.from({ length: 10_001 }, (_, id) => ({ id: `case${id}` })) : list(kind, ...args)) as CraftStore["list"];
+    assert.throws(() => service.knowledgeEvaluationRun({}), /cases exceed the bounded limit/u);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("candidate shadow evaluation rejects candidate, source or case changes during retrieval", async () => {
+  for (const changed of ["claim", "source", "case"] as const) {
+    const root = await mkdtemp(join(tmpdir(), "craft-knowledge-evaluation-race-"));
+    const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+    try {
+      service.knowledgeSourceRegister({ source_id: "source", kind: "project_note", label: "Source", trust: "verified",
+        scope_kind: "global", scope_id: "global", locator: "fixture", content_digest: `sha256:${"a".repeat(64)}` });
+      const candidate = store.create("knowledge_claim", "candidate", { status: "candidate", kind: "fact", scope: "global", source_id: "source", content: "unique rule" });
+      const case_ = service.knowledgeEvaluationCaseSave({ query: "unique rule", scope: "global", expected_claim_ids: [candidate.id] }).case as JsonObject;
+      const compile = service.wikiContextCompile.bind(service); let calls = 0;
+      service.wikiContextCompile = (args: JsonObject) => {
+        const result = compile(args);
+        if (++calls === 1) {
+          const kind = changed === "claim" ? "knowledge_claim" : changed === "source" ? "knowledge_source" : "knowledge_evaluation_case";
+          const id = changed === "claim" ? "candidate" : changed === "source" ? "source" : String(case_.id);
+          const update = changed === "claim" ? { content: "changed rule" } : changed === "source" ? { content_digest: `sha256:${"b".repeat(64)}` } : { query: "changed query" };
+          store.save(kind, id, { ...store.get(kind, id), ...update });
+        }
+        return result;
+      };
+      assert.throws(() => service.knowledgeEvaluationRun({ run_id: "race-run", mode: "candidate_shadow", case_ids: [case_.id], candidate_claim_ids: [candidate.id] }), /changed during evaluation/u);
+      assert.equal(store.find("knowledge_evaluation_run", "race-run"), null);
+    } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  }
+});
+
+test("candidate shadow comparison records when a candidate displaces expected baseline knowledge", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-regression-"));
+  const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  try {
+    const original = store.create("knowledge_claim", "z-baseline", { status: "candidate", kind: "fact", scope: "global", content: "shared rule" });
+    const baseline = attachVerifiedPromotionFixture(store, original);
+    const candidate = store.create("knowledge_claim", "a-candidate", { status: "candidate", kind: "fact", scope: "global", content: "shared rule" });
+    const case_ = service.knowledgeEvaluationCaseSave({ query: "shared rule", scope: "global", expected_claim_ids: [baseline.id], label_source: "operator_asserted" }).case as JsonObject;
+    const run = service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [case_.id], candidate_claim_ids: [candidate.id], top_k: 1,
+      min_recall: 0, min_evidence_coverage: 0, min_candidate_precision: 0 }).run as JsonObject;
+    const row = (run.results as JsonObject[])[0]!;
+    assert.deepEqual(row.baseline_matched_claim_ids, [baseline.id]);
+    assert.deepEqual(row.regressed_claim_ids, [baseline.id]);
+    assert.equal(row.recall_delta, -1);
+    assert.equal((run.metrics as JsonObject).regressed_case_count, 1);
+    assert.equal((run.metrics as JsonObject).case_count, 1);
+    assert.equal(run.status, "insufficient", "unadjudicated cases cannot authorize promotion");
+    const compile = service.wikiContextCompile.bind(service); let calls = 0;
+    service.wikiContextCompile = (args: JsonObject) => {
+      const result = compile(args);
+      if (++calls === 2) store.save("knowledge_claim", String(baseline.id), { ...store.get("knowledge_claim", String(baseline.id)), status: "stale" });
+      return result;
+    };
+    assert.throws(() => service.knowledgeEvaluationRun({ run_id: "baseline-race", mode: "candidate_shadow", case_ids: [case_.id],
+      candidate_claim_ids: [candidate.id], top_k: 1 }), /selected Claim changed during evaluation/u);
+    assert.equal(store.find("knowledge_evaluation_run", "baseline-race"), null);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("candidate shadow evaluation measures exact candidate false positives without promoting Claims", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-shadow-eval-"));
   const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
@@ -223,9 +323,39 @@ test("candidate shadow evaluation measures exact candidate false positives witho
     assert.equal(run.status, "insufficient", "a candidate false positive blocks the default precision gate");
     assert.equal((run.metrics as JsonObject).candidate_precision, 0.5);
     assert.equal((run.metrics as JsonObject).candidate_recall, 1);
+    assert.equal((run.metrics as JsonObject).baseline_recall, 0);
+    assert.equal((run.metrics as JsonObject).recall_delta, 1);
+    assert.equal((run.metrics as JsonObject).regressed_case_count, 0);
+    assert.equal((run.metrics as JsonObject).case_count, 1);
+    assert.deepEqual((run.results as JsonObject[])[0]!.baseline_selected_claim_ids, []);
+    assert.deepEqual((run.results as JsonObject[])[0]!.baseline_claim_refs, []);
+    assert.deepEqual((run.results as JsonObject[])[0]!.selected_claim_refs, [
+      { claim_id: relevant.id, claim_version: relevant.version }, { claim_id: falsePositive.id, claim_version: falsePositive.version },
+    ]);
+    const row = (run.results as JsonObject[])[0]!;
+    for (const [field, refs] of [["candidate_bundle_ref", row.selected_claim_refs], ["baseline_bundle_ref", row.baseline_claim_refs]] as const) {
+      const ref = row[field] as JsonObject;
+      const bundle = service.wikiContextBundleGet({ bundle_id: ref.id, version: ref.version }).bundle as JsonObject;
+      assert.equal(bundle.context_digest, ref.context_digest);
+      assert.deepEqual(bundle.claim_refs, refs);
+    }
+    assert.equal((run.results as JsonObject[])[0]!.recall_delta, 1);
+    assert.deepEqual((run.results as JsonObject[])[0]!.gained_claim_ids, [relevant.id]);
+    assert.deepEqual((run.results as JsonObject[])[0]!.regressed_claim_ids, []);
     assert.deepEqual((run.results as JsonObject[])[0]!.candidate_false_positive_claim_ids, [falsePositive.id]);
     assert.equal(run.changes_routing, false);
     assert.equal((service.knowledgeClaimGet({ claim_id: relevant.id }).claim as JsonObject).status, "candidate");
+
+    const source = store.get("knowledge_source", "source");
+    store.save("knowledge_source", "source", { ...source, status: "disabled" });
+    const disabled = service.wikiContextCompile({ query: "alphaonly", scope: "project:demo", candidate_claim_ids: [relevant.id] });
+    assert.deepEqual(disabled.included, []);
+    assert((disabled.excluded as JsonObject[]).some(item => item.claim_id === relevant.id && item.reason === "source_unavailable"));
+    store.save("knowledge_source", "source", { ...store.get("knowledge_source", "source"), status: "active" });
+    store.save("knowledge_source", "source", { ...store.get("knowledge_source", "source"), trust: "untrusted" });
+    const untrusted = service.wikiContextCompile({ query: "alphaonly", scope: "project:demo", candidate_claim_ids: [relevant.id] });
+    assert.deepEqual(untrusted.included, []);
+    store.save("knowledge_source", "source", { ...store.get("knowledge_source", "source"), trust: "verified" });
 
     const modelCase = service.knowledgeEvaluationCaseSave({ case_id: "model-label-case", query: "alphaonly", scope: "project:demo", expected_claim_ids: [relevant.id],
       source_session_id: "held-session", source_task_id: "held-task", source_evidence_ids: [heldOut.id], evaluation_channel: "real_session",

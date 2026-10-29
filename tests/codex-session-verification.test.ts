@@ -14,6 +14,77 @@ const completedCommand = (id: string, command: unknown, aggregated_output: unkno
 });
 const successfulOutput = (summary: string) => [{ type: "text", text: "Process exited with code 0" }, { type: "text", text: summary }];
 
+test("rejects empty, skipped, cached, and count-free test runs", () => {
+  for (const [command, summary] of [
+    ["./gradlew test", "> Task :test NO-SOURCE\nBUILD SUCCESSFUL"],
+    ["./gradlew test", "> Task :test\nBUILD SUCCESSFUL"],
+    ["./gradlew test", "3 tests completed, 3 skipped\nBUILD SUCCESSFUL"],
+    ["go test ./...", "ok example/pkg 0.01s [no tests to run]"],
+    ["go test -v ./...", "--- PASS: TestExample (0.00s)\nok example/pkg (cached)"],
+    ["go test ./...", "ok example/pkg 0.01s"],
+    ["mvn test", "Tests run: 3, Failures: 0, Errors: 0, Skipped: 3"],
+    ["pnpm test", "Test Files 1 passed (1)\nTests 0 passed (0)"],
+  ]) assert.deepEqual(extractCodexSessionVerificationArtifacts([completedCommand(command!, command!, summary!)]), [], command);
+  assert.equal(extractCodexSessionVerificationArtifacts([completedCommand("json", "go test -json ./...",
+    '{"Action":"pass","Package":"example/pkg","Test":"TestExample"}\n{"Action":"pass","Package":"example/pkg"}')]).length, 1);
+  assert.deepEqual(extractCodexSessionVerificationArtifacts([completedCommand("json", "go test -json ./...",
+    '{"Action":"pass","Package":"first","Test":"TestExample"}\n{"Action":"pass","Package":"second"}')]), []);
+  const mixed = [
+    '{"Action":"pass","Package":"cached","Test":"TestCached"}',
+    '{"Action":"output","Package":"cached","Output":"ok cached (cached)"}',
+    '{"Action":"pass","Package":"cached"}',
+    '{"Action":"pass","Package":"fresh","Test":"TestFresh"}',
+    '{"Action":"pass","Package":"fresh"}',
+  ];
+  assert.equal(extractCodexSessionVerificationArtifacts([completedCommand("mixed", "go test -json ./...", mixed.join("\n"))]).length, 1);
+  assert.deepEqual(extractCodexSessionVerificationArtifacts([completedCommand("cached", "go test -json ./...", mixed.slice(0, 3).join("\n"))]), []);
+  assert.equal(extractCodexSessionVerificationArtifacts([completedCommand("mixed-verbose", "go test -v ./...", "--- PASS: TestCached\nok cached/pkg (cached)\n--- PASS: TestFresh\nok fresh/pkg 0.1s")]).length, 1);
+  assert.deepEqual(extractCodexSessionVerificationArtifacts([completedCommand("mixed-verbose", "go test -v ./...", "--- PASS: TestCached\nok cached/pkg (cached)\nok empty/pkg [no tests to run]")]), []);
+  assert.deepEqual(extractCodexSessionVerificationArtifacts([completedCommand("invalid", "go test -json ./...", "{invalid json")]), []);
+  assert.equal(extractCodexSessionVerificationArtifacts([completedCommand("gradle", "gradle test", "1 test completed\nBUILD SUCCESSFUL")]).length, 1);
+});
+
+test("recognizes exact exec_command function calls only with paired successful test output", () => {
+  const functionCall = (id: string, args: unknown, name = "exec_command"): CodexTaskTranscriptRecord => ({ record_type: "response_item", payload: { type: "function_call", call_id: id, name, arguments: args } });
+  const functionOutput = (id: string, text: unknown): CodexTaskTranscriptRecord => ({ record_type: "response_item", payload: { type: "function_call_output", call_id: id, output: text } });
+  const passed = successfulOutput("Tests 3 passed (3)");
+  const records = [functionCall("valid", JSON.stringify({ cmd: "pnpm test", yield_time_ms: 1000 })), functionOutput("valid", passed),
+    functionCall("wrong-tool", JSON.stringify({ cmd: "pnpm test" }), "other"), functionOutput("wrong-tool", passed),
+    functionCall("bad-json", "{"), functionOutput("bad-json", passed), functionCall("array", "[]"), functionOutput("array", passed),
+    functionCall("unsafe", JSON.stringify({ cmd: "pnpm test; true" })), functionOutput("unsafe", passed),
+    functionCall("failed", JSON.stringify({ cmd: "pnpm test" })), functionOutput("failed", "Process exited with code 1\nTests 3 passed"),
+    functionCall("duplicate", JSON.stringify({ cmd: "pnpm test" })), call("duplicate", "pnpm test"), functionOutput("duplicate", passed)];
+  const artifacts = extractCodexSessionVerificationArtifacts(records);
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0]!.command_digest, stableDigest("pnpm test"));
+  assert.equal(JSON.stringify(artifacts).includes("pnpm test"), false);
+});
+
+test("verification collector resumes from content-free state and preserves duplicate detection", () => {
+  const collector = createCodexSessionVerificationCollector();
+  collector.add(call("private-call-id", "pnpm test"));
+  const saved = JSON.parse(JSON.stringify(collector.snapshot()));
+  assert.equal(JSON.stringify(saved).includes("private-call-id"), false);
+  assert.equal(JSON.stringify(saved).includes("pnpm test"), false);
+  const resumed = createCodexSessionVerificationCollector(saved);
+  resumed.add(output("private-call-id", successfulOutput("Tests 1 passed (1)")));
+  assert.equal(resumed.finish().length, 1);
+  const duplicate = createCodexSessionVerificationCollector(saved);
+  duplicate.add(call("private-call-id", "pnpm test"));
+  duplicate.add(output("private-call-id", successfulOutput("Tests 1 passed (1)")));
+  assert.deepEqual(duplicate.finish(), []);
+  const populated = createCodexSessionVerificationCollector();
+  populated.add(output("early", successfulOutput("Tests 1 passed (1)")));
+  populated.add(output("early", successfulOutput("Tests 1 passed (1)")));
+  populated.add(completedCommand("structured", "pnpm test", "Tests 1 passed (1)"));
+  const resumedPopulated = createCodexSessionVerificationCollector(JSON.parse(JSON.stringify(populated.snapshot())));
+  resumedPopulated.add(call("early", "pnpm test"));
+  assert.equal(resumedPopulated.finish().length, 1);
+  assert.throws(() => createCodexSessionVerificationCollector({ ...saved, seen_calls: ["raw-id"] }), /collector state is invalid/u);
+  assert.throws(() => createCodexSessionVerificationCollector({ ...saved, unexpected: "raw-command" }), /collector state is invalid/u);
+  assert.throws(() => createCodexSessionVerificationCollector({ ...saved, calls: [[saved.calls[0][0], { ...saved.calls[0][1], raw: "command" }]] }), /collector state is invalid/u);
+});
+
 test("duplicate call or output identifiers cannot create verification artifacts", () => {
   const passed = successfulOutput("Tests 1 passed (1)");
   assert.deepEqual(extractCodexSessionVerificationArtifacts([
@@ -55,10 +126,10 @@ test("accepts only paired, successful test-runner calls with a passing summary",
   const artifacts = extractCodexSessionVerificationArtifacts([
     call("js", "cd 'packages/core' && pnpm test"), output("js", successfulOutput("Tests 12 passed (12)")),
     call("python", "pytest -q"), output("python", successfulOutput("4 passed in 0.2s")),
-    call("go", "go test ./..."), output("go", successfulOutput("ok example/pkg 0.01s")),
+    call("go", "go test -v ./..."), output("go", successfulOutput("--- PASS: TestExample (0.00s)\nok example/pkg 0.01s")),
     call("rust", "cargo test"), output("rust", successfulOutput("test result: ok. 8 passed; 0 failed")),
     call("maven", "mvn test"), output("maven", successfulOutput("Tests run: 3, Failures: 0, Errors: 0")),
-    call("gradle", "./gradlew test"), output("gradle", successfulOutput("> Task :test\nBUILD SUCCESSFUL")),
+    call("gradle", "./gradlew test"), output("gradle", successfulOutput("> Task :test\n3 tests completed, 1 skipped\nBUILD SUCCESSFUL")),
     call("dotnet", "dotnet test"), output("dotnet", successfulOutput("Passed: 5")),
     call("node", "node --test"), output("node", successfulOutput("# tests 2\n# pass 2")),
   ]);
@@ -74,6 +145,11 @@ test("rejects non-test calls, unmatched outputs, failures, missing summaries, an
     call("other-tool", "pnpm test", "terminal"), output("other-tool", successfulOutput("Tests 1 passed (1)")),
     call("missing-output", "pnpm test"),
     call("failure", "pnpm test"), output("failure", [{ type: "text", text: "Process exited with code 1" }, { type: "text", text: "Tests 1 passed (1)" }]),
+    call("ambiguous-exit", "pnpm test"), output("ambiguous-exit", "Process exited with code 1\nTests 1 passed\nProcess exited with code 0"),
+    call("duplicate-exit", "pnpm test"), output("duplicate-exit", "Process exited with code 0\nTests 1 passed\nProcess exited with code 0"),
+    call("running-session", "pnpm test"), output("running-session", "Process running with session ID 42\nProcess exited with code 0\nTests 1 passed"),
+    call("running-cell", "pnpm test"), output("running-cell", "Script running with cell ID 42\nProcess exited with code 0\nTests 1 passed"),
+    call("pending-session", "pnpm test"), output("pending-session", "Session ID: 42\nProcess exited with code 0\nTests 1 passed"),
     call("no-summary", "pnpm test"), output("no-summary", successfulOutput("no tests found")),
     call("zero-tests", "pnpm test"), output("zero-tests", successfulOutput("Tests 0 passed (0)")),
     call("mixed-result", "pnpm test"), output("mixed-result", successfulOutput("Tests 3 passed, 1 failed")),
@@ -143,7 +219,7 @@ test("unwraps only bounded login-shell command arrays used by Codex CommandExecu
   const summary = "Tests 12 passed (12)";
   const artifacts = extractCodexSessionVerificationArtifacts([
     completedCommand("wrapped-command", ["/bin/zsh", "-lc", command], summary),
-    completedCommand("bash-command", ["/bin/bash", "-lc", "go test ./..."], "ok example/pkg 0.01s"),
+    completedCommand("bash-command", ["/bin/bash", "-lc", "go test -v ./..."], "--- PASS: TestExample (0.00s)\nok example/pkg 0.01s"),
   ]);
   assert.deepEqual(artifacts.map(item => item.runner), ["javascript", "go"]);
   assert.equal(artifacts[0]?.command_digest, stableDigest(command));

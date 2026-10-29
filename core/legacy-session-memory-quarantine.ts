@@ -25,6 +25,7 @@ const QUARANTINE_STATUSES = new Set(["unbound_host", "unidentified_session", "so
 export interface LegacySessionMemoryQuarantineLimits {
   readonly max_files?: number;
   readonly max_bytes?: number;
+  readonly retain_source?: boolean;
 }
 
 function fileDigest(path: string): string {
@@ -59,7 +60,7 @@ function ensureQuarantineRoot(paths: CraftPaths): string {
   return current;
 }
 
-function snapshotTree(source: string, limits: Required<LegacySessionMemoryQuarantineLimits>): Snapshot {
+function snapshotTree(source: string, limits: { max_files: number; max_bytes: number }): Snapshot {
   const directories: string[] = [];
   const files: SnapshotFile[] = [];
   let bytes = 0;
@@ -126,11 +127,10 @@ function removeOrphanStaging(root: string, sourceDigest: string): number {
 }
 
 function publishQuarantine(paths: CraftPaths, source: string, sourceName: string, entry: LegacySessionMemoryEntry,
-  limits: Required<LegacySessionMemoryQuarantineLimits>): { manifest: Manifest; staging_recovered: number } {
+  limits: { max_files: number; max_bytes: number }, retainSource: boolean): { manifest: Manifest; staging_recovered: number } {
   const root = ensureQuarantineRoot(paths);
   const sourceDigest = entry.source_digest.slice("sha256:".length);
   const stagingRecovered = removeOrphanStaging(root, sourceDigest);
-  const target = join(root, sourceDigest);
   let payloadDigest = createHash("sha256").update("empty").digest("hex"), fileCount = 0, bytes = 0;
   let linkTarget: string | undefined;
   const sourceStat = lstatSync(source);
@@ -145,6 +145,9 @@ function publishQuarantine(paths: CraftPaths, source: string, sourceName: string
     const snapshot = snapshotTree(source, limits);
     payloadDigest = snapshot.digest; fileCount = snapshot.files.length; bytes = snapshot.bytes;
   } else throw new Error("source_type_not_quarantinable");
+  // Retained sources can continue changing under an old Host. Preserve each
+  // verified snapshot instead of treating a later digest as a target conflict.
+  const target = join(root, retainSource ? `${sourceDigest}-${payloadDigest}` : sourceDigest);
   const manifest: Manifest = { schema: "craft.legacy-session-memory-quarantine.v1", source_digest: entry.source_digest,
     source_name: sourceName, status: entry.status, payload_digest: payloadDigest, file_count: fileCount, bytes,
     ...(linkTarget === undefined ? {} : { link_target: linkTarget }) };
@@ -157,6 +160,7 @@ function publishQuarantine(paths: CraftPaths, source: string, sourceName: string
     try {
       if (!sourceStat.isSymbolicLink()) {
         const snapshot = snapshotTree(source, limits);
+        if (snapshot.digest !== payloadDigest) throw new Error("quarantine_source_changed");
         const payload = join(staging, "payload");
         mkdirSync(payload, { mode: 0o700 });
         for (const directory of snapshot.directories) mkdirSync(targetPath(payload, directory), { recursive: true, mode: 0o700 });
@@ -182,6 +186,7 @@ function publishQuarantine(paths: CraftPaths, source: string, sourceName: string
     }
   }
   if (!verifyPublished(target, manifest)) throw new Error("quarantine_verify_failed");
+  if (retainSource) return { manifest, staging_recovered: stagingRecovered };
   const current = lstatSync(source);
   if (current.isSymbolicLink()) {
     if (linkTarget === undefined || readlinkSync(source) !== linkTarget) throw new Error("source_link_changed");
@@ -217,7 +222,7 @@ export function quarantineLegacySessionMemory(paths: CraftPaths, legacyRoot: str
     if (!sourceName) { blocked.push({ source_digest: entry.source_digest, reason: "source_identity_missing" }); continue; }
     const source = join(legacyRoot, sourceName);
     try {
-      const { manifest, staging_recovered } = publishQuarantine(paths, source, sourceName, entry, limits);
+      const { manifest, staging_recovered } = publishQuarantine(paths, source, sourceName, entry, limits, options.retain_source === true);
       stagingRecovered += staging_recovered;
       (manifest.status === "broken_symlink" ? brokenDigests : quarantinedDigests).add(entry.source_digest);
     } catch (error) {

@@ -4,7 +4,7 @@
     "SessionStart": [{
       "hooks": [{
         "type": "command",
-        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory --host claude",
         "timeout": 3,
         "statusMessage": "Checking Craft Memory lifecycle"
       }]
@@ -12,7 +12,7 @@
     "UserPromptSubmit": [{
       "hooks": [{
         "type": "command",
-        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory --host claude",
         "timeout": 3,
         "statusMessage": "Resolving scoped Craft Memory"
       }]
@@ -20,7 +20,7 @@
     "Stop": [{
       "hooks": [{
         "type": "command",
-        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory --host claude",
         "timeout": 3,
         "statusMessage": "Closing Craft Memory turn"
       }]
@@ -28,7 +28,7 @@
     "SessionEnd": [{
       "hooks": [{
         "type": "command",
-        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory --host claude",
         "timeout": 3,
         "statusMessage": "Closing Craft Memory session"
       }]

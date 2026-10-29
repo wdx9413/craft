@@ -29,6 +29,14 @@ const RESERVED_FIELDS = new Set(["id", "version", "created_at", "updated_at", "_
 function scopeAliasDigest(alias: string): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(alias)).digest("hex")}`;
 }
+// Project identity has a fixed primitive shape; serialize in canonical key order
+// without making the storage layer depend on the higher-level digest module.
+function projectIdentityDigest(canonical: JsonObject, projectKind: unknown, remoteDigest: unknown): string | null {
+  if (Object.keys(canonical).length !== 2 || typeof canonical.id !== "string" || canonical.kind !== "project"
+    || typeof projectKind !== "string" || !(remoteDigest === null || typeof remoteDigest === "string")) return null;
+  const serialized = `{"canonical":{"id":${JSON.stringify(canonical.id)},"kind":"project"},"project_kind":${JSON.stringify(projectKind)},"remote_digest":${JSON.stringify(remoteDigest)}}`;
+  return `sha256:${createHash("sha256").update(serialized).digest("hex")}`;
+}
 const CONTENT_REFERENCE_RECORD_KINDS = [
   "knowledge_claim", "knowledge_fragment", "wiki_page",
   "memory_ledger", "episodic_memory", "semantic_memory",
@@ -36,8 +44,8 @@ const CONTENT_REFERENCE_RECORD_KINDS = [
 ] as const;
 const MEMORY_PARTITIONED_KINDS = new Set([
   "memory_item", "episodic_memory", "semantic_memory", "memory_ledger", "memory_candidate", "memory_observation",
-  "memory_confirmation", "memory_policy", "memory_compat_binding", "memory_consolidation", "memory_usage_signal",
-  "memory_maintenance_candidate", "memory_maintenance_run", "memory_learning_cycle", "memory_session_archive",
+  "memory_confirmation", "memory_observation_intent", "memory_policy", "memory_compat_binding", "memory_consolidation", "memory_usage_signal",
+  "memory_maintenance_candidate", "memory_maintenance_run", "memory_maintenance_request", "memory_learning_cycle", "memory_session_archive",
 ]);
 const EXPERIENCE_PARTITIONED_KINDS = new Set([
   "experience_evaluation_dispatch", "experience_graph_draft", "experience_improvement_proposal", "experience_intervention",
@@ -47,8 +55,8 @@ const EXPERIENCE_PARTITIONED_KINDS = new Set([
   "workflow_evolution_observation", "workflow_evolution_proposal", "workflow_evolution_request",
 ]);
 const EVOLUTION_PARTITIONED_KINDS = new Set(["evolution_cycle"]);
-type PartitionDomain = "memory" | "experience" | "knowledge" | "evolution";
-const PARTITION_LABELS: Record<PartitionDomain, string> = { memory: "Memory", experience: "Experience", knowledge: "Knowledge", evolution: "Evolution" };
+type PartitionDomain = "memory" | "experience" | "knowledge" | "evolution" | "context";
+const PARTITION_LABELS: Record<PartitionDomain, string> = { memory: "Memory", experience: "Experience", knowledge: "Knowledge", evolution: "Evolution", context: "Context" };
 type MemoryScope = { kind: "global" | "user" | "project" | "workspace" | "task" | "session" | "team" | "organization" | "legacy"; id: string };
 type MigrationBackupFileOps = { write: typeof writeFileSync; rename: typeof renameSync; unlink: typeof unlinkSync };
 type ContentMigrationSnapshot = { path: string; digest: string; markdown: string };
@@ -161,6 +169,7 @@ export class CraftStore {
   readonly contentStore: MarkdownContentStore;
   #database: DatabaseSync | null = null;
   #transactionDepth = 0;
+  #readSnapshotDepth = 0;
   #memoryDatabases = new Map<string, DatabaseSync>();
   #memoryReadDatabases = new Map<string, DatabaseSync>();
   #pendingMemoryRows: PartitionRow[] = [];
@@ -173,8 +182,11 @@ export class CraftStore {
     this.traceShards = new TraceShardStore(paths.root);
     this.codebaseShards = new CodebaseShardStore(paths.root);
     this.contentStore = new MarkdownContentStore(paths);
-    this.contentStore.setSessionMemoryDirectoryResolver((sessionId, writing) =>
-      join(this.sessionStorageRoot(sessionId, writing), "memory", "md"));
+    this.contentStore.setSessionMemoryDirectoryResolver((sessionId, writing) => {
+      if (writing) this.assertSessionMemoryWritable(sessionId);
+      return join(this.sessionStorageRoot(sessionId, writing), "memory", "md");
+    });
+    this.contentStore.setSessionMemoryWriteGuard((sessionId, operation) => this.withSessionMemoryWriteGuard(sessionId, operation));
     this.contentStore.setProjectKnowledgeDirectoryResolver((scope, options) => {
       const roots = this.projectRoots(scope.slice("project:".length));
       if (roots.length !== 1) return null;
@@ -315,6 +327,8 @@ export class CraftStore {
     try {
       fileOps.write(temporary, content, { flag: "wx", mode: 0o600 });
       fileOps.rename(temporary, target);
+      const written = lstatSync(target);
+      if (written.isSymbolicLink() || !written.isFile() || readFileSync(target, "utf8") !== content) throw new Error(`${domain} migration backup readback failed`);
     } catch (error) {
       try { fileOps.unlink(temporary); } catch (cleanupError) { if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") throw cleanupError; }
       if (existsSync(target)) {
@@ -411,6 +425,7 @@ export class CraftStore {
   transaction<T>(operation: (database: DatabaseSync) => T): T {
     const database = this.database;
     const nested = this.#transactionDepth > 0;
+    if (!nested && this.#readSnapshotDepth > 0) throw Object.assign(new Error("Cannot start a write transaction inside a read snapshot; retry after the snapshot closes"), { code: "CRAFT_READ_SNAPSHOT_WRITE_CONFLICT" });
     const pendingStart = this.#pendingMemoryRows.length;
     const deletionStart = this.#pendingMemoryDeletes.length;
     const savepoint = `craft_atomic_${this.#transactionDepth}`;
@@ -450,8 +465,9 @@ export class CraftStore {
   /** Run a bounded read on one SQLite snapshot without reserving the writer. */
   readSnapshot<T>(operation: (database: DatabaseSync) => T): T {
     const database = this.database;
-    if (this.#transactionDepth > 0) return operation(database);
+    if (this.#transactionDepth > 0 || this.#readSnapshotDepth > 0) return operation(database);
     database.exec("BEGIN DEFERRED");
+    this.#readSnapshotDepth += 1;
     try {
       const result = operation(database);
       database.exec("COMMIT");
@@ -459,7 +475,7 @@ export class CraftStore {
     } catch (error) {
       database.exec("ROLLBACK");
       throw error;
-    }
+    } finally { this.#readSnapshotDepth -= 1; }
   }
 
   /** Keep all writes for one Trace on its own WAL writer, while old Traces stay on the legacy database. */
@@ -480,13 +496,22 @@ export class CraftStore {
   private cleanupMemoryRows(rows: PartitionRow[]): void {
     if (!rows.length) return;
     const clean = () => {
+      const groups = new Map<string, PartitionRow[]>();
       for (const row of rows) {
         const pointer = this.partitionPointer(row.kind, row.logicalId ?? row.id, row.version);
         if (pointer?.file === row.file && (pointer.recordId ?? row.logicalId ?? row.id) === row.id) continue;
-        const database = this.#memoryDatabases.get(row.file)!;
+        const group = groups.get(row.file) ?? [];
+        group.push(row); groups.set(row.file, group);
+      }
+      for (const [file, group] of groups) {
+        const database = this.#memoryDatabases.get(file)!;
         this.transactionOn(database, () => {
-          database.prepare("DELETE FROM records WHERE kind=? AND id=? AND version=?").run(row.kind, row.id, row.version);
-          database.prepare("DELETE FROM content_index WHERE kind=? AND id=? AND version=?").run(row.kind, row.id, row.version);
+          const deleteRecord = database.prepare("DELETE FROM records WHERE kind=? AND id=? AND version=?");
+          const deleteIndex = database.prepare("DELETE FROM content_index WHERE kind=? AND id=? AND version=?");
+          for (const row of group) {
+            deleteRecord.run(row.kind, row.id, row.version);
+            deleteIndex.run(row.kind, row.id, row.version);
+          }
         });
       }
     };
@@ -566,6 +591,25 @@ export class CraftStore {
     const host = hosts[0] ?? (legacyBinding?.session_id === sessionId ? String(legacyBinding.observed_host ?? legacyBinding.host) : "craft-mcp");
     if (create && !hosts.length && !legacyBinding) this.bindSessionStorageHost(sessionId, host);
     return create ? ensureSessionStorageDirectory(this.paths, host, sessionId) : sessionStorageDirectory(this.paths, host, sessionId);
+  }
+
+  /** Serialize only one session's Memory body writes and archive cleanup. */
+  withSessionMemoryWriteGuard<T>(sessionId: string, operation: () => T): T {
+    const root = this.sessionStorageRoot(sessionId, true);
+    const file = join(root, ".memory-write-lock.db");
+    const existing = lstatSync(file, { throwIfNoEntry: false });
+    if (existing && (existing.isSymbolicLink() || !existing.isFile())) throw new Error("Session Memory write lock is unsafe");
+    const database = new DatabaseSync(file);
+    try {
+      database.exec("PRAGMA busy_timeout=0");
+      try { database.exec("BEGIN IMMEDIATE"); }
+      catch (error) {
+        if (error instanceof Error && /locked|busy/iu.test(error.message)) throw new Error("SESSION_MEMORY_BUSY: retry session Memory operation", { cause: error });
+        throw error;
+      }
+      try { const result = operation(); database.exec("COMMIT"); return result; }
+      catch (error) { database.exec("ROLLBACK"); throw error; }
+    } finally { database.close(); }
   }
 
   save(kind: string, id: string, payload: JsonObject, version?: number): JsonObject {
@@ -741,6 +785,7 @@ export class CraftStore {
   }
 
   private partitionDomain(kind: string, payload: JsonObject): PartitionDomain | null {
+    if (["context_ephemeral_index", "context_resume_snapshot"].includes(kind) && typeof payload.session_scope_id === "string") return "context";
     if (EVOLUTION_PARTITIONED_KINDS.has(kind)) return "evolution";
     if (MEMORY_PARTITIONED_KINDS.has(kind)) return "memory";
     if (EXPERIENCE_PARTITIONED_KINDS.has(kind)) return "experience";
@@ -864,6 +909,10 @@ export class CraftStore {
   private memoryScope(kind: string, payload: JsonObject, storage = true, allowMissingKnowledgeParents = false): MemoryScope | null {
     const domain = this.partitionDomain(kind, payload);
     if (!domain) return null;
+    if (domain === "context") {
+      if (typeof payload.session_host !== "string" || typeof payload.session_id !== "string" || payload.session_scope_id !== sessionStorageScopeId(payload.session_host, payload.session_id)) throw new Error("Context session storage identity is invalid");
+      return { kind: "session", id: String(payload.session_scope_id) };
+    }
     let value = payload.scope;
     // The built-in Serena descriptor is a configuration template, not data for
     // an actual project named selected-project. Its descendants still resolve
@@ -965,9 +1014,20 @@ export class CraftStore {
     return { kind: scope.kind as MemoryScope["kind"], id: scope.id };
   }
 
+  private assertSessionMemoryWritable(sessionId: string): void {
+    const scopeId = this.resolveSessionStorageScopeId(sessionId);
+    const digest = createHash("sha256").update(scopeId).digest("hex");
+    if (this.find("memory_session_archive", `memory_session_archive_${digest.slice(-32)}`)) {
+      throw new Error("Archived session Memory cannot be written");
+    }
+  }
+
   private memoryDatabaseFile(scope: MemoryScope, create = true): string {
     if (scope.kind === "global" || scope.kind === "user") return this.paths.memoryDatabaseFile;
-    if (scope.kind === "session") return join(this.sessionStorageRoot(scope.id, create), "memory", "memory.db");
+    if (scope.kind === "session") {
+      if (create) this.assertSessionMemoryWritable(scope.id);
+      return join(this.sessionStorageRoot(scope.id, create), "memory", "memory.db");
+    }
     if (scope.kind === "task") {
       const id = scope.id;
       if (id.trim() !== id || Buffer.byteLength(id, "utf8") > 255 || id === "." || id === ".." || /[/\\\x00-\x1f\x7f]/u.test(id)) {
@@ -998,6 +1058,11 @@ export class CraftStore {
   }
 
   private partitionDatabaseFile(domain: PartitionDomain, scope: MemoryScope, create = true): string {
+    if (domain === "context") {
+      if (scope.kind !== "session" || !parseSessionStorageScopeId(scope.id)) throw new Error("Context storage requires a Host session scope");
+      if (create) this.assertSessionMemoryWritable(scope.id);
+      return join(this.sessionStorageRoot(scope.id, create), "context", "context.db");
+    }
     if (domain === "memory") return this.memoryDatabaseFile(scope, create);
     if (domain === "experience") return this.experienceDatabaseFile(scope, create);
     if (domain === "evolution") {
@@ -1074,7 +1139,7 @@ export class CraftStore {
 
   private projectRoots(projectId: string): string[] {
     const acceptedProjectIds = new Set([projectId, projectId.startsWith("project:") ? projectId : `project:${projectId}`]);
-    const rows = this.database.prepare("SELECT payload_json FROM records WHERE kind='scope_alias'").all() as Array<{ payload_json: string }>;
+    const rows = this.database.prepare("SELECT r.payload_json FROM records r JOIN (SELECT id,MAX(version) version FROM records WHERE kind='scope_alias' GROUP BY id) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind='scope_alias'").all() as Array<{ payload_json: string }>;
     for (const row of rows) {
       try {
         const payload = JSON.parse(row.payload_json) as JsonObject;
@@ -1084,36 +1149,62 @@ export class CraftStore {
           && scope?.kind === "project" && typeof scope.id === "string") acceptedProjectIds.add(scope.id);
       } catch { /* malformed aliases are ignored */ }
     }
+    let unavailable = false;
     const roots = rows.flatMap(row => {
       try {
         const payload = JSON.parse(row.payload_json) as JsonObject;
         const rowScope = payload.scope as JsonObject | undefined;
         if (payload.status !== "active" || payload.alias_kind !== "path" || rowScope?.kind !== "project" || !acceptedProjectIds.has(String(rowScope.id))
           || typeof payload.alias !== "string" || payload.alias_digest !== undefined && payload.alias_digest !== scopeAliasDigest(payload.alias)) return [];
-        const path = realpathSync(payload.alias);
-        return statSync(path).isDirectory() ? [path] : [];
+        try {
+          const path = realpathSync(payload.alias);
+          if (statSync(path).isDirectory()) return [path];
+          unavailable = true; return [];
+        } catch { unavailable = true; return []; }
       } catch { return []; }
     });
     const identityIds = [...acceptedProjectIds];
     // `acceptedProjectIds` always contains projectId and its canonical alias.
-    const identities = this.database.prepare(`SELECT id,payload_json FROM records WHERE kind='project_identity' AND id IN (${identityIds.map(() => "?").join(",")})`)
+    const identities = this.database.prepare(`SELECT r.id,r.payload_json FROM records r JOIN (SELECT id,MAX(version) version FROM records WHERE kind='project_identity' GROUP BY id) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind='project_identity' AND r.id IN (${identityIds.map(() => "?").join(",")})`)
       .all(...identityIds) as Array<{ id: string; payload_json: string }>;
     roots.push(...identities.flatMap(row => {
       try {
         const payload = JSON.parse(row.payload_json) as JsonObject;
         const canonical = payload.canonical_scope as JsonObject | undefined;
-        if (canonical?.kind !== "project" || !acceptedProjectIds.has(String(canonical.id))
-          || typeof payload.identity_digest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(payload.identity_digest)
+        if (canonical?.kind !== "project" || canonical.id !== row.id || !acceptedProjectIds.has(String(canonical.id))
+          || typeof payload.identity_digest !== "string" || payload.identity_digest !== projectIdentityDigest(canonical, payload.project_kind, payload.remote_digest)
           || typeof payload.local_path_alias !== "string" || !isAbsolute(payload.local_path_alias)) return [];
-        const path = realpathSync(payload.local_path_alias);
-        return statSync(path).isDirectory() ? [path] : [];
+        try {
+          const path = realpathSync(payload.local_path_alias);
+          if (statSync(path).isDirectory()) return [path];
+          unavailable = true; return [];
+        } catch { unavailable = true; return []; }
       } catch { return []; }
     }));
-    return [...new Set(roots)].sort();
+    if (roots.length && unavailable) throw new Error("Project storage root is unavailable or ambiguous");
+    const uniqueRoots = [...new Set(roots)].sort();
+    if (uniqueRoots.length) {
+      const accepted = new Set([...acceptedProjectIds].map(id => id.startsWith("project:") ? id.slice("project:".length) : id));
+      for (const row of rows) {
+        try {
+          const alias = JSON.parse(row.payload_json) as JsonObject;
+          const scope = alias.scope as JsonObject | undefined;
+          if (alias.status !== "active" || alias.alias_kind !== "path" || scope?.kind !== "project" || typeof scope.id !== "string"
+            || accepted.has(scope.id.startsWith("project:") ? scope.id.slice("project:".length) : scope.id)
+            || typeof alias.alias !== "string" || alias.alias_digest !== undefined && alias.alias_digest !== scopeAliasDigest(alias.alias)) continue;
+          let path: string;
+          try { path = realpathSync(alias.alias); } catch { continue; }
+          if (uniqueRoots.includes(path)) throw new Error("PROJECT_SCOPE_CONFLICT: project root is bound to multiple scopes");
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith("PROJECT_SCOPE_CONFLICT:")) throw error;
+        }
+      }
+    }
+    return uniqueRoots;
   }
 
-  private memoryDatabase(scope: MemoryScope, domain: PartitionDomain = "memory"): { database: DatabaseSync; file: string } {
-    const file = this.partitionDatabaseFile(domain, scope);
+  private memoryDatabase(scope: MemoryScope, domain: PartitionDomain = "memory", removal = false): { database: DatabaseSync; file: string } {
+    const file = this.partitionDatabaseFile(domain, scope, !(removal && (domain === "memory" || domain === "context") && scope.kind === "session"));
     const existing = this.#memoryDatabases.get(file);
     if (existing) return { database: existing, file };
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
@@ -1161,7 +1252,7 @@ export class CraftStore {
       const stat = lstatSync(file);
       if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Memory database must be a regular file");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("Memory partition database is unavailable");
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`${domain === "context" ? "Context" : "Memory"} partition database is unavailable`);
       throw error;
     }
     const database = new DatabaseSync(file, { readOnly: true });
@@ -1262,11 +1353,12 @@ export class CraftStore {
   }
 
   /** Move a bounded keyset page. Legacy reads keep working while the background owner drains pages. */
-  reconcileKnowledgeStorage(args: { max_records?: number; cursor?: string; dry_run?: boolean; summary_only?: boolean } = {}): JsonObject {
+  reconcileKnowledgeStorage(args: { max_records?: number; cursor?: string; dry_run?: boolean; summary_only?: boolean; records_only?: boolean } = {}): JsonObject {
     const limit = args.max_records ?? 100;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error("max_records must be between 1 and 500");
     if (args.dry_run !== undefined && typeof args.dry_run !== "boolean") throw new Error("dry_run must be boolean");
     if (args.summary_only !== undefined && typeof args.summary_only !== "boolean") throw new Error("summary_only must be boolean");
+    if (args.records_only !== undefined && typeof args.records_only !== "boolean") throw new Error("records_only must be boolean");
     const summaryOnly = args.summary_only === true;
     let after: [string, string, number] = ["", "", 0];
     if (args.cursor !== undefined) {
@@ -1279,7 +1371,7 @@ export class CraftStore {
       } catch { throw new Error("Knowledge migration cursor is invalid"); }
     }
     if (after[0] === "content_scan") {
-      if (after[2] !== 1) throw new Error("Knowledge migration cursor is invalid");
+      if (after[2] !== 1 || args.records_only === true) throw new Error("Knowledge migration cursor is invalid");
       return this.retireLegacyKnowledgeContent(after[1], limit, args.dry_run === true, summaryOnly);
     }
     const rows = this.database.prepare(`SELECT kind,id,version,payload_json,created_at,updated_at FROM records
@@ -1288,7 +1380,9 @@ export class CraftStore {
         AND (kind>? OR (kind=? AND id>?) OR (kind=? AND id=? AND version>?))
       ORDER BY kind,id,version LIMIT ?`).all(after[0], after[0], after[1], after[0], after[1], after[2], limit + 1) as Array<Record<string, unknown>>;
     const page = rows.slice(0, limit), hasMore = rows.length > limit;
-    if (!page.length) return this.retireLegacyKnowledgeContent("", limit, args.dry_run === true, summaryOnly);
+    if (!page.length) return args.records_only === true
+      ? { status: "completed", phase: "records", examined: 0, migratable: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null, dry_run: args.dry_run === true, raw_content_stored: false }
+      : this.retireLegacyKnowledgeContent("", limit, args.dry_run === true, summaryOnly);
     const blocked: JsonObject[] = [];
     const groups = new Map<string, { scope: MemoryScope; rows: Array<Record<string, unknown>> }>();
     const pendingPublications: Array<{ row: Record<string, unknown>; header: JsonObject }> = [];
@@ -1384,12 +1478,13 @@ export class CraftStore {
       }
     }
     const last = page.at(-1)!;
-    const cursor = Buffer.from(JSON.stringify(hasMore ? [last.kind, last.id, last.version] : ["content_scan", "", 1])).toString("base64url");
-    return { status: "partial", phase: "records", examined: page.length,
+    const recordsDone = args.records_only === true && !hasMore;
+    const cursor = recordsDone ? null : Buffer.from(JSON.stringify(hasMore ? [last.kind, last.id, last.version] : ["content_scan", "", 1])).toString("base64url");
+    return { status: recordsDone && !blocked.length ? "completed" : "partial", phase: "records", examined: page.length,
       migratable: [...groups.values()].reduce((total, group) => total + group.rows.length, 0), migrated, skipped,
       ...blockedSummary(blocked, summaryOnly), blocked_failure_kinds: blockedFailureKinds(blocked),
       blocked_failure_phases: blockedFailurePhases(blocked), summary_only: summaryOnly,
-      has_more: true, next_cursor: cursor, dry_run: args.dry_run === true, raw_content_stored: false };
+      has_more: !recordsDone, next_cursor: cursor, dry_run: args.dry_run === true, raw_content_stored: false };
   }
 
   private knowledgeContentMigrationSnapshot(scope: MemoryScope, row: Record<string, unknown>): ContentMigrationSnapshot | null {
@@ -1478,7 +1573,8 @@ export class CraftStore {
 
   private memoryHeader(payload: JsonObject, scope: MemoryScope, file: string, domain: PartitionDomain = "memory"): JsonObject {
     const projection: JsonObject = { scope };
-    for (const key of ["source_id", "document_id", "claim_id", "content_ref", "content_digest", "memory_id", "memory_version", "procedure_id", "scenario_key", "source_session_id"]) {
+    if (domain === "context") projection.context_payload_digest = `sha256:${createHash("sha256").update(JSON.stringify(payloadOnly(payload))).digest("hex")}`;
+    for (const key of ["source_id", "document_id", "claim_id", "content_ref", "content_digest", "memory_id", "memory_version", "procedure_id", "scenario_key", "source_session_id", ...(domain === "context" ? ["session_id", "session_host", "session_scope_id"] : [])]) {
       if (payload[key] !== undefined) projection[key] = payload[key];
     }
     return { ...projection, [`_${domain}_partition`]: { file, scope } };
@@ -1494,7 +1590,7 @@ export class CraftStore {
   }
 
   private partitionPointerFromPayload(payload: JsonObject): { domain: PartitionDomain; scope: MemoryScope; file: string; recordId?: string } | null {
-    for (const domain of ["memory", "experience", "knowledge", "evolution"] as const) {
+    for (const domain of ["memory", "experience", "knowledge", "evolution", "context"] as const) {
       const pointer = payload[`_${domain}_partition`] as JsonObject | undefined;
       if (!pointer || !pointer.scope || typeof pointer.scope !== "object") continue;
       const scope = pointer.scope as MemoryScope;
@@ -1529,6 +1625,7 @@ export class CraftStore {
       // Acquire the publication lock before staging. If BEGIN times out, no
       // partition state has changed. A crash after staging leaves an immutable
       // unpublished row that an identical retry can safely adopt under this lock.
+      if ((domain === "memory" || domain === "context") && scope.kind === "session") this.assertSessionMemoryWritable(scope.id);
       if (domain === "experience") this.memoryScope(kind, { ...payload, id });
       this.assertPartitionDomain(kind, id, payload);
       const latestRow = main.prepare("SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1").get(kind, id);
@@ -1643,6 +1740,12 @@ export class CraftStore {
       .run(kind, id, version, JSON.stringify(ref), updatedAt);
   }
 
+  private assertContextPartitionDigest(header: Record<string, unknown>, source: Record<string, unknown>): void {
+    const expected = (JSON.parse(String(header.payload_json)) as JsonObject).context_payload_digest;
+    if (typeof expected !== "string" || typeof source.payload_json !== "string"
+      || expected !== `sha256:${createHash("sha256").update(source.payload_json).digest("hex")}`) throw new Error("Context partition digest mismatch");
+  }
+
   find(kind: string, id: string, version?: number, hydrate = true): JsonObject | null {
     let row = version === undefined
       ? this.database.prepare(
@@ -1664,6 +1767,7 @@ export class CraftStore {
         ? target.prepare("SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1").get(kind, partition.recordId ?? id)
         : target.prepare("SELECT * FROM records WHERE kind=? AND id=? AND version=?").get(kind, partition.recordId ?? id, Number(version ?? raw.version));
       if (!source) throw new Error(`${PARTITION_LABELS[partition.domain]} partition record is missing: ${kind}/${id}@${String(version ?? raw.version)}`);
+      if (partition.domain === "context") this.assertContextPartitionDigest(raw, source as Record<string, unknown>);
       return this.record({ ...(source as Record<string, unknown>), id }, hydrate);
     }
     return this.record(raw, hydrate);
@@ -1677,6 +1781,7 @@ export class CraftStore {
       ? target.prepare("SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1").get(String(row.kind), partition.recordId ?? String(row.id))
       : target.prepare("SELECT * FROM records WHERE kind=? AND id=? AND version=?").get(String(row.kind), partition.recordId ?? String(row.id), Number(row.version));
     if (!source) throw new Error(`${PARTITION_LABELS[partition.domain]} partition record is missing: ${String(row.kind)}/${String(row.id)}@${String(row.version)}`);
+    if (partition.domain === "context") this.assertContextPartitionDigest(row, source as Record<string, unknown>);
     return this.record({ ...(source as Record<string, unknown>), id: row.id }, hydrate);
   }
 
@@ -1734,6 +1839,24 @@ export class CraftStore {
     return [...merged.values()].sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)) || String(b.id).localeCompare(String(a.id))).slice(0, bounded);
   }
 
+  /** Read one bounded page of the latest session Memory metadata without loading bodies. */
+  listSessionMemoryPage(kind: string, sessionId: string, afterId = "", limit = 100): { records: JsonObject[]; has_more: boolean; next_cursor: string | null } {
+    if (!["memory_ledger", "memory_candidate", "memory_confirmation", "memory_observation_intent"].includes(kind)) throw new Error("Unsupported session Memory collection");
+    if (typeof afterId !== "string") throw new Error("after_id must be a string");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error("session Memory page limit must be between 1 and 500");
+    const scopeId = this.resolveSessionStorageScopeId(sessionId);
+    const rows = this.database.prepare(`SELECT r.* FROM records r JOIN (
+      SELECT id,MAX(version) version FROM records WHERE kind=? AND id>? GROUP BY id
+      ) latest ON latest.id=r.id AND latest.version=r.version
+      WHERE r.kind=? AND (json_extract(r.payload_json,'$.scope')=? OR
+        (json_extract(r.payload_json,'$.scope.kind')='session' AND json_extract(r.payload_json,'$.scope.id')=?))
+      ORDER BY r.id ASC LIMIT ?`).all(kind, afterId, kind, `session:${scopeId}`, scopeId, limit + 1) as Array<Record<string, unknown>>;
+    const page = rows.slice(0, limit);
+    const records = page.map(row => this.recordFromSnapshot(row, false));
+    const hasMore = rows.length > limit;
+    return { records, has_more: hasMore, next_cursor: hasMore && page.length ? String(page[page.length - 1]!.id) : null };
+  }
+
   /** List one stable ID-ordered page; callers may persist the returned ID as a resumable cursor. */
   listByIdPage(kind: string, afterId: string, limit = 100): { records: JsonObject[]; has_more: boolean; next_cursor: string | null } {
     if (typeof kind !== "string" || !kind.trim()) throw new Error("kind must not be empty");
@@ -1748,6 +1871,24 @@ export class CraftStore {
     const page = rows.slice(0, bounded);
     const records = page.map(row => this.recordFromSnapshot(row, true));
     return { records, has_more: hasMore, next_cursor: hasMore && page.length ? String(page[page.length - 1]!.id) : null };
+  }
+
+  /** Page only the current, explicitly Host-bound Context records for one session. */
+  listSessionContextPage(kind: string, sessionId: string, host: string, afterId: string, limit = 100): { records: JsonObject[]; has_more: boolean; next_cursor: string | null } {
+    if (!["context_ephemeral_index", "context_resume_snapshot"].includes(kind)) throw new Error("Unsupported session Context collection");
+    if (typeof afterId !== "string") throw new Error("after_id must be a string");
+    const scopeId = sessionStorageScopeId(host, sessionId);
+    const bounded = validLimit(limit);
+    if (bounded > 1_000) throw new Error("page limit must not exceed 1000");
+    const rows = this.database.prepare(`SELECT r.* FROM records r JOIN (
+      SELECT id,MAX(version) version FROM records WHERE kind=? AND id>? GROUP BY id
+      ) latest ON latest.id=r.id AND latest.version=r.version
+      WHERE r.kind=? AND json_extract(r.payload_json,'$.session_scope_id')=?
+        AND json_extract(r.payload_json,'$.session_host')=? AND json_extract(r.payload_json,'$.session_id')=?
+      ORDER BY r.id ASC LIMIT ?`).all(kind, afterId, kind, scopeId, host, sessionId, bounded + 1) as Array<Record<string, unknown>>;
+    const page = rows.slice(0, bounded), hasMore = rows.length > bounded;
+    return { records: page.map(row => this.recordFromSnapshot(row, false)), has_more: hasMore,
+      next_cursor: hasMore && page.length ? String(page[page.length - 1]!.id) : null };
   }
 
   /** Fetch a bounded page of terminal traces eligible for archival without hydrating unrelated history. */
@@ -1978,7 +2119,7 @@ export class CraftStore {
         const pointer = this.partitionPointer(kind, id, Number(row.version));
         if (pointer) {
           this.assertCurrentPartitionPointer(pointer);
-          if (!partitions.has(pointer.file)) partitions.set(pointer.file, this.memoryDatabase(pointer.scope, pointer.domain).database);
+          if (!partitions.has(pointer.file)) partitions.set(pointer.file, this.memoryDatabase(pointer.scope, pointer.domain, true).database);
         }
       }
       for (const [file, target] of partitions) {
@@ -1997,8 +2138,105 @@ export class CraftStore {
     }
   }
 
-  /** Copy verified legacy rows into the new partition, then switch each central pointer with CAS.
-   * A crash before CAS leaves only an unpublished copy; retrying compares the immutable row. */
+  /** Move a page of Host-bound Context versions; retries verify unpublished copies. */
+  migrateLegacyContextVersions(entries: Array<{ kind: string; id: string; version: number; source_digest?: string }>): { migrated: number; already_current: number } {
+    if (entries.length > 500) throw new Error("Context migration page is too large");
+    const rows: Array<Record<string, unknown>> = [], seen = new Set<string>();
+    let alreadyCurrent = 0;
+    for (const entry of entries) {
+      if (!["context_ephemeral_index", "context_resume_snapshot"].includes(entry.kind) || !entry.id || !Number.isSafeInteger(entry.version) || entry.version < 1) throw new Error("Context migration identity is invalid");
+      const key = JSON.stringify([entry.kind, entry.id, entry.version]);
+      if (seen.has(key)) throw new Error("Context migration page repeats an identity");
+      seen.add(key);
+      const row = this.database.prepare("SELECT kind,id,version,payload_json,created_at,updated_at FROM records WHERE kind=? AND id=? AND version=?").get(entry.kind, entry.id, entry.version) as Record<string, unknown> | undefined;
+      if (!row) throw new Error("Context migration source is missing");
+      const payload = JSON.parse(String(row.payload_json)) as JsonObject;
+      const pointer = this.partitionPointerFromPayload(payload);
+      if (!pointer && entry.source_digest !== undefined && entry.source_digest !== `sha256:${createHash("sha256").update(String(row.payload_json)).digest("hex")}`) throw new Error("Context migration preflight source changed");
+      if (pointer) {
+        if (pointer.domain !== "context") throw new Error("Context migration pointer has the wrong owner");
+        const source = this.memoryDatabaseForRead(pointer.scope, pointer.domain, pointer.file).database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=?").get(entry.kind, entry.id, entry.version) as { payload_json: string } | undefined;
+        if (!source || payload.context_payload_digest !== `sha256:${createHash("sha256").update(source.payload_json).digest("hex")}`) throw new Error("Context migration current partition is not verified");
+        alreadyCurrent++; continue;
+      }
+      if (this.partitionDomain(entry.kind, payload) !== "context") throw new Error("Context migration Host session identity is unavailable");
+      this.memoryScope(entry.kind, { ...payload, id: entry.id });
+      rows.push(row);
+    }
+    const groups = new Map<string, { scope: MemoryScope; rows: Array<Record<string, unknown>> }>();
+    for (const row of rows) {
+      const payload = JSON.parse(String(row.payload_json)) as JsonObject;
+      const scope = this.memoryScope(String(row.kind), { ...payload, id: row.id })!;
+      const group = groups.get(scope.id) ?? { scope, rows: [] };
+      group.rows.push(row); groups.set(scope.id, group);
+    }
+    for (const group of groups.values()) this.writeLegacyPartitionBackup("context", group.scope, join(this.paths.backupsDir, "context-migration"), group.rows,
+      { write: writeFileSync, rename: renameSync, unlink: unlinkSync });
+    for (const row of rows) {
+      const payload = JSON.parse(String(row.payload_json)) as JsonObject;
+      const scope = this.memoryScope(String(row.kind), { ...payload, id: row.id })!;
+      const target = this.memoryDatabase(scope, "context");
+      this.transaction(main => {
+        this.assertSessionMemoryWritable(scope.id);
+        const current = main.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=?").get(String(row.kind), String(row.id), Number(row.version)) as { payload_json: string } | undefined;
+        if (current?.payload_json !== row.payload_json) throw new Error("Context migration source changed concurrently");
+        this.transactionOn(target.database, () => {
+          const existing = target.database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=?").get(String(row.kind), String(row.id), Number(row.version)) as { payload_json: string } | undefined;
+          if (existing && existing.payload_json !== row.payload_json) throw new Error("Context migration target conflicts");
+          if (!existing) target.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+            .run(String(row.kind), String(row.id), Number(row.version), String(row.payload_json), String(row.created_at), String(row.updated_at));
+        });
+        const header = this.memoryHeader(payload, scope, target.file, "context");
+        const changed = main.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=? AND payload_json=?")
+          .run(JSON.stringify(header), String(row.kind), String(row.id), Number(row.version), String(row.payload_json));
+        if (Number(changed.changes) !== 1) throw new Error("Context migration source changed concurrently");
+      });
+    }
+    return { migrated: rows.length, already_current: alreadyCurrent };
+  }
+
+  /** Restore missing migrated partition versions only when the published pointer still matches the backup. */
+  restoreContextMigrationBackup(name: string): { restored: number; already_present: number } {
+    if (!/^legacy-partition-[a-f0-9]{64}\.json$/u.test(name)) throw new Error("Context migration backup name is invalid");
+    const directory = join(this.paths.backupsDir, "context-migration", "backups");
+    for (const path of [this.paths.root, this.paths.backupsDir, join(this.paths.backupsDir, "context-migration"), directory]) {
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Context migration backup directory is unsafe");
+    }
+    const path = join(directory, name), stat = lstatSync(path);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 210_000_000) throw new Error("Context migration backup is unsafe");
+    const content = readFileSync(path, "utf8");
+    if (name !== `legacy-partition-${createHash("sha256").update(content).digest("hex")}.json`) throw new Error("Context migration backup digest mismatch");
+    const backup = JSON.parse(content) as { schema?: unknown; domain?: unknown; scope?: MemoryScope; records?: Array<Record<string, unknown>> };
+    if (backup.schema !== "craft.capability-partition-migration-backup.v1" || backup.domain !== "context" || backup.scope?.kind !== "session"
+      || !parseSessionStorageScopeId(backup.scope.id) || !Array.isArray(backup.records) || backup.records.length < 1 || backup.records.length > 500) throw new Error("Context migration backup is invalid");
+    const scope = backup.scope, target = this.memoryDatabase(scope, "context");
+    let restored = 0, alreadyPresent = 0;
+    for (const row of backup.records) {
+      if (!["context_ephemeral_index", "context_resume_snapshot"].includes(String(row.kind)) || typeof row.id !== "string" || !row.id
+        || !Number.isSafeInteger(row.version) || Number(row.version) < 1 || typeof row.payload_json !== "string"
+        || typeof row.created_at !== "string" || typeof row.updated_at !== "string") throw new Error("Context migration backup record is invalid");
+      const payload = JSON.parse(row.payload_json) as JsonObject;
+      if (JSON.stringify(this.memoryScope(row.kind as string, { ...payload, id: row.id })) !== JSON.stringify(scope)) throw new Error("Context migration backup scope mismatch");
+      const expectedHeader = JSON.stringify(this.memoryHeader(payload, scope, target.file, "context"));
+      this.transaction(main => {
+        this.assertSessionMemoryWritable(scope.id);
+        const current = main.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=?").get(String(row.kind), String(row.id), Number(row.version)) as { payload_json: string } | undefined;
+        if (current?.payload_json !== expectedHeader) throw new Error("Context migration published pointer changed");
+        this.transactionOn(target.database, () => {
+          const existing = target.database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=?").get(String(row.kind), String(row.id), Number(row.version)) as { payload_json: string } | undefined;
+          if (existing && existing.payload_json !== row.payload_json) throw new Error("Context migration restore target conflicts");
+          if (existing) { alreadyPresent++; return; }
+          target.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+            .run(String(row.kind), String(row.id), Number(row.version), String(row.payload_json), String(row.created_at), String(row.updated_at));
+          restored++;
+        });
+      });
+    }
+    return { restored, already_present: alreadyPresent };
+  }
+
+  /** Copy verified legacy rows into the new partition, then switch each central pointer with CAS. */
   async migrateLegacyPartitionVersions(entries: Array<{ kind: string; id: string; version: number }>): Promise<{
     migrated: number; already_current: number; backup_directory: string | null;
   }> {
@@ -2058,6 +2296,11 @@ export class CraftStore {
       try {
         if (String((check.prepare("PRAGMA quick_check").get() as { quick_check: string }).quick_check) !== "ok") {
           throw new Error("Legacy partition backup failed integrity check");
+        }
+        for (const move of moves.filter(item => item.source === source)) {
+          const saved = check.prepare("SELECT payload_json,created_at,updated_at FROM records WHERE kind=? AND id=? AND version=?")
+            .get(move.kind, move.physicalId, move.version) as Move["row"] | undefined;
+          if (!saved || JSON.stringify(saved) !== JSON.stringify(move.row)) throw new Error("Legacy partition source differs from backup");
         }
       } finally { check.close(); }
       backupManifest.push({ source, backup: destination });
@@ -2122,6 +2365,17 @@ export class CraftStore {
     for (const databases of [this.#memoryDatabases, this.#memoryReadDatabases]) {
       for (const [path, database] of databases) {
         if (!canonicalFiles.has(canonicalCandidatePath(path))) continue;
+        database.close();
+        databases.delete(path);
+      }
+    }
+  }
+
+  closeContextScope(scope: { kind: string; id: string }): void {
+    const file = canonicalCandidatePath(this.partitionDatabaseFile("context", scope as MemoryScope, false));
+    for (const databases of [this.#memoryDatabases, this.#memoryReadDatabases]) {
+      for (const [path, database] of databases) {
+        if (canonicalCandidatePath(path) !== file) continue;
         database.close();
         databases.delete(path);
       }

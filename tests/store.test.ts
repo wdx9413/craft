@@ -46,8 +46,15 @@ test("read snapshots keep a consistent read while allowing another store to writ
     assert.deepEqual(observed, { before: 1, during: 1 });
     assert.equal(store.list("snapshot").length, 2);
     assert.equal(store.transaction(() => store.readSnapshot(() => "nested")), "nested");
+    assert.equal(store.readSnapshot(() => store.readSnapshot(() => "nested read")), "nested read");
+    assert.throws(() => store.readSnapshot(() => store.readSnapshot(() => { throw new Error("nested snapshot failed"); })), /nested snapshot failed/u);
+    assert.throws(() => store.readSnapshot(() => store.transaction(() => store.create("snapshot", "forbidden", {}))),
+      error => (error as NodeJS.ErrnoException).code === "CRAFT_READ_SNAPSHOT_WRITE_CONFLICT");
+    assert.equal(store.find("snapshot", "forbidden"), null);
+    store.transaction(() => store.create("snapshot", "retried", {}));
+    assert.ok(store.find("snapshot", "retried"));
     assert.throws(() => store.readSnapshot(() => { throw new Error("snapshot failed"); }), /snapshot failed/u);
-    assert.equal(store.readSnapshot((database) => Number((database.prepare("SELECT COUNT(*) AS count FROM records WHERE kind=?").get("snapshot") as { count: number }).count)), 2);
+    assert.equal(store.readSnapshot((database) => Number((database.prepare("SELECT COUNT(*) AS count FROM records WHERE kind=?").get("snapshot") as { count: number }).count)), 3);
   } finally { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

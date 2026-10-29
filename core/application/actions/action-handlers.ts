@@ -254,7 +254,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_strategy_recommend: (a) => service.strategyRecommend(a),
       craft_knowledge_claim_save: (a) => service.knowledgeClaimSave(a), craft_knowledge_session_evidence_record: async (a) => {
         if (a.verify_against_archive !== true) return service.knowledgeSessionEvidenceRecord(a);
-        if (a.dataset_partition !== "candidate_generation" && a.dataset_partition !== "held_out") throw new Error("dataset_partition is required for archive verification");
+        if (a.dataset_partition !== "candidate_generation" && a.dataset_partition !== "development" && a.dataset_partition !== "held_out") throw new Error("dataset_partition is required for archive verification");
         let transcriptCheck: JsonObject;
         try { transcriptCheck = await verifyCodexSessionEvidenceInput(a, { expected_partition: a.dataset_partition },
           { ...process.env, CRAFT_DATA_DIR: service.store.paths.root }); }

@@ -147,26 +147,30 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     const sessionIds = new Set((args.session_ids as string[]).map(id => id.trim()));
     const limit = args.limit === undefined ? 1_000 : args.limit;
     if (!Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 10_000) throw new Error("limit must be an integer between 1 and 10000");
-    const linkedOutcomes = new Map<string, Array<{ session_id: string; task_id: string; host: string; outcome: string }>>();
-    for (const observation of this.store.list("workflow_evolution_observation", Number(limit), item => {
+    const linkedOutcomes = new Map<string, Array<{ session_id: string; task_id: string; host: string; outcome: string; observation_id: string }>>();
+    const observations = this.store.list("workflow_evolution_observation", Number(limit) + 1, item => {
       const source = item.source as JsonObject | undefined;
       return item.sanitized === true && item.content_stored === false && Array.isArray(item.evidence_ids)
         && typeof source?.session_id === "string" && sessionIds.has(source.session_id);
-    })) {
+    });
+    for (const observation of observations.slice(0, Number(limit))) {
       const source = observation.source as JsonObject;
       if (typeof source.id !== "string" || typeof source.kind !== "string" || !["passed", "failed"].includes(String(observation.outcome))) continue;
       for (const evidenceId of observation.evidence_ids as string[]) {
         const linked = linkedOutcomes.get(evidenceId) ?? [];
-        linked.push({ session_id: String(source.session_id), task_id: source.id, host: source.kind.startsWith("host:") ? source.kind.slice(5) : "",
+        linked.push({ session_id: String(source.session_id), task_id: source.id, host: source.kind.startsWith("host:") ? source.kind.slice(5) : "", observation_id: String(observation.id),
           outcome: String(observation.outcome) });
         linkedOutcomes.set(evidenceId, linked);
       }
     }
-    const evidence = this.store.list("evidence", Number(limit), item => {
+    const evidenceRecords = this.store.list("evidence", Number(limit) + 1, item => {
       const metadata = item.metadata as JsonObject | undefined;
-      return metadata?.provenance === "host_completion_signal" && metadata.content_stored === false
+      return item.record_origin !== "caller_asserted" && item.source_type === "host_completion_signal"
+        && metadata?.provenance === "host_completion_signal" && metadata.content_stored === false
         && typeof metadata.source_session_id === "string" && sessionIds.has(metadata.source_session_id);
-    }).flatMap(item => {
+    });
+    let excludedUnusableReceiptCount = 0;
+    const evidence = evidenceRecords.slice(0, Number(limit)).flatMap(item => {
       const metadata = item.metadata as JsonObject;
       if (typeof metadata.host !== "string" || !metadata.host.trim() || metadata.host.length > 64 || typeof metadata.turn_id !== "string" || !metadata.turn_id.trim()
         || typeof metadata.task_id !== "string" || !metadata.task_id.trim()
@@ -178,17 +182,25 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
       const linked = (linkedOutcomes.get(String(item.id)) ?? []).filter(observation => observation.session_id === metadata.source_session_id
         && observation.task_id === metadata.task_id && observation.host === metadata.host);
       const linkedResults = new Set(linked.map(observation => observation.outcome));
-      if (linkedResults.size !== 1) return [];
+      if (linkedResults.size === 0) return [];
       const verificationOutcome = [...linkedResults][0]!;
-      if (metadata.verification_outcome !== undefined && metadata.verification_outcome !== verificationOutcome) return [];
+      const receipt = this.store.find("context_resolution_receipt", String(metadata.context_receipt_id));
+      const receiptScope = receipt?.scope as JsonObject | undefined;
+      const receiptProject = receiptScope?.kind === "project" && typeof receiptScope.id === "string"
+        ? receiptScope.id.startsWith("project:") ? receiptScope.id : `project:${receiptScope.id}` : null;
+      if (!receipt || !receiptProject) { excludedUnusableReceiptCount++; return []; }
+      const conflicting = linkedResults.size > 1 || linkedResults.size === 1 && metadata.verification_outcome !== undefined
+        && metadata.verification_outcome !== verificationOutcome || typeof metadata.project_scope_id === "string" && receiptProject !== null
+        && metadata.project_scope_id !== receiptProject;
       return [{ evidence_id: item.id, host: metadata.host, session_id: metadata.source_session_id, turn_id: metadata.turn_id,
         task_id: metadata.task_id, context_receipt_id: metadata.context_receipt_id,
         verification_ref_digest: metadata.verification_ref_digest, terminal_identity_digest: metadata.terminal_identity_digest,
         ...(typeof metadata.task_goal_digest === "string" ? { task_goal_digest: metadata.task_goal_digest } : {}),
-        ...(typeof metadata.project_scope_id === "string" ? { project_scope_id: metadata.project_scope_id } : {}),
-        verification_outcome: verificationOutcome, verified: true, content_stored: false }];
+        project_scope_id: typeof metadata.project_scope_id === "string" ? metadata.project_scope_id : receiptProject,
+        verification_outcome: conflicting ? "conflict" : verificationOutcome, verified: !conflicting,
+        ...(conflicting ? { evidence_conflict: true, conflicting_observation_ids: [...new Set(linked.map(observation => observation.observation_id))].sort() } : {}), content_stored: false }];
     });
-    return { evidence, evidence_count: evidence.length, content_stored: false };
+    return { evidence, evidence_count: evidence.length, excluded_unusable_receipt_count: excludedUnusableReceiptCount, partial: observations.length > Number(limit) || evidenceRecords.length > Number(limit), content_stored: false };
   };
   serviceClass.prototype.learningCycleFinalize = function (args) {
     const requiredText = (key: string): string => {

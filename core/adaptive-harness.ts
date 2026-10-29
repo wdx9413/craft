@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { text } from "./validation.ts";
 import { digestJson } from "./digest.ts";
+import { assertDeliveryEvaluationCurrent } from "./delivery-evaluation.ts";
+import { canaryRoutingEvidenceCurrent } from "./task-benchmark.ts";
 
 
 
@@ -15,6 +17,11 @@ export class AdaptiveHarnessKernel {
     const task = this.store.get("task", text(args.task_id, "task_id")); const goal = text(args.goal, "goal"); const baseline = text(args.baseline_harness, "baseline_harness");
     const terms = [...new Set(goal.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
     const candidates = this.store.list("task_benchmark_candidate", 10_000, (item) => item.lifecycle === "routing_eligible" && typeof item.candidate_harness === "string")
+      .filter(candidate => {
+        const evaluation = typeof candidate.evaluation_run_id === "string" ? this.store.find("delivery_evaluation_run", candidate.evaluation_run_id) : null;
+        if (!evaluation || evaluation.version !== candidate.evaluation_run_version || evaluation.status !== "eligible_for_signoff" || !canaryRoutingEvidenceCurrent(this.store, candidate)) return false;
+        try { assertDeliveryEvaluationCurrent(this.store, evaluation); return true; } catch { return false; }
+      })
       .map((candidate) => ({ candidate, matches: (candidate.applicability_terms as string[] ?? []).filter((term) => terms.includes(term.toLowerCase())).length }))
       .filter((item) => item.matches > 0)
       .sort((left, right) => right.matches - left.matches || String(left.candidate.id).localeCompare(String(right.candidate.id)));

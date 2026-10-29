@@ -19,7 +19,7 @@ const workflow = (): JsonObject => ({ title: "Review", procedure_kind: "workflow
 test("readable English scene IDs are exact directory names and old hashed drafts/revisions stay usable", async () => {
   const f = await fixture();
   try {
-    const base = join(projectStorageDirectory(f.store.paths, f.root), "experience");
+    const base = join(projectStorageDirectory(f.store.paths, f.projectRoot), "experience");
     const id = "product-development", plain = experienceGraphDirectory(f.store.paths, id, false, base), old = experienceGraphDirectory(f.store.paths, id, true, base);
     assert.equal(plain, join(base, "graph", id)); assert.notEqual(old, plain);
     for (const unsafe of ["../outside", "CON", "con", "a/b", "a".repeat(97)]) assert.notEqual(experienceGraphDirectory(f.store.paths, unsafe, false, base), join(base, "graph", unsafe));
@@ -52,7 +52,7 @@ test("a scenario draft is discoverable, editable on disk and submitted as an imm
     assert.match(String(saved.path).replaceAll("\\", "/"), /experience\/graph\/engineering\/draft\.json$/);
     assert.equal(f.store.count("experience_procedure"), 0);
     assert.equal((inspect({ action: "list", scenario_id: "internet-product-engineering" }).drafts as JsonObject[]).length, 1);
-    assert.equal(inspect({ action: "list" }).data_root, join(projectStorageDirectory(f.store.paths, f.root), "experience"));
+    assert.equal(inspect({ action: "list" }).data_root, join(projectStorageDirectory(f.store.paths, f.projectRoot), "experience"));
     assert.equal((inspect({ action: "list", scenario_id: "missing" }).drafts as JsonObject[]).length, 0);
     assert.equal((inspect({ action: "list", graph_id: "engineering" }).drafts as JsonObject[]).length, 1);
     assert.equal((inspect({ action: "list", graph_id: "missing" }).drafts as JsonObject[]).length, 0);
@@ -252,7 +252,7 @@ test("draft and immutable paths reject symlink escapes and direct version tamper
     rmSync(String(ref.path)); symlinkSync(join(f.root, "missing.json"), String(ref.path));
     assert.throws(() => definitions.read(ref as never), /symbolic link/);
     rmSync(String(ref.path)); writeFileSync(String(ref.path), JSON.stringify(value));
-    const id = "escape", directory = experienceGraphDirectory(f.store.paths, id, false, join(projectStorageDirectory(f.store.paths, f.root), "experience")); symlinkSync(f.root, directory);
+    const id = "escape", directory = experienceGraphDirectory(f.store.paths, id, false, join(projectStorageDirectory(f.store.paths, f.projectRoot), "experience")); symlinkSync(f.root, directory);
     assert.throws(() => f.service.experienceGraphEdit({ action: "save", graph_id: id, scope, configuration: config() }), /symbolic link/);
     unlinkSync(directory); symlinkSync(join(f.root, "missing-directory"), directory);
     assert.throws(() => f.service.experienceGraphEdit({ action: "save", graph_id: id, scope, configuration: config() }), /EEXIST|symbolic link/);
@@ -447,7 +447,7 @@ test("a malformed definition is isolated while later records migrate in the same
     assert.equal(JSON.stringify(failure).includes("sensitive diagnostic fixture"), false);
     const header = f.store.database.prepare("SELECT payload_json FROM records WHERE kind='experience_asset_migration_failure' AND id=?").get(String(failure.id)) as { payload_json: string };
     const pointer = JSON.parse(header.payload_json)._experience_partition;
-    assert.equal(pointer.file, join(projectStorageDirectory(f.store.paths, f.root), "experience", "experience.db"));
+    assert.equal(pointer.file, join(projectStorageDirectory(f.store.paths, f.projectRoot), "experience", "experience.db"));
     assert.equal(definitions.maintain().status, "idle");
     assert.equal(definitions.maintain().failed, 1);
     assert.equal(f.store.get("experience_asset_migration_failure", String(failure.id)).attempts, 2);

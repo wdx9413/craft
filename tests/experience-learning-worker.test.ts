@@ -13,6 +13,21 @@ import { McpStdioClient, boundedPollInterval, learningComponents, learningMcpReq
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
 
+test("reports Knowledge recovery waits without including untrusted detail", () => {
+  for (const [key, label] of [["task_candidates", "candidate"], ["evaluation_cases", "evaluation"]] as const) {
+    for (const status of ["waiting_for_skip_reconciliation", "waiting_for_source_revalidation", "waiting_for_call_reconciliation"]) {
+      const result = { knowledge: { [key]: { status, reason: "private detail" } } };
+      const expected = `Craft Knowledge ${label} requires reconciliation (${status}).\n`;
+      assert.deepEqual(learningTickStatus(result, true), { diagnostics: expected, exit_code: 1 });
+      assert.deepEqual(learningTickStatus(result, false), { diagnostics: expected, exit_code: null });
+    }
+    assert.equal(learningTickStatus({ knowledge: { [key]: { status: "unexpected/private" } } }, true).diagnostics, "");
+  }
+  const busy = { knowledge: { task_candidates: { status: "candidate_created", blocked_skips: 2 } } };
+  assert.deepEqual(learningTickStatus(busy, true), { diagnostics: "Craft Knowledge candidate has 2 skipped task(s) requiring reconciliation.\n", exit_code: 1 });
+  assert.equal(learningTickStatus({ knowledge: { task_candidates: { status: "candidate_created", blocked_skips: -1 } } }, true).diagnostics, "");
+});
+
 test("reports unknown Experience classification results in continuous and one-shot runs", () => {
   const result = { scenario_classification: { processed: 1, reconciliation_pending: true } };
   const diagnostics = "Craft Experience classification requires reconciliation (model_result_unknown).\n";
@@ -63,8 +78,8 @@ function fixture(modelText = JSON.stringify({ name: "Verified flow", description
 }
 
 function emptySessionCollection(dataDir: string) {
-  return { status: "source_unavailable", sessions_seen: 0, sessions_pending: 0, sessions_processed: 0, bytes_processed: 0,
-    tasks_indexed: 0, tasks_completed: 0, tasks_aborted: 0, tasks_candidate_generation: 0, tasks_held_out: 0, tasks_with_user_input: 0, tasks_verified: 0, tasks_with_test_evidence: 0, malformed_lines: 0,
+  return { status: "source_unavailable", sessions_seen: 0, indexed_sources_not_discovered: 0, tasks_from_undiscovered_sources: 0, sessions_pending: 0, sessions_processed: 0, bytes_processed: 0,
+    tasks_indexed: 0, tasks_completed: 0, tasks_aborted: 0, tasks_candidate_generation: 0, tasks_development: 0, tasks_held_out: 0, tasks_with_user_input: 0, tasks_verified: 0, tasks_with_test_evidence: 0, malformed_lines: 0,
     raw_content_stored: false, state_file: join(dataDir, "runtime", "codex-session-collection.json") };
 }
 
@@ -694,7 +709,7 @@ test("Worker links archived task indexes to exact Host verification Evidence", a
     verification_outcome: "passed", verified: true, content_stored: false }];
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
     ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: codexHome, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
-    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_TEST_SESSION_EVIDENCE: JSON.stringify(evidence),
+    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_TEST_SESSION_EVIDENCE: JSON.stringify(evidence), CRAFT_TEST_EXCLUDED_RECEIPTS: "2",
   }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
@@ -708,12 +723,54 @@ test("Worker links archived task indexes to exact Host verification Evidence", a
     const result = JSON.parse(stdout.trim());
     assert.equal(result.session_collection.tasks_verified, 1);
     assert.equal(result.session_collection.evidence_reconciliation.tasks_verified, 1);
+    assert.equal(result.session_collection.evidence_lookup.excluded_unusable_receipt_count, 2);
     assert.deepEqual(result.session_collection.evidence_batch, { status: "advanced", sessions_queried: 1, cursor_stored: true, raw_content_stored: false });
     const state = readFileSync(join(dataDir, "runtime", "codex-session-collection.json"), "utf8");
     assert.match(state, /evidence-hook/u);
     assert.doesNotMatch(state, /private source prompt|private result text/u);
     assert.equal(JSON.parse(state).evidence_cursor_session_id, "session-evidence-worker");
   } finally { rmSync(dataDir, { recursive: true, force: true }); }
+});
+
+test("Worker does not reconcile or advance an incomplete evidence lookup", async () => {
+  const partialStatus = learningTickStatus({ session_collection: { evidence_reconciliation: { status: "partial" } } }, true);
+  assert.equal(partialStatus.exit_code, 1);
+  assert.match(partialStatus.diagnostics, /session evidence lookup is incomplete/u);
+  assert.equal(learningTickStatus({ session_collection: { evidence_reconciliation: { status: "reconciled" } } }, true).exit_code, null);
+  const recheckStatus = learningTickStatus({ knowledge: { task_candidates: { status: "waiting_for_source_recheck" } } }, true);
+  assert.equal(recheckStatus.exit_code, 1);
+  assert.match(recheckStatus.diagnostics, /waiting_for_source_recheck/u);
+  const excerptStatus = learningTickStatus({ knowledge: { evaluation_cases: { status: "waiting_for_consistent_excerpt" } } }, true);
+  assert.equal(excerptStatus.exit_code, 1);
+  assert.match(excerptStatus.diagnostics, /waiting_for_consistent_excerpt/u);
+  const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
+  const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
+  for (const partial of ["true", "missing"]) {
+    const dataDir = mkdtempSync(join(tmpdir(), "craft-incomplete-session-evidence-"));
+    try {
+      const codexHome = join(dataDir, "codex-home"), sessions = join(codexHome, "sessions");
+      mkdirSync(sessions, { recursive: true });
+      const records = [
+        { type: "session_meta", payload: { session_id: "session-partial", cwd: dataDir } },
+        { type: "event_msg", payload: { type: "task_started", turn_id: "turn-partial" } },
+        { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "test task" }] } },
+        { type: "event_msg", payload: { type: "task_complete", turn_id: "turn-partial" } },
+      ];
+      writeFileSync(join(sessions, "session.jsonl"), `${records.map(record => JSON.stringify(record)).join("\n")}\n`);
+      const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
+        ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: codexHome, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
+        CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_TEST_SESSION_PARTIAL: partial,
+      }, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "", stderr = "";
+      child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+      child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+      const exitCode = await new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("close", code => resolve(code ?? -1)); });
+      assert.equal(exitCode, 1, stderr);
+      assert.match(stderr, /session evidence lookup is incomplete/u);
+      assert.equal(JSON.parse(stdout.trim()).session_collection.evidence_reconciliation.reason, "evidence_lookup_incomplete_or_unknown");
+      assert.equal(JSON.parse(readFileSync(join(dataDir, "runtime", "codex-session-collection.json"), "utf8")).evidence_cursor_session_id, undefined);
+    } finally { rmSync(dataDir, { recursive: true, force: true }); }
+  }
 });
 
 test("Worker skips Codex session collection while another worker owns its lock", async () => {
@@ -1058,7 +1115,7 @@ test("distillation default fetch transport stays credential gated before network
 });
 
 test("worker MCP command configuration defaults safely and validates argument arrays", () => {
-  assert.deepEqual(mcpCommandOptions({}), { command: "craft-mcp", args: ["--surface", "component-context-daily"] });
+  assert.deepEqual(mcpCommandOptions({}), { command: "craft-mcp", args: ["--surface", "component-context-complete"] });
   assert.deepEqual(mcpCommandOptions({ CRAFT_EXPERIENCE_MCP_COMMAND: " custom-mcp ", CRAFT_EXPERIENCE_MCP_ARGS: "[\"--surface\",\"component-experience\"]" }),
     { command: "custom-mcp", args: ["--surface", "component-experience"] });
   assert.throws(() => mcpCommandOptions({ CRAFT_EXPERIENCE_MCP_ARGS: "not-json" }), /JSON/u);

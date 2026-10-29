@@ -1,11 +1,7 @@
-/**
- * Stable identities for data that must survive a checkout moving to another
- * machine.  A filesystem path is useful as a local alias, but never as the
- * project identity carried by a Context receipt or an export bundle.
- */
+/** Project identities bind the canonical real project root; relocation requires migration. */
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
@@ -28,17 +24,28 @@ function normalizeRemote(value: string): string {
   return (ssh ? `${ssh[1]}/${ssh[2]}` : url ? `${url[1]}/${url[2]}` : trimmed).toLowerCase();
 }
 
-/** Resolve Git identity without changing the repository or consulting a network. */
+/** Resolve a real project root without changing the repository or consulting a network. */
 export function projectIdentityFromRoot(root: string, userNamedId?: string): JsonObject {
   const localPath = resolve(root);
-  let canonicalPath = localPath;
-  try { canonicalPath = realpathSync(localPath); } catch { /* a caller may be preparing a new workspace */ }
+  let canonicalPath = realpathSync(localPath);
+  if (!statSync(canonicalPath).isDirectory()) throw new Error("project_root must be a directory");
+  const gitOptions = { encoding: "utf8" as const, stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"], timeout: 2_000, env: { ...process.env, LC_ALL: "C" } };
+  try { canonicalPath = realpathSync(execFileSync("git", ["-C", canonicalPath, "rev-parse", "--show-toplevel"], gitOptions).trim()); }
+  catch (error) {
+    const failure = error as NodeJS.ErrnoException & { status?: number; stderr?: string };
+    if (failure.status !== 128 || !failure.stderr?.includes("not a git repository")) throw new Error("PROJECT_ROOT_DISCOVERY_FAILED", { cause: error });
+    // A non-Git directory is itself the explicitly supplied project root.
+  }
   let remote: string | null = null;
-  try { remote = execFileSync("git", ["-C", canonicalPath, "config", "--get", "remote.origin.url"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null; } catch { /* not a Git checkout */ }
-  const basis = remote ? `git:${normalizeRemote(remote)}` : userNamedId ? `named:${userNamedId.trim()}` : `local:${hash(canonicalPath)}`;
+  try { remote = execFileSync("git", ["-C", canonicalPath, "config", "--get", "remote.origin.url"], gitOptions).trim() || null; }
+  catch (error) {
+    if ((error as { status?: number }).status !== 1) throw new Error("PROJECT_REMOTE_DISCOVERY_FAILED", { cause: error });
+  }
+  const canonicalId = `project:${createHash("sha256").update(canonicalPath).digest("hex")}`;
+  if (userNamedId !== undefined && userNamedId.trim() !== canonicalId) throw new Error("project_id conflicts with the canonical project root identity");
   return {
-    canonical_scope: { kind: "project", id: `project:${hash(basis)}` },
-    project_kind: remote ? "git_remote" : userNamedId ? "user_named" : "local_fingerprint",
+    canonical_scope: { kind: "project", id: canonicalId },
+    project_kind: "local_fingerprint",
     remote_digest: remote ? stableDigest(normalizeRemote(remote)) : null,
     local_path_alias: canonicalPath,
   };
@@ -58,13 +65,41 @@ export class ScopeIdentityKernel {
     const identity = projectIdentityFromRoot(root, typeof args.project_id === "string" ? args.project_id : undefined);
     const canonical = identity.canonical_scope as ScopeRef;
     const projectId = canonical.id;
-    const existing = this.store.find("project_identity", projectId);
-    if (existing) {
-      const alias = this.bindAlias({ scope_kind: "project", scope_id: projectId, alias_kind: "path", alias: identity.local_path_alias });
-      return { identity: existing, alias: alias.alias, idempotent: alias.idempotent === true };
-    }
+    const hasLegacyBinding = () => this.store.list("scope_alias", 1, item => {
+      if (item.status !== "active" || item.alias_kind !== "path" || typeof item.alias !== "string"
+        || (item.scope as JsonObject | undefined)?.id === projectId) return false;
+      try { return realpathSync(item.alias) === identity.local_path_alias; } catch { return false; }
+    }, false).length > 0 || this.store.list("project_identity", 1, item => {
+      if (item.id === projectId || typeof item.local_path_alias !== "string") return false;
+      try { return realpathSync(item.local_path_alias) === identity.local_path_alias; } catch { return false; }
+    }, false).length > 0;
+    const assertCurrentIdentity = (record: JsonObject): void => {
+      const storedScope = record.canonical_scope as JsonObject | undefined;
+      let storedPath: string;
+      try { storedPath = typeof record.local_path_alias === "string" ? realpathSync(record.local_path_alias) : ""; }
+      catch { throw new Error("PROJECT_IDENTITY_INVALID: registered project path is unavailable"); }
+      if (storedScope?.kind !== "project" || storedScope.id !== projectId || storedPath !== identity.local_path_alias
+        || record.identity_digest !== stableDigest({ canonical: storedScope, project_kind: record.project_kind, remote_digest: record.remote_digest })) {
+        throw new Error("PROJECT_IDENTITY_INVALID: registered project identity does not match its root");
+      }
+    };
+    const existingBinding = this.store.readSnapshot(() => {
+      if (hasLegacyBinding()) throw new Error("PROJECT_IDENTITY_MIGRATION_REQUIRED: existing project data uses a different identity for this root");
+      const existing = this.store.find("project_identity", projectId);
+      if (!existing) return null;
+      assertCurrentIdentity(existing);
+      const aliasKey = { scopeKind: "project", scopeId: projectId, aliasKind: "path", alias: identity.local_path_alias };
+      const alias = this.store.find("scope_alias", `scope_alias_${hash(canonicalJson(aliasKey))}`);
+      if (!alias) return null;
+      const aliasIdentity = { scope: { kind: "project", id: projectId }, alias_kind: "path", alias: identity.local_path_alias, alias_digest: stableDigest(identity.local_path_alias) };
+      if (alias.status !== "active" || alias.identity_digest !== stableDigest(aliasIdentity)) throw new Error("PROJECT_IDENTITY_INVALID: registered project alias is inactive or invalid");
+      return { identity: existing, alias, idempotent: true };
+    });
+    if (existingBinding) return existingBinding;
     return this.store.transaction(() => {
       const current = this.store.find("project_identity", projectId);
+      if (hasLegacyBinding()) throw new Error("PROJECT_IDENTITY_MIGRATION_REQUIRED: existing project data uses a different identity for this root");
+      if (current) assertCurrentIdentity(current);
       const saved = current ?? this.store.create("project_identity", projectId, { ...identity, identity_digest: stableDigest({ canonical, project_kind: identity.project_kind, remote_digest: identity.remote_digest }) });
       const alias = this.bindAlias({ scope_kind: "project", scope_id: projectId, alias_kind: "path", alias: identity.local_path_alias });
       return { identity: saved, alias: alias.alias, idempotent: Boolean(current) && alias.idempotent === true };
@@ -114,15 +149,26 @@ export class ScopeIdentityKernel {
       if (project) {
         const candidates = this.store.list("scope_alias", 10_000, (item) => item.status === "active" && String(item.alias) === project.id);
         const direct = this.store.find("project_identity", project.id);
+        if (!direct && new Set(candidates.map(item => canonicalJson(item.scope))).size > 1) throw new Error("PROJECT_SCOPE_AMBIGUOUS: alias maps to multiple projects");
         const canonical = direct ? direct.canonical_scope as ScopeRef : (candidates[0]?.scope as ScopeRef | undefined) ?? project;
+        if (canonical && typeof args.project_root === "string" && args.project_root.trim()) {
+          const expected = projectIdentityFromRoot(args.project_root, typeof args.project_id === "string" ? args.project_id : undefined).canonical_scope as ScopeRef;
+          if (canonical.id !== expected.id) throw new Error("PROJECT_SCOPE_CONFLICT: project scope does not match project root");
+        }
+        if (requested.kind === "project" && typeof args.project_scope_id === "string" && args.project_scope_id.trim() && args.project_scope_id.trim() !== canonical?.id) {
+          throw new Error("PROJECT_SCOPE_CONFLICT: project scopes do not match");
+        }
         if (canonical) {
           attempted.push(canonical); aliases.push(...candidates);
-          // Read legacy/path aliases only as bounded project aliases for this
-          // canonical identity. This is migration compatibility, not a scan of
-          // every project scope.
+          // Path-based identities cannot inherit records merely because an old
+          // scope was registered as an alias. Data migration must prove ownership.
           const reverseAliases = this.store.list("scope_alias", 10_000, (item) => item.status === "active" && canonicalJson(item.scope) === canonicalJson(canonical));
           aliases.push(...reverseAliases);
-          for (const alias of reverseAliases) attempted.push({ kind: "project", id: String(alias.alias) });
+          for (const alias of reverseAliases) {
+            if (/^project:[a-f0-9]{64}$/u.test(canonical.id) && String(alias.alias) !== canonical.id) {
+              excluded.push({ scope: { kind: "project", id: String(alias.alias) }, reason: "project_scope_migration_required" });
+            } else attempted.push({ kind: "project", id: String(alias.alias) });
+          }
         } else attempted.push(project);
       }
     }

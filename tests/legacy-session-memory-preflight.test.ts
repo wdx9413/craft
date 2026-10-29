@@ -9,7 +9,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { craftPaths, sessionStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
 import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
-import { legacySessionMemoryPreflight } from "../core/legacy-session-memory-preflight.ts";
+import { legacySessionMemoryInventory, legacySessionMemoryPreflight } from "../core/legacy-session-memory-preflight.ts";
 
 function putScopeDatabase(path: string, scopes: unknown[]): void {
   const database = new DatabaseSync(path);
@@ -19,6 +19,45 @@ function putScopeDatabase(path: string, scopes: unknown[]): void {
     scopes.forEach((scope, index) => insert.run("memory_ledger", `memory-${index}`, JSON.stringify({ scope }), "now", "now"));
   } finally { database.close(); }
 }
+
+test("full legacy inventory detects root changes and can be restarted", t => {
+  const root = mkdtempSync(join(tmpdir(), "craft-legacy-inventory-race-")), legacy = join(root, "legacy"), paths = craftPaths(join(root, "data"));
+  mkdirSync(legacy); mkdirSync(join(legacy, "z"));
+  const original = fs.readdirSync;
+  let reads = 0;
+  t.mock.method(fs, "readdirSync", ((path: Parameters<typeof fs.readdirSync>[0], options?: unknown) => {
+    const result = original(path, options as never);
+    if (String(path) === legacy && ++reads === 2) mkdirSync(join(legacy, "a"));
+    return result;
+  }) as typeof fs.readdirSync);
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => legacySessionMemoryInventory(paths, legacy), /root changed; restart inventory/u);
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    assert.equal(legacySessionMemoryInventory(paths, legacy).entries.length, 2);
+    assert.equal(legacySessionMemoryInventory(paths, join(root, "missing")).root_status, "missing");
+    const file = join(root, "file"); writeFileSync(file, "x");
+    assert.equal(legacySessionMemoryInventory(paths, file).root_status, "unsafe");
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("full legacy inventory pages all entries and propagates root access errors", t => {
+  const root = mkdtempSync(join(tmpdir(), "craft-legacy-inventory-pages-")), legacy = join(root, "legacy"), paths = craftPaths(join(root, "data"));
+  mkdirSync(legacy);
+  try {
+    for (let i = 0; i < 501; i++) symlinkSync(join(root, "missing"), join(legacy, `session-${String(i).padStart(3, "0")}`));
+    const inventory = legacySessionMemoryInventory(paths, legacy);
+    assert.equal(inventory.entries.length, 501);
+    assert.equal(inventory.entries.every(entry => entry.status === "broken_symlink"), true);
+    const original = fs.lstatSync;
+    t.mock.method(fs, "lstatSync", ((path: Parameters<typeof fs.lstatSync>[0], options?: unknown) => {
+      if (String(path) === legacy) throw Object.assign(new Error("denied"), { code: "EACCES" });
+      return original(path, options as never);
+    }) as typeof fs.lstatSync);
+    syncBuiltinESMExports();
+    assert.throws(() => legacySessionMemoryInventory(paths, legacy), /denied/u);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test("legacy session Memory inventory pages read-only artifacts and resolves only unique Host mappings", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-legacy-session-preflight-"));

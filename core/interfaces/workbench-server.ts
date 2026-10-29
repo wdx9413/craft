@@ -8,6 +8,10 @@ import { CraftService, VERSION } from "../application/craft-service.ts";
 import { runBuiltinAcceptanceTicks } from "../acceptance-worker.ts";
 import { createActionHandlers } from "../application/actions/action-handlers.ts";
 import { type JsonObject } from "../infrastructure/store.ts";
+import { CodexWorkbenchSessions } from "./codex-workbench-sessions.ts";
+import { agentSessionRoute } from "./workbench-agent-session-api.ts";
+import { ClaudeWorkbenchRuns } from "./claude-workbench-runs.ts";
+import { claudeRunRoute } from "./claude-workbench-api.ts";
 
 const MAX_BODY = 64 * 1024;
 /**
@@ -36,6 +40,8 @@ function boundedLimit(value: string | null, fallback: number): number { if (valu
 function queryValue(url: URL, key: string): string | undefined { const value = url.searchParams.get(key); return value === null ? undefined : value; }
 
 const WORKBENCH_ASSETS: Readonly<Record<string, { file: string; type: string }>> = {
+  "/craft-logo.svg": { file: "craft-logo.svg", type: "image/svg+xml" },
+  "/workbench/craft-logo.svg": { file: "craft-logo.svg", type: "image/svg+xml" },
   "/entry.css": { file: "entry.css", type: "text/css; charset=utf-8" },
   "/workbench/entry.css": { file: "entry.css", type: "text/css; charset=utf-8" },
   "/entry-shell.js": { file: "entry-shell.js", type: "application/javascript; charset=utf-8" },
@@ -48,6 +54,10 @@ const WORKBENCH_ASSETS: Readonly<Record<string, { file: string; type: string }>>
   "/app.js": { file: "app.js", type: "application/javascript; charset=utf-8" },
   "/runtime-client.js": { file: "runtime-client.js", type: "application/javascript; charset=utf-8" },
   "/workbench/runtime-client.js": { file: "runtime-client.js", type: "application/javascript; charset=utf-8" },
+  "/agent-workspace.js": { file: "agent-workspace.js", type: "application/javascript; charset=utf-8" },
+  "/workbench/agent-workspace.js": { file: "agent-workspace.js", type: "application/javascript; charset=utf-8" },
+  "/project-shell.js": { file: "project-shell.js", type: "application/javascript; charset=utf-8" },
+  "/workbench/project-shell.js": { file: "project-shell.js", type: "application/javascript; charset=utf-8" },
   "/workbench": { file: "index.html", type: "text/html; charset=utf-8" },
   "/workbench/": { file: "index.html", type: "text/html; charset=utf-8" },
   "/workbench/app.css": { file: "app.css", type: "text/css; charset=utf-8" },
@@ -78,11 +88,14 @@ export function workbenchBridge(service: CraftService): WorkbenchDispatch {
 }
 
 export class WorkbenchWebApp {
-  readonly service: CraftService; readonly token: string; readonly origin: string; readonly workbenchDir: string | null;
-  constructor(service: CraftService, token: string, origin: string, options: { workbenchDir?: string | null } = {}) {
+  readonly service: CraftService; readonly token: string; readonly origin: string; readonly workbenchDir: string | null; readonly agentSessions: CodexWorkbenchSessions | null; readonly claudeRuns: ClaudeWorkbenchRuns | null; readonly claudeExecutable: (() => string) | undefined;
+  constructor(service: CraftService, token: string, origin: string, options: { workbenchDir?: string | null; agentSessions?: CodexWorkbenchSessions; claudeRuns?: ClaudeWorkbenchRuns; claudeExecutable?: () => string } = {}) {
     this.service = service; this.token = token; this.origin = origin;
     // Presentation is owned by craft-workbench and must be mounted explicitly.
     this.workbenchDir = options.workbenchDir ?? null;
+    this.agentSessions = options.agentSessions ?? null;
+    this.claudeRuns = options.claudeRuns ?? null;
+    this.claudeExecutable = options.claudeExecutable;
   }
   handle(request: WebRequest): WebResponse {
     const url = new URL(request.path, this.origin); const path = url.pathname;
@@ -339,7 +352,21 @@ export class WorkbenchWebApp {
    * synchronous app contract every existing test relies on is unchanged.
    */
   async handleAsync(request: WebRequest): Promise<WebResponse> {
-    const path = new URL(request.path, this.origin).pathname;
+    const url = new URL(request.path, this.origin); const path = url.pathname;
+    if (path === "/api/workbench/claude-runs" || path.startsWith("/api/workbench/claude-runs/")) {
+      if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
+      if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
+      if (!this.claudeRuns) return json(503, { error: "Claude runs are unavailable" });
+      try { const result = claudeRunRoute(this.claudeRuns, request.method, url, bodyObject(request.body), this.claudeExecutable); return json(result.status, result.value); }
+      catch (error) { return failure(error); }
+    }
+    if (path === "/api/workbench/agent-sessions" || path.startsWith("/api/workbench/agent-sessions/")) {
+      if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
+      if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
+      if (!this.agentSessions) return json(503, { error: "Agent sessions are unavailable" });
+      try { const result = await agentSessionRoute(this.agentSessions, request.method, url, bodyObject(request.body), this.claudeRuns); return json(result.status, result.value); }
+      catch (error) { return failure(error); }
+    }
     if (request.method === "POST" && (path === "/api/sources" || path === "/api/workbench/call" || (path.startsWith("/api/tasks/") && path.endsWith("/messages")))) {
       if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
       if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
@@ -370,11 +397,13 @@ export class WorkbenchWebApp {
 
 export class LocalWorkbenchServer {
   readonly workbenchDir: string | null;
-  readonly service: CraftService; readonly token: string; readonly acceptanceTick: () => Promise<unknown>; #server: Server | null = null; #acceptanceTimer: NodeJS.Timeout | null = null; #acceptanceRunning = false;
+  readonly service: CraftService; readonly token: string; readonly acceptanceTick: () => Promise<unknown>; #server: Server | null = null; #agentSessions: CodexWorkbenchSessions | null = null; #claudeRuns: ClaudeWorkbenchRuns | null = null; #acceptanceTimer: NodeJS.Timeout | null = null; #acceptanceRunning = false;
   constructor(service: CraftService, token = randomBytes(32).toString("base64url"), options: { acceptanceTick?: () => Promise<unknown>; workbenchDir?: string | null } = {}) { this.service = service; this.token = token; this.workbenchDir = options.workbenchDir ?? null; this.acceptanceTick = options.acceptanceTick ?? (() => runBuiltinAcceptanceTicks(this.service)); }
   async start(port = 4173): Promise<{ url: string; token: string }> {
     if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("port must be an integer between 0 and 65535");
     if (this.#server) throw new Error("Workbench server is already running");
+    const agentSessions = new CodexWorkbenchSessions(this.service.store);
+    const claudeRuns = new ClaudeWorkbenchRuns(this.service.store);
     const server = createServer((request, response) => { const chunks: Buffer[] = []; let size = 0;
       request.on("data", (chunk: Buffer) => { size += chunk.length; if (size <= MAX_BODY) chunks.push(chunk); });
       request.on("end", () => { const activePort = (server.address() as AddressInfo).port;
@@ -384,13 +413,13 @@ export class LocalWorkbenchServer {
         // NB: hand over the raw url, not `.pathname`. `handle` reads limits and
         // ids from `url.searchParams`, so stripping the query here silently
         // dropped every `?limit=` / `?project_id=` a caller sent.
-        const pending = size > MAX_BODY ? Promise.resolve(json(413, { error: "Request body exceeds 64 KiB" })) : new WorkbenchWebApp(this.service, this.token, origin, { workbenchDir: this.workbenchDir }).handleAsync({ method: String(request.method),
+        const pending = size > MAX_BODY ? Promise.resolve(json(413, { error: "Request body exceeds 64 KiB" })) : new WorkbenchWebApp(this.service, this.token, origin, { workbenchDir: this.workbenchDir, agentSessions, claudeRuns }).handleAsync({ method: String(request.method),
           path: String(request.url), token: auth, origin: request.headers.origin, body: Buffer.concat(chunks).toString("utf8") });
         void pending.then((result) => {
           response.writeHead(result.status, { "content-type": result.contentType, "content-length": Buffer.byteLength(result.body), ...SECURITY_HEADERS }); response.end(result.body); }); }); });
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", () => { server.off("error", reject); resolve(); }); });
-    this.#server = server; this.#acceptanceTimer = setInterval(() => { if (this.#acceptanceRunning) return; this.#acceptanceRunning = true; this.acceptanceTick().catch(() => undefined).finally(() => { this.#acceptanceRunning = false; }); }, 500); const activePort = (server.address() as AddressInfo).port;
+    this.#server = server; this.#agentSessions = agentSessions; this.#claudeRuns = claudeRuns; this.#acceptanceTimer = setInterval(() => { if (this.#acceptanceRunning) return; this.#acceptanceRunning = true; this.acceptanceTick().catch(() => undefined).finally(() => { this.#acceptanceRunning = false; }); }, 500); const activePort = (server.address() as AddressInfo).port;
     return { url: `http://127.0.0.1:${activePort}/#token=${encodeURIComponent(this.token)}`, token: this.token };
   }
-  async close(): Promise<void> { const server = this.#server; if (!server) return; this.#server = null; if (this.#acceptanceTimer) clearInterval(this.#acceptanceTimer); this.#acceptanceTimer = null; await new Promise<void>((resolve) => server.close(() => resolve())); }
+  async close(): Promise<void> { const server = this.#server; if (!server) return; this.#server = null; this.#agentSessions?.close(); this.#agentSessions = null; this.#claudeRuns?.close(); this.#claudeRuns = null; if (this.#acceptanceTimer) clearInterval(this.#acceptanceTimer); this.#acceptanceTimer = null; await new Promise<void>((resolve) => server.close(() => resolve())); }
 }

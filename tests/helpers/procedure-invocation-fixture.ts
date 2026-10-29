@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
 import { payload, stableDigest } from "../../core/digest.ts";
 import { ProcedureDefinitionStore } from "../../capability/craft-experience/procedure-definition.ts";
+import { projectIdentityFromRoot } from "../../core/scope-identity.ts";
 
-export const scope = `project:${createHash("sha256").update("named:invocation").digest("hex").slice(0, 24)}`;
+const projectRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+export const scope = String((projectIdentityFromRoot(projectRoot).canonical_scope as JsonObject).id);
 export const spec = (preconditions: string[] = []): JsonObject => ({
   steps: [{ id: "review", type: "instruction", side_effect: "read_only", requires: ["diff"], provides: ["report"], instruction: "Review diff" }],
   composition: { entries: [{ id: "review", title: "Review", required_inputs: ["diff"], preconditions, routes: [{ exit_id: "reviewed", step_ids: ["review"] }] }],
@@ -18,12 +20,8 @@ export const spec = (preconditions: string[] = []): JsonObject => ({
 export async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-invocation-"));
   const store = await new CraftStore(craftPaths(root)).open();
-  store.create("scope_alias", "project-root", { status: "active", scope: { kind: "project", id: scope },
-    alias_kind: "path", alias: root, alias_digest: stableDigest(root) });
-  store.create("scope_alias", "observed-project-root", { status: "active", scope: { kind: "project", id: "project:internet-product-engineering" },
-    alias_kind: "path", alias: root, alias_digest: stableDigest(root) });
   let service = new CraftService(store), n = 0;
-  service.scopeIdentityResolveProject({ project_root: root, project_id: "invocation" });
+  service.scopeIdentityResolveProject({ project_root: projectRoot });
   store.create("task", "task", { status: "active" });
   store.create("task_control_contract", "contract", { task_id: "task", allowed_effects: ["read_only", "local_write"] });
   store.create("task_run", "run", { contract_id: "contract" });
@@ -61,6 +59,6 @@ export async function fixture() {
     store.create("evidence", evidenceId, { confidence: "confirmed", metadata: { scope, invocation_id: id, call_path: path, task_id: "task", condition_ref: "approved", input_digest: stableDigest(inputRefs), snapshot_digest: snapshot.snapshot_digest, workspace_state_revision: snapshot.workspace_state_revision, expires_at: new Date(Date.now() + 60_000).toISOString() } });
     return evidenceId;
   }
-  return { root, store, get service() { return service; }, create, args, params, dispatch, proof, precondition,
+  return { root, projectRoot, store, get service() { return service; }, create, args, params, dispatch, proof, precondition,
     async reopen() { store.close(); await store.open(); service = new CraftService(store); }, async close() { store.close(); await rm(root, { recursive: true, force: true }); } };
 }

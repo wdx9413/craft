@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { object, text } from "./validation.ts";
 import { digestJson, payload } from "./digest.ts";
+import { assertDeliveryEvaluationCurrent } from "./delivery-evaluation.ts";
 
 
 function strings(value: unknown, name: string, minimum = 0): string[] {
@@ -52,6 +53,7 @@ export class A2ADelegationKernel {
     if (trust.status !== "active") throw new Error("A2A Agent trust is not active");
     const evaluation = this.store.get("delivery_evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
     if (evaluation.status !== "eligible_for_signoff") throw new Error("A2A collaboration requires an eligible single-Agent evaluation baseline");
+    assertDeliveryEvaluationCurrent(this.store, evaluation);
     const evidenceId = text(args.justification_evidence_id, "justification_evidence_id"); confirmedEvidence(this.store, [evidenceId]);
     const budget = object(args.budget, "budget"); const sessionIdentity = { task_id: task.id, trust_id: trust.id, trust_version: trust.version,
       evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version, justification_evidence_id: evidenceId, budget_digest: digestJson(budget), max_delegations: integer(args.max_delegations, "max_delegations", 5, 1, 5) };

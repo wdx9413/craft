@@ -21,9 +21,21 @@ export class MaintenanceScheduler {
       if (existing.identity_digest !== stableDigest(identity)) throw new Error("Maintenance schedule idempotency conflict");
       return { status: existing.status, receipt: existing, idempotent: true };
     }
+    // The process may have stopped after persisting the run but before the
+    // schedule receipt. Reuse that run instead of recomputing its timestamped
+    // identity or claiming an expiry count that was not checkpointed.
+    const completedRun = this.store.find("memory_maintenance_run", `scheduled_${leaseId}`);
+    if (completedRun) {
+      if (stage !== "light" || identity.scope !== null || identity.cursor !== null || completedRun.stage !== "light" || completedRun.status !== "completed"
+        || stableDigest(completedRun.scope) !== stableDigest({ kind: "global", id: "global" }))
+        throw new Error("Maintenance schedule recovery identity conflict");
+      const receipt = this.store.create("maintenance_schedule_receipt", leaseId, { ...identity, identity_digest: stableDigest(identity), status: "completed", run_id: completedRun.id, expired_memory: null, publication_allowed: false });
+      return { status: "completed", receipt, recovered: true };
+    }
     const expiry = this.expireMemory({ limit: 100 });
     const result = this.maintenance.run({ stage, maintenance_id: `scheduled_${leaseId}` });
-    const receipt = this.store.create("maintenance_schedule_receipt", leaseId, { ...identity, identity_digest: stableDigest(identity), status: "completed", run_id: (result.run as JsonObject).id, expired_memory: Number(expiry.count ?? 0), publication_allowed: false });
+    const receipt = this.store.create("maintenance_schedule_receipt", leaseId, { ...identity, identity_digest: stableDigest(identity), status: "completed", run_id: (result.run as JsonObject).id,
+      expired_memory: Number.isSafeInteger(expiry.count) && Number(expiry.count) >= 0 ? expiry.count : null, publication_allowed: false });
     return { status: "completed", receipt, result, expiry, idempotent: false };
   }
 }

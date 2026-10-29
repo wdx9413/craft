@@ -8,6 +8,8 @@ import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { deliveryEvaluationFixture } from "./helpers/delivery-evaluation-fixture.ts";
+import { WorkDeliveryKernel } from "../core/work-delivery.ts";
 
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 
@@ -23,9 +25,12 @@ async function fixture() {
 function observedRun(store: CraftStore, id: string, deliveryStatus: string, environment: JsonObject = { image: "fixed" }, budget: JsonObject = { usd: 1 }) {
   const launchId = `launch-${id}`;
   store.create("task_run", id, { launch_id: launchId, environment_digest: digest(environment), budget_digest: digest(budget) });
-  store.create("work_launch", launchId, { trial_id: `trial-${id}` });
+  const host = store.create("host_run", `host-${id}`, { status: deliveryStatus === "accepted" ? "completed" : "failed" });
+  const plan = deliveryStatus === "accepted" ? `plan-${id}` : undefined;
+  const acceptance = plan ? store.create("acceptance_assessment", `assessment_${plan}`, { status: "passed" }) : null;
+  const launch = store.create("work_launch", launchId, { trial_id: `trial-${id}`, run_id: host.id, ...(plan ? { acceptance_plan_id: plan } : {}) });
   store.create("outcome", `outcome_trial-${id}`, { verdict: deliveryStatus === "accepted" ? "passed" : "failed", costs: { duration_ms: deliveryStatus === "accepted" ? 10 : 20 } });
-  store.create("work_delivery", `delivery-${id}`, { launch_id: launchId, status: deliveryStatus });
+  new WorkDeliveryKernel(store).observe({ delivery_id: `delivery-${id}`, launch_id: launch.id });
 }
 
 test("closes a local write with a scoped transaction and explicit rollback", async () => {
@@ -60,13 +65,13 @@ test("reports a repeated held-out Campaign and routes only a reviewed canary can
   const f = await fixture();
   try {
     for (const id of ["code", "file"]) f.service.deliveryEvaluationCaseSave({ case_id: id, name: id, domain: id === "code" ? "software" : "media", partition: "held_out", acceptance_contract_ref: "contract", sanitized: true, approved_by: "curator" });
-    for (const id of ["code", "file"]) {
-      observedRun(f.store, `baseline-${id}`, "host_failed");
-      observedRun(f.store, `candidate-${id}`, "accepted");
+    for (const id of ["code", "file"]) for (const trial of [1, 2]) {
+      observedRun(f.store, `baseline-${id}-${trial}`, "host_failed");
+      observedRun(f.store, `candidate-${id}-${trial}`, "accepted");
     }
     const campaign = f.service.evalCampaignCreate({ campaign_id: "campaign", case_ids: ["code", "file"], baseline_harness: "minimal", candidate_harness: "retrieval", trials_per_case: 2, environment: { image: "fixed" }, budget: { usd: 1 }, acceptance_ref: "contract" }).campaign as JsonObject;
     const slots = f.service.evalCampaignGet({ campaign_id: campaign.id }).slots as JsonObject[];
-    for (const slot of slots) f.service.evalCampaignBind({ slot_id: slot.id, task_run_id: `${slot.arm}-${slot.case_id}` });
+    for (const slot of slots) f.service.evalCampaignBind({ slot_id: slot.id, task_run_id: `${slot.arm}-${slot.case_id}-${slot.trial}` });
     const advanced = f.service.evalCampaignAdvance({ campaign_id: campaign.id });
     assert.equal(advanced.status, "eligible");
     const report = f.service.evalCampaignReport({ campaign_id: campaign.id }).report as JsonObject;
@@ -76,10 +81,13 @@ test("reports a repeated held-out Campaign and routes only a reviewed canary can
     const signoff = f.store.create("signoff", "signoff", { decision: "passed" });
     f.service.taskBenchmarkCandidateAuthorizeCanary({ candidate_id: candidate.id, signoff_id: signoff.id });
     const canary = f.service.taskBenchmarkCandidateCanaryStart({ candidate_id: candidate.id, canary_id: "canary", baseline_id: "minimal", environment: { image: "fixed" }, budget: { usd: 1 } }).canary as JsonObject;
-    const evidence = f.store.create("evidence", "canary-evidence", { confidence: "confirmed" });
+    const evidence = f.store.create("evidence", "canary-evidence", { confidence: "confirmed", metadata: { source_session_id: "session-1", task_id: "task-1", source_ref_digest: `sha256:${"a".repeat(64)}` } });
     f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: canary.id, sample_id: "one", evidence_id: evidence.id, baseline_quality: 0.5, candidate_quality: 1 });
     assert.equal(f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: canary.id, sample_id: "one", evidence_id: evidence.id, baseline_quality: 0.5, candidate_quality: 1 }).idempotent, true);
     f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: canary.id, sample_id: "two", evidence_id: evidence.id, baseline_quality: 0.5, candidate_quality: 1 });
+    assert.throws(() => f.service.taskBenchmarkCandidateCanaryConclude({ candidate_id: candidate.id, canary_id: canary.id, reviewer: "reviewer", min_samples: 2 }), /independent Canary samples/);
+    const secondEvidence = f.store.create("evidence", "canary-evidence-2", { confidence: "confirmed", metadata: { source_session_id: "session-2", task_id: "task-2", source_ref_digest: `sha256:${"b".repeat(64)}` } });
+    f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: canary.id, sample_id: "three", evidence_id: secondEvidence.id, baseline_quality: 0.5, candidate_quality: 1 });
     const eligible = f.service.taskBenchmarkCandidateCanaryConclude({ candidate_id: candidate.id, canary_id: canary.id, reviewer: "reviewer", min_samples: 2 }).candidate as JsonObject;
     assert.equal(eligible.lifecycle, "routing_eligible");
     assert.equal(f.service.taskBenchmarkCandidateCanaryConclude({ candidate_id: candidate.id, canary_id: canary.id, reviewer: "reviewer", min_samples: 2 }).idempotent, true);
@@ -88,6 +96,13 @@ test("reports a repeated held-out Campaign and routes only a reviewed canary can
     const task = f.service.taskOpen({ title: "Code task", goal: "code file" }).task as JsonObject;
     const recommendation = f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: task.goal, baseline_harness: "minimal" }).recommendation as JsonObject;
     assert.equal(recommendation.selected_harness, "retrieval");
+    f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: canary.id, sample_id: "later-positive", baseline_quality: 0.5, candidate_quality: 1 });
+    assert.equal((f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: task.goal, baseline_harness: "minimal", recommendation_id: "after-positive" }).recommendation as JsonObject).selected_harness, "retrieval");
+    f.store.save("evidence", String(secondEvidence.id), { ...secondEvidence, confidence: "rejected" });
+    assert.equal((f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: task.goal, baseline_harness: "minimal", recommendation_id: "stale-canary" }).recommendation as JsonObject).selected_harness, "minimal");
+    const oldOutcome = f.store.get("outcome", "outcome_trial-baseline-code-1");
+    f.store.save("outcome", String(oldOutcome.id), { ...oldOutcome, verdict: "passed" });
+    assert.equal((f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: task.goal, baseline_harness: "minimal", recommendation_id: "stale-evaluation" }).recommendation as JsonObject).selected_harness, "minimal");
     const fallback = f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: "unrelated", baseline_harness: "minimal", recommendation_id: "fallback" }).recommendation as JsonObject;
     assert.deepEqual([fallback.selected_harness, fallback.reason], ["minimal", "no_eligible_candidate"]);
     const core = new McpServer(f.service, "core");
@@ -97,6 +112,53 @@ test("reports a repeated held-out Campaign and routes only a reviewed canary can
     assert.equal(((await full.handle({ id: "report", method: "tools/call", params: { name: "craft_eval_campaign_report", arguments: { campaign_id: campaign.id } } }))?.result as JsonObject).isError, false);
     assert.equal(((await full.handle({ id: "recommend", method: "tools/call", params: { name: "craft_adaptive_harness_recommend", arguments: { task_id: task.id, goal: task.goal, baseline_harness: "minimal" } } }))?.result as JsonObject).isError, false);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("post-promotion canary regression returns routing to the baseline", async () => {
+  const f = await fixture();
+  try {
+    const evaluation = deliveryEvaluationFixture(f.service, "regression-eval", "eligible_for_signoff", digest({}), digest({}));
+    const candidate = f.service.taskBenchmarkCandidatePropose({ candidate_id: "regression-candidate", evaluation_run_id: evaluation.id, summary: "candidate", candidate_axes: "context", candidate_harness: "retrieval", applicability_terms: ["code"] }).candidate as JsonObject;
+    const signoff = f.store.create("signoff", "regression-signoff", { decision: "passed" });
+    f.service.taskBenchmarkCandidateAuthorizeCanary({ candidate_id: candidate.id, signoff_id: signoff.id });
+    const canary = f.service.taskBenchmarkCandidateCanaryStart({ candidate_id: candidate.id, canary_id: "regression-canary", baseline_id: "minimal", environment: {}, budget: {} }).canary as JsonObject;
+    for (const [id, char] of [["one", "a"], ["two", "b"]] as const) {
+      const evidence = f.store.create("evidence", `regression-${id}`, { confidence: "confirmed", metadata: { source_session_id: `session-${id}`, task_id: `task-${id}`, source_ref_digest: `sha256:${char.repeat(64)}` } });
+      f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: canary.id, sample_id: `sample-${id}`, evidence_id: evidence.id, baseline_quality: 0.5, candidate_quality: 1 });
+    }
+    f.service.taskBenchmarkCandidateCanaryConclude({ candidate_id: candidate.id, canary_id: canary.id, reviewer: "reviewer" });
+    const task = f.service.taskOpen({ title: "Code", goal: "code" }).task as JsonObject;
+    assert.equal((f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: task.goal, baseline_harness: "minimal" }).recommendation as JsonObject).selected_harness, "retrieval");
+    const observed = f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: canary.id, sample_id: "regression", baseline_quality: 1, candidate_quality: 0 });
+    assert.equal((observed.canary as JsonObject).status, "rolled_back");
+    assert.equal((observed.canary as JsonObject).rollback_to, "minimal");
+    assert.equal((f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: task.goal, baseline_harness: "minimal", recommendation_id: "after-regression" }).recommendation as JsonObject).selected_harness, "minimal");
+    assert.throws(() => f.service.taskBenchmarkCandidateCanaryConclude({ candidate_id: candidate.id, canary_id: canary.id, reviewer: "reviewer" }), /no longer eligible/);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Canary conclusion rejects a regression committed after its initial read", async () => {
+  const f = await fixture();
+  const transaction = f.store.transaction.bind(f.store);
+  try {
+    const evaluation = deliveryEvaluationFixture(f.service, "race-eval", "eligible_for_signoff", digest({}), digest({}));
+    const candidate = f.service.taskBenchmarkCandidatePropose({ candidate_id: "race-candidate", evaluation_run_id: evaluation.id, summary: "candidate", candidate_axes: "context" }).candidate as JsonObject;
+    f.store.create("signoff", "race-signoff", { decision: "passed" });
+    f.service.taskBenchmarkCandidateAuthorizeCanary({ candidate_id: candidate.id, signoff_id: "race-signoff" });
+    f.service.taskBenchmarkCandidateCanaryStart({ candidate_id: candidate.id, canary_id: "race-canary", baseline_id: "minimal", environment: {}, budget: {} });
+    for (const [id, char] of [["one", "a"], ["two", "b"]] as const) {
+      const evidence = f.store.create("evidence", `race-${id}`, { confidence: "confirmed", metadata: { source_session_id: `race-session-${id}`, task_id: `race-task-${id}`, source_ref_digest: `sha256:${char.repeat(64)}` } });
+      f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: "race-canary", sample_id: `race-sample-${id}`, evidence_id: evidence.id, baseline_quality: 0.5, candidate_quality: 1 });
+    }
+    let injected = false;
+    f.store.transaction = ((operation: Parameters<typeof f.store.transaction>[0]) => {
+      if (!injected) { injected = true; f.store.transaction = transaction; f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: "race-canary", sample_id: "race-regression", baseline_quality: 1, candidate_quality: 0 }); }
+      return transaction(operation);
+    }) as typeof f.store.transaction;
+    assert.throws(() => f.service.taskBenchmarkCandidateCanaryConclude({ candidate_id: candidate.id, canary_id: "race-canary", reviewer: "reviewer" }), /changed during conclusion/);
+    assert.equal(f.store.get("task_benchmark_candidate", String(candidate.id)).lifecycle, "canary_ready");
+    assert.equal(f.store.get("task_benchmark_canary", "race-canary").status, "rolled_back");
+  } finally { f.store.transaction = transaction; f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
 test("keeps recovery, report, and routing rejection branches explicit", async () => {
@@ -157,14 +219,15 @@ test("keeps recovery, report, and routing rejection branches explicit", async ()
     assert.equal((f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: "plain", baseline_harness: "minimal", recommendation_id: "plain" }).recommendation as JsonObject).selected_harness, "minimal");
     assert.equal(f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: "plain", baseline_harness: "minimal", recommendation_id: "plain" }).idempotent, true);
     assert.throws(() => f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: "plain", baseline_harness: "other", recommendation_id: "plain" }), /conflict/);
-    f.store.create("task_benchmark_candidate", "first", { lifecycle: "routing_eligible", candidate_harness: "first", applicability_terms: ["plain"] });
-    f.store.create("task_benchmark_candidate", "second", { lifecycle: "routing_eligible", candidate_harness: "second", applicability_terms: ["plain"] });
-    assert.equal((f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: "plain", baseline_harness: "minimal", recommendation_id: "sorted" }).recommendation as JsonObject).selected_harness, "first");
+    const currentEvaluation = deliveryEvaluationFixture(f.service, "routing-valid");
+    f.store.create("task_benchmark_candidate", "first", { lifecycle: "routing_eligible", candidate_harness: "first", applicability_terms: ["plain"], evaluation_run_id: currentEvaluation.id, evaluation_run_version: currentEvaluation.version });
+    f.store.create("task_benchmark_candidate", "second", { lifecycle: "routing_eligible", candidate_harness: "second", applicability_terms: ["plain"], evaluation_run_id: currentEvaluation.id, evaluation_run_version: currentEvaluation.version });
+    assert.equal((f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: "plain", baseline_harness: "minimal", recommendation_id: "sorted" }).recommendation as JsonObject).selected_harness, "minimal");
     assert.equal((f.service.adaptiveHarnessRecommend({ task_id: task.id, goal: "💥", baseline_harness: "minimal", recommendation_id: "empty-terms" }).recommendation as JsonObject).selected_harness, "minimal");
     assert.throws(() => f.service.adaptiveHarnessRecommend({ task_id: " ", goal: "plain", baseline_harness: "minimal" }), /task_id/);
     assert.equal(noTerms.id, "no-terms");
 
-    const routingEvaluation = f.store.create("delivery_evaluation_run", "routing-evaluation", { status: "eligible_for_signoff" });
+    const routingEvaluation = deliveryEvaluationFixture(f.service, "routing-evaluation");
     assert.throws(() => f.service.taskBenchmarkCandidatePropose({ evaluation_run_id: routingEvaluation.id, summary: "x", candidate_axes: "context", applicability_terms: [] }), /applicability_terms/);
     assert.throws(() => f.service.taskBenchmarkCandidatePropose({ evaluation_run_id: routingEvaluation.id, summary: "x", candidate_axes: "context", applicability_terms: ["same", "same"] }), /applicability_terms/);
     const stoppedCandidate = f.store.create("task_benchmark_candidate", "stopped-candidate", { lifecycle: "canary_ready", evaluation_run_id: routingEvaluation.id });
@@ -174,7 +237,7 @@ test("keeps recovery, report, and routing rejection branches explicit", async ()
     const staleCandidate = f.store.create("task_benchmark_candidate", "stale-candidate", { lifecycle: "canary_ready", evaluation_run_id: staleEvaluation.id });
     const staleCanary = f.store.create("task_benchmark_canary", "stale-canary", { candidate_id: staleCandidate.id, status: "running" });
     assert.throws(() => f.service.taskBenchmarkCandidateCanaryConclude({ candidate_id: staleCandidate.id, canary_id: staleCanary.id, reviewer: "reviewer" }), /no longer eligible/);
-    const emptyCandidate = f.store.create("task_benchmark_candidate", "empty-candidate", { lifecycle: "canary_ready", evaluation_run_id: routingEvaluation.id });
+    const emptyCandidate = f.store.create("task_benchmark_candidate", "empty-candidate", { lifecycle: "canary_ready", evaluation_run_id: routingEvaluation.id, evaluation_run_version: routingEvaluation.version });
     const emptyCanary = f.store.create("task_benchmark_canary", "empty-canary", { candidate_id: emptyCandidate.id, status: "running" });
     assert.throws(() => f.service.taskBenchmarkCandidateCanaryConclude({ candidate_id: emptyCandidate.id, canary_id: emptyCanary.id, reviewer: "reviewer" }), /enough evidence/);
     const brokenHost = f.store.create("host_run", "settlement-error", { status: "completed" });

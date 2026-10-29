@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
@@ -27,7 +27,7 @@ async function fixture() {
   store.create("evidence", "e", { source_type: "human", confidence: "confirmed" });
   const memory = (id: string, extra: JsonObject = {}) => service.memoryLedgerRemember({ memory_id: id, source_id: "public", kind: "preference", ...scope,
     content: `alpha ${id}`, evidence_ids: ["e"], ...extra }).memory as JsonObject;
-  return { store, service, source, memory, async close() { store.close(); await Promise.all([rm(root, { recursive: true, force: true }), rm(otherRoot, { recursive: true, force: true })]); } };
+  return { store, service, source, memory, root, async close() { store.close(); await Promise.all([rm(root, { recursive: true, force: true }), rm(otherRoot, { recursive: true, force: true })]); } };
 }
 
 test("Source audience gates Knowledge independently of derivative purpose and follows current source restrictions", async () => {
@@ -47,6 +47,25 @@ test("Source audience gates Knowledge independently of derivative purpose and fo
     assert(!sourceAllows(f.store.get("knowledge_source", "public"), { principal_id: "owner", tenant_id: "other" }));
     assert.equal(sourceAllows({}, { purpose: "preference" }), false);
     assert.equal(sourceAllows({ scope: "malformed" }, {}), false);
+  } finally { await f.close(); }
+});
+
+test("path-based project Knowledge excludes legacy aliases and injected project scopes", async () => {
+  const f = await fixture();
+  try {
+    const canonical = `project:${"a".repeat(64)}`;
+    const canonicalRoot = join(f.root, "canonical-project");
+    await mkdir(canonicalRoot);
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: canonical, alias_kind: "path", alias: canonicalRoot });
+    f.source("current-source", { scope_id: canonical });
+    f.service.knowledgeClaimSave({ claim_id: "legacy-claim", source_id: "public", kind: "fact", content: "alpha legacy fact", scope: "project:access-fixture", evidence_ids: ["e"] });
+    f.service.knowledgeClaimSave({ claim_id: "current-claim", source_id: "current-source", kind: "fact", content: "alpha current fact", scope: `project:${canonical}`, evidence_ids: ["e"] });
+    const reader = new KnowledgeContribution(f.store);
+    const base = { query: "alpha", scope_kind: "project", max_items: 20, max_chars: 10000 } as const;
+    assert.deepEqual((await reader.search({ ...base, scope_id: "access-fixture" }, true)).items.map(item => item.claim_id), ["legacy-claim"]);
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: canonical, alias_kind: "legacy", alias: "access-fixture" });
+    const result = await reader.search({ ...base, scope_id: canonical, scope_stack: [{ kind: "project", id: canonical }, { kind: "project", id: "access-fixture" }] }, true);
+    assert.deepEqual(result.items.map(item => item.claim_id), ["current-claim"]);
   } finally { await f.close(); }
 });
 

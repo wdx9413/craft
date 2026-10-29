@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -26,6 +26,18 @@ async function fixture() {
   return { root, manifest, artifact, configure, dependency, close: () => rm(root, { recursive: true, force: true }) };
 }
 
+test("staged runtime binary is writable for repeated desktop resource copies", { skip: process.platform === "win32" }, async () => {
+  const f = await fixture(); const binary = join(f.root, "runtime-node");
+  try {
+    await writeFile(binary, "runtime"); await chmod(binary, 0o555);
+    const result = await prepareRuntimeArtifact(f.root, binary);
+    assert.equal((await stat(binary)).mode & 0o777, 0o555);
+    assert.equal((await stat(join(result, "runtime-node"))).mode & 0o777, 0o755);
+    await prepareRuntimeArtifact(f.root, binary);
+    assert.equal(await readFile(join(result, "runtime-node"), "utf8"), "runtime");
+  } finally { await f.close(); }
+});
+
 test("runtime artifact consumes npm graph and copies actual dependency bytes with repeat/cycle deduplication", async () => {
   const f = await fixture();
   try {
@@ -38,6 +50,20 @@ test("runtime artifact consumes npm graph and copies actual dependency bytes wit
     assert.equal(await readFile(join(result, "dist/core/entry.js"), "utf8"), "compiled-runtime");
     assert.equal(JSON.parse(await readFile(join(result, "node_modules/beta/package.json"), "utf8")).version, "1");
     await assert.rejects(readFile(join(result, "previous")), /ENOENT/);
+  } finally { await f.close(); }
+});
+
+test("runtime artifact resolves packages that do not export package.json", async () => {
+  const f = await fixture();
+  try {
+    f.manifest.dependencies = { locked: "1" };
+    const folder = join(f.root, "node_modules", "locked");
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, "package.json"), JSON.stringify({ name: "locked", version: "1", exports: { ".": "./index.js" } }));
+    await writeFile(join(folder, "index.js"), "export default 1;");
+    await f.configure();
+    const result = await prepareRuntimeArtifact(f.root);
+    assert.equal(await readFile(join(result, "node_modules/locked/index.js"), "utf8"), "export default 1;");
   } finally { await f.close(); }
 });
 

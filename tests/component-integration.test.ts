@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +11,12 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+import { projectKnowledgeContentDirectory } from "../core/project-knowledge-content.ts";
+import { projectExperienceContentDirectory, projectExperienceDirectory, projectPathAliasDigest } from "../core/project-experience-directory.ts";
+import { MemoryFileStore } from "../capability/craft-memory/memory-files.ts";
+import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
+import { ContextResolutionKernel } from "../core/context-resolution.ts";
+import { stableDigest } from "../core/digest.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-component-integration-"));
@@ -23,19 +32,67 @@ async function fixture() {
 }
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 
-test("resolves one canonical project through an explicit legacy alias without global fallback", async () => {
+test("capability directories reject a scope with a missing historic project root", async () => {
+  const f = await fixture();
+  try {
+    const scope = "project:incomplete-roots";
+    const root = join(f.root, "current-project"); await mkdir(root);
+    for (const path of [root, join(f.root, "missing-project")]) f.service.scopeAliasBind({ scope_kind: "project", scope_id: scope, alias_kind: "path", alias: path });
+    assert.throws(() => projectKnowledgeContentDirectory(f.store, scope, { create: true }), /ambiguous/u);
+    assert.throws(() => projectExperienceDirectory(f.store, scope, root, true), /ambiguous/u);
+    assert.throws(() => projectExperienceContentDirectory(f.store, scope, { create: true }), /ambiguous/u);
+    assert.throws(() => projectPathAliasDigest(f.store, scope, root), /ambiguous/u);
+    assert.throws(() => new MemoryFileStore(f.store).pathFor({ kind: "project", id: scope }, root), /ambiguous/u);
+  } finally { await dispose(f); }
+});
+
+test("Knowledge directory rejects a registered project with an unavailable identity path", async () => {
+  const f = await fixture();
+  try {
+    const id = "project:identity-unavailable", scope = { kind: "project", id };
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: id, alias_kind: "path", alias: f.root });
+    const project_kind = "local_fingerprint", remote_digest = null;
+    f.store.create("project_identity", id, { canonical_scope: scope, local_path_alias: join(f.root, "missing"), project_kind, remote_digest,
+      identity_digest: stableDigest({ canonical: scope, project_kind, remote_digest }) });
+    assert.throws(() => projectKnowledgeContentDirectory(f.store, id, { create: true }), /ambiguous/u);
+  } finally { await dispose(f); }
+});
+
+test("does not read a legacy project alias before its data is migrated", async () => {
   const f = await fixture();
   try {
     f.service.knowledgeMemoryInstallBuiltins();
-    const identity = f.service.scopeIdentityResolveProject({ project_root: f.root }).identity as JsonObject;
+    const isolatedRoot = join(f.root, "isolated-project"); await mkdir(isolatedRoot);
+    const identity = f.service.scopeIdentityResolveProject({ project_root: isolatedRoot }).identity as JsonObject;
     const canonical = identity.canonical_scope as JsonObject;
-    f.service.scopeAliasMigrate({ project_root: f.root, legacy_scope_id: "project:old-machine-path" });
+    f.service.scopeAliasMigrate({ project_root: isolatedRoot, legacy_scope_id: "project:old-machine-path" });
     f.service.memoryLedgerRemember({ memory_id: "legacy-memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "project:old-machine-path", content: "Prefer verified local tests.", confidence: "bounded", topic: "testing" });
     const resolved = await f.service.contextResolutionResolve({ receipt_id: "scope-receipt", query: "verified tests", scope_kind: "project", scope_id: canonical.id });
-    assert.match(String((resolved.items as JsonObject[])[0]?.content), /verified local tests/u);
+    assert(!(resolved.items as JsonObject[]).some(item => String(item.content).includes("verified local tests")));
     const receipt = resolved.receipt as JsonObject;
-    assert.equal((receipt.attempted_scopes as JsonObject[]).some((scope) => scope.id === "project:old-machine-path"), true);
+    assert.equal((receipt.attempted_scopes as JsonObject[]).some((scope) => scope.id === "project:old-machine-path"), false);
+    assert.equal((receipt.excluded_scopes as JsonObject[]).some((entry) => entry.reason === "project_scope_migration_required"), true);
     assert.equal((receipt.excluded_scopes as JsonObject[]).some((entry) => entry.reason === "explicit_global_not_requested"), true);
+  } finally { await dispose(f); }
+});
+
+test("separate checkouts of the same remote do not share project memory", async () => {
+  const f = await fixture();
+  try {
+    f.service.knowledgeMemoryInstallBuiltins();
+    const roots = [join(f.root, "checkout-a"), join(f.root, "checkout-b")];
+    for (const root of roots) {
+      await mkdir(root); execFileSync("git", ["init", "--quiet", root]);
+      execFileSync("git", ["-C", root, "remote", "add", "origin", "https://example.invalid/shared/repository.git"]);
+    }
+    const scopes = roots.map(root => ((f.service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject).canonical_scope as JsonObject).id);
+    assert.notEqual(scopes[0], scopes[1]);
+    f.service.memoryLedgerRemember({ memory_id: "isolated-memory", source_id: "builtin.evidence-wiki", kind: "preference",
+      scope_kind: "project", scope_id: scopes[0], content: "Use verified focused tests for this checkout.", confidence: "bounded", topic: "testing" });
+    const own = await f.service.contextResolutionResolve({ receipt_id: "own-receipt", query: "verified focused tests", scope_kind: "project", scope_id: scopes[0] });
+    assert((own.items as JsonObject[]).some(item => String(item.content).includes("verified focused tests")));
+    const result = await f.service.contextResolutionResolve({ receipt_id: "isolated-receipt", query: "verified focused tests", scope_kind: "project", scope_id: scopes[1] });
+    assert(!(result.items as JsonObject[]).some(item => String(item.content).includes("verified focused tests")));
   } finally { await dispose(f); }
 });
 
@@ -80,9 +137,89 @@ test("ingests immutable source revisions as Evidence and candidates, never revie
     assert.equal(((ingested.automatic_review as JsonObject).summary as JsonObject).revalidation_required, 1);
     assert.equal(f.store.list("knowledge_claim", 10).length, 1);
     assert.equal(f.store.list("knowledge_claim", 10)[0]?.status, "candidate");
+    const reader = new KnowledgeContribution(f.store);
+    const request = { query: "focused verification", scope_kind: "project" as const, scope_id: "p", max_items: 10, max_chars: 10_000 };
+    assert.equal((await reader.search(request, true)).items.length, 1);
+    await writeFile(join(sourceRoot, "README.md"), "# Rule\nRun full verification before delivery.\n", "utf8");
+    assert.equal((await reader.search(request, true)).items.length, 0, "changed file is withheld before background ingestion");
+    await rm(join(sourceRoot, "README.md"));
+    assert.equal((await reader.search(request, true)).items.length, 0, "missing source is withheld");
+    const external = join(f.root, "external.md");
+    await writeFile(external, "# Rule\nRun focused verification before delivery.\n", "utf8");
+    await symlink(external, join(sourceRoot, "README.md"));
+    assert.equal((await reader.search(request, true)).items.length, 0, "symlink outside the source is withheld");
+    await rm(join(sourceRoot, "README.md"));
     await writeFile(join(sourceRoot, "README.md"), "# Rule\nRun full verification before delivery.\n", "utf8");
     const refreshed = f.service.knowledgeSourceIngest({ source_id: source.id, root: sourceRoot, max_files: 5, max_chars_per_fragment: 200 });
     assert.notEqual((refreshed.revision as JsonObject).id, (ingested.revision as JsonObject).id);
+  } finally { await dispose(f); }
+});
+
+test("a changed file makes its required Knowledge reference unavailable", async t => {
+  const f = await fixture();
+  try {
+    const sourceRoot = join(f.root, "required-notes"); await mkdir(sourceRoot);
+    const path = join(sourceRoot, "README.md"); await writeFile(path, "alpha required fact\n");
+    f.service.knowledgeSourceRegister({ source_id: "required-source", kind: "readme", label: "required", scope_kind: "project", scope_id: "p",
+      locator: sourceRoot, content_digest: "registered", trust: "verified", access: "read_only" });
+    const ingested = f.service.knowledgeSourceIngest({ source_id: "required-source" });
+    const candidateId = String((ingested.candidates as JsonObject[])[0]!.claim_id);
+    attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", candidateId));
+    const kernel = new ContextResolutionKernel(f.store, [new KnowledgeContribution(f.store)]);
+    const request = { query: "alpha", scope_kind: "project", scope_id: "p", members: ["knowledge"],
+      required_refs: [{ member: "knowledge", id: candidateId }] };
+    const before = await kernel.resolve(request);
+    assert((before.contributions as JsonObject[]).some(part => (part.items as JsonObject[]).some(item => item.claim_id === candidateId)));
+    for (const mutation of ["replace_before_open", "replace", "grow"] as const) {
+      const originalOpen = fsPromises.open, resolvedPath = fs.realpathSync(path);
+      let injected = false;
+      const fault = t.mock.method(fsPromises, "open", async (...args: Parameters<typeof fsPromises.open>) => {
+        const target = String(args[0]) === resolvedPath;
+        if (target && mutation === "replace_before_open") {
+          injected = true; fs.writeFileSync(`${path}.new`, "replacement\n"); fs.renameSync(`${path}.new`, path);
+        }
+        const handle = await Reflect.apply(originalOpen, fsPromises, args);
+        if (target && mutation !== "replace_before_open") {
+          const originalRead = handle.read.bind(handle);
+          t.mock.method(handle, "read", async (...readArgs: Parameters<typeof handle.read>) => {
+            if (!injected) {
+              injected = true;
+              if (mutation === "replace") { fs.writeFileSync(`${path}.new`, "replacement\n"); fs.renameSync(`${path}.new`, path); }
+              else fs.appendFileSync(path, "extra\n");
+            }
+            return Reflect.apply(originalRead, handle, readArgs);
+          });
+        }
+        return handle;
+      });
+      try {
+        await assert.rejects(kernel.resolve(request), /Required Context reference is unavailable/u);
+        assert.equal(injected, true);
+      } finally { fault.mock.restore(); }
+      await writeFile(path, "alpha required fact\n");
+    }
+    await writeFile(path, "alpha changed fact\n");
+    await assert.rejects(kernel.resolve(request), /Required Context reference is unavailable/u);
+    const partial = await kernel.resolve({ query: "alpha", scope_kind: "project", scope_id: "p", members: ["knowledge"], allow_partial: true });
+    assert.equal((partial.receipt as JsonObject).partial, true);
+    assert.deepEqual((partial.receipt as JsonObject).contributor_failures, [{ member: "knowledge", reason: "source_verification_incomplete" }]);
+  } finally { await dispose(f); }
+});
+
+test("Knowledge verifies documents ingested from a source subdirectory", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "knowledge-subdir"), subdir = join(root, "nested");
+    await mkdir(join(subdir, "child"), { recursive: true });
+    await writeFile(join(subdir, "child", "note.md"), "alpha subdirectory fact\n");
+    f.service.knowledgeSourceRegister({ source_id: "subdir-source", kind: "readme", label: "subdir", scope_kind: "project", scope_id: "p",
+      locator: root, content_digest: "registered", trust: "verified", access: "read_only" });
+    f.service.knowledgeSourceIngest({ source_id: "subdir-source", root: subdir });
+    const reader = new KnowledgeContribution(f.store);
+    const request = { query: "alpha", scope_kind: "project" as const, scope_id: "p", max_items: 10, max_chars: 10_000 };
+    assert.equal((await reader.search(request, true)).items.length, 1);
+    await writeFile(join(subdir, "child", "note.md"), "alpha changed\n");
+    assert.equal((await reader.search(request, true)).items.length, 0);
   } finally { await dispose(f); }
 });
 

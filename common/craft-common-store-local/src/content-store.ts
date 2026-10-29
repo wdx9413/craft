@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { canonicalCandidatePath, ensureSessionStorageDirectory, isLegacySafeSessionId, sessionStorageDirectory, type CraftPaths } from "./paths.ts";
 
 export type ContentKind = "knowledge" | "memory" | "experience";
@@ -162,6 +163,7 @@ export class MarkdownContentStore {
   #projectMemoryDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
   #projectExperienceDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
   #sessionMemoryDirectory: ((sessionId: string, writing: boolean) => string) | undefined;
+  #sessionMemoryWriteGuard: (<T>(sessionId: string, operation: () => T) => T) | undefined;
   constructor(paths: CraftPaths) { this.paths = paths; }
 
   setProjectKnowledgeDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
@@ -174,6 +176,10 @@ export class MarkdownContentStore {
 
   setSessionMemoryDirectoryResolver(resolver: (sessionId: string, writing: boolean) => string): void {
     this.#sessionMemoryDirectory = resolver;
+  }
+
+  setSessionMemoryWriteGuard(guard: <T>(sessionId: string, operation: () => T) => T): void {
+    this.#sessionMemoryWriteGuard = guard;
   }
 
   setProjectExperienceDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
@@ -210,57 +216,53 @@ export class MarkdownContentStore {
   }
 
   async write(input: ContentWriteInput): Promise<ContentRef> {
-    if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
-    validateContentBody(input.body);
-    const title = contentTitle(input.body, input.title, input.record_id);
-    const path = this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder, input.scope, input.project_root);
-    await mkdir(resolve(path, ".."), { recursive: true });
-    const digest = bodyDigest(input.body);
-    const existingPath = existsSync(path) ? path : this.findCanonicalPath(input.kind, input.record_id, input.version, input.scope, input.project_root);
-    try {
-      const existing = await this.readPath(existingPath ?? path);
-      if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind) throw new Error("Content file identity conflict");
-      if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, existingPath!, digest, input.body, existing.manifest.title ?? title, input.scope);
-      throw new Error("Content version already exists with different body");
-    } catch (error) {
-      if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message)) throw error;
-    }
-    const manifest = this.manifest(input, digest);
-    const raw = this.serialize(manifest, input.body);
-    const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temporary, raw, { encoding: "utf8", mode: 0o600 });
-    await rename(temporary, path);
-    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title, input.scope);
+    return this.writeSync(input);
   }
 
   writeSync(input: ContentWriteInput): ContentRef {
+    return this.withVersionLock(input, () => this.writeUnlocked(input));
+  }
+
+  private writeUnlocked(input: ContentWriteInput): ContentRef {
     if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
     validateContentBody(input.body);
     const title = contentTitle(input.body, input.title, input.record_id);
     const path = this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder, input.scope, input.project_root); mkdirSync(resolve(path, ".."), { recursive: true });
     const digest = bodyDigest(input.body);
-    const existingPath = existsSync(path) ? path : this.findCanonicalPath(input.kind, input.record_id, input.version, input.scope, input.project_root);
+    const existingPath = this.findCanonicalPath(input.kind, input.record_id, input.version, input.scope, input.project_root);
     try {
       const existing = parseDocument(readFileSync(existingPath ?? path, "utf8"));
       if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind) throw new Error("Content file identity conflict");
+      if (existing.manifest.scope !== input.scope) throw new Error("Content file scope conflict");
+      if (bodyDigest(existing.body) !== existing.manifest.body_digest) throw new Error("Content body digest drifted");
       if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, existingPath!, digest, input.body, existing.manifest.title ?? title, input.scope);
       throw new Error("Content version already exists with different body");
     } catch (error) {
       if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message)) throw error;
     }
     const raw = this.serialize(this.manifest(input, digest), input.body);
-    const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(temporary, raw, { encoding: "utf8", mode: 0o600 }); renameSync(temporary, path);
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, raw, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    try {
+      try { linkSync(temporary, path); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; return this.writeUnlocked(input); }
+    } finally { unlinkSync(temporary); }
     return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title, input.scope);
   }
 
   /** Relocate verified immutable content without rewriting its metadata or overwriting a competing version. */
   relocateSync(ref: ContentRef, scope: string): ContentRef {
+    return this.withVersionLock({ kind: ref.kind, record_id: ref.record_id, version: ref.version, scope }, () => this.relocateUnlocked(ref, scope));
+  }
+
+  private relocateUnlocked(ref: ContentRef, scope: string): ContentRef {
     const source = this.readCompatSync(ref, scope);
     if (source.manifest.scope !== scope) throw new Error("Content migration scope drifted");
     const target = this.namedPathFor(ref.kind, ref.record_id, ref.version, source.manifest.title ?? ref.record_id,
       this.folderOf(ref.kind, ref.path), scope);
     if (resolve(target) === resolve(ref.path)) return ref;
+    const existingPath = this.findCanonicalPath(ref.kind, ref.record_id, ref.version, scope);
+    if (existingPath && resolve(existingPath) !== resolve(target)) throw new Error("Content migration destination conflicts");
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
     if (!lstatSync(dirname(target)).isDirectory()) throw new Error("Content migration destination directory must be regular");
     const raw = readFileSync(ref.path);
@@ -283,6 +285,10 @@ export class MarkdownContentStore {
    * identity or version. This is reserved for source-aware migrations: normal
    * domain writes remain append-only and must create a new record version. */
   rewriteSync(input: ContentWriteInput): ContentRef {
+    return this.withVersionLock(input, () => this.rewriteUnlocked(input));
+  }
+
+  private rewriteUnlocked(input: ContentWriteInput): ContentRef {
     if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
     validateContentBody(input.body);
     const title = contentTitle(input.body, input.title, input.record_id);
@@ -293,6 +299,9 @@ export class MarkdownContentStore {
     const existing = parseDocument(readFileSync(currentPath, "utf8"));
     if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind
       || existing.manifest.record_version !== input.version) throw new Error("Content rewrite identity conflict");
+    if (existing.manifest.scope !== input.scope) throw new Error("Content rewrite scope conflict");
+    if (bodyDigest(existing.body) !== existing.manifest.body_digest) throw new Error("Content body digest drifted");
+    if (resolve(currentPath) !== resolve(path) && lstatSync(path, { throwIfNoEntry: false })) throw new Error("Content rewrite destination conflicts");
     const digest = bodyDigest(input.body);
     const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(temporary, this.serialize(this.manifest(input, digest), input.body), { encoding: "utf8", mode: 0o600 });
@@ -368,12 +377,43 @@ export class MarkdownContentStore {
 
   private async readPath(path: string): Promise<ContentReadResult> { return parseDocument(await readFile(path, "utf8")); }
 
+  private withVersionLock<T>(input: Pick<ContentWriteInput, "kind" | "record_id" | "version" | "scope" | "project_root">, operation: () => T): T {
+    if (input.kind === "memory" && input.scope.startsWith("session:") && this.#sessionMemoryWriteGuard) {
+      return this.#sessionMemoryWriteGuard(input.scope.slice("session:".length), () => this.withVersionLockUnguarded(input, operation));
+    }
+    return this.withVersionLockUnguarded(input, operation);
+  }
+
+  private withVersionLockUnguarded<T>(input: Pick<ContentWriteInput, "kind" | "record_id" | "version" | "scope" | "project_root">, operation: () => T): T {
+    const directory = this.directory(input.kind, undefined, input.scope, input.project_root, undefined, true);
+    const locks = join(directory, ".version-locks");
+    mkdirSync(locks, { recursive: true, mode: 0o700 });
+    const lockDirectory = lstatSync(locks);
+    if (lockDirectory.isSymbolicLink() || !lockDirectory.isDirectory()) throw new Error("Content version lock directory is unsafe");
+    const shard = createHash("sha256").update(JSON.stringify([input.kind, input.record_id, input.version])).digest("hex").slice(0, 2);
+    const file = join(locks, `${shard}.db`);
+    const existing = lstatSync(file, { throwIfNoEntry: false });
+    if (existing && (existing.isSymbolicLink() || !existing.isFile())) throw new Error("Content version lock file is unsafe");
+    const database = new DatabaseSync(file);
+    try {
+      database.exec("PRAGMA busy_timeout=0");
+      try { database.exec("BEGIN IMMEDIATE"); }
+      catch (error) {
+        if (error instanceof Error && /locked|busy/iu.test(error.message)) throw new Error("Content version is busy; retry", { cause: error });
+        throw error;
+      }
+      try { const result = operation(); database.exec("COMMIT"); return result; }
+      catch (error) { database.exec("ROLLBACK"); throw error; }
+    } finally { database.close(); }
+  }
+
   private findCanonicalPath(kind: ContentKind, recordId: string, version: number, scope?: string, projectRoot?: string): string | null {
     const directory = this.directory(kind, undefined, scope, projectRoot, undefined, true);
     try {
       const suffix = `--${idSuffix(recordId)}.v${version}.md`;
-      for (const path of this.files(directory, kind === "experience")) {
-        if (!path.endsWith(suffix)) continue;
+      const matches = this.files(directory, kind === "experience", suffix);
+      if (matches.length > 1) throw new Error("Content version has multiple files");
+      for (const path of matches) {
         try {
           const manifest = parseDocument(readFileSync(path, "utf8")).manifest;
           if (manifest.record_kind === kind && manifest.record_version === version) return path;
@@ -383,18 +423,19 @@ export class MarkdownContentStore {
           return path;
         }
       }
-    } catch {
-      return null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
     }
     return null;
   }
 
-  private files(directory: string, recursive: boolean): string[] {
+  private files(directory: string, recursive: boolean, suffix: string): string[] {
     const result: string[] = [];
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
-      if (entry.isFile()) result.push(path);
-      else if (recursive && entry.isDirectory()) result.push(...this.files(path, true));
+      if (entry.isFile() && entry.name.endsWith(suffix)) result.push(path);
+      else if (recursive && entry.isDirectory() && entry.name !== ".version-locks") result.push(...this.files(path, true, suffix));
     }
     return result;
   }

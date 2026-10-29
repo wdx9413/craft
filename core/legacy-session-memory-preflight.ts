@@ -166,3 +166,30 @@ export function legacySessionMemoryPreflight(paths: CraftPaths, args: {
       next_cursor: hasMore && page.length ? encodeCursor(page.at(-1)!) : null };
   } finally { database?.close(); }
 }
+
+/** Scan all pages only while the legacy root's immediate entries remain stable. */
+export function legacySessionMemoryInventory(paths: CraftPaths, root: string): {
+  root_status: "missing" | "ready" | "unsafe"; entries: LegacySessionMemoryEntry[];
+} {
+  function rootSnapshot(): string {
+    try {
+      const stat = lstatSync(root);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) return "unsafe";
+      return JSON.stringify([stat.dev, stat.ino, readdirSync(root).sort()]);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+      throw error;
+    }
+  }
+  const before = rootSnapshot();
+  const entries: LegacySessionMemoryEntry[] = [];
+  let cursor: string | undefined, rootStatus: "missing" | "ready" | "unsafe" = "missing";
+  do {
+    const page = legacySessionMemoryPreflight(paths, { legacy_root: root, max_entries: 500, ...(cursor ? { cursor } : {}) });
+    rootStatus = page.root_status;
+    entries.push(...page.entries);
+    cursor = page.next_cursor ?? undefined;
+  } while (cursor);
+  if (rootSnapshot() !== before) throw new Error("Legacy session memory root changed; restart inventory");
+  return { root_status: rootStatus, entries };
+}

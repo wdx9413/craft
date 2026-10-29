@@ -12,6 +12,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, withContextLockBudget, type JsonObject } from "../core/infrastructure/store.ts";
 import { projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
 import { stableDigest } from "../core/digest.ts";
+import { codexTaskGoalDigest } from "../core/codex-task-prose.ts";
 import { applySessionEvidencePage, repairSessionEvidencePage } from "../capability/craft-knowledge/session-evidence-repair.ts";
 import { preflightSessionEvidencePage } from "../core/session-evidence-repair-preflight.ts";
 
@@ -33,6 +34,7 @@ test("session evidence repair backs up within project scope and appends an idemp
   const f = await fixture();
   try {
     const created = f.service.knowledgeSessionEvidenceRecord(input()).evidence as JsonObject;
+    assert.equal((created.metadata as JsonObject).task_goal_digest, codexTaskGoalDigest(input().task_goal));
     const old = f.store.save("evidence", String(created.id), { ...created, confidence: "confirmed" });
     assert.equal(repairSessionEvidencePage(f.store).affected, 1);
     const originalList = f.store.list.bind(f.store);

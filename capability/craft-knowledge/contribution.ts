@@ -17,6 +17,64 @@ import { retrievalExcerpt } from "../../common/craft-common-base/src/retrieval-e
 import { contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
 import { knowledgeClaimPromotionProofVerified } from "../../core/knowledge-evaluation-provenance.ts";
 import { contextFeedbackWeights } from "../../core/context-feedback-weight.ts";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import fsPromises from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
+
+const inFlightFileVerifications = new Map<string, Promise<boolean>>();
+
+/** Verify only file-backed ingested documents. Virtual session evidence has no local root. */
+async function currentFileDocument(locator: string, document: JsonObject): Promise<boolean> {
+  if (typeof document.root_digest !== "string") return false;
+  try {
+    if ((await fsPromises.lstat(locator)).isSymbolicLink()) return false;
+    const root = await fsPromises.realpath(locator);
+    if (typeof document.path !== "string") return false;
+    const rootStat = await fsPromises.lstat(root);
+    const path = document.path === "." ? root : join(root, document.path);
+    const resolved = await fsPromises.realpath(path), rel = relative(root, resolved);
+    if (rootStat.isFile() ? resolved !== root : !rootStat.isDirectory() || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false;
+    let ingestRoot = rootStat.isFile() ? root : dirname(resolved), rootMatches = false;
+    for (let depth = 0; depth < 256; depth++) {
+      if (stableDigest(ingestRoot) === document.root_digest) { rootMatches = true; break; }
+      if (ingestRoot === root) break;
+      ingestRoot = dirname(ingestRoot);
+    }
+    if (!rootMatches) return false;
+    const stat = await fsPromises.lstat(path);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 2_000_000) return false;
+    const fd = await fsPromises.open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const before = await fd.stat();
+      if (!before.isFile() || before.dev !== stat.dev || before.ino !== stat.ino || before.size > 2_000_000) return false;
+      const buffer = Buffer.alloc(before.size + 1);
+      let offset = 0;
+      while (offset < buffer.length) {
+        const { bytesRead: count } = await fd.read(buffer, offset, buffer.length - offset, offset);
+        if (!count) break;
+        offset += count;
+      }
+      const after = await fd.stat(), current = await fsPromises.lstat(path);
+      if (offset !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs
+        || current.isSymbolicLink() || current.dev !== before.dev || current.ino !== before.ino || await fsPromises.realpath(path) !== resolved) return false;
+      const body = buffer.subarray(0, offset).toString("utf8").replace(/\r\n/g, "\n");
+      return `sha256:${createHash("sha256").update(body).digest("hex")}` === document.content_digest;
+    } finally { await fd.close(); }
+  } catch { return false; }
+}
+
+function sharedFileVerification(locator: string, document: JsonObject): Promise<boolean> | null {
+  const key = stableDigest({ locator, path: document.path ?? null, root_digest: document.root_digest ?? null, content_digest: document.content_digest ?? null });
+  const existing = inFlightFileVerifications.get(key);
+  if (existing) return existing;
+  if (inFlightFileVerifications.size >= 64) return null;
+  const pending = currentFileDocument(locator, document);
+  inFlightFileVerifications.set(key, pending);
+  void pending.finally(() => { if (inFlightFileVerifications.get(key) === pending) inFlightFileVerifications.delete(key); });
+  return pending;
+}
 
 function recordScope(value: unknown): { kind: string; id: string } {
   if (value === "global") return { kind: "global", id: "global" };
@@ -24,8 +82,7 @@ function recordScope(value: unknown): { kind: string; id: string } {
   return { kind, id: rest.join(":") };
 }
 
-function scopeMatches(claimScope: unknown, request: ContextRequest, projectAliases: readonly string[]): boolean {
-  const scopes = request.scope_stack ?? [{ kind: request.scope_kind, id: request.scope_id }];
+function scopeMatches(claimScope: unknown, request: ContextRequest, projectAliases: readonly string[], scopes: readonly { kind: string; id: string }[]): boolean {
   return scopes.some((scope) => claimScope === `${scope.kind}:${scope.id}` || claimScope === "global" && scope.kind === "global") || request.scope_kind === "project" && projectAliases.includes(String(claimScope));
 }
 
@@ -70,14 +127,17 @@ export class KnowledgeContribution implements ContextContributionProvider {
     const aliases = request.scope_kind === "project"
       ? this.store.list("scope_alias", 10_001, (alias) => alias.status === "active" && JSON.stringify(alias.scope) === JSON.stringify({ kind: "project", id: request.scope_id }))
       : [];
-    const projectAliases = aliases.map(alias => `project:${String(alias.alias)}`);
+    const pathIdentity = request.scope_kind === "project" && /^project:[a-f0-9]{64}$/u.test(request.scope_id);
+    const projectAliases = pathIdentity ? [] : aliases.map(alias => `project:${String(alias.alias)}`);
+    const scopes = (request.scope_stack ?? [{ kind: request.scope_kind, id: request.scope_id }])
+      .filter(scope => !pathIdentity || scope.kind !== "project" || scope.id === request.scope_id);
     if (projectAliases.length > 10_000) throw new Error("Knowledge candidate budget exceeded; narrow project aliases");
     // SQL scope selection and metadata predicates precede content hydration.
-    const eligible = this.store.listScoped("knowledge_claim", [...(request.scope_stack ?? [{ kind: request.scope_kind, id: request.scope_id }]), ...projectAliases.map(alias => recordScope(alias))], 10_001, (claim) => {
+    const eligible = this.store.listScoped("knowledge_claim", [...scopes, ...projectAliases.map(alias => recordScope(alias))], 10_001, (claim) => {
         const applicability = recordScope(claim.scope);
         if ((claim.status !== "reviewed" && !(includeCandidates && claim.status === "candidate"))
           || claim.status === "reviewed" && !knowledgeClaimPromotionProofVerified(this.store, claim)
-          || !scopeMatches(claim.scope, request, projectAliases) || !scopeAllows(scopeEnvelope(claim.scope_envelope, applicability), access(request))
+          || !scopeMatches(claim.scope, request, projectAliases, scopes) || !scopeAllows(scopeEnvelope(claim.scope_envelope, applicability), access(request))
           || claim.sensitivity === "restricted" && request.allow_restricted !== true || !validAt(claim.valid_until, now)) return false;
         // Legacy records without a persisted source cannot become execution Context
         // merely because an old Markdown frontmatter happened to name one.  The
@@ -128,9 +188,23 @@ export class KnowledgeContribution implements ContextContributionProvider {
       .sort((a, b) => Number(isRequired(b.claim)) - Number(isRequired(a.claim)) || scoreOf(b.claim) - scoreOf(a.claim) || String(a.claim.id).localeCompare(String(b.claim.id)));
 
     const items: JsonObject[] = [];
+    const verifiedDocuments = new Map<string, boolean>();
+    let verificationBudgetOmitted = 0, verificationRejected = 0;
     let usedChars = 0;
     for (const match of ranked) {
       if (items.length >= request.max_items) break;
+      const dependency = dependencies.get(String(match.claim.id))!;
+      if (dependency.document && typeof dependency.source.locator === "string" && isAbsolute(dependency.source.locator)) {
+        const key = String(dependency.document.id);
+        if (!verifiedDocuments.has(key)) {
+          // Bound per-request disk reads even when many claims share a source.
+          if (verifiedDocuments.size >= 12) { verificationBudgetOmitted++; continue; }
+          const verification = sharedFileVerification(dependency.source.locator, dependency.document);
+          if (!verification) { verificationBudgetOmitted++; continue; }
+          verifiedDocuments.set(key, await verification);
+        }
+        if (!verifiedDocuments.get(key)) { verificationRejected++; continue; }
+      }
       let item: JsonObject = {
         kind: "knowledge_claim",
         scope: recordScope(match.claim.scope),
@@ -167,6 +241,8 @@ export class KnowledgeContribution implements ContextContributionProvider {
       items,
       receipt_id: `knowledge_contribution_${items.map((item) => `${String(item.claim_id)}@${String(item.claim_version)}`).join("+") || "none"}`,
       omitted_count: ranked.length - items.length,
+      ...(verificationBudgetOmitted || verificationRejected ? { diagnostics: { source_verification_incomplete: true,
+        verification_budget_omitted_count: verificationBudgetOmitted, verification_rejected_count: verificationRejected } } : {}),
     };
   }
 

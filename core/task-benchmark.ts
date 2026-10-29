@@ -1,11 +1,44 @@
 import { createHash } from "node:crypto";
-import { DeliveryEvaluationKernel } from "./delivery-evaluation.ts";
+import { assertDeliveryEvaluationCurrent, DeliveryEvaluationKernel } from "./delivery-evaluation.ts";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { text } from "./validation.ts";
 import { digestJson, payload } from "./digest.ts";
 
 
 function positive(value: unknown, name: string, fallback: number): number { const parsed = value === undefined ? fallback : Number(value); if (![Number.isInteger(parsed), parsed >= 1, parsed <= 100].every(Boolean)) throw new Error(`${name} must be an integer between 1 and 100`); return parsed; }
+
+function independentCanarySamples(store: CraftStore, samples: JsonObject[]): JsonObject[] {
+  const sessions = new Set<string>(), tasks = new Set<string>(), sources = new Set<string>(); const accepted: JsonObject[] = [];
+  for (const sample of samples) {
+    const evidence = typeof sample.evidence_id === "string" ? store.find("evidence", sample.evidence_id) : null;
+    const metadata = evidence?.metadata as JsonObject | undefined;
+    const session = metadata?.source_session_id, task = metadata?.task_id, source = metadata?.source_ref_digest;
+    if (!evidence || evidence.version !== sample.evidence_version || evidence.record_origin === "caller_asserted" || evidence.confidence !== "confirmed"
+      || typeof session !== "string" || !session.trim() || typeof task !== "string" || !task.trim() || typeof source !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(source)
+      || sessions.has(session) || tasks.has(task) || sources.has(source)) continue;
+    sessions.add(session); tasks.add(task); sources.add(source); accepted.push(sample);
+  }
+  return accepted;
+}
+
+export function canaryRoutingEvidenceCurrent(store: CraftStore, candidate: JsonObject): boolean {
+  const binding = candidate.routing_evidence as JsonObject | undefined;
+  if (!binding || typeof binding.canary_id !== "string" || !Number.isSafeInteger(binding.canary_version) || typeof binding.canary_identity_digest !== "string"
+    || !Number.isSafeInteger(binding.min_samples) || Number(binding.min_samples) < 2 || !Array.isArray(binding.sample_refs)) return false;
+  const canary = store.find("task_benchmark_canary", binding.canary_id);
+  if (!canary || canary.candidate_id !== candidate.id || Number(canary.version) < Number(binding.canary_version) || canary.status !== "running") return false;
+  const identity = { candidate_id: canary.candidate_id, candidate_version: canary.candidate_version, baseline_id: canary.baseline_id,
+    evaluation_run_id: canary.evaluation_run_id, evaluation_run_version: canary.evaluation_run_version, environment_digest: canary.environment_digest, budget_digest: canary.budget_digest };
+  if (canary.identity_digest !== binding.canary_identity_digest || digestJson(identity) !== binding.canary_identity_digest) return false;
+  const refs = binding.sample_refs as JsonObject[]; const seen = new Set<string>(); const samples: JsonObject[] = [];
+  for (const ref of refs) {
+    if (!ref || typeof ref.id !== "string" || seen.has(ref.id) || !Number.isSafeInteger(ref.version)) return false;
+    const sample = store.find("task_benchmark_canary_sample", ref.id);
+    if (!sample || sample.version !== ref.version || sample.canary_id !== canary.id) return false;
+    seen.add(ref.id); samples.push(sample);
+  }
+  return samples.length >= Number(binding.min_samples) && independentCanarySamples(store, samples).length === samples.length;
+}
 
 
 
@@ -46,6 +79,7 @@ export class TaskBenchmarkKernel {
   candidatePropose(args: JsonObject): JsonObject {
     const evaluation = this.store.get("delivery_evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
     if (evaluation.status !== "eligible_for_signoff") throw new Error("Task Benchmark candidate requires held-out eligible evaluation");
+    assertDeliveryEvaluationCurrent(this.store, evaluation);
     const candidateHarness = args.candidate_harness === undefined ? null : text(args.candidate_harness, "candidate_harness");
     const applicabilityTerms = args.applicability_terms === undefined ? [] : terms(args.applicability_terms);
     const identity = { evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version, summary_digest: digestJson(text(args.summary, "summary")), design_axes: axes(args.candidate_axes), candidate_harness: candidateHarness, applicability_terms: applicabilityTerms };
@@ -65,6 +99,8 @@ export class TaskBenchmarkKernel {
     const candidate = this.store.get("task_benchmark_candidate", text(args.candidate_id, "candidate_id"));
     if (candidate.lifecycle !== "canary_ready") throw new Error("Task Benchmark candidate must be canary_ready");
     const evaluation = this.store.get("delivery_evaluation_run", String(candidate.evaluation_run_id));
+    if (evaluation.version !== candidate.evaluation_run_version || evaluation.status !== "eligible_for_signoff") throw new Error("Task Benchmark candidate evaluation is no longer eligible");
+    assertDeliveryEvaluationCurrent(this.store, evaluation);
     const environmentDigest = digestJson(args.environment ?? {}); const budgetDigest = digestJson(args.budget ?? {});
     if (digestJson([environmentDigest, budgetDigest]) !== digestJson([evaluation.environment, evaluation.budget])) throw new Error("Task Benchmark Canary requires the evaluated environment and budget");
     const identity = { candidate_id: candidate.id, candidate_version: candidate.version, baseline_id: text(args.baseline_id, "baseline_id"), evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version, environment_digest: environmentDigest, budget_digest: budgetDigest };
@@ -74,30 +110,47 @@ export class TaskBenchmarkKernel {
   }
 
   candidateCanaryObserve(args: JsonObject): JsonObject {
+    return this.store.transaction(() => {
     const canary = this.store.get("task_benchmark_canary", text(args.canary_id, "canary_id"));
     const baseline = finite(args.baseline_quality, "baseline_quality"); const candidate = finite(args.candidate_quality, "candidate_quality"); const threshold = finite(args.regression_threshold ?? 0, "regression_threshold");
     if (canary.status === "rolled_back") return { canary, idempotent: true };
     if (canary.status !== "running") throw new Error("Task Benchmark Canary is not running");
-    const evidenceId = args.evidence_id === undefined ? null : text(args.evidence_id, "evidence_id"); if (evidenceId) this.store.get("evidence", evidenceId);
-    const sampleIdentity = { canary_id: canary.id, evidence_id: evidenceId, baseline_quality: baseline, candidate_quality: candidate, regression_threshold: threshold };
+    const evidenceId = args.evidence_id === undefined ? null : text(args.evidence_id, "evidence_id"); const evidence = evidenceId ? this.store.get("evidence", evidenceId) : null;
+    const sampleIdentity = { canary_id: canary.id, evidence_id: evidenceId, evidence_version: evidence?.version ?? null, baseline_quality: baseline, candidate_quality: candidate, regression_threshold: threshold };
     const sampleId = String(args.sample_id ?? `task_benchmark_canary_sample_${digestJson(sampleIdentity).slice(-16)}`); const existing = this.store.find("task_benchmark_canary_sample", sampleId); const sampleDigest = digestJson(sampleIdentity);
     if (existing) { if (existing.sample_digest !== sampleDigest) throw new Error("Task Benchmark Canary sample idempotency conflict"); return { canary, sample: existing, idempotent: true }; }
     const sample = this.store.create("task_benchmark_canary_sample", sampleId, { ...sampleIdentity, sample_digest: sampleDigest });
     const regressed = candidate < baseline - threshold;
     return { canary: this.save("task_benchmark_canary", canary, { status: regressed ? "rolled_back" : "running", baseline_quality: baseline, candidate_quality: candidate, regression_threshold: threshold, rollback_to: regressed ? canary.baseline_id : null, publication_allowed: false, sample_count: Number(canary.sample_count ?? 0) + 1 }), sample, idempotent: false };
+    });
   }
 
   /** A candidate becomes selectable only after the already-passed Signoff and confirmed Canary samples. */
   candidateCanaryConclude(args: JsonObject): JsonObject {
     const candidate = this.store.get("task_benchmark_candidate", text(args.candidate_id, "candidate_id")); const canary = this.store.get("task_benchmark_canary", text(args.canary_id, "canary_id"));
     const minSamples = positive(args.min_samples, "min_samples", 2); text(args.reviewer, "reviewer");
-    if (candidate.lifecycle === "routing_eligible") return { candidate, idempotent: true };
+    if (candidate.lifecycle === "routing_eligible") {
+      const evaluation = typeof candidate.evaluation_run_id === "string" ? this.store.find("delivery_evaluation_run", candidate.evaluation_run_id) : null;
+      if (!evaluation || evaluation.version !== candidate.evaluation_run_version || evaluation.status !== "eligible_for_signoff" || !canaryRoutingEvidenceCurrent(this.store, candidate)) throw new Error("Task Benchmark candidate routing evidence is no longer eligible");
+      assertDeliveryEvaluationCurrent(this.store, evaluation);
+      return { candidate, idempotent: true };
+    }
     if (candidate.lifecycle !== "canary_ready" || canary.candidate_id !== candidate.id || canary.status !== "running") throw new Error("Task Benchmark candidate requires a non-regressed running Canary");
-    const evaluation = this.store.get("delivery_evaluation_run", String(candidate.evaluation_run_id)); if (evaluation.status !== "eligible_for_signoff") throw new Error("Task Benchmark candidate evaluation is no longer eligible");
+    const evaluation = this.store.get("delivery_evaluation_run", String(candidate.evaluation_run_id)); if (evaluation.status !== "eligible_for_signoff" || evaluation.version !== candidate.evaluation_run_version) throw new Error("Task Benchmark candidate evaluation is no longer eligible");
+    assertDeliveryEvaluationCurrent(this.store, evaluation);
     const samples = this.store.list("task_benchmark_canary_sample", 10_000, (item) => item.canary_id === canary.id && item.evidence_id !== null);
-    if (samples.length < minSamples) throw new Error("Task Benchmark candidate requires enough evidence-backed Canary samples");
-    const saved = this.save("task_benchmark_candidate", candidate, { lifecycle: "routing_eligible", publication_allowed: false, routing_evidence: { canary_id: canary.id, canary_version: canary.version, sample_ids: samples.map((item) => item.id).sort(), reviewer: text(args.reviewer, "reviewer") } });
-    return { candidate: saved, idempotent: false };
+    const accepted = independentCanarySamples(this.store, samples).slice(0, minSamples);
+    if (accepted.length < minSamples) throw new Error("Task Benchmark candidate requires enough evidence-backed independent Canary samples");
+    return this.store.transaction(() => {
+      const currentCanary = this.store.get("task_benchmark_canary", String(canary.id));
+      const currentEvaluation = this.store.get("delivery_evaluation_run", String(evaluation.id));
+      if (currentCanary.version !== canary.version || currentCanary.status !== "running" || currentEvaluation.version !== evaluation.version || currentEvaluation.status !== "eligible_for_signoff") throw new Error("Task Benchmark Canary or evaluation changed during conclusion");
+      assertDeliveryEvaluationCurrent(this.store, currentEvaluation);
+      const currentSamples = accepted.map(item => this.store.get("task_benchmark_canary_sample", String(item.id)));
+      if (currentSamples.some((item, index) => item.version !== accepted[index]!.version) || independentCanarySamples(this.store, currentSamples).length !== minSamples) throw new Error("Task Benchmark Canary evidence changed during conclusion");
+      const saved = this.store.updateIfVersion("task_benchmark_candidate", String(candidate.id), Number(candidate.version), { ...payload(candidate), lifecycle: "routing_eligible", publication_allowed: false, routing_evidence: { canary_id: canary.id, canary_version: canary.version, canary_identity_digest: canary.identity_digest, min_samples: minSamples, sample_ids: accepted.map((item) => item.id).sort(), sample_refs: accepted.map(item => ({ id: item.id, version: item.version })), reviewer: text(args.reviewer, "reviewer") } });
+      return { candidate: saved, idempotent: false };
+    });
   }
 
   private delivery(taskRunId: string): JsonObject | null { const run = this.store.get("task_run", taskRunId); const records = this.store.list("work_delivery", 10_000, (item) => item.launch_id === run.launch_id); return records.at(-1) ?? null; }

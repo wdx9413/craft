@@ -21,6 +21,7 @@ import { cacheLspDocumentSymbols, lspDocumentSymbolsDigest } from "../capability
 import { ProjectGraphStore } from "../capability/craft-codebase/project-graph-store.ts";
 import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
 import { estimateTokens } from "../core/token-budget.ts";
+import { compactContextResponse } from "../core/context-response-projection.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-repository-context-"));
@@ -2349,6 +2350,32 @@ test("Context marks the pack partial when automatic Knowledge ingestion is incom
     assert.equal(result.pack_status, "partial");
     assert.equal(result.partial, true);
     assert(((result.pack_receipt as JsonObject).partial_reasons as string[]).includes("knowledge_source_discovery_incomplete"));
+  } finally { f.close(); }
+});
+
+test("compact Context reports an incomplete Knowledge source verification", async t => {
+  const f = await fixture();
+  try {
+    const resolveWorkingSet = f.service.contextWorkingSets.resolve.bind(f.service.contextWorkingSets);
+    let failures: JsonObject[] | undefined = [{ member: "knowledge", reason: "source_verification_incomplete" }];
+    t.mock.method(f.service.contextWorkingSets, "resolve", async (args: JsonObject) => {
+      const result = await resolveWorkingSet(args);
+      return { ...result, receipt: { ...result.receipt as JsonObject, partial: true,
+        contributor_failures: failures } };
+    });
+    const result = await f.service.contextOpen({ project_root: f.repo, query: "source", include_codebase: false });
+    const compact = compactContextResponse(result);
+    assert.equal(compact.partial, true);
+    assert.deepEqual(compact.partial_reasons, ["knowledge_source_verification_incomplete"]);
+    failures = undefined;
+    const missing = await f.service.contextOpen({ project_root: f.repo, query: "missing failures", include_codebase: false });
+    assert.deepEqual(compactContextResponse(missing).partial_reasons, ["context_contribution_unavailable"]);
+    failures = [{ member: "knowledge", reason: "source_verification_incomplete" }, { member: "experience", reason: "contribution_unavailable" }];
+    const mixed = await f.service.contextOpen({ project_root: f.repo, query: "mixed failures", include_codebase: false });
+    assert.deepEqual(compactContextResponse(mixed).partial_reasons, ["knowledge_source_verification_incomplete", "context_contribution_unavailable"]);
+    failures = [{ member: "knowledge", reason: "contribution_unavailable" }];
+    const unavailable = await f.service.contextOpen({ project_root: f.repo, query: "unavailable knowledge", include_codebase: false });
+    assert.deepEqual(compactContextResponse(unavailable).partial_reasons, ["context_contribution_unavailable"]);
   } finally { f.close(); }
 });
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -30,7 +30,7 @@ function fixture(snapshotRoot?: (root: string, project: string) => string) {
   return { root, project, sourceDatabase, localSnapshot, body, payload };
 }
 
-test("migration command dry-runs, imports a repository-local database, and resumes idempotently", async () => {
+test("migration command inventories an external database and migrates a staged copy idempotently", async () => {
   const f = fixture(), dataRoot = join(f.root, "global-data");
   try {
     const args = [`--data-root=${dataRoot}`, `--source-database=${f.sourceDatabase}`];
@@ -38,7 +38,14 @@ test("migration command dry-runs, imports a repository-local database, and resum
     assert.equal(dryRun.exit_code, 0);
     assert.deepEqual(JSON.parse(dryRun.output), { mode: "dry_run", statuses: { legacy_ready: 1 }, migratable: 1 });
     assert.equal(existsSync(dataRoot), false);
-    const applied = await runCodebaseStorageMigrationCommand([...args, "--apply"]);
+    await assert.rejects(runCodebaseStorageMigrationCommand([...args, "--apply"]), /inside the data root/u);
+    mkdirSync(dataRoot);
+    await assert.rejects(runCodebaseStorageMigrationCommand([...args, "--apply"]), /inside the data root/u);
+    const staged = join(dataRoot, "db", "craft.db"); mkdirSync(dirname(staged), { recursive: true }); copyFileSync(f.sourceDatabase, staged);
+    const isolated = join(dataRoot, "db", "isolated.db"); copyFileSync(f.sourceDatabase, isolated);
+    await assert.rejects(runCodebaseStorageMigrationCommand([`--data-root=${dataRoot}`, `--source-database=${isolated}`, "--apply"]), /active central database/u);
+    const stagedArgs = [`--data-root=${dataRoot}`, `--source-database=${staged}`];
+    const applied = await runCodebaseStorageMigrationCommand([...stagedArgs, "--apply"]);
     const result = JSON.parse(applied.output) as { mode: string; migrated: number; blocked: unknown[]; after_statuses: Record<string, number>; backups: string[] };
     assert.equal(applied.exit_code, 0);
     assert.equal(result.mode, "apply");
@@ -50,14 +57,14 @@ test("migration command dry-runs, imports a repository-local database, and resum
     assert.equal(existsSync(f.localSnapshot), true);
     const target = join(projectStorageDirectory(craftPaths(dataRoot), f.project), "codebase", "snapshots", "repo", "checkpoint", "src", "value.ts");
     assert.equal(await import("node:fs/promises").then(fs => fs.readFile(target, "utf8")), f.body);
-    const source = new DatabaseSync(f.sourceDatabase);
+    const source = new DatabaseSync(staged);
     try { source.prepare("UPDATE records SET payload_json=? WHERE kind='workspace_checkpoint' AND id='checkpoint'")
       .run(JSON.stringify(f.payload)); } finally { source.close(); }
-    const resumed = await runCodebaseStorageMigrationCommand([...args, "--apply", "--recover-verified-peer",
+    const resumed = await runCodebaseStorageMigrationCommand([...stagedArgs, "--apply", "--recover-verified-peer",
       `--resume-backup=${result.backups[0]}`]);
     assert.equal(resumed.exit_code, 0);
     assert.equal(JSON.parse(resumed.output).migrated, 1);
-    const repeated = await runCodebaseStorageMigrationCommand([...args, "--apply"]);
+    const repeated = await runCodebaseStorageMigrationCommand([...stagedArgs, "--apply"]);
     assert.equal(repeated.exit_code, 0);
     assert.equal(JSON.parse(repeated.output).migrated, 0);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
@@ -76,6 +83,22 @@ test("migration command validates options and rejects a database symlink", async
   try {
     symlinkSync(f.sourceDatabase, link);
     await assert.rejects(runCodebaseStorageMigrationCommand([`--data-root=${join(f.root, "global")}`, `--source-database=${link}`]), /regular file/u);
+    const dataRoot = join(f.root, "global"), central = join(dataRoot, "db", "craft.db");
+    mkdirSync(dirname(central), { recursive: true }); symlinkSync(f.sourceDatabase, central);
+    await assert.rejects(runCodebaseStorageMigrationCommand([`--data-root=${dataRoot}`, "--apply"]), /regular file/u);
+    const isolated = join(dataRoot, "db", "isolated.db"); copyFileSync(f.sourceDatabase, isolated);
+    rmSync(central);
+    await assert.rejects(runCodebaseStorageMigrationCommand([`--data-root=${dataRoot}`, `--source-database=${isolated}`, "--apply"]), /active central database/u);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("migration apply rejects a central database reached through an escaping parent link", async () => {
+  const f = fixture(), dataRoot = join(f.root, "global"), outside = join(f.root, "outside");
+  try {
+    mkdirSync(dataRoot); mkdirSync(outside);
+    copyFileSync(f.sourceDatabase, join(outside, "craft.db"));
+    symlinkSync(outside, join(dataRoot, "db"));
+    await assert.rejects(runCodebaseStorageMigrationCommand([`--data-root=${dataRoot}`, "--apply"]), /inside the data root/u);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -116,8 +139,10 @@ test("migration command pages more than 500 rows and refuses an oversized resume
 test("migration command applies fail-closed status and reports remaining rows", async () => {
   const f = fixture((root, project) => join(project, ".craft_data", "foreign", "snapshot"));
   try {
-    const result = await runCodebaseStorageMigrationCommand([`--data-root=${join(f.root, "global")}`,
-      `--source-database=${f.sourceDatabase}`, "--apply"]);
+    const dataRoot = join(f.root, "global"), staged = join(dataRoot, "db", "craft.db");
+    mkdirSync(dirname(staged), { recursive: true }); copyFileSync(f.sourceDatabase, staged);
+    const result = await runCodebaseStorageMigrationCommand([`--data-root=${dataRoot}`,
+      `--source-database=${staged}`, "--apply"]);
     assert.equal(result.exit_code, 2);
     const output = JSON.parse(result.output) as { migrated: number; after_statuses: Record<string, number> };
     assert.equal(output.migrated, 0);

@@ -15,7 +15,7 @@ import { contentReference, type ContentRef } from "./infrastructure/content-stor
 import { updateKnowledgeScenarioClaim } from "../capability/craft-knowledge/scenario-catalog.ts";
 import { scopeFromKey } from "../common/craft-common-base/src/scope-policy.ts";
 import { knowledgeDirectoryForScope } from "./project-knowledge-content.ts";
-import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationEvidence } from "./knowledge-evaluation-provenance.ts";
+import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationEvidence, knowledgeEvaluationSourceMatches, knowledgeTaskEffectEvidenceVerified } from "./knowledge-evaluation-provenance.ts";
 
 type Verdict = "eligible" | "revalidation_required" | "rejected" | "already_reviewed";
 type Confidence = "bounded" | "confirmed";
@@ -317,6 +317,12 @@ export class KnowledgeAutoReviewKernel {
     let supportRefs: JsonObject[] = [];
     let verdict: Verdict;
     if (claim.status === "reviewed" && knowledgeClaimPromotionProofVerified(this.store, claim)) verdict = "already_reviewed";
+    else if (claim.status === "reviewed" && !knowledgeTaskEffectEvidenceVerified()) {
+      // A temporarily unavailable verifier is not evidence that the stored
+      // promotion is invalid. Retrieval remains fail-closed until it returns.
+      verdict = "revalidation_required";
+      reasons.push("independent_effectiveness_evaluation_required");
+    }
     else if (claim.status === "reviewed") {
       const quarantined = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "candidate",
         promotion_revalidation_required: true,
@@ -410,13 +416,15 @@ export class KnowledgeAutoReviewKernel {
 
   /** A candidate needs an independent held-out retrieval evaluation of this exact revision. */
   private independentEffectivenessRun(claim: JsonObject): JsonObject | null {
+    if (!knowledgeTaskEffectEvidenceVerified()) return null;
     const runs = this.store.list("knowledge_evaluation_run", 10_000,
       (run) => run.mode === "candidate_shadow" && run.status === "eligible")
       .sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")));
     for (const run of runs) {
       const candidateRefs = Array.isArray(run.candidate_claim_refs) ? run.candidate_claim_refs as JsonObject[] : [];
       const candidateRef = candidateRefs.find((item) => item.claim_id === claim.id);
-      if (!candidateRef || candidateRef.claim_version !== claim.version
+      const source = typeof claim.source_id === "string" ? this.store.find("knowledge_source", claim.source_id) : null;
+      if (!knowledgeEvaluationSourceMatches(run, claim, source) || !candidateRef || candidateRef.claim_version !== claim.version
         || candidateRef.identity_digest !== (claim.identity_digest ?? null)
         || candidateRef.content_digest !== (claim.content_digest ?? null)) continue;
       const caseRefs = Array.isArray(run.case_refs) ? run.case_refs as JsonObject[] : [];

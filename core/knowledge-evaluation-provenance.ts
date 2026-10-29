@@ -15,10 +15,28 @@ export type KnowledgeEvaluationProvenanceStatus =
   | "insufficient_outcome_evidence"
   | "missing_claim_evidence"
   | "unverified_claim_source"
+  | "insufficient_independence_evidence"
   | "session_leak"
   | "verified_independent";
 
 type ClaimEvidence = { claim_id: string; evidence: JsonObject };
+
+/** Retrieval scores are not task-effect evidence. A verified effect path is
+ * required before this gate can accept any promotion. */
+export function knowledgeTaskEffectEvidenceVerified(): boolean {
+  return false;
+}
+
+/** A run applies only to the exact active source revision it evaluated. */
+export function knowledgeEvaluationSourceMatches(run: JsonObject, claim: JsonObject, source: JsonObject | null): boolean {
+  if (!source || !Array.isArray(run.candidate_source_refs)) return false;
+  const matches = (run.candidate_source_refs as JsonObject[]).filter(ref => ref && typeof ref === "object" && ref.claim_id === claim.id);
+  if (matches.length !== 1) return false;
+  const ref = matches[0]!;
+  return ref.source_id === claim.source_id && ref.source_id === source.id && ref.source_version === source.version
+    && ref.source_digest === source.content_digest && ref.source_status === "active" && source.status === "active"
+    && ref.source_trust === source.trust && source.trust !== "untrusted";
+}
 
 /** Bind a second-pass Host decision to the exact persisted case and inputs. */
 export function knowledgeEvaluationCaseBindingDigest(item: JsonObject): string {
@@ -90,6 +108,7 @@ export function knowledgeEvaluationEvidence(store: CraftStore, item: JsonObject)
  * model reviews do not carry this local chain and therefore fail closed.
  */
 export function knowledgeClaimPromotionProofVerified(store: CraftStore, claim: JsonObject): boolean {
+  if (!knowledgeTaskEffectEvidenceVerified()) return false;
   if (claim.status !== "reviewed" || !Number.isSafeInteger(claim.version) || Number(claim.version) < 2) return false;
   const review = claim.review as JsonObject | undefined;
   if (!review) return false;
@@ -118,7 +137,7 @@ export function knowledgeClaimPromotionProofVerified(store: CraftStore, claim: J
     || assessment.claim_identity_digest !== (claim.identity_digest ?? null) || assessment.verdict !== "eligible"
     || assessment.effectiveness_run_id !== runId || assessment.policy_id !== review.policy_id
     || assessment.policy_revision !== review.policy_revision
-    || !run || run.mode !== "candidate_shadow" || run.status !== "eligible"
+    || !run || run.mode !== "candidate_shadow" || run.status !== "eligible" || !knowledgeEvaluationSourceMatches(run, claim, source)
     || (run.metrics as JsonObject | undefined)?.provenance_eligible !== true) return false;
   const supportRefs = assessment.support_refs;
   const required = Number(assessment.required_independent_support), confidence = assessment.minimum_confidence;
@@ -229,7 +248,22 @@ export function assessKnowledgeEvaluationProvenance(
         || (metadata as JsonObject).task_id === item.source_task_id) {
         return { status: "session_leak", evaluation_eligible: false };
       }
+      const sourceRef = (metadata as JsonObject).source_ref_digest;
+      if (typeof sourceRef === "string" && /^sha256:[a-f0-9]{64}$/u.test(sourceRef)
+        && item.source_evidence_ids.some(id => (sourceEvidenceById.get(String(id))?.metadata as JsonObject | undefined)?.source_ref_digest === sourceRef)) {
+        return { status: "session_leak", evaluation_eligible: false };
+      }
+      const goalDigest = (metadata as JsonObject).task_goal_digest;
+      if (typeof goalDigest === "string" && /^sha256:[a-f0-9]{64}$/u.test(goalDigest)
+        && item.source_evidence_ids.some(id => (sourceEvidenceById.get(String(id))?.metadata as JsonObject | undefined)?.task_goal_digest === goalDigest)) {
+        return { status: "session_leak", evaluation_eligible: false };
+      }
     }
+  }
+  const validRef = (value: unknown) => typeof value === "string" && /^sha256:[a-f0-9]{64}$/u.test(value);
+  if (item.source_evidence_ids.some(id => !validRef((sourceEvidenceById.get(String(id))?.metadata as JsonObject | undefined)?.source_ref_digest))
+    || claimEvidence.some(entry => claimIds.includes(entry.claim_id) && !validRef((entry.evidence.metadata as JsonObject | undefined)?.source_ref_digest))) {
+    return { status: "insufficient_independence_evidence", evaluation_eligible: false };
   }
   return { status: "verified_independent", evaluation_eligible: true };
 }

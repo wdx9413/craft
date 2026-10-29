@@ -33,6 +33,8 @@ test("legacy repository migration command dry-runs, applies ready projects, and 
     const preview = JSON.parse(dryRun.output) as { mode: string; roots: number; statuses: Record<string, number>;
       scan_errors: unknown[]; migratable: number; blocked: Array<{ status: string }> };
     assert.equal(preview.mode, "dry_run");
+    assert.equal((preview as unknown as { migration_semantics: string }).migration_semantics, "archive_copy_only");
+    assert.equal((preview as unknown as { runtime_data_integrated: boolean }).runtime_data_integrated, false);
     assert.equal(preview.roots, 2);
     assert.deepEqual(preview.statuses, { ready: 1, unbound: 1 });
     assert.equal(preview.scan_errors.length, 0);
@@ -78,7 +80,7 @@ test("legacy repository migration command returns partial status when inventory 
     preflight: () => ({ entries: [], scan_errors: [{ path: "/repo/locked", error_code: "EACCES" }] }),
   });
   assert.equal(result.exit_code, 2);
-  assert.deepEqual(JSON.parse(result.output), { mode: "apply", migrated: 0, results: [], blocked: [],
+  assert.deepEqual(JSON.parse(result.output), { mode: "apply", migration_semantics: "archive_copy_only", source_retired: false, runtime_data_integrated: false, migrated: 0, results: [], blocked: [],
     scan_errors: [{ path: "/repo/locked", error_code: "EACCES" }] });
   const dryRun = await runLegacyRepositoryStorageMigration(["/repo"], {
     preflight: () => ({ entries: [], scan_errors: [{ path: "/repo/locked", error_code: "EACCES" }] }),

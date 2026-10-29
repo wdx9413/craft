@@ -12,6 +12,12 @@
   },
   "groups": [
     {
+      "name": "memory-archive-background-worker",
+      "include": ["core/interfaces/memory-archive-worker.ts", "core/maintenance-scheduler.ts"],
+      "tests": ["tests/memory-archive-worker.test.ts", "tests/maintenance-scheduler-recovery.test.ts"],
+      "branches": true
+    },
+    {
       "name": "learning-worker-diagnostic",
       "include": ["core/learning-worker-diagnostic.ts"],
       "tests": ["tests/learning-worker-diagnostic.test.ts"],
@@ -2178,6 +2184,36 @@
       "include": [
         "core/context-extensions.ts",
         "capability/craft-codebase/usage-signals.ts"
+      ],
+      "tests": [
+        "tests/context-extensions.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-storage-preflight",
+      "include": [
+        "core/context-storage-preflight.ts"
+      ],
+      "tests": [
+        "tests/context-extensions.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-storage-migration",
+      "include": [
+        "scripts/context-storage-migration.ts"
+      ],
+      "tests": [
+        "tests/context-extensions.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-storage-restore",
+      "include": [
+        "scripts/context-storage-restore.ts"
       ],
       "tests": [
         "tests/context-extensions.test.ts"

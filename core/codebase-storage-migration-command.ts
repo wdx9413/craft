@@ -1,8 +1,8 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { craftPaths, ensureLayout } from "../common/craft-common-store-local/src/paths.ts";
-import { codebaseStoragePreflight, type CodebaseMigrationEntry } from "./codebase-storage-preflight.ts";
+import { CodebaseStoragePreflightReader, type CodebaseMigrationEntry } from "./codebase-storage-preflight.ts";
 import { migrateCodebaseSnapshots } from "./codebase-storage-migration.ts";
 
 export interface CodebaseStorageMigrationCommandOptions {
@@ -45,18 +45,35 @@ export async function runCodebaseStorageMigrationCommand(args: string[]): Promis
   if (options.source_database) {
     const source = resolve(options.source_database), stat = lstatSync(source);
     if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Source Codebase database must be a regular file");
-    paths = { ...basePaths, databaseFile: realpathSync(source) };
+    const realSource = realpathSync(source);
+    if (options.apply) {
+      let root: string;
+      try { root = realpathSync(basePaths.root); } catch { throw new Error("Codebase migration database must be inside the data root"); }
+      const within = relative(root, realSource);
+      if (!within || within === ".." || within.startsWith(`..${sep}`) || isAbsolute(within)) throw new Error("Codebase migration database must be inside the data root");
+      let activeDatabase: string;
+      try { activeDatabase = realpathSync(basePaths.databaseFile); } catch { throw new Error("Codebase migration database must be the active central database"); }
+      if (realSource !== activeDatabase) throw new Error("Codebase migration database must be the active central database");
+    }
+    paths = { ...basePaths, databaseFile: realSource };
+  }
+  if (options.apply && !options.source_database) {
+    const file = lstatSync(paths.databaseFile);
+    if (file.isSymbolicLink() || !file.isFile()) throw new Error("Central Codebase database must be a regular file");
+    const within = relative(realpathSync(paths.root), realpathSync(paths.databaseFile));
+    if (!within || within === ".." || within.startsWith(`..${sep}`) || isAbsolute(within)) throw new Error("Codebase migration database must be inside the data root");
   }
   const ready: CodebaseMigrationEntry[] = [], counts: Record<string, number> = {};
   let cursor: string | undefined;
-  do {
-    const page = codebaseStoragePreflight(paths, { max_records: 500, ...(cursor ? { cursor } : {}) });
+  const initialReader = new CodebaseStoragePreflightReader(paths);
+  try { do {
+    const page = initialReader.readPage({ max_records: 500, ...(cursor ? { cursor } : {}) });
     for (const entry of page.entries) {
       counts[entry.status] = (counts[entry.status] ?? 0) + 1;
       if (entry.status === "legacy_ready") ready.push(entry);
     }
     cursor = page.next_cursor ?? undefined;
-  } while (cursor);
+  } while (cursor); } finally { initialReader.close(); }
   if (!options.apply) return { output: JSON.stringify({ mode: "dry_run", statuses: counts, migratable: ready.length }), exit_code: 0 };
   if (options.resume_backup && ready.length > 500) throw new Error("A resumed Codebase migration must fit one page");
   await ensureLayout(paths);
@@ -80,11 +97,12 @@ export async function runCodebaseStorageMigrationCommand(args: string[]): Promis
     }
     const after: Record<string, number> = {};
     cursor = undefined;
-    do {
-      const page = codebaseStoragePreflight(paths, { max_records: 500, ...(cursor ? { cursor } : {}) });
+    const finalReader = new CodebaseStoragePreflightReader(paths);
+    try { do {
+      const page = finalReader.readPage({ max_records: 500, ...(cursor ? { cursor } : {}) });
       for (const entry of page.entries) after[entry.status] = (after[entry.status] ?? 0) + 1;
       cursor = page.next_cursor ?? undefined;
-    } while (cursor);
+    } while (cursor); } finally { finalReader.close(); }
     const output = JSON.stringify({ mode: "apply", migrated, blocked, recovered, after_statuses: after, backups });
     const remaining = Object.entries(after).some(([status]) => status !== "current");
     return { output, exit_code: blocked.length || remaining ? 2 : 0 };

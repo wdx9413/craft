@@ -15,6 +15,9 @@ const legacyMemory = legacySessionMemoryPreflight(craftPaths(root), { legacy_roo
 console.log(JSON.stringify({ ...result, status_counts: result.entries.reduce<Record<string, number>>((counts, entry) => {
   counts[entry.status] = (counts[entry.status] ?? 0) + 1;
   return counts;
+}, {}), project_identity_status_counts: result.entries.reduce<Record<string, number>>((counts, entry) => {
+  if (entry.project_identity_status !== null) counts[entry.project_identity_status] = (counts[entry.project_identity_status] ?? 0) + 1;
+  return counts;
 }, {}), legacy_session_memory: { ...legacyMemory, status_counts: legacyMemory.entries.reduce<Record<string, number>>((counts, entry) => {
   counts[entry.status] = (counts[entry.status] ?? 0) + 1;
   return counts;

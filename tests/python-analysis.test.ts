@@ -43,7 +43,10 @@ test("Python adapter bounds malformed responses and classifies subprocess failur
   assert.equal(analyzePythonCheckpoint([file()], { ...args, execute: () => JSON.stringify({ format: "wrong", nodes: [], edges: [] }) }).diagnostic?.reason, "invalid_analyzer_response");
   assert.equal(analyzePythonCheckpoint([file()], { ...args, execute: () => "x".repeat(64_000_001) }).diagnostic?.reason, "output_budget_exceeded");
   const error = (code: string) => Object.assign(new Error("sensitive stderr"), { code });
-  assert.equal(analyzePythonCheckpoint([file()], { ...args, execute: () => { throw error("ENOENT"); } }).diagnostic?.reason, "python_runtime_unavailable");
+  const fallback = analyzePythonCheckpoint([file()], { ...args, execute: () => { throw error("ENOENT"); } });
+  assert.equal(fallback.diagnostic?.reason, "python_runtime_unavailable_regex_fallback");
+  assert.equal(fallback.diagnostic?.status, "partial");
+  assert(fallback.analysis);
   assert.equal(analyzePythonCheckpoint([file()], { ...args, execute: () => { throw error("ETIMEDOUT"); } }).diagnostic?.reason, "analysis_timed_out");
   assert.equal(analyzePythonCheckpoint([file()], { ...args, execute: () => { throw error("EFAIL"); } }).diagnostic?.reason, "analysis_failed");
 });

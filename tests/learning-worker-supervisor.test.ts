@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { realpathSync } from "node:fs";
 import { link, mkdir, mkdtemp, open, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { acquireLearningWorkerLocks, learningWorkerOwnerAlive, resolveLearningWorkerLaunch, startContextLearningWorker } from "../core/interfaces/learning-worker-supervisor.ts";
 
@@ -106,19 +107,20 @@ test("worker lock publishes complete metadata atomically under concurrent startu
   const f = await fixture();
   try {
     const runtimeDir = join(f.root, "runtime");
-    let arrivals = 0, openGate!: () => void;
+    let reachedLink!: () => void, openGate!: () => void;
+    const entered = new Promise<void>(resolve => { reachedLink = resolve; });
     const gate = new Promise<void>(resolve => { openGate = resolve; });
     const atomicFileSystem = { link: async (source: Parameters<typeof link>[0], destination: Parameters<typeof link>[1]) => {
-      arrivals += 1;
-      if (arrivals === 2) openGate();
+      reachedLink();
       await gate;
       assert.match(await readFile(source, "utf8"), /"owner_id":"[^"]+"/u);
       return link(source, destination);
     } };
-    const [first, second] = await Promise.all([
-      acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: atomicFileSystem, runtime_version: (await import("../core/version.ts")).CRAFT_RELEASE_VERSION }),
-      acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: atomicFileSystem, runtime_version: (await import("../core/version.ts")).CRAFT_RELEASE_VERSION }),
-    ]);
+    const pending = acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: atomicFileSystem, runtime_version: (await import("../core/version.ts")).CRAFT_RELEASE_VERSION });
+    await entered;
+    const second = await acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: atomicFileSystem });
+    openGate();
+    const first = await pending;
     assert.equal([first, second].filter(Boolean).length, 1);
     const lock = JSON.parse(await readFile(join(runtimeDir, "learning-worker-knowledge.lock.json"), "utf8"));
     assert.equal(lock.pid, process.pid);
@@ -189,6 +191,68 @@ test("dead-owner lock recovery retains the new worker release version", async ()
   } finally { await f.close(); }
 });
 
+test("concurrent stale-lock recovery admits only one new owner", async () => {
+  const f = await fixture();
+  try {
+    const runtimeDir = join(f.root, "runtime");
+    await mkdir(runtimeDir, { recursive: true });
+    const path = join(runtimeDir, "learning-worker-knowledge.lock.json");
+    await writeFile(path, JSON.stringify({ pid: 999_999_999, owner_id: "dead-owner" }));
+    let enteredRecovery!: () => void, continueRecovery!: () => void;
+    const entered = new Promise<void>(resolve => { enteredRecovery = resolve; });
+    const gate = new Promise<void>(resolve => { continueRecovery = resolve; });
+    const pending = acquireLearningWorkerLocks(runtimeDir, ["knowledge"], {
+      file_system: { rename: async (from, to) => { enteredRecovery(); await gate; return rename(from, to); } }
+    });
+    await entered;
+    assert.equal(await acquireLearningWorkerLocks(runtimeDir, ["knowledge"]), null);
+    continueRecovery();
+    const release = await pending;
+    assert.ok(release);
+    assert.equal(await acquireLearningWorkerLocks(runtimeDir, ["knowledge"]), null);
+    await release();
+    const next = await acquireLearningWorkerLocks(runtimeDir, ["knowledge"]);
+    assert.ok(next);
+    await next();
+  } finally { await f.close(); }
+});
+
+test("worker lock fails closed when its guard database is corrupt", async () => {
+  const f = await fixture();
+  try {
+    const runtimeDir = join(f.root, "runtime");
+    await mkdir(runtimeDir, { recursive: true });
+    await writeFile(join(runtimeDir, "learning-worker-knowledge.lock.json.guard.sqlite"), "not a sqlite database");
+    await assert.rejects(acquireLearningWorkerLocks(runtimeDir, ["knowledge"]), /not a database/u);
+  } finally { await f.close(); }
+});
+
+test("a real process holds the guard until death and a replacement recovers its lock", { timeout: 15_000 }, async () => {
+  const f = await fixture();
+  const runtimeDir = join(f.root, "runtime");
+  const moduleUrl = pathToFileURL(join(process.cwd(), "core/infrastructure/learning-worker-lock.ts")).href;
+  const script = `const { acquireLearningWorkerLocks } = await import(process.argv[1]);
+    const release = await acquireLearningWorkerLocks(process.argv[2], ["knowledge"]);
+    if (!release) process.exit(2);
+    process.stdout.write("ready\\n");
+    setInterval(() => {}, 1000);`;
+  const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script, moduleUrl, runtimeDir], { stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    const [output] = await once(child.stdout!, "data");
+    assert.match(String(output), /ready/u);
+    assert.equal(await acquireLearningWorkerLocks(runtimeDir, ["knowledge"]), null);
+    const ended = once(child, "exit");
+    child.kill("SIGKILL");
+    await ended;
+    const replacement = await acquireLearningWorkerLocks(runtimeDir, ["knowledge"]);
+    assert.ok(replacement);
+    await replacement();
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) { const ended = once(child, "exit"); child.kill("SIGKILL"); await ended; }
+    await f.close();
+  }
+});
+
 test("worker supervisor never removes a lock after ownership changes", async () => {
   const f = await fixture(); const failures: string[] = [];
   try {
@@ -251,6 +315,35 @@ test("worker component locks fail closed when lock creation or metadata is inval
     const lockPath = join(runtimeDir, "learning-worker-knowledge.lock.json");
     await writeFile(lockPath, JSON.stringify({ pid: 0, owner_id: "" }));
     await assert.rejects(acquireLearningWorkerLocks(runtimeDir, ["knowledge"]), /lock is invalid/u);
+  } finally { await f.close(); }
+});
+
+test("worker lock acquisition errors release previously acquired components", async () => {
+  const f = await fixture();
+  try {
+    const runtimeDir = join(f.root, "runtime");
+    await mkdir(runtimeDir, { recursive: true });
+    await writeFile(join(runtimeDir, "learning-worker-knowledge.lock.json"), "invalid");
+    await assert.rejects(acquireLearningWorkerLocks(runtimeDir, ["experience", "knowledge"]), SyntaxError);
+    const release = await acquireLearningWorkerLocks(runtimeDir, ["experience"]);
+    assert.ok(release);
+    await release();
+  } finally { await f.close(); }
+});
+
+test("worker lock acquisition reports cleanup failures with the original error", async () => {
+  const f = await fixture();
+  try {
+    const runtimeDir = join(f.root, "runtime");
+    await mkdir(runtimeDir, { recursive: true });
+    await writeFile(join(runtimeDir, "learning-worker-knowledge.lock.json"), "invalid");
+    await assert.rejects(acquireLearningWorkerLocks(runtimeDir, ["experience", "knowledge"], {
+      file_system: { unlink: async path => {
+        if (String(path).endsWith("learning-worker-experience.lock.json")) throw new Error("cleanup denied");
+        return unlink(path);
+      } }
+    }), error => error instanceof AggregateError && error.errors[0] instanceof SyntaxError
+      && error.errors[1] instanceof Error && error.errors[1].message === "cleanup denied");
   } finally { await f.close(); }
 });
 

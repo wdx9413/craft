@@ -228,7 +228,7 @@ test("standalone Knowledge, Memory and Experience plugins do not register duplic
 
 test("the complete context plugin declares one command-only lifecycle Hook for Codex and Claude", async () => {
   const expected = {
-    "craft-context": { member: "context", events: ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"] },
+    "craft-context": { member: "context", events: ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd", "PreCompact"] },
   } as const;
   for (const [name, contract] of Object.entries(expected)) {
     const codex = JSON.parse(await readFile(`plugins/${name}/.codex-plugin/plugin.json`, "utf8")) as { hooks?: string };
@@ -247,7 +247,7 @@ test("the complete context plugin declares one command-only lifecycle Hook for C
       for (const group of Object.values(config.hooks).flat()) {
         for (const handler of group.hooks) {
         assert.equal(handler.type, "command");
-          assert.equal(handler.command, `node "\${${root}}/dist/plugin/craft-codex-hook.cjs" --member ${contract.member}`);
+          assert.equal(handler.command, `node "\${${root}}/dist/plugin/craft-codex-hook.cjs" --member ${contract.member}${root === "CLAUDE_PLUGIN_ROOT" ? " --host claude" : ""}`);
         }
       }
     }
@@ -326,6 +326,9 @@ test("component McpServer cannot call tools outside its mounted boundary", async
     assert.equal((response?.error as { code: number }).code, -32602);
     const contextWorker = new McpServer(new CraftService(store), "component-context-complete");
     assert(contextWorker.tools.some((tool) => tool.name === "craft_learning_cycle_task_evidence_list"));
+    const evidence = await contextWorker.handle({ id: 2, method: "tools/call", params: { name: "craft_learning_cycle_task_evidence_list", arguments: { session_ids: ["isolated-session"] } } });
+    assert.equal((evidence?.result as JsonObject).isError, false);
+    assert.equal(((evidence?.result as JsonObject).structuredContent as JsonObject).evidence_count, 0);
     const contextAgent = new McpServer(new CraftService(store), "component-context-agent");
     assert(!contextAgent.tools.some((tool) => tool.name === "craft_learning_cycle_task_evidence_list"));
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }

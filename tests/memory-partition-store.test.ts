@@ -12,6 +12,7 @@ import { MarkdownContentStore } from "../common/craft-common-store-local/src/con
 import { assertRegularSessionMemoryDirectories, CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory, sessionStorageDirectory, type CraftPaths } from "../core/infrastructure/paths.ts";
 import { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
+import { stableDigest } from "../common/craft-common-base/src/digest.ts";
 
 function projectCapabilityPath(paths: CraftPaths, root: string, capability: "memory" | "experience", ...parts: string[]): string {
   return join(projectStorageDirectory(paths, root), capability, ...parts);
@@ -319,6 +320,36 @@ test("legacy partition migration stops when its source row changes after backup"
     };
     try {
       await assert.rejects(f.store.migrateLegacyPartitionVersions([{ kind: "memory_ledger", id: "migration-row", version: 1 }]), /source changed concurrently/u);
+    } finally { legacyDatabase.close(); }
+  } finally { f.close(); }
+});
+
+test("legacy partition migration rejects a backup of a changed source before publishing", async () => {
+  const f = await legacyMigrationFixture();
+  try {
+    const internals = f.store as any;
+    const original = internals.memoryDatabaseForRead.bind(f.store);
+    const legacyDatabase = new DatabaseSync(join(f.project, ".craft_data", "memory", "memory.db"));
+    const originalRow = legacyDatabase.prepare("SELECT payload_json FROM records WHERE kind='memory_ledger' AND id='migration-row' AND version=1").get() as { payload_json: string };
+    let reads = 0;
+    internals.memoryDatabaseForRead = (...args: unknown[]) => {
+      const result = original(...args);
+      if (++reads === 2) legacyDatabase.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=1")
+        .run(JSON.stringify({ changed: true }), "memory_ledger", "migration-row");
+      return result;
+    };
+    try {
+      await assert.rejects(f.store.migrateLegacyPartitionVersions([{ kind: "memory_ledger", id: "migration-row", version: 1 }]), /source differs from backup/u);
+      const pointer = f.store.database.prepare("SELECT payload_json FROM records WHERE kind='memory_ledger' AND id='migration-row' AND version=1").get() as { payload_json: string };
+      assert.equal(JSON.parse(pointer.payload_json)._memory_partition.file, join(f.project, ".craft_data", "memory", "memory.db"));
+      const backupRoot = join(f.paths.backupsDir, "storage-migration");
+      const incomplete = readdirSync(backupRoot);
+      assert.equal(incomplete.length, 1);
+      assert.equal(existsSync(join(backupRoot, incomplete[0]!, "manifest.json")), false);
+      legacyDatabase.prepare("UPDATE records SET payload_json=? WHERE kind='memory_ledger' AND id='migration-row' AND version=1").run(originalRow.payload_json);
+      const retried = await f.store.migrateLegacyPartitionVersions([{ kind: "memory_ledger", id: "migration-row", version: 1 }]);
+      assert.equal(retried.migrated, 1);
+      assert.ok(retried.backup_directory && existsSync(join(retried.backup_directory, "manifest.json")));
     } finally { legacyDatabase.close(); }
   } finally { f.close(); }
 });
@@ -1332,6 +1363,32 @@ test("project Memory roots reject ambiguous aliases and ignore malformed or non-
       path: join(root, "empty", ".craft_data", "memory", "md", "empty-project.v1.md"), scope: "project:" }), false);
     assert.equal(store.contentStore.isCanonicalRef({ kind: "memory", record_id: "not-created", version: 1,
       path: join(projectThree, ".craft_data", "memory", "md", "not-created.v1.md"), scope: "project:current-project" }), false);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("project partition resolution ignores superseded aliases and identities", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-project-root-versions-")), project = join(root, "project");
+  mkdirSync(project);
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const alias = { scope: { kind: "project", id: "retired-alias" }, alias_kind: "path", alias: project, status: "active" };
+    store.create("scope_alias", "retired-path", alias);
+    store.save("scope_alias", "retired-path", { ...alias, status: "retired" });
+    assert.throws(() => store.create("memory_candidate", "retired-path-record", { scope: alias.scope, content: "reject" }), /root is not registered/u);
+    const canonical = { kind: "project", id: "retired-identity" }, project_kind = "local_fingerprint", remote_digest = null;
+    const identity = { canonical_scope: canonical, local_path_alias: project, project_kind, remote_digest, identity_digest: stableDigest({ canonical, project_kind, remote_digest }) };
+    store.create("project_identity", "retired-identity", identity);
+    store.save("project_identity", "retired-identity", { ...identity, identity_digest: null });
+    assert.throws(() => store.create("memory_candidate", "retired-identity-record", { scope: { kind: "project", id: "retired-identity" }, content: "reject" }), /root is not registered/u);
+    store.create("project_identity", "forged-identity", { ...identity, canonical_scope: { kind: "project", id: "forged-identity" } });
+    assert.throws(() => store.create("memory_candidate", "forged-identity-record", { scope: { kind: "project", id: "forged-identity" }, content: "reject" }), /root is not registered/u);
+    const validCanonical = { kind: "project", id: "valid-identity" };
+    store.create("project_identity", "valid-identity", { ...identity, canonical_scope: validCanonical, identity_digest: stableDigest({ canonical: validCanonical, project_kind, remote_digest }) });
+    store.create("memory_candidate", "valid-identity-record", { scope: validCanonical, content: "accepted" });
+    const ambiguous = { kind: "project", id: "missing-binding" };
+    store.create("scope_alias", "available-binding", { scope: ambiguous, alias_kind: "path", alias: project, status: "active" });
+    store.create("scope_alias", "missing-binding", { scope: ambiguous, alias_kind: "path", alias: join(root, "missing"), status: "active" });
+    assert.throws(() => store.create("memory_candidate", "missing-binding-record", { scope: ambiguous, content: "reject" }), /unavailable or ambiguous/u);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 

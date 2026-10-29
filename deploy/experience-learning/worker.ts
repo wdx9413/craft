@@ -27,18 +27,21 @@ import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 export interface ExperienceLearningClient { call(name: string, args?: JsonObject): Promise<JsonObject> }
 export type LearningComponent = "experience" | "knowledge";
 
-async function collectCodexSessionsWithLock(client: ExperienceLearningClient): Promise<JsonObject> {
+async function collectCodexSessionsWithLock(client: ExperienceLearningClient, recheckVerified: boolean): Promise<JsonObject> {
   const release = await acquireLearningWorkerLocks(craftPaths(dataRoot()).runtimeDir, ["codex-session-collection"], { runtime_version: CRAFT_RELEASE_VERSION });
   if (!release) return { status: "skipped_locked", sessions_processed: 0, raw_content_stored: false };
   try {
     const collection = await runCodexSessionCollectionOnce();
-    const batch = await codexSessionEvidenceBatch();
+    const batch = await codexSessionEvidenceBatch({ recheck_verified: recheckVerified });
     const sessionIds = batch.session_ids as string[];
     if (!sessionIds.length) return collection;
     const lookup = await client.call("craft_learning_cycle_task_evidence_list", { session_ids: sessionIds, limit: 10_000 });
-    const reconciliation = await reconcileCodexSessionTaskEvidence(lookup.evidence);
+    const excluded = lookup.excluded_unusable_receipt_count;
+    const evidenceLookup = { excluded_unusable_receipt_count: Number.isSafeInteger(excluded) && Number(excluded) >= 0 ? Number(excluded) : null };
+    if (lookup.partial !== false) return { ...collection, evidence_lookup: evidenceLookup, evidence_reconciliation: { status: "partial", reason: "evidence_lookup_incomplete_or_unknown" }, raw_content_stored: false };
+    const reconciliation = await reconcileCodexSessionTaskEvidence(lookup.evidence, { checked_session_ids: sessionIds });
     const evidenceBatch = await commitCodexSessionEvidenceBatch(sessionIds);
-    return { ...collection, tasks_verified: Number(collection.tasks_verified) + Number(reconciliation.tasks_verified), evidence_reconciliation: reconciliation,
+    return { ...collection, tasks_verified: Number(collection.tasks_verified) + Number(reconciliation.tasks_verified), evidence_lookup: evidenceLookup, evidence_reconciliation: reconciliation,
       evidence_batch: evidenceBatch };
   }
   finally { await release(); }
@@ -132,7 +135,7 @@ export async function runLearningTick(deps: DistillationDependencies, syncKnowle
         try { taskCandidates = await runSessionKnowledgeCandidateOnce({ client: configuredDeps.client, providers: configuredDeps.providers,
           transport: configuredDeps.transport, contentLanguage: configuredDeps.contentLanguage, env }); }
         catch (error) { taskCandidates = { status: "failed", failure_kind: learningFailureKind(error), raw_content_stored: false }; }
-        return { ...ingestion, ...(taskCandidates.status !== "idle" && taskCandidates.status !== "skipped" ? { task_candidates: taskCandidates } : {}),
+        return { ...ingestion, ...(taskCandidates.status !== "idle" && (taskCandidates.status !== "skipped" || Number(taskCandidates.blocked_skips) > 0) ? { task_candidates: taskCandidates } : {}),
           ...(taskCandidates.status === "failed" ? { failure_kind: taskCandidates.failure_kind } : {}) };
       }
       if (stage === "session_evaluation") {
@@ -155,7 +158,7 @@ export async function runLearningTick(deps: DistillationDependencies, syncKnowle
 
 export function mcpCommandOptions(env: NodeJS.ProcessEnv = process.env): { command: string; args: string[] } {
   const command = env.CRAFT_EXPERIENCE_MCP_COMMAND?.trim() || "craft-mcp";
-  let args = ["--surface", "component-context-daily"];
+  let args = ["--surface", "component-context-complete"];
   if (env.CRAFT_EXPERIENCE_MCP_ARGS) {
     const parsed: unknown = JSON.parse(env.CRAFT_EXPERIENCE_MCP_ARGS);
     if (!Array.isArray(parsed) || parsed.some(value => typeof value !== "string")) throw new Error("CRAFT_EXPERIENCE_MCP_ARGS must be a JSON string array");
@@ -474,6 +477,7 @@ async function main(): Promise<void> {
   let cleanupClient: McpStdioClient | null = null;
   let stopping = false;
   let lastKnowledgeSync = 0;
+  let lastVerifiedRecheck = 0;
   let idleExperiencePasses = 0;
   let nextPollMs = pollMs;
   let wakePoll: (() => void) | null = null;
@@ -492,9 +496,13 @@ async function main(): Promise<void> {
     await client.initialize();
     do {
       const syncKnowledge = knowledgeEnabled && Date.now() - lastKnowledgeSync >= knowledgePollMs;
+      const recheckVerified = Date.now() - lastVerifiedRecheck >= 300_000;
       const modelTransport = createLearningModelTransport(process.env.CRAFT_LEARNING_MODEL_HOST);
       const result = await runLearningTick({ client, ...(modelTransport ? { transport: modelTransport } : {}) }, syncKnowledge, components,
-        () => collectCodexSessionsWithLock(client));
+        () => collectCodexSessionsWithLock(client, recheckVerified));
+      const sessionCollection = result.session_collection as JsonObject | undefined;
+      if (recheckVerified && sessionCollection && !sessionCollection.failure_kind && sessionCollection.status !== "skipped_locked"
+        && (sessionCollection.evidence_reconciliation as JsonObject | undefined)?.status !== "partial") lastVerifiedRecheck = Date.now();
       const idlePass = Number(experienceEnabled) * Number(!learningWorkFound(result));
       idleExperiencePasses = idlePass * (idleExperiencePasses + 1);
       const experienceNextPollMs = learningPollInterval(experiencePollMs, idleExperiencePasses);

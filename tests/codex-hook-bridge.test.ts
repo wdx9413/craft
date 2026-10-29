@@ -198,7 +198,7 @@ test("a pre-existing current-format Hook journal keeps its legacy central write 
     const session_id = "legacy-current-session", turn_id = "legacy-current-turn";
     const id = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope, session_id, turn: turn_id })).digest("hex").slice(-20)}`;
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
-      .run("codex_hook_turn", id, 1, JSON.stringify({ scope, session_id, turn_id, signals: [], has_edit: false,
+      .run("codex_hook_turn", id, 1, JSON.stringify({ scope, session_host: "codex", session_id, turn_id, signals: [], has_edit: false,
         verification_outcome: null, content_stored: false }), new Date().toISOString(), new Date().toISOString());
     await bridge.handle("experience", { cwd: f.root, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
     const journal = f.store.get("codex_hook_turn", id);
@@ -292,8 +292,9 @@ test("overlapping Hook turns refuse missing IDs even after one explicitly closes
 });
 
 test("Codex hook scope and explicit memory parser never retain arbitrary prompts", () => {
-  assert.deepEqual(codexProjectScope("/work/../craft")?.kind, "project");
-  assert.match(String(codexProjectScope("/work/../craft")?.id), /^project:/u);
+  assert.deepEqual(codexProjectScope(process.cwd())?.kind, "project");
+  assert.match(String(codexProjectScope(process.cwd())?.id), /^project:/u);
+  assert.throws(() => codexProjectScope("/missing-craft-project-root"));
   assert.equal(codexProjectScope(" "), null);
   assert.equal(explicitMemoryStatement("ordinary conversation"), null);
   assert.equal(explicitMemoryStatement("记住：我偏好无糖咖啡"), "我偏好无糖咖啡");
@@ -387,7 +388,11 @@ test("Hook Memory output projects promotion summaries and legacy journals defaul
     const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope, turn })).digest("hex").slice(-20)}`;
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run("codex_hook_turn", legacyId, 1, JSON.stringify({ turn_id: turn }), new Date().toISOString(), new Date().toISOString());
+    assert.equal(bridge.journal.find({ cwd: f.root, turn_id: turn }), null);
+    f.store.database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=1")
+      .run(JSON.stringify({ turn_id: turn, session_host: "codex" }), "codex_hook_turn", legacyId);
     assert.equal(bridge.journal.find({ cwd: f.root, turn_id: turn })?.id, legacyId);
+    assert.equal(bridge.journal.find({ cwd: f.root, turn_id: turn, session_id: "different" }), null);
   } finally {
     f.service.memoryCaptureObservedFact = originalCapture;
     await dispose(f);
@@ -421,6 +426,107 @@ test("Memory SessionEnd removes the temporary Memory body and ledger rows", asyn
     assert.equal(failures.length, 2);
     assert.deepEqual(failures.map(event => (event.payload as JsonObject).error_type), ["Error", "unknown"]);
   } finally { await dispose(f); }
+});
+
+test("Memory SessionEnd queues bounded background archive without deleting inline", async () => {
+  const f = await fixture();
+  try {
+    const sessionId = "queued-hook-session", scope = sessionStorageScopeId("codex", sessionId);
+    f.service.knowledgeMemoryInstallBuiltins();
+    f.service.memoryCaptureUserStatement({ content: "Temporary session fact", kind: "episodic", topic: "temporary-fact", session_id: sessionId, session_host: "codex" });
+    let launches = 0;
+    const bridge = new CodexHookBridge(f.service, () => { launches++; });
+    await bridge.handle("memory", { hook_event_name: "SessionEnd", source: "codex", cwd: f.root, session_id: sessionId });
+    assert.equal(launches, 1);
+    assert.equal(f.store.listSessionMemoryPage("memory_ledger", scope).records.length, 1);
+    const files = f.service.memoryGovernance.ledger.files;
+    assert.equal(files.isSessionArchived(scope), true);
+    for (let i = 0; i < 20 && files.runQueuedArchiveSteps().attempted; i++) { /* Advance a bounded page. */ }
+    assert.equal(f.store.listSessionMemoryPage("memory_ledger", scope).records.length, 0);
+  } finally { await dispose(f); }
+});
+
+test("a maintenance enqueue failure still starts the already queued session archive", async t => {
+  const f = await fixture();
+  try {
+    const sessionId = "maintenance-enqueue-failed", host = "codex", scope = sessionStorageScopeId(host, sessionId);
+    f.store.bindSessionStorageHost(sessionId, host);
+    f.store.create("memory_candidate", "pending-before-failure", { scope: { kind: "session", id: scope }, status: "candidate" });
+    const originalCreate = f.store.create.bind(f.store);
+    t.mock.method(f.store, "create", (kind: string, id: string, payload: JsonObject) => {
+      if (kind === "memory_maintenance_request") throw new Error("private failure details");
+      return originalCreate(kind, id, payload);
+    });
+    let launches = 0;
+    const bridge = new CodexHookBridge(f.service, () => { launches++; });
+    assert.deepEqual(await bridge.handle("memory", { hook_event_name: "SessionEnd", source: host, cwd: f.root, session_id: sessionId }), {});
+    assert.equal(launches, 1);
+    assert.equal(f.store.list("memory_session_archive", 1)[0]?.status, "archiving");
+    const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed");
+    assert.equal(failures.length, 1);
+    assert.doesNotMatch(JSON.stringify(failures), /private failure details/u);
+    const files = f.service.memoryGovernance.ledger.files;
+    for (let i = 0; i < 20 && files.runQueuedArchiveSteps().attempted; i++) { /* Advance archive checkpoints. */ }
+    assert.equal(f.store.listSessionMemoryPage("memory_candidate", scope).records.length, 0);
+  } finally { t.mock.restoreAll(); await dispose(f); }
+});
+
+test("a lifecycle telemetry failure does not prevent the session archive from starting", async t => {
+  const f = await fixture();
+  try {
+    const sessionId = "activation-failed", scope = sessionStorageScopeId("codex", sessionId);
+    f.store.bindSessionStorageHost(sessionId, "codex");
+    f.store.create("memory_candidate", "pending-activation-failure", { scope: { kind: "session", id: scope }, status: "candidate" });
+    t.mock.method(f.service, "activationProofRecord", () => { throw new Error("private telemetry failure"); });
+    let launches = 0;
+    const bridge = new CodexHookBridge(f.service, () => { launches++; });
+    await bridge.handle("memory", { hook_event_name: "SessionEnd", cwd: f.root, session_id: sessionId });
+    assert.equal(launches, 1);
+    assert.equal(f.store.list("memory_session_archive", 1)[0]?.status, "archiving");
+    assert.equal(f.store.list("memory_maintenance_request", 1)[0]?.status, "pending");
+    const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed");
+    assert.equal(failures.length, 1);
+    assert.doesNotMatch(JSON.stringify(failures), /private telemetry failure/u);
+    const files = f.service.memoryGovernance.ledger.files;
+    for (let i = 0; i < 20 && files.runQueuedArchiveSteps().attempted; i++) { /* Advance archive checkpoints. */ }
+    assert.equal(f.store.listSessionMemoryPage("memory_candidate", scope).records.length, 0);
+  } finally { t.mock.restoreAll(); await dispose(f); }
+});
+
+test("SessionEnd queues Host-scoped archive when project identity resolution fails", async t => {
+  const f = await fixture();
+  try {
+    const sessionId = "project-unavailable", scope = sessionStorageScopeId("codex", sessionId);
+    f.store.bindSessionStorageHost(sessionId, "codex");
+    f.store.create("memory_candidate", "project-unavailable-candidate", { scope: { kind: "session", id: scope }, status: "candidate" });
+    t.mock.method(f.service, "scopeIdentityResolveProject", () => { throw new Error("private project identity failure"); });
+    let launches = 0;
+    const bridge = new CodexHookBridge(f.service, () => { launches++; });
+    assert.deepEqual(await bridge.handle("context", { hook_event_name: "SessionEnd", cwd: f.root, session_id: sessionId }), {});
+    assert.equal(launches, 1);
+    assert.equal(f.store.list("memory_session_archive", 1)[0]?.status, "archiving");
+    assert.equal(f.store.list("memory_maintenance_request", 1).length, 0);
+    assert.equal(f.store.list("memory_observation", 10).length, 0);
+    const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed");
+    assert.equal(failures.length, 1);
+    assert.doesNotMatch(JSON.stringify(failures), /private project identity failure/u);
+    const files = f.service.memoryGovernance.ledger.files;
+    for (let i = 0; i < 20 && files.runQueuedArchiveSteps().attempted; i++) { /* Advance archive checkpoints. */ }
+    assert.equal(f.store.listSessionMemoryPage("memory_candidate", scope).records.length, 0);
+  } finally { t.mock.restoreAll(); await dispose(f); }
+});
+
+test("archive fallback failures preserve the original project identity diagnostic", async t => {
+  const f = await fixture();
+  try {
+    t.mock.method(f.service, "scopeIdentityResolveProject", () => { throw new TypeError("identity private"); });
+    t.mock.method(f.store, "bindSessionStorageHost", () => { throw new Error("archive private"); });
+    const bridge = new CodexHookBridge(f.service, () => { throw new Error("launch private"); });
+    assert.deepEqual(await bridge.handle("memory", { hook_event_name: "SessionEnd", cwd: f.root, session_id: "failed-fallback" }), {});
+    const failure = f.store.events("codex-hook").find(event => event.event_type === "codex_hook.failed");
+    assert.equal((failure?.payload as JsonObject).error_type, "TypeError");
+    assert.doesNotMatch(JSON.stringify(failure), /private/u);
+  } finally { t.mock.restoreAll(); await dispose(f); }
 });
 
 test("the same Host session ID resolves, stores and archives Memory in separate Host partitions", async () => {
@@ -537,7 +643,7 @@ test("Hook responses fit their declared token caps before recording emitted refe
     const bridge = new CodexHookBridge(f.service);
     for (const [member, limit, turn] of [["context", 400, "context-budget"], ["memory", 150, "memory-budget"]] as const) {
       const response = await bridge.handle(member, { hook_event_name: "UserPromptSubmit", cwd, session_id: "budget-session", turn_id: turn, prompt: "verification" });
-      assert.equal(typeof response.additionalContext, "string");
+      assert.equal(typeof response.additionalContext, "string", `member=${member}; response=${JSON.stringify(response)}`);
       assert(estimateTokens(String(response.additionalContext)) <= limit);
       const injected = JSON.parse(String(response.additionalContext)) as JsonObject;
       const selected = injected.selected as JsonObject[];
@@ -882,7 +988,7 @@ test("Hook scenario catalog rejects malformed, linked and oversized metadata bef
     for (const [turn_id, session_id] of [["legacy-match", "legacy-session"], ["legacy-mismatch", "different-session"]] as const) {
       const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope: codexProjectScope(f.root), turn: turn_id })).digest("hex").slice(-20)}`;
       f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
-        .run("codex_hook_turn", legacyId, 1, JSON.stringify({ session_id, turn_id }), new Date().toISOString(), new Date().toISOString());
+        .run("codex_hook_turn", legacyId, 1, JSON.stringify({ session_host: "codex", session_id, turn_id }), new Date().toISOString(), new Date().toISOString());
     }
     assert.equal(bridge.journal.find({ cwd: f.root, session_id: "legacy-session", turn_id: "legacy-match" })?.turn_id, "legacy-match");
     assert.equal(bridge.journal.find({ cwd: f.root, session_id: "other-session", turn_id: "legacy-mismatch" }), null);
@@ -1006,12 +1112,37 @@ test("MCP Host completion enters the same verified Experience proposal loop idem
     assert.equal(verifiedEvidence.length, 2);
     assert.deepEqual(verifiedEvidence.map(item => item.verification_outcome).sort(), ["failed", "passed"]);
     assert.equal(verifiedEvidence.every(item => item.verified === true && item.content_stored === false && !Object.hasOwn(item, "verification_ref")), true);
+    const verifiedOne = verifiedEvidence.find(item => item.session_id === "session-task-one")!;
+    const receipt = f.store.get("context_resolution_receipt", String(verifiedOne.context_receipt_id));
+    f.store.save("context_resolution_receipt", String(receipt.id), { ...receipt, scope: { kind: "global", id: "global" } });
+    const missingProjectReceipt = f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] });
+    assert.equal((missingProjectReceipt.evidence as JsonObject[]).length, 0);
+    assert.equal(missingProjectReceipt.excluded_unusable_receipt_count, 1);
+    f.store.save("context_resolution_receipt", String(receipt.id), receipt);
     const legacyEvidence = f.store.get("evidence", String(verifiedEvidence.find(item => item.session_id === "session-task-one")!.evidence_id));
+    f.store.save("evidence", String(legacyEvidence.id), { ...legacyEvidence, record_origin: "caller_asserted" });
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).length, 0);
+    f.store.save("evidence", String(legacyEvidence.id), { ...legacyEvidence, source_type: "program" });
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).length, 0);
+    f.store.save("evidence", String(legacyEvidence.id), legacyEvidence);
+    f.store.save("evidence", String(legacyEvidence.id), { ...legacyEvidence, metadata: { ...(legacyEvidence.metadata as JsonObject), project_scope_id: "project:other" } });
+    const mismatched = (f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[])[0]!;
+    assert.equal(mismatched.verified, false);
+    assert.equal(mismatched.evidence_conflict, true);
+    f.store.save("evidence", String(legacyEvidence.id), legacyEvidence);
+    const receiptRecord = f.store.get("context_resolution_receipt", receiptId);
+    const receiptScope = receiptRecord.scope as JsonObject;
+    f.store.save("context_resolution_receipt", receiptId, { ...receiptRecord, scope: { ...receiptScope, id: String(receiptScope.id).replace(/^project:/u, "") } });
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[])[0]!.verified, true);
+    f.store.save("context_resolution_receipt", receiptId, receiptRecord);
     const legacyMetadata = { ...(legacyEvidence.metadata as JsonObject) };
     delete legacyMetadata.verification_outcome;
+    delete legacyMetadata.project_scope_id;
     f.store.save("evidence", String(legacyEvidence.id), { ...legacyEvidence, metadata: legacyMetadata });
     assert.deepEqual((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[])
       .map(item => item.verification_outcome), ["passed"], "legacy result is recovered only from its exact sanitized linked observation");
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[])[0]!.project_scope_id,
+      verifiedEvidence.find(item => item.session_id === "session-task-one")!.project_scope_id);
     f.service.evidenceRecord({ evidence_id: "evidence-bad-outcome", source_type: "host_completion_signal", confidence: "bounded",
       claim: "Host reported terminal verification passed.", metadata: { provenance: "host_completion_signal", content_stored: false,
         source_session_id: "session-task-one", host: "codex", turn_id: "bad-outcome-turn", task_id: "bad-outcome-task",
@@ -1021,7 +1152,7 @@ test("MCP Host completion enters the same verified Experience proposal loop idem
       claim: "Host reported terminal verification passed.", metadata: { provenance: "host_completion_signal", content_stored: false,
         source_session_id: "session-task-one", host: "codex", turn_id: "orphan-turn", task_id: "task-one",
         context_receipt_id: "receipt", verification_ref_digest: `sha256:${"c".repeat(64)}`, terminal_identity_digest: `sha256:${"d".repeat(64)}`, verification_outcome: "passed" } });
-    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).length, 1,
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).filter(item => item.verified === true).length, 1,
       "a standalone Evidence record cannot verify a task without a linked Experience observation");
     const originalEvidenceId = String(verifiedEvidence.find(item => item.session_id === "session-task-one")!.evidence_id);
     f.store.create("workflow_evolution_observation", "empty-linked-observation", { source: { kind: "host:mcp_host", id: "empty-task", session_id: "session-task-one" },
@@ -1036,14 +1167,19 @@ test("MCP Host completion enters the same verified Experience proposal loop idem
         context_receipt_id: "receipt", verification_ref_digest: "digest", terminal_identity_digest: "terminal", verification_outcome: "failed" } });
     f.store.create("workflow_evolution_observation", "conflicting-metadata-observation", { source: { kind: "host:codex", id: "conflicting-metadata-task", session_id: "session-task-one" },
       outcome: "passed", evidence_ids: ["evidence-conflicting-metadata-outcome"], sanitized: true, content_stored: false });
-    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).length, 1,
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).filter(item => item.verified === true).length, 1,
       "Evidence metadata cannot override the linked Host observation outcome");
     f.store.create("workflow_evolution_observation", "conflicting-linked-observation", { source: { kind: "host:mcp_host", id: "task-one", session_id: "session-task-one" },
       outcome: "failed", evidence_ids: [originalEvidenceId], sanitized: true, content_stored: false });
-    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).length, 0,
+    assert.equal(f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: 1 }).partial, true);
+    assert.equal(f.service.learningCycleTaskEvidenceList({ session_ids: ["unmatched-session"], limit: 1 }).partial, false);
+    const conflictingEvidence = f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[];
+    assert.equal(conflictingEvidence.filter(item => item.verified === true).length, 0,
       "conflicting linked outcomes cannot verify the affected task");
+    assert(conflictingEvidence.some(item => item.evidence_conflict === true && item.verification_outcome === "conflict"));
+    assert(conflictingEvidence.some(item => Array.isArray(item.conflicting_observation_ids) && item.conflicting_observation_ids.includes("conflicting-linked-observation")));
     const evidenceTool = await server.handle({ jsonrpc: "2.0", id: "task-evidence", method: "tools/call", params: { name: "craft_learning_cycle_task_evidence_list", arguments: { session_ids: ["session-task-one"] } } }) as any;
-    assert.equal(evidenceTool.result.structuredContent.evidence.length, 0);
+    assert.equal(evidenceTool.result.structuredContent.evidence.filter((item: JsonObject) => item.verified === true).length, 0);
     assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: [] }), /bounded Host session identifiers/u);
     assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: null }), /bounded Host session identifiers/u);
     assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: "invalid" }), /bounded Host session identifiers/u);
@@ -1054,7 +1190,7 @@ test("MCP Host completion enters the same verified Experience proposal loop idem
     assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: 0 }), /limit/u);
     assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: 1.5 }), /limit/u);
     assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: "10" }), /limit/u);
-    assert.equal(f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: 10 }).evidence_count, 0);
+    assert.equal(f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: 10 }).evidence_count, 1);
     f.service.evidenceRecord({ evidence_id: "evidence-unknown-outcome", source_type: "host_completion_signal", confidence: "bounded",
       claim: "Host reported a terminal outcome.", metadata: { provenance: "host_completion_signal", content_stored: false,
         source_session_id: "session-unknown-outcome", host: "codex", turn_id: "unknown-outcome-turn", task_id: "unknown-outcome-task",
@@ -1066,8 +1202,7 @@ test("MCP Host completion enters the same verified Experience proposal loop idem
         context_receipt_id: "receipt", verification_ref_digest: `sha256:${"a".repeat(64)}`, terminal_identity_digest: `sha256:${"b".repeat(64)}`, verification_outcome: "passed" } });
     f.store.create("workflow_evolution_observation", "unscoped-host-observation", { source: { session_id: "unscoped-session", kind: "host:codex", id: "unscoped-task" },
       outcome: "passed", evidence_ids: [unscopedEvidence.id], sanitized: true, content_stored: false });
-    const unscoped = (f.service.learningCycleTaskEvidenceList({ session_ids: ["unscoped-session"] }).evidence as JsonObject[])[0]!;
-    assert.equal(Object.hasOwn(unscoped, "project_scope_id"), false);
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["unscoped-session"] }).evidence as JsonObject[]).length, 0);
     const requestId = String((second.result.structuredContent.request as JsonObject).id);
     const trace = f.service.traceGet({ trace_id: second.result.structuredContent.trace_correlation.trace_id });
     assert((trace.events as JsonObject[]).some(event => event.event_kind === "component.call.completed" && (event.output_refs as string[]).includes(requestId)));
@@ -1560,6 +1695,7 @@ test("Hook mints a fresh turn when the Host omits its native turn identifier", a
 test("Lifecycle hooks record boundaries without counting readiness as component usage", async () => {
   const f = await fixture();
   try {
+    f.service.componentReadinessGet = () => { throw new Error("lifecycle must not scan readiness"); };
     const bridge = new CodexHookBridge(f.service);
     await bridge.handle("knowledge", { hook_event_name: "SessionStart", cwd: f.root, session_id: "session", source: "claude" });
     await bridge.handle("knowledge", { hook_event_name: "Stop", cwd: f.root, session_id: "session", turn_id: "turn" });
@@ -1569,8 +1705,47 @@ test("Lifecycle hooks record boundaries without counting readiness as component 
     assert.equal(events.length, 4);
     assert.deepEqual(events.map((event) => (event.payload as JsonObject).event), ["SessionStart", "Stop", "SessionEnd", "SessionEnd"]);
     assert(events.every((event) => ((event.payload as JsonObject).usage as JsonObject).component_used === false));
+    assert(events.every((event) => (event.payload as JsonObject).readiness_state === "not_evaluated"));
     assert.match(String(((events[0]!.payload as JsonObject).scope as JsonObject).id), /^project:/u);
     assert.equal((events[3]!.payload as JsonObject).session_id, "unknown");
+  } finally { await dispose(f); }
+});
+
+test("lifecycle maintenance separates Hosts and never invents a missing session", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service, () => {});
+    for (const source of ["codex", "claude", "codex"]) {
+      await bridge.handle("knowledge", { hook_event_name: "SessionEnd", cwd: f.root, session_id: "shared-session", source });
+    }
+    await bridge.handle("knowledge", { hook_event_name: "SessionEnd", cwd: f.root, source: "codex" });
+    const requests = f.store.list("memory_maintenance_request", 10);
+    assert.equal(requests.length, 2);
+    assert.equal(new Set(requests.map(request => request.lease_id)).size, 2);
+    assert(requests.every(request => !String(request.lease_id).includes("shared-session")));
+  } finally { await dispose(f); }
+});
+
+test("identical session and turn IDs remain separate across Hosts", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    const base = { cwd: f.root, session_id: "shared", turn_id: "same-turn" };
+    for (const host of ["codex", "claude"]) {
+      await bridge.handle("context", { ...base, session_host: host, hook_event_name: "UserPromptSubmit", prompt: "Verify the change" });
+      await bridge.handle("context", { ...base, session_host: host, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "same-tool" });
+    }
+    const sessions = f.store.list("context_hook_session", 10);
+    assert.equal(sessions.length, 2);
+    assert.deepEqual(new Set(sessions.map(session => session.session_host)), new Set(["codex", "claude"]));
+    const codex = bridge.journal.find({ ...base, session_host: "codex" });
+    const claude = bridge.journal.find({ ...base, session_host: "claude" });
+    assert(codex && claude);
+    assert.notEqual(codex.id, claude.id);
+    assert.notEqual((codex.signals as JsonObject[])[0]?.id, (claude.signals as JsonObject[])[0]?.id);
+    await bridge.handle("context", { ...base, session_host: "codex", hook_event_name: "SessionEnd" });
+    const activeClaude = f.store.list("context_hook_session", 10).find(session => session.session_host === "claude");
+    assert.deepEqual(activeClaude?.pending_turn_ids, ["same-turn"]);
   } finally { await dispose(f); }
 });
 
@@ -1637,7 +1812,7 @@ test("reused native turn IDs remain distinct across sessions and legacy journals
     const turn = "legacy-turn";
     const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope, turn })).digest("hex").slice(-20)}`;
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
-      .run("codex_hook_turn", legacyId, 1, JSON.stringify({ scope, turn_id: turn, session_id: "legacy-session", signals: [], content_stored: false }),
+      .run("codex_hook_turn", legacyId, 1, JSON.stringify({ scope, session_host: "codex", turn_id: turn, session_id: "legacy-session", signals: [], content_stored: false }),
         new Date().toISOString(), new Date().toISOString());
     assert.equal(bridge.journal.find({ ...base, turn_id: turn, session_id: "legacy-session" })?.id, legacyId);
     assert.equal(bridge.journal.find({ ...base, turn_id: turn, session_id: "foreign-session" }), null);
@@ -1884,7 +2059,7 @@ test("PreCompact captures a bounded resume snapshot without blocking compaction"
     const snapshots = f.store.list("context_resume_snapshot", 10);
     assert.equal(snapshots.length, 1);
     assert.equal((snapshots[0]!.files_touched as unknown[]).length, 1);
-    const projected = f.service.contextExtensionsResolveResume({ session_id: "compact-session" });
+    const projected = f.service.contextExtensionsResolveResume({ session_host: "codex", session_id: "compact-session" });
     assert.equal(projected.resume_available, true);
     assert.match(String(projected.content), /a\.ts/u);
   } finally { await dispose(f); }

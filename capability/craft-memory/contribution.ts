@@ -3,7 +3,7 @@ import type { ContextContribution, ContextContributionProvider, ContextRequest }
 import { ContextBudget, contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
 import { canonicalJson, stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import { Bm25Index } from "../../common/craft-common-base/src/bm25.ts";
-import { contextFeedbackWeights } from "../../core/context-feedback-weight.ts";
+import { contextFeedbackEvidenceCurrent, contextFeedbackWeights } from "../../core/context-feedback-weight.ts";
 import { retrievalExcerpt } from "../../common/craft-common-base/src/retrieval-excerpt.ts";
 import { temporalMemorySelect } from "../../common/craft-common-base/src/memory-temporal-policy.ts";
 import { scopeAllows, scopeEnvelope, scopeEnvelopeReceipt, sourceAllows, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
@@ -92,11 +92,16 @@ export class MemoryContribution implements ContextContributionProvider {
     };
     const feedback = this.store.list("context_feedback", 10_000, item => item.outcome === "helpful" && item.evidence_verified === true, false);
     const usages = new Map<string, number>();
+    const counted = new Set<string>();
     for (const item of feedback) {
+      if (!contextFeedbackEvidenceCurrent(this.store, item)) continue;
       const references = Array.isArray(item.memory_refs) ? item.memory_refs as JsonObject[] : [];
       const used = new Set(references.filter(ref => ref && typeof ref.memory_id === "string" && typeof ref.content_digest === "string")
         .map(ref => canonicalJson([ref.memory_id, ref.content_digest])));
-      for (const key of used) usages.set(key, (usages.get(key) ?? 0) + 1);
+      for (const key of used) {
+        const receiptKey = canonicalJson([item.receipt_id, key]);
+        if (!counted.has(receiptKey)) { counted.add(receiptKey); usages.set(key, (usages.get(key) ?? 0) + 1); }
+      }
     }
     const snapshot = stableDigest({ scopes, access: { ...access, allow_restricted: request.allow_restricted === true, source_ids: selectedSourceIds ? [...selectedSourceIds].sort() : [] }, candidates: available.map(({ memory }) => ({
       id: memory.id, version: memory.version, content_digest: memory.content_digest, source_id: memory.source_id, source_version: memory.source_version,

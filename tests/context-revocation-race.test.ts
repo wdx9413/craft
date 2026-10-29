@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
@@ -24,12 +24,16 @@ function barrier() {
 async function fixture(options: { canonicalProjectMemory?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "craft-revocation-race-")), paths = craftPaths(root);
   const store = await new CraftStore(paths).open(), writer = await new CraftStore(paths).open(), service = new CraftService(store);
-  service.scopeAliasBind({ scope_kind: "project", scope_id: "race", alias_kind: "path", alias: root });
-  service.scopeAliasBind({ scope_kind: "project", scope_id: "other", alias_kind: "path", alias: root });
+  if (!options.canonicalProjectMemory) {
+    const otherRoot = join(root, "other-project");
+    await mkdir(otherRoot);
+    service.scopeAliasBind({ scope_kind: "project", scope_id: "race", alias_kind: "path", alias: root });
+    service.scopeAliasBind({ scope_kind: "project", scope_id: "other", alias_kind: "path", alias: otherRoot });
+  }
   const memoryScope: JsonObject = options.canonicalProjectMemory ? (service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject).canonical_scope as JsonObject : scope;
   const storageScope = { kind: String(memoryScope.kind ?? memoryScope.scope_kind), id: String(memoryScope.id ?? memoryScope.scope_id) };
   if (options.canonicalProjectMemory) service.scopeAliasBind({ scope_kind: "project", scope_id: storageScope.id, alias_kind: "path", alias: root });
-  service.knowledgeSourceRegister({ source_id: "source", label: "source", scope_kind: storageScope.kind, scope_id: storageScope.id, kind: "custom", locator: root, content_digest: "source-digest", trust: "verified", access: "read_only" });
+  service.knowledgeSourceRegister({ source_id: "source", label: "source", scope_kind: storageScope.kind, scope_id: storageScope.id, kind: "custom", locator: "test://source", content_digest: "source-digest", trust: "verified", access: "read_only" });
   store.create("evidence", "proof", { source_type: "human", confidence: "confirmed" });
   const memory = service.memoryLedgerRemember({ memory_id: "private", source_id: "source", kind: "preference", scope_kind: storageScope.kind, scope_id: storageScope.id, content: "alpha private content", evidence_ids: ["proof"],
     scope_envelope: { audience: { mode: "private", principal_ids: ["owner"] }, tenant_id: "tenant", applicability: storageScope } }).memory as JsonObject;
@@ -126,7 +130,7 @@ for (const member of ["knowledge", "experience"] as const) {
         }
         const reader = member === "knowledge" ? new KnowledgeContribution(f.store) : new ExperienceContribution(f.store), gate = barrier();
         const kernel = new ContextResolutionKernel(f.store, [{ member, async contribute(request) { const cached = await reader.contribute(request); assert(cached.items.length); await gate.wait(); return cached; } }]);
-        const pending = kernel.resolve({ ...scope, ...owner, query: "alpha", members: [member], allow_partial: true }); const denied = assert.rejects(pending, /changed during recall/); await gate.started;
+        const pending = kernel.resolve({ ...scope, ...owner, query: "alpha", members: [member], allow_partial: true }); const denied = assert.rejects(pending, /changed during recall/, `${member} ${mode}`); await gate.started;
         const kind = mode === "source" ? "knowledge_source" : mode === "document" ? "knowledge_document" : mode === "release" ? "experience_release" : member === "knowledge" ? "knowledge_claim" : "experience_procedure";
         const id = mode === "source" ? "source" : mode === "document" ? "doc" : member === "knowledge" ? "claim" : "procedure";
         const current = f.writer.get(kind, id);

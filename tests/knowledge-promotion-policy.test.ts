@@ -9,6 +9,8 @@ import { craftPaths, projectStorageDirectory } from "../core/infrastructure/path
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { adjudicateKnowledgeCase } from "./helpers/knowledge-evaluation-adjudication.ts";
 import { createActionHandlers } from "../core/application/actions/action-handlers.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+import { knowledgeClaimPromotionProofVerified } from "../core/knowledge-evaluation-provenance.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-promotion-"));
@@ -22,7 +24,7 @@ async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); 
 
 function candidate(service: CraftService, id = "claim") {
   const first = service.evidenceRecord({ evidence_id: `${id}-e1`, source_type: "observation", confidence: "confirmed", claim: "first observed fact",
-    metadata: { source_session_id: `${id}-source-session`, task_id: `${id}-source-task` } });
+    metadata: { source_session_id: `${id}-source-session`, task_id: `${id}-source-task`, source_ref_digest: stableDigest(`${id}-source`) } });
   const claim = service.knowledgeClaimSave({ claim_id: id, kind: "fact", content: "Run the focused test first.", scope: "project:demo", source_id: "source", evidence_ids: [first.id] }).claim as JsonObject;
   return { claim, first };
 }
@@ -32,7 +34,7 @@ function evaluateCandidate(f: Awaited<ReturnType<typeof fixture>>, claim: JsonOb
   const claimContent = typeof claim.content === "string" ? claim.content
     : f.store.contentStore.readCompatSync(claim.content_ref as never, String(claim.scope)).body;
   const evidence = f.service.evidenceRecord({ evidence_id: `${caseId}-evidence`, source_type: "program", confidence: "confirmed",
-    claim: "Independent held-out task label.", metadata: { source_session_id: sessionId, task_id: taskId } });
+    claim: "Independent held-out task label.", metadata: { source_session_id: sessionId, task_id: taskId, source_ref_digest: stableDigest(sessionId) } });
   const caseRecord = f.service.knowledgeEvaluationCaseSave({ case_id: caseId, query: claimContent, scope: String(claim.scope),
     expected_claim_ids: [String(claim.id)], source_session_id: sessionId, source_task_id: taskId, source_evidence_ids: [evidence.id],
     evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "model_candidate", sanitized: true,
@@ -42,7 +44,26 @@ function evaluateCandidate(f: Awaited<ReturnType<typeof fixture>>, claim: JsonOb
     candidate_claim_ids: [String(claim.id)], top_k: 5 }).run as JsonObject;
 }
 
-test("automatic promotion requires independent evidence by default and records the exact policy", async () => {
+test("a source revision change invalidates an earlier candidate evaluation", async () => {
+  const f = await fixture();
+  try {
+    const { claim, first } = candidate(f.service, "changed-source");
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: first.id, observation_key: "first" });
+    const second = f.service.evidenceRecord({ evidence_id: "changed-source-support", source_type: "receipt", confidence: "confirmed",
+      claim: "independent observation", metadata: { source_session_id: "second-session", task_id: "second-task" } });
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "second" });
+    const evaluation = evaluateCandidate(f, claim);
+    assert.equal(evaluation.status, "eligible");
+    const currentSource = f.store.get("knowledge_source", "source");
+    f.store.save("knowledge_source", "source", { ...currentSource, content_digest: `sha256:${"c".repeat(64)}` });
+    const result = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id] });
+    const assessment = (result.assessments as JsonObject[])[0]!;
+    assert.equal(assessment.promoted, false);
+    assert((assessment.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
+  } finally { await close(f); }
+});
+
+test("retrieval-only shadow evaluation cannot automatically promote Knowledge", async () => {
   const f = await fixture();
   try {
     const { claim, first } = candidate(f.service);
@@ -69,15 +90,37 @@ test("automatic promotion requires independent evidence by default and records t
     }) as CraftStore["list"];
     const automatic = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[];
     (f.store as unknown as { list: CraftStore["list"] }).list = list;
-    assert.equal(automatic[0]!.verdict, "eligible");
-    assert.equal(automatic[0]!.promoted, true);
-    assert.equal((f.store.get("knowledge_claim", String(claim.id)).review as JsonObject).reviewer, "automated-promotion-policy");
-    assert.equal(((f.store.get("knowledge_claim", String(claim.id)).review as JsonObject).policy_revision), 1);
-    assert.equal((f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!.verdict, "already_reviewed");
+    assert.equal(automatic[0]!.promoted, false);
+    assert((automatic[0]!.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
+    assert.equal(f.store.get("knowledge_claim", String(claim.id)).status, "candidate");
   } finally { await close(f); }
 });
 
-test("quarantined legacy promotion cannot reuse old support and a fresh shadow run", async () => {
+test("previous retrieval-only promotion cannot enter formal Knowledge context", async () => {
+  const f = await fixture();
+  try {
+    const reviewed = attachVerifiedPromotionFixture(f.store, candidate(f.service, "legacy-retrieval-only").claim);
+    assert.equal(reviewed.status, "reviewed");
+    assert.equal(knowledgeClaimPromotionProofVerified(f.store, reviewed), false);
+    assert.deepEqual(f.service.wikiContextCompile({ query: "focused test", scope: "project:demo" }).included, []);
+  } finally { await close(f); }
+});
+
+test("unavailable task effect verifier preserves reviewed claim while retrieval stays closed", async () => {
+  const f = await fixture();
+  try {
+    const reviewed = attachVerifiedPromotionFixture(f.store, candidate(f.service, "effect-verifier-unavailable").claim);
+    const before = f.store.get("knowledge_claim", String(reviewed.id));
+    const assessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [reviewed.id] }).assessments as JsonObject[])[0]!;
+    assert.equal(assessment.verdict, "revalidation_required");
+    assert.equal(assessment.promoted, false);
+    assert((assessment.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
+    assert.deepEqual(f.store.get("knowledge_claim", String(reviewed.id)), before);
+    assert.deepEqual(f.service.wikiContextCompile({ query: "focused test", scope: "project:demo" }).included, []);
+  } finally { await close(f); }
+});
+
+test("legacy promotion remains excluded while task effect verification is unavailable", async () => {
   const f = await fixture();
   try {
     const { claim, first } = candidate(f.service, "legacy-repromotion");
@@ -86,22 +129,20 @@ test("quarantined legacy promotion cannot reuse old support and a fresh shadow r
       claim: "fixture support", metadata: { source_session_id: "legacy-session-2", task_id: "legacy-task-2" } });
     f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "second" });
     assert.equal(evaluateCandidate(f, claim).status, "eligible");
-    const original = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id] }).assessments as JsonObject[])[0]!;
-    assert.equal(original.promoted, true);
-    const promoted = f.store.get("knowledge_claim", String(claim.id));
+    const promoted = attachVerifiedPromotionFixture(f.store, claim);
     const reviewId = String((promoted.review as JsonObject).promotion_review_id);
     const review = f.store.get("knowledge_auto_review", reviewId);
     const { support_refs: _supportRefs, ...oldReview } = review;
     f.store.save("knowledge_auto_review", reviewId, oldReview);
     const firstPass = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id] }).assessments as JsonObject[])[0]!;
     assert.equal(firstPass.promoted, false);
-    assert((firstPass.reasons as string[]).includes("independent_promotion_revalidation_required"));
+    assert((firstPass.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
     const quarantined = f.store.get("knowledge_claim", String(claim.id));
-    assert.equal(quarantined.status, "candidate"); assert.equal(quarantined.promotion_revalidation_required, true);
-    assert.equal(evaluateCandidate(f, quarantined, "legacy-repromotion-new-case").status, "eligible");
+    assert.equal(quarantined.status, "reviewed");
+    assert.equal(knowledgeClaimPromotionProofVerified(f.store, quarantined), false);
     const retry = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id] }).assessments as JsonObject[])[0]!;
     assert.equal(retry.promoted, false);
-    assert((retry.reasons as string[]).includes("independent_promotion_revalidation_required"));
+    assert((retry.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
   } finally { await close(f); }
 });
 
@@ -195,11 +236,11 @@ test("project Host review packets read both Claim and Evidence from project Know
   } finally { await close(f); }
 });
 
-test("automatic Claim promotion also advances its project scenario evidence reference", async () => {
+test("retrieval-only assessment does not advance the project scenario claim", async () => {
   const f = await fixture();
   try {
     const first = f.service.evidenceRecord({ evidence_id: "scene-first", source_type: "observation", confidence: "confirmed", claim: "first support",
-      metadata: { source_session_id: "scene-source-session", task_id: "scene-source-task" } });
+      metadata: { source_session_id: "scene-source-session", task_id: "scene-source-task", source_ref_digest: stableDigest("scene-source") } });
     const claim = f.service.knowledgeClaimSave({ claim_id: "scene-auto", kind: "fact", content: "Use the focused validation.", scope: "project:demo",
       source_id: "source", scenario_key: "engineering.validation.focused", coarse_scenario_key: "engineering.validation", evidence_ids: [first.id] }).claim as JsonObject;
     f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: first.id, observation_key: "scene:one" });
@@ -208,11 +249,11 @@ test("automatic Claim promotion also advances its project scenario evidence refe
     f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "scene:two" });
     assert.equal(evaluateCandidate(f, claim).status, "eligible");
     const assessment = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[];
-    assert.equal(assessment[0]!.promoted, true);
+    assert.equal(assessment[0]!.promoted, false);
     const catalog = JSON.parse(await readFile(join(projectStorageDirectory(f.store.paths, f.root), "knowledge", "projects", "demo", "knowledge-scenarios.json"), "utf8")) as JsonObject;
     const scene = (catalog.scenarios as JsonObject[]).find(item => item.scenario_key === "engineering.validation.focused")!;
     assert.equal(scene.lifecycle, "candidate");
-    assert.equal((scene.claim_refs as JsonObject[])[0]!.status, "reviewed");
+    assert.equal((scene.claim_refs as JsonObject[])[0]!.status, "candidate");
   } finally { await close(f); }
 });
 
@@ -220,7 +261,7 @@ test("automatic review keeps inline project Claims scoped when promoting without
   const f = await fixture();
   try {
     const origin = f.service.evidenceRecord({ evidence_id: "inline-origin", source_type: "observation", confidence: "confirmed", claim: "Origin task evidence.",
-      metadata: { source_session_id: "inline-origin-session", task_id: "inline-origin-task" } });
+      metadata: { source_session_id: "inline-origin-session", task_id: "inline-origin-task", source_ref_digest: stableDigest("inline-origin") } });
     const candidate = f.store.create("knowledge_claim", "inline-project-claim", { status: "candidate", kind: "fact", scope: "project:demo",
       source_id: "source", content: "A supported inline project fact.", evidence_ids: [origin.id] });
     for (const [index, claim] of ["First support", "Second support"].entries()) {
@@ -230,9 +271,9 @@ test("automatic review keeps inline project Claims scoped when promoting without
     }
     assert.equal(evaluateCandidate(f, candidate).status, "eligible");
     const result = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [candidate.id], now: "2026-09-20T00:00:00.000Z" });
-    assert.equal(((result.assessments as JsonObject[])[0]!.verdict), "eligible");
-    assert.equal(((result.assessments as JsonObject[])[0]!.promoted), true);
-    assert.equal(((result.assessments as JsonObject[])[0]!.claim as JsonObject).status, "reviewed");
+    assert.equal(((result.assessments as JsonObject[])[0]!.verdict), "revalidation_required");
+    assert.equal(((result.assessments as JsonObject[])[0]!.promoted), false);
+    assert.equal(((result.assessments as JsonObject[])[0]!.claim as JsonObject).status, "candidate");
   } finally { await close(f); }
 });
 
@@ -332,7 +373,7 @@ test("local policy can lower a threshold without turning off deterministic safet
     assert.throws(() => f.service.knowledgePromotionPolicySave({ minimum_independent_support: 0 }), /between 1 and 10/u);
     assert.throws(() => f.service.knowledgePromotionPolicySave({ minimum_confidence: "maybe" }), /bounded or confirmed/u);
     assert.equal(evaluateCandidate(f, claim).status, "eligible");
-    assert.equal((f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!.promoted, true);
+    assert.equal((f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!.promoted, false);
 
     const conflicted = candidate(f.service, "conflicted");
     f.service.knowledgeClaimSupportRecord({ claim_id: conflicted.claim.id, evidence_id: conflicted.first.id, observation_key: "conflict-one" });
@@ -463,8 +504,8 @@ test("promotion policy rejects malformed inputs and reports every non-promotable
     const legacyReviewedWithoutReview = raw("legacy-reviewed-without-review", { status: "reviewed", review: null });
     const legacyReviewedId = String(legacyReviewed.id);
     const quarantined = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [legacyReviewedId], auto_promote: false }).assessments as JsonObject[])[0]!;
-    assert.equal(f.store.get("knowledge_claim", legacyReviewedId).status, "candidate");
-    assert.equal(((f.store.get("knowledge_claim", legacyReviewedId).review as JsonObject).qualification_status), "legacy_promotion_quarantined");
+    assert.equal(f.store.get("knowledge_claim", legacyReviewedId).status, "reviewed");
+    assert((quarantined.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
     assert.equal(quarantined.claim_id, legacyReviewedId);
     assert.equal((f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [String(legacyReviewedWithoutReview.id)], auto_promote: false }).assessments as JsonObject[])[0]!.claim_id,
       legacyReviewedWithoutReview.id);

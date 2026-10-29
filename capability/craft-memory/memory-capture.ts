@@ -50,6 +50,16 @@ export class MemoryCapture {
     const evidence = this.evidenceRecord({ evidence_id: String(args.evidence_id ?? `evidence_memory_statement_${suffix}`), source_type: explicit ? "human" : "host_observed_fact", confidence: "bounded",
       claim: explicit ? "User-authored statement captured for governed Memory." : "Host-classified stable fact captured for governed Memory.",
       locator: `memory-capture:${scopeKind}:${scopeId}`, metadata: { capture_digest: digestJson(captureIdentity), user_authored: explicit, capture_mode: proposedBy } });
+    if (scopeKind === "session" && args.project_scope_id) {
+      const intentId = `memory_observation_intent_${suffix}`;
+      const intent = {
+        scope: { kind: "session", id: scopeId }, project_id: text(args.project_scope_id, "project_scope_id"), capture_digest: digestJson(captureIdentity),
+        candidate_id: String(args.candidate_id ?? `memory_candidate_statement_${suffix}`), content_digest: digestJson(content), kind, topic: topic ?? "", capture_topic: topic ?? null, evidence_id: evidence.id, content_free: true,
+      };
+      const existing = this.memory.store.find("memory_observation_intent", intentId);
+      if (existing && Object.entries(intent).some(([key, value]) => digestJson(existing[key]) !== digestJson(value))) throw new Error("Memory observation intent idempotency conflict");
+      if (!existing) this.memory.store.create("memory_observation_intent", intentId, intent);
+    }
     const proposed = this.memory.propose({ candidate_id: String(args.candidate_id ?? `memory_candidate_statement_${suffix}`), source_id: "builtin.evidence-wiki", kind,
       scope_kind: scopeKind, scope_id: scopeId, ...(args.scope_envelope === undefined ? {} : { scope_envelope: args.scope_envelope }), ...(topic === undefined ? {} : { topic }), content, sensitivity: args.sensitivity ?? "internal", confidence: "bounded",
       proposal_only: hints.length > 0, evidence_ids: [evidence.id], proposed_by: proposedBy, valid_until: args.valid_until,
@@ -57,7 +67,12 @@ export class MemoryCapture {
     const retainedCandidate = proposed.candidate as JsonObject;
     if (proposed.idempotent === true && retainedCandidate.ledger_memory_id) {
       const retained = this.memory.ledger.get({ ...args, scope_kind: scopeKind, scope_id: scopeId, memory_id: retainedCandidate.ledger_memory_id }).memory as JsonObject;
-      if (retained.status === "active") return { ...proposed, memory: retained, evidence, already_retained: true, auto_committed: false, next_action: "available_for_scoped_context" };
+      if (retained.status === "active") {
+        const promotions = scopeKind === "session" && args.project_scope_id
+          ? this.promoteRepeatedFact({ sessionId: scopeId, projectId: text(args.project_scope_id, "project_scope_id"), projectRoot: typeof args.project_root === "string" ? args.project_root : undefined, candidate: retainedCandidate })
+          : [];
+        return { ...proposed, memory: retained, evidence, promotions, already_retained: true, auto_committed: false, next_action: "available_for_scoped_context" };
+      }
     }
     if (hints.length > 0) return { ...proposed, evidence, topic_suggestions: hints, auto_committed: false, next_action: "confirm_topic_or_explicit_replacement" };
     // Governed policy can already approve and commit; neither deny that fact nor commit twice.
@@ -72,6 +87,7 @@ export class MemoryCapture {
     return { ...proposed, evidence, auto_committed: false,
       next_action: candidate.status === "conflict_pending" ? "resolve_conflict" : "review_or_accept" };
   }
+
 
   private promoteRepeatedFact(input: { sessionId: string; projectId: string; projectRoot?: string; candidate: JsonObject }): JsonObject[] {
     const candidate = input.candidate;

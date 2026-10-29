@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { link, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 type ReleaseLock = () => Promise<void>;
 type WorkerLockFileSystem = {
@@ -62,6 +63,27 @@ async function acquireComponentLock(path: string, fileSystem: WorkerLockFileSyst
   };
 }
 
+async function acquireGuardedComponentLock(path: string, fileSystem: WorkerLockFileSystem, isOwnerAlive: (pid: number) => boolean, runtimeVersion?: string): Promise<ReleaseLock | null> {
+  const database = new DatabaseSync(`${path}.guard.sqlite`);
+  try {
+    database.exec("PRAGMA busy_timeout=0");
+    try { database.exec("BEGIN IMMEDIATE"); }
+    catch (error) {
+      if (error instanceof Error && /locked|busy/iu.test(error.message)) { database.close(); return null; }
+      throw error;
+    }
+    const release = await acquireComponentLock(path, fileSystem, isOwnerAlive, runtimeVersion);
+    if (!release) { database.close(); return null; }
+    return async () => {
+      try { await release(); }
+      finally { database.close(); }
+    };
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+}
+
 export async function acquireLearningWorkerLocks(runtimeDir: string, components: string[], dependencies: {
   file_system?: Partial<WorkerLockFileSystem>;
   is_process_alive?: (pid: number) => boolean;
@@ -72,7 +94,15 @@ export async function acquireLearningWorkerLocks(runtimeDir: string, components:
   await fileSystem.mkdir(runtimeDir, { recursive: true, mode: 0o700 });
   const releases: ReleaseLock[] = [];
   for (const component of [...new Set(components)].sort()) {
-    const release = await acquireComponentLock(join(runtimeDir, `learning-worker-${component}.lock.json`), fileSystem, isOwnerAlive, dependencies.runtime_version);
+    let release: ReleaseLock | null;
+    try {
+      release = await acquireGuardedComponentLock(join(runtimeDir, `learning-worker-${component}.lock.json`), fileSystem, isOwnerAlive, dependencies.runtime_version);
+    } catch (error) {
+      const cleanup = await Promise.allSettled(releases.reverse().map(item => item()));
+      const failures = cleanup.filter((item): item is PromiseRejectedResult => item.status === "rejected");
+      if (failures.length) throw new AggregateError([error, ...failures.map(item => item.reason)], "Learning worker lock acquisition and cleanup failed");
+      throw error;
+    }
     if (!release) {
       await Promise.all(releases.reverse().map(item => item()));
       return null;

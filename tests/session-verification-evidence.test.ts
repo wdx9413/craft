@@ -42,6 +42,19 @@ test("requests server-side archive comparison and preserves only recognized diag
   }
 });
 
+test("development evidence also requests archive verification", async () => {
+  let request: JsonObject = {};
+  const client: ExperienceLearningClient = { async call(_name, args = {}) {
+    request = args;
+    return { evidence: { id: "evidence-1", source_id: "source-1", fragment_id: "fragment-1" }, source_id: "source-1",
+      fragment_id: "fragment-1", sanitized_content_stored: true, raw_content_stored: false, transcript_check: { status: "transcript_matched" } };
+  } };
+  const result = await recordSessionVerificationEvidence(client, { ...task, dataset_partition: "development" }, excerpt);
+  assert.equal(request.verify_against_archive, true);
+  assert.equal(request.dataset_partition, "development");
+  assert.equal(result?.transcript_check_status, "transcript_matched");
+});
+
 test("does not write Evidence when task provenance or verification artifacts are incomplete", async () => {
   let calls = 0;
   const client: ExperienceLearningClient = { async call() { calls++; return {}; } };

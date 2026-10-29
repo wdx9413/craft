@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -98,6 +100,63 @@ test("Knowledge diagnosis reads only bounded content-free learning status", asyn
     assert.deepEqual(observation, { status: "last_recorded", measurement_scope: "eligible_held_out_batch_only",
       legacy_unknown_outcomes: 11, updated_at: "2026-10-27T14:11:27.523Z" });
     assert.equal(JSON.stringify(observation).includes("private-task-id"), false);
+    await writeFile(join(f.store.paths.knowledgeDir, "session-evaluation-state.json"), JSON.stringify({
+      schema: "craft.knowledge-session-evaluation-state.v1", legacy_unknown_outcomes: 11, legacy_untraced_tasks: 3,
+      processed_task_ids: ["private-task-id"], updated_at: "2026-10-27T14:11:27.523Z" }));
+    const withUntraced = (new ComponentReadinessKernel(f.store).diagnose({ component: "knowledge" }).observability as JsonObject).learning_evaluation as JsonObject;
+    assert.deepEqual(withUntraced, { status: "last_recorded", measurement_scope: "eligible_held_out_batch_only", legacy_unknown_outcomes: 11,
+      legacy_untraced_tasks: 3, legacy_untraced_scope: "processed_state", updated_at: "2026-10-27T14:11:27.523Z" });
+    assert.equal(JSON.stringify(withUntraced).includes("private-task-id"), false);
+  } finally { await dispose(f); }
+});
+
+test("Knowledge diagnosis preserves content-free candidate recovery counts across learning stages", async () => {
+  const f = await fixture();
+  try {
+    const directory = f.store.paths.knowledgeDir, path = join(directory, "session-candidate-state.json");
+    const diagnostic = () => (new ComponentReadinessKernel(f.store).diagnose({ component: "knowledge" }).observability as JsonObject).learning_candidates;
+    await mkdir(directory, { recursive: true });
+    assert.deepEqual(diagnostic(), { status: "not_observed" });
+    await writeFile(path, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", terminal_skips: { "private-task": {}, other: {} },
+      trace_ids_by_task: { "private-task": "trace-private" }, uncertain_calls: { other: {}, third: {} } }));
+    const value = diagnostic();
+    assert.deepEqual(value, { status: "last_recorded", measurement_scope: "persisted_candidate_state", uncertain_calls: 2, conflicting_skips: 2 });
+    assert.equal(JSON.stringify(value).includes("private"), false);
+    const originalRead = fs.readSync, candidateStat = fs.statSync(path);
+    try {
+      fs.readSync = ((...args: Parameters<typeof originalRead>) => {
+        const stat = fs.fstatSync(args[0]);
+        if (stat.dev === candidateStat.dev && stat.ino === candidateStat.ino) return 0;
+        return originalRead(...args);
+      }) as typeof originalRead;
+      syncBuiltinESMExports();
+      assert.deepEqual(diagnostic(), { status: "unavailable" });
+    } finally { fs.readSync = originalRead; syncBuiltinESMExports(); }
+    const originalContent = await fs.promises.readFile(path, "utf8");
+    let changed = false;
+    try {
+      fs.readSync = ((...args: Parameters<typeof originalRead>) => {
+        const count = originalRead(...args), stat = fs.fstatSync(args[0]);
+        if (!changed && count > 0 && stat.dev === candidateStat.dev && stat.ino === candidateStat.ino) {
+          changed = true;
+          fs.writeFileSync(path, originalContent.replace("private-task", "private-TASK"));
+          fs.utimesSync(path, new Date(), new Date(Date.now() + 10_000));
+        }
+        return count;
+      }) as typeof originalRead;
+      syncBuiltinESMExports();
+      assert.deepEqual(diagnostic(), { status: "unavailable" });
+      assert.equal(changed, true);
+    } finally { fs.readSync = originalRead; syncBuiltinESMExports(); }
+    for (const invalid of [null, {}, { schema: "craft.knowledge-session-candidate-state.v1", terminal_skips: [] },
+      { schema: "craft.knowledge-session-candidate-state.v1", uncertain_calls: "invalid" },
+      { schema: "craft.knowledge-session-candidate-state.v1", trace_ids_by_task: null },
+      { schema: "craft.knowledge-session-candidate-state.v1", terminal_skips: Object.fromEntries(Array.from({ length: 50_001 }, (_, i) => [`t${i}`, {}])) }]) {
+      await writeFile(path, JSON.stringify(invalid)); assert.deepEqual(diagnostic(), { status: "unavailable" });
+    }
+    await writeFile(path, "{"); assert.deepEqual(diagnostic(), { status: "unavailable" });
+    await writeFile(path, Buffer.alloc(8 * 1024 * 1024 + 1)); assert.deepEqual(diagnostic(), { status: "unavailable" });
+    await rm(path); await symlink(join(f.root, "missing"), path); assert.deepEqual(diagnostic(), { status: "unavailable" });
   } finally { await dispose(f); }
 });
 
@@ -115,7 +174,8 @@ test("Knowledge learning status fails closed on malformed or unsafe state", asyn
     const base = { schema: "craft.knowledge-session-evaluation-state.v1", legacy_unknown_outcomes: 1, updated_at: "2026-10-27T14:11:27.523Z" };
     for (const value of [{ ...base, legacy_unknown_outcomes: -1 }, { ...base, legacy_unknown_outcomes: 50_001 },
       { ...base, legacy_unknown_outcomes: 1.5 }, { ...base, updated_at: null }, { ...base, updated_at: "a".repeat(65) },
-      { ...base, updated_at: "not-a-date" }]) {
+      { ...base, updated_at: "not-a-date" }, { ...base, legacy_untraced_tasks: -1 },
+      { ...base, legacy_untraced_tasks: 50_001 }, { ...base, legacy_untraced_tasks: 1.5 }]) {
       await writeFile(path, JSON.stringify(value)); assert.equal(status(), "unavailable");
     }
     await writeFile(path, "{"); assert.equal(status(), "unavailable");
@@ -261,7 +321,9 @@ test("standalone readiness reflects automatic memory commitment and the coding e
     f.store.create("memory_ledger", "active", { status: "active" });
     f.store.create("workflow_evolution_request", "readiness-draft-request", { scope: { kind: "project", id: "coding" }, scenario_key: "readiness", lifecycle: "awaiting_model" });
     f.store.create("workflow_evolution_proposal", "draft", { request_id: "readiness-draft-request", status: "draft" });
-    assert.equal((await knowledge.handlers.craft_component_readiness_get({ component: "knowledge" })).state, "ready");
+    const knowledgePending = await knowledge.handlers.craft_component_readiness_get({ component: "knowledge" });
+    assert.equal(knowledgePending.state, "effect_evaluation_pending");
+    assert.equal(knowledgePending.task_effect_gate, "unavailable");
     assert.equal((await memory.handlers.craft_component_readiness_get({ component: "memory" })).state, "ready");
     assert.equal((await experience.handlers.craft_component_readiness_get({ component: "experience" })).state, "evaluation_required");
   } finally { await dispose(f); }

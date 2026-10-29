@@ -49,7 +49,7 @@ export async function runLegacyRepositoryStorageMigration(args: string[], depend
     result[entry.status] = (result[entry.status] ?? 0) + 1;
     return result;
   }, {});
-  if (!options.apply) return { output: JSON.stringify({ mode: "dry_run", roots: scan.entries.length, statuses: counts,
+  if (!options.apply) return { output: JSON.stringify({ mode: "dry_run", migration_semantics: "archive_copy_only", source_retired: false, runtime_data_integrated: false, roots: scan.entries.length, statuses: counts,
     blocked: scan.entries.filter(entry => entry.status !== "ready").map(entry => ({ source_root: entry.source_root, status: entry.status,
       file_count: entry.file_count, size_bytes: entry.size_bytes, symlink_count: entry.symlink_count,
       unsafe_entry_count: entry.unsafe_entry_count, scan_error_count: entry.scan_error_count })),
@@ -57,6 +57,6 @@ export async function runLegacyRepositoryStorageMigration(args: string[], depend
   const results = [];
   for (const entry of scan.entries) if (entry.status === "ready") results.push(await migrate(paths, entry));
   const blocked = scan.entries.filter(entry => entry.status !== "ready").map(entry => ({ source_root: entry.source_root, status: entry.status }));
-  return { output: JSON.stringify({ mode: "apply", migrated: results.length, results, blocked, scan_errors: scan.scan_errors }),
+  return { output: JSON.stringify({ mode: "apply", migration_semantics: "archive_copy_only", source_retired: false, runtime_data_integrated: false, migrated: results.length, results, blocked, scan_errors: scan.scan_errors }),
     exit_code: blocked.length || scan.scan_errors.length ? 2 : 0 };
 }

@@ -18,7 +18,7 @@ async function replayFixture(host: "codex" | "claude") {
   const temporary = await mkdtemp(join(tmpdir(), "craft-hook-process-"));
   const data = join(temporary, "data");
   const manifest = JSON.parse(await readFile(join(root, "plugins/craft-context/hooks", host === "codex" ? "codex-hooks.json" : "hooks.json"), "utf8")) as HookManifest;
-  const bundle = join(root, "plugins/craft-context/dist/plugin/craft-codex-hook.cjs");
+  const bundle = process.env.CRAFT_TEST_HOOK_BUNDLE ?? join(root, "plugins/craft-context/dist/plugin/craft-codex-hook.cjs");
   const repository = join(temporary, "repo");
   const git = spawnSync("git", ["init", "-q", repository], { encoding: "utf8" });
   assert.equal(git.status, 0, git.stderr);
@@ -29,8 +29,8 @@ async function replayFixture(host: "codex" | "claude") {
     const eventName = String(event.hook_event_name);
     const handler = manifest.hooks[eventName]?.[0]?.hooks[0];
     assert(handler, `Missing ${host} ${eventName} command`);
-    assert.equal(handler.command, `node "\${${host === "codex" ? "PLUGIN_ROOT" : "CLAUDE_PLUGIN_ROOT"}}/dist/plugin/craft-codex-hook.cjs" --member context`);
-    const child = spawn(process.execPath, [bundle, "--member", "context"], { cwd: repository,
+    assert.equal(handler.command, `node "\${${host === "codex" ? "PLUGIN_ROOT" : "CLAUDE_PLUGIN_ROOT"}}/dist/plugin/craft-codex-hook.cjs" --member context${host === "claude" ? " --host claude" : ""}`);
+    const child = spawn(process.execPath, [bundle, "--member", "context", ...(host === "claude" ? ["--host", "claude"] : [])], { cwd: repository,
       env: { PATH: process.env.PATH, CRAFT_DATA_DIR: data, NODE_NO_WARNINGS: "1" },
       stdio: ["pipe", "pipe", "pipe"], timeout: 10_000 });
     let stdout = "", stderr = "";
@@ -59,7 +59,7 @@ for (const host of ["codex", "claude"] as const) {
       await Promise.all(["npm test", "pytest"].map((command, index) => f.execute({ hook_event_name: "PostToolUse", tool_use_id: `verify-${index}`,
         tool_name: "Bash", tool_input: { command }, tool_response: { exit_code: 0 } })));
       const turn = f.store.list("context_hook_session", 10)[0]!;
-      const journal = f.bridge.journal.find({ cwd: f.repository, session_id: `${host}-process`, turn_id: String(turn.last_turn_id) }, true)!;
+      const journal = f.bridge.journal.find({ cwd: f.repository, session_host: host, session_id: `${host}-process`, turn_id: String(turn.last_turn_id) }, true)!;
       assert.equal((journal.signals as JsonObject[]).length, 3);
       assert.equal((journal.verification_receipts as JsonObject[]).length, 2,
         JSON.stringify((journal.signals as JsonObject[]).map(signal => ({ kind: signal.kind, outcome: signal.outcome, verifier: signal.verifier }))));

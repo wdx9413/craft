@@ -19,8 +19,12 @@ test("legacy formal knowledge migration is read-only, candidate-first, deduplica
   const root = await mkdtemp(join(tmpdir(), "craft-legacy-migration-")); const legacy = await mkdtemp(join(tmpdir(), "legacy-knowledge-")); const pages = join(legacy, "data", "pages", "workflows"); await mkdir(pages, { recursive: true }); await writeFile(join(pages, "eligible.md"), eligible); await writeFile(join(pages, "sensitive.md"), sensitive); await writeFile(join(pages, "heading.md"), `---\nstatus: confirmed\ncategory: workflows\nknowledge_type: workflow\nevidence_type: test\nevidence_ref: x\nreuse_reason: heading fallback\n---\n# Heading fallback\n`);
     const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
-    for (const scopeId of ["legacy:project:demo", "legacy:project:shared"]) store.create("scope_alias", `path-${scopeId}`, {
-      scope: { kind: "project", id: `project:${scopeId}` }, alias_kind: "path", alias: root, alias_digest: stableDigest(root), status: "active" });
+    for (const scopeId of ["legacy:project:demo", "legacy:project:shared"]) {
+      const projectRoot = join(root, scopeId.endsWith("demo") ? "demo-project" : "shared-project");
+      await mkdir(projectRoot);
+      store.create("scope_alias", `path-${scopeId}`, {
+        scope: { kind: "project", id: `project:${scopeId}` }, alias_kind: "path", alias: projectRoot, alias_digest: stableDigest(projectRoot), status: "active" });
+    }
     await assert.rejects(Promise.resolve().then(() => service.legacyKnowledgeMigrationDiscover({ source_root: legacy })), /offline-only/);
     await assert.rejects(service.legacyKnowledgeMigrationDiscover({ source_root: join(legacy, "missing"), offline: true }), /ENOENT/);
     const discovered = await service.legacyKnowledgeMigrationDiscover({ migration_id: "migration", source_root: legacy, offline: true }); const migration = discovered.migration as JsonObject; const entries = migration.entries as JsonObject[];

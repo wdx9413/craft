@@ -26,6 +26,7 @@ function record(row: Record<string, unknown>): JsonObject {
 export class TraceShardStore {
   readonly directory: string;
   #databases = new Map<number, DatabaseSync>();
+  #readDatabases = new Map<number, DatabaseSync>();
   #depth = new Map<number, number>();
 
   constructor(dataRoot: string) { this.directory = join(dataRoot, "trace", "v1"); }
@@ -38,7 +39,7 @@ export class TraceShardStore {
   private file(shard: number): string { return join(this.directory, `${shard.toString(16).padStart(2, "0")}.db`); }
 
   private database(shard: number, create: boolean): DatabaseSync | null {
-    const current = this.#databases.get(shard);
+    const current = create || (this.#depth.get(shard) ?? 0) > 0 ? this.#databases.get(shard) : this.#readDatabases.get(shard);
     if (current) return current;
     const file = this.file(shard);
     if (!create && !existsSync(file)) return null;
@@ -51,12 +52,14 @@ export class TraceShardStore {
       const stat = lstatSync(file);
       if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Trace database must be a regular file");
     }
-    const database = new DatabaseSync(file);
+    const database = new DatabaseSync(file, { readOnly: !create });
     try {
       database.exec(`PRAGMA busy_timeout=${sqliteTraceBusyTimeoutMs()}; PRAGMA foreign_keys=ON;`);
       if (create && String((database.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toLowerCase() !== "wal")
         database.exec("PRAGMA journal_mode=WAL;");
-      if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get()) database.exec(`BEGIN IMMEDIATE;
+      if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get()) {
+        if (!create) throw new Error("Trace shard records are unavailable");
+        database.exec(`BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS records(
       kind TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,
       payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
@@ -66,6 +69,7 @@ export class TraceShardStore {
       CREATE TABLE IF NOT EXISTS events(stream TEXT NOT NULL,sequence INTEGER NOT NULL,event_type TEXT NOT NULL,
         payload_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(stream,sequence));
       COMMIT;`);
+      }
       if (create) {
         const lookupExisted = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='hook_signal_lookup'").get() !== undefined;
         database.exec(`CREATE TABLE IF NOT EXISTS hook_signal_lookup(
@@ -82,7 +86,7 @@ export class TraceShardStore {
             AND json_extract(r.payload_json,'$.session_id') IS NOT NULL AND json_extract(r.payload_json,'$.turn_id') IS NOT NULL`);
       }
     } catch (error) { database.close(); throw error; }
-    this.#databases.set(shard, database);
+    (create ? this.#databases : this.#readDatabases).set(shard, database);
     return database;
   }
 
@@ -178,15 +182,15 @@ export class TraceShardStore {
   }
 
   /** Read only the signals for one Host turn; avoid decoding every Hook signal in every shard. */
-  hookSignalsForTurn(scopeKind: string, scopeId: string, sessionId: string, turnId: string, limit: number): JsonObject[] {
+  hookSignalsForTurn(scopeKind: string, scopeId: string, sessionId: string, turnId: string, limit: number, host?: string): JsonObject[] {
     if (!scopeKind || !scopeId || !sessionId || !turnId || !Number.isSafeInteger(limit) || limit <= 0) return [];
     const records: JsonObject[] = [];
     for (const [, database] of this.existing()) {
       if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='hook_signal_lookup'").get()) continue;
       const rows = database.prepare(`SELECT r.* FROM hook_signal_lookup l JOIN records r
         ON r.kind='codex_hook_signal' AND r.id=l.id AND r.version=l.version
-        WHERE l.scope_kind=? AND l.scope_id=? AND l.session_id=? AND l.turn_id=? LIMIT ?`)
-        .all(scopeKind, scopeId, sessionId, turnId, limit) as Array<Record<string, unknown>>;
+        WHERE l.scope_kind=? AND l.scope_id=? AND l.session_id=? AND l.turn_id=? AND (? IS NULL OR json_extract(r.payload_json, '$.session_host')=?) LIMIT ?`)
+        .all(scopeKind, scopeId, sessionId, turnId, host ?? null, host ?? null, limit) as Array<Record<string, unknown>>;
       records.push(...rows.map(record));
     }
     return records.sort((a, b) => Number(a.observed_at_ms ?? Date.parse(String(a.created_at)))
@@ -223,9 +227,9 @@ export class TraceShardStore {
   }
 
   remove(traceId: string, eventIds: readonly string[], feedbackIds: readonly string[], telemetryIds: readonly string[]): number {
-    const database = this.database(this.shard(traceId), false);
-    if (!database) return 0;
+    if (!this.database(this.shard(traceId), false)) return 0;
     return this.transaction(traceId, () => {
+      const database = this.database(this.shard(traceId), true)!;
       let changes = Number(database.prepare("DELETE FROM records WHERE kind='trace' AND id=?").run(traceId).changes);
       for (const [kind, ids] of [["trace_event", eventIds], ["trace_feedback", feedbackIds], ["telemetry_event", telemetryIds]] as const)
         for (const id of ids) changes += Number(database.prepare("DELETE FROM records WHERE kind=? AND id=? AND json_extract(payload_json,'$.trace_id')=?").run(kind, id, traceId).changes);
@@ -280,5 +284,5 @@ export class TraceShardStore {
     });
   }
 
-  close(): void { for (const database of this.#databases.values()) database.close(); this.#databases.clear(); this.#depth.clear(); }
+  close(): void { for (const database of [...this.#databases.values(), ...this.#readDatabases.values()]) database.close(); this.#databases.clear(); this.#readDatabases.clear(); this.#depth.clear(); }
 }

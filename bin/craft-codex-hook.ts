@@ -5,6 +5,7 @@ import { HookSignalSanitizer } from "../core/interfaces/codex-hook-signal-saniti
 import { randomUUID } from "node:crypto";
 import { beginHookRuntimeDiagnostic, hookStorageFailureDetails } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
 import { operationErrorCode } from "../common/craft-common-log/src/index.ts";
+import { launchMemoryArchiveWorker, MEMORY_ARCHIVE_WORKER_FLAG, runMemoryArchiveWorker } from "../core/interfaces/memory-archive-worker.ts";
 
 type CodexHookMember = "context" | "knowledge" | "memory" | "experience";
 
@@ -25,6 +26,12 @@ async function main(): Promise<void> {
   const inputReadMs = performance.now() - inputReadStarted;
   const inputParseStarted = performance.now();
   const input = JSON.parse(raw);
+  const hostIndex = process.argv.indexOf("--host");
+  if (hostIndex >= 0) {
+    const host = process.argv[hostIndex + 1];
+    if (host !== "codex" && host !== "claude") throw new Error("--host must be codex or claude");
+    input.session_host = host;
+  } else input.session_host = "codex";
   const inputParseMs = performance.now() - inputParseStarted;
   const component = member(process.argv.slice(2));
   const event = typeof input.hook_event_name === "string" ? input.hook_event_name : "";
@@ -35,6 +42,7 @@ async function main(): Promise<void> {
         event: event as "SessionStart" | "UserPromptSubmit" | "PostToolUse" | "Stop" | "SessionEnd" | "PreCompact",
         ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}) });
   } catch { /* Diagnostics must never delay or prevent the Host Hook. */ }
+  if (event === "SessionStart" && process.argv[1]) launchMemoryArchiveWorker(process.argv[1], craftPaths().root);
   // Context has no SessionStart work: its bridge deliberately returns an empty
   // result for this event. Keep the content-free runtime receipt, but avoid
   // opening SQLite and constructing the full service for a pure no-op.
@@ -85,7 +93,7 @@ async function main(): Promise<void> {
     serviceOpenMs = performance.now() - serviceOpenStarted;
     const handlerStarted = performance.now();
     let output;
-    try { output = await new CodexHookBridge(service).handle(component, input); }
+    try { output = await new CodexHookBridge(service, () => { if (process.argv[1]) launchMemoryArchiveWorker(process.argv[1], store.paths.root); }).handle(component, input); }
     finally { handlerMs = performance.now() - handlerStarted; }
     const outputStarted = performance.now();
     process.stdout.write(`${JSON.stringify(output)}\n`);
@@ -111,4 +119,7 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch(() => { process.stdout.write("{}\n"); process.exitCode = 0; });
+if (process.argv[2] === MEMORY_ARCHIVE_WORKER_FLAG) {
+  process.env.CRAFT_HOOK_MODE = "0";
+  runMemoryArchiveWorker().catch(() => { process.exitCode = 1; });
+} else main().catch(() => { process.stdout.write("{}\n"); process.exitCode = 0; });

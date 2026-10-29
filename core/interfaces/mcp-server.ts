@@ -16,6 +16,8 @@ import type { McpHandler } from "./mcp/handler-types.js";
 import { ComponentTraceKernel, type ComponentTraceResult } from "../component-trace.ts";
 import { JsonlTelemetryJournal, observeOperation, operationErrorCode, withoutOperationPersistence, type OperationEvent } from "../../common/craft-common-log/src/index.ts";
 import { validateJsonSchema, type JsonValue } from "../json-schema.ts";
+import { CraftOperationError } from "../operation-error.ts";
+import { DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from "../../common/craft-common-base/src/context-assets.ts";
 import { CONTEXT_ROUTED_TOOL_NAMES } from "../mcp/context-tools.ts";
 import { formatContextResponse, resolveContextResponseDetail } from "../context-response-projection.ts";
 export { COMPONENT_SURFACES, COMPONENT_SURFACE_NAMES, DOMAIN_SURFACE_NAMES, SURFACE_NAMES, SURFACE_RULES, domainSurfaceOf } from "./mcp/surface-registry.ts";
@@ -194,6 +196,16 @@ export class McpServer {
       // Standalone contracts are checked at the wire boundary, including calls
       // from clients that do not validate JSON Schema themselves.
       if (this.mode.endsWith("-daily") || this.mode === "component-codebase" || this.mode === "component-context-agent") {
+        if (name === "craft_context_open") {
+          for (const [field, maximum] of [["max_items", DEFAULT_CONTEXT_MAX_ITEMS], ["max_chars", DEFAULT_CONTEXT_MAX_CHARS]] as const) {
+            const value = (supplied as JsonObject)[field];
+            if (typeof value === "number" && Number.isSafeInteger(value) && (value < 1 || value > maximum)) {
+              throw new CraftOperationError("LIMIT_EXCEEDED", "budget_validation", value > maximum
+                ? `Context budget exceeds the configured maximum: max_items <= ${DEFAULT_CONTEXT_MAX_ITEMS}, max_chars <= ${DEFAULT_CONTEXT_MAX_CHARS}; omit these parameters to use defaults`
+                : `Context ${field} must be between 1 and ${maximum}`, { budget: field, minimum: 1, maximum });
+            }
+          }
+        }
         validateJsonSchema(supplied as JsonValue, this.tools.find((tool) => tool.name === name)!.inputSchema);
       }
       const result = SYSCALL_VERBS.includes(name)

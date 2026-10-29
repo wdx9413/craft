@@ -292,17 +292,28 @@ test("verified feedback counts each matching revision once and ignores stale or 
     const baseline = (await f.reader.contribute(context)).items[0]!.ranking_weight;
     assert(typeof baseline === "number");
     const ref = { memory_id: memory.id, content_digest: memory.content_digest };
-    f.store.create("context_feedback", "first", { outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
+    const evidence = f.store.create("evidence", "feedback-evidence", { source_type: "program", confidence: "confirmed", metadata: { context_receipt_id: "receipt", verdict: "passed" } });
+    const binding = { receipt_id: "receipt", usage_stage: "used", verified_evidence_refs: [{ id: evidence.id, version: evidence.version }] };
+    f.store.create("context_feedback", "legacy", { outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
+    assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, baseline);
+    f.store.create("context_feedback", "first", { ...binding, outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
     const once = (await f.reader.contribute(context)).items[0]!.ranking_weight;
     assert(typeof once === "number");
     assert(once > baseline);
-    f.store.save("context_feedback", "first", { outcome: "helpful", evidence_verified: true, memory_refs: [ref, ref] });
+    f.store.save("context_feedback", "first", { ...binding, outcome: "helpful", evidence_verified: true, memory_refs: [ref, ref] });
     for (const [id, extra] of [["stale", { memory_refs: [{ ...ref, content_digest: "old" }] }], ["missing", {}], ["malformed", { memory_refs: [null, "invalid", {}] }], ["unverified", { memory_refs: [ref], evidence_verified: false }], ["unhelpful", { memory_refs: [ref], outcome: "unhelpful" }]] as const) {
-      f.store.create("context_feedback", id, { outcome: "helpful", evidence_verified: true, ...extra });
+      f.store.create("context_feedback", id, { ...binding, outcome: "helpful", evidence_verified: true, ...extra });
     }
     assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, once);
-    f.store.create("context_feedback", "second", { outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
+    f.store.create("context_feedback", "second", { ...binding, outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
+    assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, once);
+    const secondEvidence = f.store.create("evidence", "feedback-evidence-2", { source_type: "program", confidence: "confirmed", metadata: { context_receipt_id: "receipt-2", verdict: "passed" } });
+    f.store.create("context_feedback", "third", { receipt_id: "receipt-2", usage_stage: "used", verified_evidence_refs: [{ id: secondEvidence.id, version: secondEvidence.version }], outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
     const twice = (await f.reader.contribute(context)).items[0]!.ranking_weight;
     assert(typeof twice === "number" && twice > once);
+    f.store.save("evidence", String(evidence.id), { ...evidence, confidence: "rejected" });
+    assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, once);
+    f.store.save("evidence", String(secondEvidence.id), { ...secondEvidence, confidence: "rejected" });
+    assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, baseline);
   } finally { await f.close(); }
 });

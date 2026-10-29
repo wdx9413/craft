@@ -1,4 +1,4 @@
-import { access, cp, mkdir, readFile, rm } from "node:fs/promises";
+import { access, chmod, cp, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, resolve, sep } from "node:path";
@@ -56,10 +56,17 @@ export async function prepareRuntimeArtifact(root: string, binary = process.exec
     let manifestPath: string;
     try { manifestPath = createRequire(resolve(parent, "package.json")).resolve(`${name}/package.json`); }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "MODULE_NOT_FOUND") throw error;
-      const fallback = workspaceManifest(name);
-      if (!fallback) throw error;
-      manifestPath = fallback;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ERR_PACKAGE_PATH_NOT_EXPORTED") {
+        let folder = dirname(createRequire(resolve(parent, "package.json")).resolve(name));
+        while (!existsSync(resolve(folder, "package.json")) && dirname(folder) !== folder) folder = dirname(folder);
+        manifestPath = resolve(folder, "package.json");
+      } else {
+        if (code !== "MODULE_NOT_FOUND") throw error;
+        const fallback = workspaceManifest(name);
+        if (!fallback) throw error;
+        manifestPath = fallback;
+      }
     }
     const source = dirname(manifestPath);
     const dependency = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -85,6 +92,10 @@ export async function prepareRuntimeArtifact(root: string, binary = process.exec
   for (const entry of packages) {
     await cp(entry.source, resolve(output, "node_modules", entry.name), { recursive: true, dereference: true });
   }
-  await cp(binary, resolve(output, basename(binary)));
+  const runtimeBinary = resolve(output, basename(binary));
+  await cp(binary, runtimeBinary);
+  // Tauri copies resources over its previous build output; a read-only Node
+  // binary would make the next build fail while replacing that copy.
+  await chmod(runtimeBinary, (await stat(runtimeBinary)).mode | 0o200);
   return output;
 }

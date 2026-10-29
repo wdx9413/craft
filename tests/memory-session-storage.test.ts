@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -74,6 +76,31 @@ test("session Memory uses Host-scoped storage and retires the old projection aft
   } finally { f.cleanup(); }
 });
 
+test("session Memory pages keep Host scopes separate and return latest metadata", async () => {
+  const f = await fixture();
+  try {
+    const codex = sessionStorageScopeId("codex", f.id), claude = sessionStorageScopeId("claude", f.id);
+    for (const [index, scopeId] of [codex, codex, codex, claude].entries()) {
+      f.store.create("memory_candidate", `page-${index}`, { scope: { kind: "session", id: scopeId }, status: "candidate" });
+    }
+    const updated = f.store.get("memory_candidate", "page-1");
+    f.store.save("memory_candidate", "page-1", { ...updated, status: "approved" });
+    const first = f.store.listSessionMemoryPage("memory_candidate", codex, "", 2);
+    assert.deepEqual(first.records.map(item => item.id), ["page-0", "page-1"]);
+    assert.equal(first.records[1]!.status, "approved");
+    assert.equal(first.has_more, true);
+    const second = f.store.listSessionMemoryPage("memory_candidate", codex, first.next_cursor!, 2);
+    assert.deepEqual(second.records.map(item => item.id), ["page-2"]);
+    assert.equal(second.has_more, false);
+    assert.equal(second.next_cursor, null);
+    assert.deepEqual(f.store.listSessionMemoryPage("memory_candidate", claude).records.map(item => item.id), ["page-3"]);
+    assert.throws(() => f.store.listSessionMemoryPage("evidence", codex), /Unsupported/u);
+    assert.throws(() => f.store.listSessionMemoryPage("memory_candidate", codex, null as never), /after_id/u);
+    for (const limit of [0, 501, 1.5]) assert.throws(() => f.store.listSessionMemoryPage("memory_candidate", codex, "", limit), /page limit/u);
+  } finally { f.cleanup(); }
+});
+
+
 test("Memory projection keeps the Windows permission path portable", async () => {
   const f = await fixture();
   const originalPlatform = process.platform;
@@ -111,7 +138,543 @@ test("archive removes both owned session locations and candidates without requir
   } finally { f.cleanup(); }
 });
 
-test("archive deletes the session Memory body from its canonical content directory", async () => {
+test("session Memory publication rechecks archive state after acquiring the publication lock", async t => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const original = f.store.transaction.bind(f.store);
+    const intercepted = t.mock.method(f.store, "transaction", (operation: Parameters<typeof f.store.transaction>[0]) => {
+      intercepted.mock.restore();
+      f.files.archiveSession(f.id);
+      return original(operation);
+    });
+    assert.throws(() => f.store.create("memory_candidate", "racing-candidate", {
+      scope: { kind: "session", id: f.id }, status: "candidate",
+    }), /Archived session Memory/u);
+    assert.equal(f.store.find("memory_candidate", "racing-candidate"), null);
+    assert.equal(f.files.isSessionArchived(f.id), true);
+    assert.equal(existsSync(join(f.store.sessionStorageRoot(f.id), "memory")), false);
+  } finally { f.cleanup(); }
+});
+
+test("a separate process cannot publish session Memory after archive wins the race", { timeout: 15_000 }, async () => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const script = `import { readSync } from "node:fs";
+      import { CraftStore } from "./core/infrastructure/store.ts";
+      import { craftPaths } from "./core/infrastructure/paths.ts";
+      const store = await new CraftStore(craftPaths(process.argv[1])).open();
+      const transaction = store.transaction.bind(store);
+      store.transaction = (operation) => { process.stdout.write("ready\\n"); readSync(0, Buffer.alloc(1), 0, 1, null); return transaction(operation); };
+      try { store.create("memory_candidate", "child-race", { scope: { kind: "session", id: process.argv[2] }, status: "candidate" }); process.exitCode = 2; }
+      catch (error) { if (!String(error).includes("Archived session Memory")) { process.stderr.write(String(error)); process.exitCode = 3; } }
+      finally { store.close(); }`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script, f.store.paths.root, f.id], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] });
+    let errors = "";
+    child.stderr.setEncoding("utf8"); child.stderr.on("data", value => { errors += value; });
+    const ready = new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.stdout.once("data", chunk => String(chunk).includes("ready") ? resolve() : reject(new Error("child did not reach publication")));
+      child.once("exit", code => reject(new Error(`child exited before publication: ${code}`)));
+    });
+    const completed = new Promise<number | null>(resolve => child.once("exit", resolve));
+    try {
+      await ready;
+      f.files.archiveSession(f.id);
+      child.stdin.end("x");
+      assert.equal(await completed, 0, errors);
+      assert.equal(f.store.find("memory_candidate", "child-race"), null);
+    } finally { child.kill(); }
+  } finally { f.cleanup(); }
+});
+
+test("a racing session body write does not recreate the archived Memory directory", { timeout: 15_000 }, async () => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const script = `import { readSync } from "node:fs";
+      import { CraftStore } from "./core/infrastructure/store.ts";
+      import { craftPaths } from "./core/infrastructure/paths.ts";
+      const store = await new CraftStore(craftPaths(process.argv[1])).open();
+      const namedPath = store.contentStore.namedPathFor.bind(store.contentStore);
+      store.contentStore.namedPathFor = (...args) => { const path = namedPath(...args); process.stdout.write("ready\\n"); readSync(0, Buffer.alloc(1), 0, 1, null); return path; };
+      try { store.contentStore.writeSync({ kind: "memory", record_id: "racing-body", version: 1, scope: "session:" + process.argv[2], status: "active", sensitivity: "internal", source_id: "source", body: "temporary" }); }
+      catch (error) { process.stderr.write(String(error)); process.exitCode = 3; }
+      finally { store.close(); }`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script, f.store.paths.root, f.id], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] });
+    let errors = "";
+    child.stderr.setEncoding("utf8"); child.stderr.on("data", value => { errors += value; });
+    const ready = new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.stdout.once("data", chunk => String(chunk).includes("ready") ? resolve() : reject(new Error("child did not reach body write")));
+      child.once("exit", code => reject(new Error(`child exited before body write: ${code}`)));
+    });
+    const completed = new Promise<number | null>(resolve => child.once("exit", resolve));
+    try {
+      await ready;
+      assert.throws(() => f.files.archiveSession(f.id), /SESSION_MEMORY_BUSY/u);
+      assert.throws(() => f.files.sync({ kind: "session", id: f.id }), /SESSION_MEMORY_BUSY/u);
+      child.stdin.end("x");
+      assert.equal(await completed, 0, errors);
+      f.files.archiveSession(f.id);
+      assert.equal(existsSync(join(f.store.sessionStorageRoot(f.id), "memory")), false);
+    } finally { child.kill(); }
+  } finally { f.cleanup(); }
+});
+
+test("session Memory write guard isolates sessions and releases on failure", async () => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const otherId = `${f.id}-other`; f.createSession(otherId);
+    const body = { kind: "memory" as const, record_id: "guarded-body", version: 1, scope: `session:${f.id}`,
+      status: "active", sensitivity: "internal", source_id: "source", body: "original" };
+    const reference = f.store.contentStore.writeSync(body);
+    assert.throws(() => f.store.withSessionMemoryWriteGuard(f.id, () => {
+      assert.throws(() => f.files.archiveSession(f.id), /SESSION_MEMORY_BUSY/u);
+      assert.throws(() => f.store.contentStore.writeSync(body), /SESSION_MEMORY_BUSY/u);
+      assert.throws(() => f.store.contentStore.rewriteSync(body), /SESSION_MEMORY_BUSY/u);
+      assert.throws(() => f.store.contentStore.relocateSync(reference, body.scope), /SESSION_MEMORY_BUSY/u);
+      assert.equal(f.files.archiveSession(otherId).status, "archived");
+      throw new Error("injected guarded failure");
+    }), /injected guarded failure/u);
+    assert.equal(f.files.archiveSession(f.id).status, "archived");
+  } finally { f.cleanup(); }
+});
+
+test("session Memory write guard rejects a symbolic-link lock", async () => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const lock = join(f.store.sessionStorageRoot(f.id), ".memory-write-lock.db");
+    symlinkSync(join(f.root, "foreign"), lock);
+    assert.throws(() => f.files.archiveSession(f.id), /write lock is unsafe/u);
+    assert.equal(f.store.find("memory_ledger", `memory-${f.id}`)?.status, "active");
+  } finally { f.cleanup(); }
+});
+
+test("session Memory write guard recovers after its owner process crashes", { timeout: 15_000 }, async () => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const script = `import { readSync } from "node:fs";
+      import { CraftStore } from "./core/infrastructure/store.ts";
+      import { craftPaths } from "./core/infrastructure/paths.ts";
+      const store = await new CraftStore(craftPaths(process.argv[1])).open();
+      store.withSessionMemoryWriteGuard(process.argv[2], () => { process.stdout.write("ready\\n"); readSync(0, Buffer.alloc(1), 0, 1, null); });
+      store.close();`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script, f.store.paths.root, f.id], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] });
+    const ready = new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.stdout.once("data", chunk => String(chunk).includes("ready") ? resolve() : reject(new Error("child did not acquire the guard")));
+      child.once("exit", code => reject(new Error(`child exited before acquiring the guard: ${code}`)));
+    });
+    const completed = new Promise<NodeJS.Signals | null>(resolve => child.once("exit", (_code, signal) => resolve(signal)));
+    try {
+      await ready;
+      assert.throws(() => f.files.archiveSession(f.id), /SESSION_MEMORY_BUSY/u);
+      child.kill("SIGKILL");
+      assert.equal(await completed, "SIGKILL");
+      assert.equal(f.files.archiveSession(f.id).status, "archived");
+    } finally { child.kill(); }
+  } finally { f.cleanup(); }
+});
+
+test("session Memory write guard preserves non-contention database errors", async t => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const exec = DatabaseSync.prototype.exec;
+    const fault = t.mock.method(DatabaseSync.prototype, "exec", function(this: DatabaseSync, sql: string) {
+      if (sql === "BEGIN IMMEDIATE") throw new Error("injected storage failure");
+      return exec.call(this, sql);
+    });
+    try { assert.throws(() => f.files.archiveSession(f.id), /injected storage failure/u); }
+    finally { fault.mock.restore(); }
+    assert.equal(f.store.find("memory_ledger", `memory-${f.id}`)?.status, "active");
+  } finally { f.cleanup(); }
+});
+
+test("session Memory archive resumes after interrupted deletion and store restart", async t => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    f.store.create("memory_candidate", "resume-candidate", { scope: { kind: "session", id: f.id }, status: "candidate" });
+    const remove = f.store.remove.bind(f.store);
+    const fault = t.mock.method(f.store, "remove", (kind: string, id: string) => {
+      if (kind === "memory_candidate") throw new Error("injected archive interruption");
+      return remove(kind, id);
+    });
+    assert.throws(() => f.files.archiveSession(f.id), /injected archive interruption/u);
+    fault.mock.restore();
+    assert.equal(f.files.isSessionArchived(f.id), true);
+    assert.throws(() => f.createSession(), /Archived session Memory/u);
+    f.store.close();
+    const reopened = await new CraftStore(craftPaths(join(f.root, "data"))).open();
+    try {
+      const files = new MemoryFileStore(reopened);
+      const result = files.archiveSession(f.id);
+      assert.equal(result.status, "archived");
+      assert.equal(result.memory_count, 1);
+      assert.equal(result.candidate_count, 1);
+      assert.equal(reopened.find("memory_candidate", "resume-candidate"), null);
+      assert.equal(files.archiveSession(f.id).idempotent, true);
+    } finally { reopened.close(); }
+  } finally { f.cleanup(); }
+});
+
+test("session archive inventories again after fencing a concurrent writer", async t => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const create = f.store.create.bind(f.store);
+    const intercepted = t.mock.method(f.store, "create", (kind: string, id: string, payload: Record<string, unknown>) => {
+      if (kind === "memory_session_archive") {
+        intercepted.mock.restore();
+        create("memory_candidate", "before-fence", { scope: { kind: "session", id: f.id }, status: "candidate" });
+      }
+      return create(kind, id, payload);
+    });
+    const result = f.files.archiveSession(f.id);
+    assert.equal(result.candidate_count, 1);
+    assert.equal(f.store.find("memory_candidate", "before-fence"), null);
+  } finally { f.cleanup(); }
+});
+
+test("session archive retains its fence when paged inventory fails", async t => {
+  for (const failing of ["memory_ledger", "memory_candidate", "memory_confirmation", "memory_observation_intent"]) {
+    const f = await fixture();
+    try {
+      f.createSession();
+      const list = f.store.listSessionMemoryPage.bind(f.store);
+      const fault = t.mock.method(f.store, "listSessionMemoryPage", (kind: string, ...args: Parameters<typeof f.store.listSessionMemoryPage> extends [string, ...infer R] ? R : never) => {
+        if (kind === failing) throw new Error("injected page failure");
+        return list(kind, ...args);
+      });
+      assert.throws(() => f.files.archiveSession(f.id), /injected page failure/u);
+      fault.mock.restore();
+      assert.equal(f.files.isSessionArchived(f.id), true);
+      assert.equal(f.store.find("memory_ledger", `memory-${f.id}`)?.status, "active");
+      assert.equal(f.files.archiveSession(f.id).memory_count, 1);
+    } finally { f.cleanup(); }
+  }
+});
+
+test("session archive rejects an unknown persisted state", async () => {
+  const f = await fixture();
+  try {
+    const suffix = createHash("sha256").update(f.id).digest("hex").slice(-32);
+    f.store.create("memory_session_archive", `memory_session_archive_${suffix}`, { status: "invalid" });
+    assert.throws(() => f.files.archiveSession(f.id), /archive state is invalid/u);
+  } finally { f.cleanup(); }
+});
+
+test("bounded session archive rejects an invalid inventory checkpoint", async () => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    const suffix = createHash("sha256").update(f.id).digest("hex").slice(-32);
+    f.store.create("memory_session_archive", `memory_session_archive_${suffix}`, { status: "archiving", inventory_index: 4 });
+    assert.throws(() => f.files.archiveSessionStep(f.id), /inventory checkpoint is invalid/u);
+    assert.equal(f.store.find("memory_ledger", `memory-${f.id}`)?.status, "active");
+  } finally { f.cleanup(); }
+});
+
+test("archive never deletes a foreign Context record returned by a page", async t => {
+  const f = await fixture();
+  try {
+    const queued = f.files.queueSessionArchive("context-owner", "codex");
+    f.store.save("memory_session_archive", String(queued.id), { ...queued, inventory_complete: true, observations_complete: true });
+    let first = true;
+    t.mock.method(f.store, "listSessionContextPage", () => {
+      if (first) { first = false; return { records: [
+        { id: "foreign-scope", session_id: "context-owner", session_host: "codex", session_scope_id: "other" },
+        { id: "foreign-host", session_id: "context-owner", session_host: "other", session_scope_id: sessionStorageScopeId("codex", "context-owner") },
+        { id: "foreign-session", session_id: "other", session_host: "codex", session_scope_id: sessionStorageScopeId("codex", "context-owner") },
+      ], has_more: true, next_cursor: "foreign-session" }; }
+      return { records: [], has_more: false, next_cursor: null };
+    });
+    const remove = t.mock.method(f.store, "remove", f.store.remove.bind(f.store));
+    assert.equal(f.files.archiveSessionStep("context-owner", "codex", 100).status, "archived");
+    assert.equal(remove.mock.calls.some(call => String(call.arguments[1]).startsWith("foreign-")), false);
+  } finally { f.cleanup(); }
+});
+
+test("archive quarantines invalid Context cleanup checkpoints", async () => {
+  for (const checkpoint of [{ context_cleanup_index: -1 }, { context_cleanup_index: 2 },
+    { context_cleanup_index: 0.5 }, { context_cleanup_index: 0, context_cleanup_cursor: 42 }]) {
+    const f = await fixture();
+    try {
+      const queued = f.files.queueSessionArchive("invalid-context-checkpoint", "codex");
+      f.store.save("memory_session_archive", String(queued.id), { ...queued, inventory_complete: true, observations_complete: true, ...checkpoint });
+      const result = f.files.runQueuedArchiveSteps();
+      assert.equal((result.outcomes as Array<Record<string, unknown>>)[0]?.needs_reconciliation, true);
+      assert.equal(f.store.get("memory_session_archive", String(queued.id)).retry_state, "requires_reconciliation");
+      assert.equal(f.files.runQueuedArchiveSteps().attempted, 0);
+    } finally { f.cleanup(); }
+  }
+});
+
+test("archive removes multiple pages and resumes after a page boundary", { timeout: 60_000 }, async () => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    for (let i = 0; i < 501; i++) f.store.create("memory_candidate", `paged-${String(i).padStart(4, "0")}`,
+      { scope: { kind: "session", id: f.id }, status: "candidate" });
+    f.store.database.exec("CREATE TEMP TRIGGER archive_fault BEFORE DELETE ON records WHEN OLD.kind='memory_candidate' AND OLD.id='paged-0475' BEGIN SELECT RAISE(ABORT,'injected page interruption'); END");
+    assert.throws(() => f.files.archiveSession(f.id), /injected page interruption/u);
+    f.store.database.exec("DROP TRIGGER archive_fault");
+    assert.equal(f.store.listSessionMemoryPage("memory_candidate", f.id).records.length, 51);
+    const result = f.files.archiveSession(f.id);
+    assert.equal(result.candidate_count, 501);
+    assert.equal(f.store.listSessionMemoryPage("memory_candidate", f.id).records.length, 0);
+  } finally { f.cleanup(); }
+});
+
+test("archive handles more than ten thousand session records without touching another session", { timeout: 180_000 }, async t => {
+  const f = await fixture();
+  try {
+    const otherId = `${f.id}-other`;
+    f.store.create("memory_candidate", "other-session", { scope: { kind: "session", id: otherId }, status: "candidate" });
+    for (let i = 0; i < 10_001; i++) f.store.create("memory_candidate", `large-${String(i).padStart(5, "0")}`,
+      { scope: { kind: "session", id: f.id }, status: "candidate" });
+    const started = performance.now();
+    const result = f.files.archiveSession(f.id);
+    t.diagnostic(`archive_ms=${Math.round(performance.now() - started)} records=10001`);
+    assert.equal(result.candidate_count, 10_001);
+    assert.equal(f.store.listSessionMemoryPage("memory_candidate", f.id).records.length, 0);
+    assert.equal(f.store.get("memory_candidate", "other-session").status, "candidate");
+  } finally { f.cleanup(); }
+});
+
+test("archive does not create long-term observations from an intent without a candidate", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("memory_observation_intent", "no-candidate", { scope: { kind: "session", id: f.id }, content_free: true });
+    assert.equal(f.files.archiveSession(f.id).status, "archived");
+    assert.equal(f.store.list("memory_observation", 10).length, 0);
+    assert.equal(f.store.listSessionMemoryPage("memory_observation_intent", f.id).records.length, 0);
+  } finally { f.cleanup(); }
+});
+
+test("archive resumes observation verification after a completed page", { timeout: 60_000 }, async t => {
+  const f = await fixture();
+  try {
+    for (let i = 0; i < 501; i++) f.store.create("memory_observation_intent", `intent-${String(i).padStart(4, "0")}`,
+      { scope: { kind: "session", id: f.id }, candidate_id: `missing-${i}`, content_free: true });
+    const list = f.store.listSessionMemoryPage.bind(f.store);
+    let calls = 0;
+    const fault = t.mock.method(f.store, "listSessionMemoryPage", (kind: string, ...args: Parameters<typeof f.store.listSessionMemoryPage> extends [string, ...infer R] ? R : never) => {
+      if (kind === "memory_observation_intent" && ++calls === 4) throw new Error("injected observation page interruption");
+      return list(kind, ...args);
+    });
+    assert.throws(() => f.files.archiveSession(f.id), /injected observation page interruption/u);
+    fault.mock.restore();
+    const checkpoint = f.store.list("memory_session_archive", 10)[0]!;
+    assert.equal(checkpoint.observation_cursor, "intent-0499");
+    assert.equal(checkpoint.observations_complete, false);
+    assert.equal(f.files.archiveSession(f.id).status, "archived");
+    assert.equal(f.store.listSessionMemoryPage("memory_observation_intent", f.id).records.length, 0);
+  } finally { f.cleanup(); }
+});
+
+test("bounded session archive resumes durable checkpoints after store restart", { timeout: 60_000 }, async t => {
+  const f = await fixture();
+  try {
+    f.createSession();
+    for (let i = 0; i < 501; i++) f.store.create("memory_candidate", `step-${String(i).padStart(4, "0")}`,
+      { scope: { kind: "session", id: f.id }, status: "candidate" });
+    const timings: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const started = performance.now();
+      const step = f.files.archiveSessionStep(f.id);
+      timings.push(performance.now() - started);
+      assert.equal(step.status, "archiving");
+      assert.equal(step.pages_processed, 1);
+      assert.equal(step.content_deleted, false);
+    }
+    f.store.close();
+    const reopened = await new CraftStore(craftPaths(join(f.root, "data"))).open();
+    try {
+      const files = new MemoryFileStore(reopened);
+      let result: Record<string, unknown> = {};
+      let attempts = 0;
+      while (result.status !== "archived" && attempts++ < 20) {
+        const started = performance.now();
+        result = files.archiveSessionStep(f.id);
+        timings.push(performance.now() - started);
+        if (result.status === "archiving") assert.equal(result.pages_processed, 1);
+      }
+      assert.equal(result.status, "archived");
+      assert.equal(result.candidate_count, 501);
+      t.diagnostic(`steps=${timings.length} max_step_ms=${Math.round(Math.max(...timings))}`);
+      assert.equal(reopened.listSessionMemoryPage("memory_candidate", f.id).records.length, 0);
+      assert.equal(files.archiveSessionStep(f.id).idempotent, true);
+      for (const value of [0, 101, 1.5]) assert.throws(() => files.archiveSessionStep(f.id, undefined, value), /max_pages/u);
+      assert.throws(() => files.archiveSessionStep(" "), /session_id/u);
+    } finally { reopened.close(); }
+  } finally { f.cleanup(); }
+});
+
+test("queued session archive survives restart and drains through bounded steps", { timeout: 60_000 }, async () => {
+  const f = await fixture();
+  try {
+    const id = "queued-session", host = "codex", scope = sessionStorageScopeId(host, id);
+    f.store.bindSessionStorageHost(id, host);
+    for (let i = 0; i < 501; i++) f.store.create("memory_candidate", `queued-${String(i).padStart(4, "0")}`,
+      { scope: { kind: "session", id: scope }, status: "candidate" });
+    const queued = f.files.queueSessionArchive(id, host);
+    assert.equal(queued.status, "archiving");
+    assert.equal(f.files.queueSessionArchive(id, host).idempotent, true);
+    assert.throws(() => f.store.create("memory_candidate", "late-queue", { scope: { kind: "session", id: scope } }), /Archived session Memory/u);
+    f.store.close();
+    const reopened = await new CraftStore(craftPaths(join(f.root, "data"))).open();
+    try {
+      const files = new MemoryFileStore(reopened);
+      let attempts = 0, result: Record<string, unknown> = {};
+      do { result = files.runQueuedArchiveSteps(); attempts++; } while (Number(result.attempted) && attempts < 25);
+      assert.equal(result.attempted, 0);
+      assert.equal(reopened.listSessionMemoryPage("memory_candidate", scope).records.length, 0);
+      assert.equal(files.queueSessionArchive(id, host).status, "archived");
+      assert.throws(() => files.runQueuedArchiveSteps(0), /queue limit/u);
+      assert.throws(() => files.queueSessionArchive(" ", host), /session_id/u);
+    } finally { reopened.close(); }
+  } finally { f.cleanup(); }
+});
+
+test("failed archive jobs back off without starving other sessions", async t => {
+  const f = await fixture();
+  try {
+    f.files.queueSessionArchive("healthy", "codex");
+    const failed = f.files.queueSessionArchive("failing", "codex");
+    const step = f.files.archiveSessionStep.bind(f.files);
+    const injected = t.mock.method(f.files, "archiveSessionStep", (sessionId: string, host?: string, maxPages?: number) => {
+      if (sessionId === "failing") throw new Error("private failure detail");
+      return step(sessionId, host, maxPages);
+    });
+    try {
+      const first = f.files.runQueuedArchiveSteps(2);
+      assert.equal(first.attempted, 2);
+      assert.equal((first.outcomes as Array<Record<string, unknown>>).some(item => item.status === "failed"), true);
+      const saved = f.store.get("memory_session_archive", String(failed.id));
+      assert.equal(saved.consecutive_failures, 1);
+      assert.equal(JSON.stringify(saved).includes("private failure detail"), false);
+      assert.equal(f.files.runQueuedArchiveSteps(2).attempted, 1);
+    } finally { injected.mock.restore(); }
+  } finally { f.cleanup(); }
+});
+
+test("archive queue rejects invalid state and conflicting stored session identity", async () => {
+  const f = await fixture();
+  try {
+    const queued = f.files.queueSessionArchive("identity-check", "codex");
+    for (const changes of [{ status: "invalid" }, { session_scope_id: "other" }, { session_id: "other" }, { session_host: "other" }]) {
+      const current = f.store.get("memory_session_archive", String(queued.id));
+      f.store.save("memory_session_archive", String(queued.id), { ...queued, version: current.version, ...changes });
+      assert.throws(() => f.files.queueSessionArchive("identity-check", "codex"), /state is invalid|identity conflicts/u);
+    }
+  } finally { f.cleanup(); }
+});
+
+test("archive retries a legacy request without a failure count", async t => {
+  const f = await fixture();
+  try {
+    const queued = f.files.queueSessionArchive("legacy-retry", "codex");
+    const { consecutive_failures: _missing, ...legacy } = queued;
+    f.store.save("memory_session_archive", String(queued.id), legacy);
+    t.mock.method(f.files, "archiveSessionStep", () => { throw new Error("transient"); });
+    const result = f.files.runQueuedArchiveSteps();
+    assert.equal((result.outcomes as Array<Record<string, unknown>>)[0]?.backoff_recorded, true);
+    const saved = f.store.get("memory_session_archive", String(queued.id));
+    assert.equal(saved.consecutive_failures, 1);
+    assert.equal(saved.retry_state, "backoff");
+    assert.equal(f.files.runQueuedArchiveSteps().attempted, 0);
+  } finally { f.cleanup(); }
+});
+
+test("archive detects a tampered queued scope before cleanup", async t => {
+  const f = await fixture();
+  try {
+    const queued = f.files.queueSessionArchive("tampered", "codex");
+    f.store.save("memory_session_archive", String(queued.id), { ...queued, session_scope_id: "other" });
+    const cleanup = t.mock.method(f.files, "archiveSessionStep", () => { throw new Error("must not run"); });
+    const result = f.files.runQueuedArchiveSteps();
+    assert.equal(cleanup.mock.callCount(), 0);
+    assert.equal((result.outcomes as Array<Record<string, unknown>>)[0]?.needs_reconciliation, true);
+    assert.equal(f.store.get("memory_session_archive", String(queued.id)).retry_state, "requires_reconciliation");
+  } finally { f.cleanup(); }
+});
+
+test("archive retains its request if failure checkpoint cannot be saved", async t => {
+  const f = await fixture();
+  try {
+    const queued = f.files.queueSessionArchive("checkpoint-error", "codex");
+    t.mock.method(f.files, "archiveSessionStep", () => { throw "private failure"; });
+    t.mock.method(f.store, "save", () => { throw new Error("write failed"); });
+    const result = f.files.runQueuedArchiveSteps();
+    const outcome = (result.outcomes as Array<Record<string, unknown>>)[0]!;
+    assert.equal(outcome.error_type, "unknown");
+    assert.equal(outcome.backoff_recorded, false);
+    assert.equal(JSON.stringify(result).includes("private failure"), false);
+    assert.equal(f.store.get("memory_session_archive", String(queued.id)).status, "archiving");
+  } finally { f.cleanup(); }
+});
+
+test("unknown Context partition errors are retried without exposing details", async t => {
+  const f = await fixture();
+  try {
+    const queued = f.files.queueSessionArchive("unknown-context-error", "codex");
+    t.mock.method(f.files, "archiveSessionStep", () => { throw new Error("Context partition temporary error: secret"); });
+    const result = f.files.runQueuedArchiveSteps();
+    const saved = f.store.get("memory_session_archive", String(queued.id));
+    assert.equal(saved.retry_state, "backoff");
+    assert.equal(saved.last_error_code, null);
+    assert.equal((result.outcomes as Array<Record<string, unknown>>)[0]?.needs_reconciliation, false);
+    assert.equal(JSON.stringify(saved).includes("secret"), false);
+  } finally { f.cleanup(); }
+});
+
+test("archive records Context partition failures for reconciliation without storing details", async t => {
+  for (const [message, code] of [["Context partition digest mismatch: secret", "context_digest_mismatch"],
+    ["Context partition record is missing: secret", "context_record_missing"],
+    ["Context partition database is unavailable: secret", "context_database_missing"]] as const) {
+    const f = await fixture();
+    try {
+      const queued = f.files.queueSessionArchive("context-error", "codex");
+      const injected = t.mock.method(f.files, "archiveSessionStep", () => { throw new Error(message); });
+      try {
+        const result = f.files.runQueuedArchiveSteps();
+        assert.equal((result.outcomes as Array<Record<string, unknown>>)[0]?.needs_reconciliation, true);
+        const saved = f.store.get("memory_session_archive", String(queued.id));
+        assert.equal(saved.retry_state, "requires_reconciliation");
+        assert.equal(saved.last_error_code, code);
+        assert.equal(JSON.stringify(saved).includes("secret"), false);
+        assert.equal(f.files.runQueuedArchiveSteps().attempted, 0);
+      } finally { injected.mock.restore(); }
+    } finally { f.cleanup(); }
+  }
+});
+
+test("archive identity failures wait for reconciliation until explicitly requeued", async t => {
+  const f = await fixture();
+  try {
+    const queued = f.files.queueSessionArchive("invalid-job", "codex");
+    const injected = t.mock.method(f.files, "archiveSessionStep", () => { throw new Error("SESSION_ARCHIVE_OBSERVATION_UNVERIFIED: changed"); });
+    try {
+      const result = f.files.runQueuedArchiveSteps();
+      assert.equal((result.outcomes as Array<Record<string, unknown>>)[0]!.needs_reconciliation, true);
+      assert.equal(f.store.get("memory_session_archive", String(queued.id)).retry_state, "requires_reconciliation");
+      assert.equal(f.files.runQueuedArchiveSteps().attempted, 0);
+    } finally { injected.mock.restore(); }
+    assert.equal(f.files.queueSessionArchive("invalid-job", "codex").retry_state, "requires_reconciliation");
+    assert.equal(f.files.runQueuedArchiveSteps().attempted, 0);
+    assert.equal(f.files.queueSessionArchive("invalid-job", "codex", { retry_reconciled: true }).retry_state, "ready");
+    assert.equal(f.files.runQueuedArchiveSteps().attempted, 1);
+  } finally { f.cleanup(); }
+});
+
+test("archive deletes the session Memory body without reading its content", async t => {
   const f = await fixture();
   try {
     f.createSession();
@@ -120,7 +683,9 @@ test("archive deletes the session Memory body from its canonical content directo
     f.store.create("memory_ledger", "archive-session-body", { scope: { kind: "session", id: f.id }, status: "active",
       topic: "temporary", content: "temporary body", content_ref: ref });
     assert.equal(existsSync(ref.path), true);
+    const read = t.mock.method(f.store.contentStore, "readCompatSync", () => { throw new Error("archive must not read bodies"); });
     f.files.archiveSession(f.id);
+    assert.equal(read.mock.callCount(), 0);
     assert.equal(existsSync(ref.path), false);
   } finally { f.cleanup(); }
 });
@@ -214,6 +779,14 @@ test("same raw session ID stays isolated across Hosts through Memory storage and
     assert.equal(f.files.isSessionArchived(sessionId, "codex"), true);
     assert.equal(f.files.isSessionArchived(sessionId, "claude"), false);
     assert.equal(f.store.find("memory_ledger", "claude-memory")?.status, "active");
+    const reopened = await new CraftStore(f.store.paths).open();
+    try {
+      assert.throws(() => reopened.create("memory_candidate", "late-codex", { scope: { kind: "session", id: codexScope }, status: "candidate" }), /Archived session Memory/u);
+      assert.throws(() => reopened.contentStore.writeSync({ kind: "memory", record_id: "late-body", version: 1,
+        scope: `session:${codexScope}`, status: "active", sensitivity: "internal", source_id: "source", body: "must stay deleted" }), /Archived session Memory/u);
+      assert.equal(existsSync(dirname(codexPath)), false);
+      reopened.create("memory_candidate", "claude-still-active", { scope: { kind: "session", id: claudeScope }, status: "candidate" });
+    } finally { reopened.close(); }
   } finally { f.cleanup(); }
 });
 

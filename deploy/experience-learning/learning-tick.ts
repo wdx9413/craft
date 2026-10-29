@@ -45,12 +45,27 @@ export async function runLearningTick(deps: LearningTickDependencies, syncKnowle
 export function learningTickStatus(result: JsonObject, once: boolean): { diagnostics: string; exit_code: number | null } {
   const sessionCollection = result.session_collection && typeof result.session_collection === "object" ? result.session_collection as JsonObject : null;
   const sessionCollectionFailure = typeof sessionCollection?.failure_kind === "string" ? sessionCollection.failure_kind : null;
+  const sessionEvidenceIncomplete = Boolean(sessionCollection?.evidence_reconciliation && typeof sessionCollection.evidence_reconciliation === "object"
+    && (sessionCollection.evidence_reconciliation as JsonObject).status === "partial");
   const experienceFailure = typeof result.failure_kind === "string" ? result.failure_kind : null;
   const experienceClassification = result.scenario_classification && typeof result.scenario_classification === "object"
     ? result.scenario_classification as JsonObject : null;
   const experienceReconciliation = experienceClassification?.reconciliation_pending === true;
   const knowledge = result.knowledge && typeof result.knowledge === "object" ? result.knowledge as JsonObject : null;
   const knowledgeFailure = typeof knowledge?.failure_kind === "string" ? knowledge.failure_kind : null;
+  const pendingKnowledge: string[] = [];
+  for (const [key, label] of [["task_candidates", "candidate"], ["evaluation_cases", "evaluation"]] as const) {
+    const value = knowledge?.[key];
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const status = (value as JsonObject).status;
+    if (["waiting_for_skip_reconciliation", "waiting_for_source_revalidation", "waiting_for_source_recheck", "waiting_for_consistent_excerpt", "waiting_for_call_reconciliation"].includes(String(status))) {
+      pendingKnowledge.push(`Craft Knowledge ${label} requires reconciliation (${String(status)}).\n`);
+    }
+    const blocked = (value as JsonObject).blocked_skips;
+    if (key === "task_candidates" && status !== "waiting_for_skip_reconciliation" && Number.isSafeInteger(blocked) && Number(blocked) > 0 && Number(blocked) <= 50_000) {
+      pendingKnowledge.push(`Craft Knowledge candidate has ${Number(blocked)} skipped task(s) requiring reconciliation.\n`);
+    }
+  }
   const classification = knowledge?.classification && typeof knowledge.classification === "object" ? knowledge.classification as JsonObject : null;
   const classificationFailure = classification?.status === "failed"
     ? typeof classification.failure_kind === "string" && /^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(classification.failure_kind) ? classification.failure_kind : "Error"
@@ -90,16 +105,18 @@ export function learningTickStatus(result: JsonObject, once: boolean): { diagnos
   }) : [];
   const diagnostics = [
     ...(sessionCollectionFailure ? [`Craft Codex session collection failed (${sessionCollectionFailure}).\n`] : []),
+    ...(sessionEvidenceIncomplete ? ["Craft Codex session evidence lookup is incomplete; reconciliation and cursor advancement were skipped.\n"] : []),
     ...(experienceFailure ? [`Craft Experience learning pass failed (${experienceFailure}).\n`] : []),
     ...(experienceReconciliation ? ["Craft Experience classification requires reconciliation (model_result_unknown).\n"] : []),
     ...(experienceClassification?.reconciliation_checkpoint_failed === true ? ["Craft Experience reconciliation checkpoint could not be saved or verified.\n"] : []),
     ...(knowledgeFailure ? [`Craft Knowledge learning pass failed (${knowledgeFailure}).\n`] : []),
+    ...pendingKnowledge,
     ...(classificationFailure ? [`Craft Knowledge scenario classification failed (${classificationFailure}).\n`] : []),
     ...(classificationSkip ? [`Craft Knowledge scenario classification skipped (${classificationSkip}); configure one ready model profile to resume.\n`] : []),
     ...(!classificationFailure && failedClassifications ? [`Craft Knowledge scenario classification failed for ${failedClassifications} Claim(s)${stageSummary ? ` at ${stageSummary}` : ""}.\n`] : []),
     ...sourceIssues,
   ].join("");
-  return { diagnostics, exit_code: once && (sessionCollectionFailure !== null || experienceFailure !== null || experienceReconciliation || knowledgeFailure !== null || classificationFailure !== null || classificationSkipped || failedClassifications > 0 || sourceIssues.length > 0) ? 1 : null };
+  return { diagnostics, exit_code: once && (sessionCollectionFailure !== null || sessionEvidenceIncomplete || experienceFailure !== null || experienceReconciliation || knowledgeFailure !== null || pendingKnowledge.length > 0 || classificationFailure !== null || classificationSkipped || failedClassifications > 0 || sourceIssues.length > 0) ? 1 : null };
 }
 
 export function learningFailureKind(error: unknown): string { return failureKind(error); }

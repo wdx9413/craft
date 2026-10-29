@@ -8,15 +8,53 @@ import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { WorkDeliveryKernel } from "../core/work-delivery.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-task-benchmark-")); const store = await new CraftStore(craftPaths(root)).open(); return { root, store, service: new CraftService(store) };
 }
 
+test("Canary sample and rollback state are atomic on write failure", async () => {
+  const f = await fixture();
+  const save = f.store.save.bind(f.store);
+  try {
+    f.store.create("task_benchmark_canary", "atomic-canary", { status: "running", baseline_id: "baseline", sample_count: 0 });
+    f.store.save = ((kind: string, ...args: Parameters<typeof f.store.save> extends [string, ...infer Rest] ? Rest : never) => {
+      if (kind === "task_benchmark_canary") throw new Error("injected write failure");
+      return save(kind, ...args);
+    }) as typeof f.store.save;
+    assert.throws(() => f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: "atomic-canary", sample_id: "atomic-sample", baseline_quality: 1, candidate_quality: 0 }), /injected write failure/);
+    assert.equal(f.store.find("task_benchmark_canary_sample", "atomic-sample"), null);
+    assert.equal(f.store.get("task_benchmark_canary", "atomic-canary").status, "running");
+    f.store.save = save;
+    assert.equal((f.service.taskBenchmarkCandidateCanaryObserve({ canary_id: "atomic-canary", sample_id: "atomic-sample", baseline_quality: 1, candidate_quality: 0 }).canary as JsonObject).status, "rolled_back");
+  } finally { f.store.save = save; f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Canary observation recovers after another connection holds the write lock", async () => {
+  const f = await fixture();
+  let other: CraftStore | undefined;
+  try {
+    f.store.create("task_benchmark_canary", "locked-canary", { status: "running", baseline_id: "baseline", sample_count: 0 });
+    other = await new CraftStore(craftPaths(f.root)).open();
+    other.database.exec("PRAGMA busy_timeout=0");
+    const service = new CraftService(other);
+    f.store.database.exec("BEGIN IMMEDIATE");
+    try {
+      assert.equal(other.get("task_benchmark_canary", "locked-canary").status, "running");
+      assert.throws(() => service.taskBenchmarkCandidateCanaryObserve({ canary_id: "locked-canary", sample_id: "locked-sample", baseline_quality: 1, candidate_quality: 0 }), /locked|busy/i);
+      assert.equal(other.find("task_benchmark_canary_sample", "locked-sample"), null);
+    } finally { f.store.database.exec("ROLLBACK"); }
+    assert.equal((service.taskBenchmarkCandidateCanaryObserve({ canary_id: "locked-canary", sample_id: "locked-sample", baseline_quality: 1, candidate_quality: 0 }).canary as JsonObject).status, "rolled_back");
+    assert.equal(f.store.get("task_benchmark_canary", "locked-canary").status, "rolled_back");
+    assert.ok(f.store.find("task_benchmark_canary_sample", "locked-sample"));
+  } finally { other?.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function taskRun(store: CraftStore, id: string, deliveryStatus: string | null, environment: JsonObject = { image: "same" }, budget: JsonObject = { usd: 1 }) {
   const launchId = `launch-${id}`; store.create("task_run", id, { launch_id: launchId, environment_digest: digest(environment), budget_digest: digest(budget) });
-  if (deliveryStatus) { store.create("work_launch", launchId, { trial_id: `trial-${id}` }); store.create("outcome", `outcome_trial-${id}`, { verdict: deliveryStatus === "host_failed" ? "failed" : "passed", costs: {} }); store.create("work_delivery", `delivery-${id}`, { launch_id: launchId, status: deliveryStatus }); }
+  if (deliveryStatus) { const host = store.create("host_run", `host-${id}`, { status: deliveryStatus === "host_failed" ? "failed" : "completed" }); const plan = deliveryStatus === "accepted" ? `plan-${id}` : undefined; if (plan) store.create("acceptance_assessment", `assessment_${plan}`, { status: "passed" }); const launch = store.create("work_launch", launchId, { trial_id: `trial-${id}`, run_id: host.id, ...(plan ? { acceptance_plan_id: plan } : {}) }); store.create("outcome", `outcome_trial-${id}`, { verdict: deliveryStatus === "host_failed" ? "failed" : "passed", costs: {} }); new WorkDeliveryKernel(store).observe({ delivery_id: `delivery-${id}`, launch_id: launch.id }); }
 }
 
 test("Task Benchmark waits for observed deliveries, aggregates only comparable held-out pairs, and creates a non-publishing candidate", async () => {

@@ -1,5 +1,6 @@
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { stableDigest } from "../../core/digest.ts";
+import { codexTaskGoalDigest } from "../../core/codex-task-prose.ts";
 import { knowledgeDirectoryForScope } from "../../core/project-knowledge-content.ts";
 import { scopeFromKey } from "../../common/craft-common-base/src/scope-policy.ts";
 import { KnowledgeSourceRegistry } from "./knowledge-source-registry.ts";
@@ -132,6 +133,7 @@ export function recordKnowledgeSessionEvidence(store: CraftStore, args: JsonObje
     content_digest: contentDigest, observed_at: observedAt,
     metadata: { provenance: "codex_session_program_verification", scope, project_scope_id: scope,
       source_session_id: sessionId, task_id: taskId, turn_id: turnId, source_ref_digest: sourceRef,
+      ...(codexTaskGoalDigest(taskGoal) ? { task_goal_digest: codexTaskGoalDigest(taskGoal) } : {}),
       verification_artifact_digest: artifactDigest, content_stored: true, raw_content_stored: false },
   });
   const safeEvidence = evidence.record.confidence === "unverified" && evidence.record.recorded_confidence === undefined ? evidence.record : store.transaction(() => {

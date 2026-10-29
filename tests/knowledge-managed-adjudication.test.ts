@@ -35,7 +35,7 @@ async function fixture(output = JSON.stringify({ decision: "accepted", expected_
       exit_code: 0, summary_kind: "tests_passed", content_stored: false }] });
   const sourceEvidence = options.synthetic_legacy_source ? service.evidenceRecord({ evidence_id: "legacy-source-fixture", source_type: "program",
     confidence: "confirmed", claim: "legacy fixture", source_id: source.source_id, fragment_id: source.fragment_id,
-    metadata: { source_session_id: "source-session", task_id: "source-task" } }) : source.evidence as JsonObject;
+    metadata: { source_session_id: "source-session", task_id: "source-task", source_ref_digest: sha("a") } }) : source.evidence as JsonObject;
   const claim = service.knowledgeClaimSave({ claim_id: "managed-claim", kind: "fact", title: "已验证规则", content: "规则成立",
     scope: "project:demo", source_id: source.source_id, evidence_ids: [sourceEvidence.id] }).claim as JsonObject;
   const held = service.knowledgeSessionEvidenceRecord({ scope: "project:demo", task_id: "held-task", source_session_id: "held-session",
@@ -46,7 +46,7 @@ async function fixture(output = JSON.stringify({ decision: "accepted", expected_
   // not proof that public confidence labels are trustworthy in real operation.
   const heldControl = store.create("evidence", "held-control", { source_type: "program", confidence: "confirmed",
     claim: "独立任务结果", source_id: held.source_id, fragment_id: held.fragment_id,
-    metadata: { source_session_id: "held-session", task_id: "held-task" } });
+    metadata: { source_session_id: "held-session", task_id: "held-task", source_ref_digest: sha("e") } });
   const case_ = service.knowledgeEvaluationCaseSave({ case_id: "managed-case", query: "规则成立", scope: "project:demo",
     expected_claim_ids: [claim.id], candidate_claim_refs: [{ claim_id: claim.id, claim_version: claim.version,
       identity_digest: claim.identity_digest, content_digest: claim.content_digest }],

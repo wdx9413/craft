@@ -6,7 +6,7 @@ import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
 import { generatedTextLanguageInstruction } from "../../core/config.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
-import { codexSessionTaskBatch, readCodexSessionTaskExcerpt, type CodexSessionCollectionOptions } from "../../core/codex-session-archive.ts";
+import { codexSessionTaskBatch, readCodexSessionTaskExcerpt, requestCodexSessionSourceRecheck, type CodexSessionCollectionOptions } from "../../core/codex-session-archive.ts";
 import type { ExperienceLearningClient } from "./worker.ts";
 import { recordSessionVerificationEvidence } from "./session-verification-evidence.ts";
 
@@ -135,7 +135,8 @@ async function completedCandidateCall(client: ExperienceLearningClient, task: Js
     const request = matching("model.request"), completed = matching("model.completed"), skipped = matching("knowledge.candidate_skipped"), created = matching("knowledge.candidate_created");
     if (request.length !== 1 || completed.length !== 1 || skipped.length + created.length !== 1) return null;
     const output = (skipped[0] ?? created[0]) as JsonObject;
-    if (!Array.isArray(request[0].input_refs) || request[0].input_refs.length !== 1 || request[0].input_refs[0] !== call.input_digest
+    if (request[0].data_digest !== stableDigest({ purpose: "knowledge_session_candidate_generation", input_digest: call.input_digest, source_ref: task.source_ref, content_stored: false })
+      || !Array.isArray(request[0].input_refs) || request[0].input_refs.length !== 1 || request[0].input_refs[0] !== call.input_digest
       || !Array.isArray(output.output_refs) || !Number.isSafeInteger(request[0].sequence) || !Number.isSafeInteger(completed[0].sequence)
       || !Number.isSafeInteger(output.sequence) || Number(request[0].sequence) >= Number(completed[0].sequence)
       || Number(completed[0].sequence) >= Number(output.sequence)) return null;
@@ -164,20 +165,52 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   const path = candidateStatePath(deps), state = readCandidateState(path);
   const batch = await codexSessionTaskBatch("candidate_generation", deps.archive_options, deps.env);
   const tasks = batch.tasks as JsonObject[];
-  const pending = tasks.filter(item => typeof item.task_id === "string" && !state.processed_task_ids.includes(item.task_id));
+  const recovered = new Set<string>();
+  let blockedSkips = 0;
+  for (const task of tasks) {
+    const taskId = String(task.task_id), skip = state.terminal_skips[taskId];
+    if (skip && (state.trace_ids_by_task[taskId] || state.uncertain_calls[taskId])) blockedSkips++;
+    if (skip && !state.trace_ids_by_task[taskId] && !state.uncertain_calls[taskId]
+      && (skip.source_ref_digest !== stableDigest(task.source_ref)
+      || skip.reason_code === "verifiable_test_result_unavailable" && Number(task.verification_artifact_count) > 0)) {
+      delete state.terminal_skips[taskId];
+      recovered.add(taskId);
+    }
+  }
+  if (recovered.size) {
+    state.processed_task_ids = state.processed_task_ids.filter(id => !recovered.has(id));
+    await writeCandidateState(path, state);
+  }
+  const processed = new Set(state.processed_task_ids);
+  const pending = tasks.filter(item => typeof item.task_id === "string" && !processed.has(item.task_id));
   const previous = pending.findIndex(item => item.task_id === state.last_unavailable_task_id);
   const task = pending[(previous + 1) % pending.length];
-  if (!task) return { status: "idle", processed: 0, verified_candidates_pending: 0, raw_content_stored: false };
+  if (!task) return blockedSkips ? { status: "waiting_for_skip_reconciliation", processed: 0, blocked_skips: blockedSkips, raw_content_stored: false }
+    : Number(batch.excluded_source_recheck_pending) > 0 ? { status: "waiting_for_source_recheck", processed: 0, source_recheck_pending: batch.excluded_source_recheck_pending, raw_content_stored: false }
+    : { status: "idle", processed: 0, verified_candidates_pending: 0, raw_content_stored: false };
   if (state.uncertain_calls[String(task.task_id)]) {
     const taskId = String(task.task_id), call = state.uncertain_calls[taskId]!;
     const decision = await completedCandidateCall(deps.client, task, call);
     if (decision) {
+      let current: JsonObject;
+      try { current = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(taskId, { ...deps.archive_options, expected_partition: "candidate_generation" }, deps.env); }
+      catch {
+        if (state.last_unavailable_task_id !== taskId) { state.last_unavailable_task_id = taskId; await writeCandidateState(path, state); }
+        return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_source_revalidation", processed: 0, reason: "archive_unavailable", raw_content_stored: false };
+      }
+      if (current.status !== "ready" || current.source_ref !== task.source_ref || current.session_id !== task.session_id
+        || current.turn_id !== task.turn_id || current.project_scope_id !== task.project_scope_id
+        || (current.verification_outcome ?? null) !== (task.verification_outcome ?? null)
+        || JSON.stringify(current.evidence_ids) !== JSON.stringify(task.verification_evidence_ids)) {
+        if (state.last_unavailable_task_id !== taskId) { state.last_unavailable_task_id = taskId; await writeCandidateState(path, state); }
+        return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_source_revalidation", processed: 0, reason: "archive_changed", raw_content_stored: false };
+      }
       state.processed_task_ids.push(taskId); state.trace_ids_by_task[taskId] = call.trace_id;
       delete state.uncertain_calls[taskId]; await writeCandidateState(path, state);
-      return { status: "completed_call_reconciled", processed: 1, decision, trace_id: call.trace_id, raw_content_stored: false };
+      return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "completed_call_reconciled", processed: 1, decision, trace_id: call.trace_id, raw_content_stored: false };
     }
     if (state.last_unavailable_task_id !== task.task_id) { state.last_unavailable_task_id = String(task.task_id); await writeCandidateState(path, state); }
-    return { status: "waiting_for_call_reconciliation", processed: 0, reason: "model_result_unknown", raw_content_stored: false };
+    return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_call_reconciliation", processed: 0, reason: "model_result_unknown", raw_content_stored: false };
   }
   const transcriptEvidence = task.verification_source === "session_test_log";
   const contextEvidenceComplete = Array.isArray(task.verification_evidence_ids) && task.verification_evidence_ids.length > 0
@@ -187,38 +220,44 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   if (typeof task.project_scope_id !== "string" || !/^project:[A-Za-z0-9_-]{1,96}$/u.test(task.project_scope_id)
     || !contextEvidenceComplete && !transcriptEvidenceComplete) {
     await recordTerminalSkip(path, state, task, "verified_project_evidence_incomplete");
-    return { status: "skipped", processed: 1, reason: "verified_project_evidence_incomplete", raw_content_stored: false };
+    return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "skipped", processed: 1, reason: "verified_project_evidence_incomplete", raw_content_stored: false };
   }
   const excerpt = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(task.task_id,
     { ...deps.archive_options, expected_partition: "candidate_generation" }, deps.env);
   const excerptEvidenceIds = Array.isArray(excerpt.evidence_ids) ? excerpt.evidence_ids : [];
   if (excerpt.status !== "ready" || excerpt.session_id !== task.session_id || excerpt.turn_id !== task.turn_id
+    || excerpt.source_ref !== task.source_ref
     || excerpt.project_scope_id !== task.project_scope_id || excerpt.verification_outcome !== task.verification_outcome
     || excerpt.verification_outcome !== "passed" && !(transcriptEvidence && excerpt.verification_outcome === null)
     || excerpt.verification_source !== task.verification_source
     || JSON.stringify(excerptEvidenceIds) !== JSON.stringify(task.verification_evidence_ids)) {
+    if (excerpt.reason === "task_source_digest_mismatch" && typeof task.task_id === "string" && typeof task.source_ref === "string") {
+      try { await requestCodexSessionSourceRecheck(task.task_id, task.source_ref, deps.archive_options, deps.env); } catch { /* A later poll retries a busy or unavailable index. */ }
+    }
     if (state.last_unavailable_task_id !== task.task_id) {
       state.last_unavailable_task_id = String(task.task_id); await writeCandidateState(path, state);
     }
-    return { status: "waiting_for_consistent_excerpt", processed: 0, reason: "verified_task_excerpt_unavailable", raw_content_stored: false };
+    return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_consistent_excerpt", processed: 0, reason: "verified_task_excerpt_unavailable", raw_content_stored: false };
   }
   const verificationArtifacts = Array.isArray(excerpt.verification_artifacts) ? excerpt.verification_artifacts : [];
   if (!verificationArtifacts.length) {
-    await recordTerminalSkip(path, state, task, "verifiable_test_result_unavailable");
-    return { status: "skipped", processed: 1, reason: "verifiable_test_result_unavailable", raw_content_stored: false };
+    if (state.last_unavailable_task_id !== task.task_id) {
+      state.last_unavailable_task_id = String(task.task_id); await writeCandidateState(path, state);
+    }
+    return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_verification_artifacts", processed: 0, reason: "verifiable_test_result_unavailable", raw_content_stored: false };
   }
   const profileResult = await deps.client.call("craft_evaluation_model_profile_ensure_single", { purpose: "knowledge_scenario_classification" });
-  if (profileResult.status !== "ready_for_adapter") return { status: "waiting_for_model", processed: 0,
+  if (profileResult.status !== "ready_for_adapter") return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_model", processed: 0,
     reason: String(profileResult.reason || "model_profile_not_ready"), raw_content_stored: false };
-  if (!profileResult.profile) return { status: "waiting_for_model", processed: 0, reason: "model_profile_unavailable", raw_content_stored: false };
+  if (!profileResult.profile) return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_model", processed: 0, reason: "model_profile_unavailable", raw_content_stored: false };
   const profile = object(profileResult.profile, "Knowledge generation profile");
   const detail = await deps.client.call("craft_evaluation_model_profile_get", { profile_id: profile.id, version: profile.version });
   const readiness = object(detail.readiness, "Knowledge generation profile readiness");
-  if (readiness.status !== "ready_for_adapter") return { status: "waiting_for_model", processed: 0,
+  if (readiness.status !== "ready_for_adapter") return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_model", processed: 0,
     reason: String(readiness.next_action ?? "model_profile_not_ready"), raw_content_stored: false };
   const provider = (deps.providers ?? PROVIDER_CATALOG).find(item => item.provider === profile.provider)
     ?? (detail.provider ? defineProvider(object(detail.provider, "Knowledge generation provider")) : undefined);
-  if (!provider) return { status: "waiting_for_model", processed: 0, reason: "provider_unavailable", raw_content_stored: false };
+  if (!provider) return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_model", processed: 0, reason: "provider_unavailable", raw_content_stored: false };
   const packet = { project_scope_id: task.project_scope_id, task_goal: excerpt.task_goal, task_result: excerpt.task_result,
     verification_outcome: excerpt.verification_outcome, verification_artifacts: verificationArtifacts,
     evidence_count: excerptEvidenceIds.length + 1, sanitized: true, content_stored: false };
@@ -227,9 +266,9 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   const modelFingerprint = stableDigest({ provider: provider.provider, model: profile.model });
   const system = `从项目任务及其测试记录中提炼一条可复用、可独立核实的项目知识候选。verification_outcome 为 null 表示任务最终结果未知；单次测试通过不代表整个任务成功。仅依据输入中的任务目标和结果，不补充未观察到的事实；若没有稳定、可验证的知识，返回 decision=skip。返回一个 JSON 对象，字段为 decision、kind、title、content、tags。所有可读文字使用中文。不得写入会话细节、个人信息、密钥、路径或代码。候选只供后续独立证据评审，不代表事实已确认。${generatedTextLanguageInstruction(deps.contentLanguage ?? "zh-CN")}`;
   const messages: ChatMessage[] = [{ role: "system", content: system }, { role: "user", content: JSON.stringify(packet) }];
-  if (!deps.transport) return { status: "waiting_for_model", processed: 0, reason: "model_transport_unavailable", raw_content_stored: false };
+  if (!deps.transport) return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_model", processed: 0, reason: "model_transport_unavailable", raw_content_stored: false };
   const transport = deps.transport;
-  if (transport.acquireCall && !transport.acquireCall(provider.provider)) return { status: "waiting_for_budget", processed: 0, reason: "model_call_budget_exhausted", raw_content_stored: false };
+  if (transport.acquireCall && !transport.acquireCall(provider.provider)) return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_budget", processed: 0, reason: "model_call_budget_exhausted", raw_content_stored: false };
   const traceStart = object(await deps.client.call("craft_trace_start", { task_id: `knowledge:${task.task_id}`, operation_id: String(task.task_id),
     model_fingerprint: modelFingerprint, capability_fingerprint: `craft-knowledge:${CRAFT_RELEASE_VERSION}`,
     metadata: { purpose: "knowledge_session_candidate_generation", input_digest: inputDigest, content_stored: false } }), "Knowledge generation Trace start");
@@ -246,6 +285,7 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   let candidate: JsonObject | null;
   let claimId: string | null = null, verificationEvidenceId: string | null = null;
   let transcriptCheckStatus: unknown = "not_reported";
+  let archiveRejected = false;
   let claimBinding: string | null = null;
   state.uncertain_calls[String(task.task_id)] = { trace_id: traceId, input_digest: inputDigest };
   await writeCandidateState(path, state);
@@ -256,9 +296,25 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
       usage: response.usage, data: { model: response.model, response_digest: stableDigest(response.text) },
       summary: "Codex Host 返回了结构化 Knowledge 候选结果" });
     candidate = validateCandidate(parseModelResult(response.text));
+    if (!candidate) {
+      const latestExcerpt = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(task.task_id,
+        { ...deps.archive_options, expected_partition: "candidate_generation" }, deps.env);
+      if (latestExcerpt.status !== "ready" || stableDigest(latestExcerpt) !== stableDigest(excerpt)) {
+        archiveRejected = true; throw new Error("session Evidence changed during model execution");
+      }
+    }
     if (candidate) {
       const verificationEvidence = await (deps.record_verification_evidence ?? recordSessionVerificationEvidence)(deps.client, task, excerpt);
       if (!verificationEvidence) throw new Error("verified test Evidence is unavailable");
+      if (verificationEvidence.transcript_check_status !== "transcript_matched"
+        || !Object.hasOwn(verificationEvidence, "transcript_check_outcome") || verificationEvidence.transcript_check_outcome !== (task.verification_outcome ?? null)) {
+        archiveRejected = true; throw new Error("session Evidence archive verification is unavailable or mismatched");
+      }
+      const latestExcerpt = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(task.task_id,
+        { ...deps.archive_options, expected_partition: "candidate_generation" }, deps.env);
+      if (latestExcerpt.status !== "ready" || stableDigest(latestExcerpt) !== stableDigest(excerpt)) {
+        archiveRejected = true; throw new Error("session Evidence changed during model execution");
+      }
       verificationEvidenceId = String(verificationEvidence.id);
       transcriptCheckStatus = verificationEvidence.transcript_check_status;
       const saved = await deps.client.call("craft_knowledge_claim_save", { claim_id: `knowledge_claim_${stableDigest(task.task_id).slice(-24)}`,
@@ -284,12 +340,13 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
     delete state.uncertain_calls[String(task.task_id)];
     await writeCandidateState(path, state);
   } catch (error) {
+    if (archiveRejected) { delete state.uncertain_calls[String(task.task_id)]; await writeCandidateState(path, state); }
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.failed", actor: "knowledge-session-candidate-worker",
       source: "craft-knowledge", trust: "observed", operation_id: String(task.task_id), model_fingerprint: modelFingerprint,
-      data: { failure_kind: safeFailureKind(error), input_digest: inputDigest, result_state: "unknown" }, summary: "Knowledge 候选生成未完成，调用结果待核对" });
+      data: { failure_kind: safeFailureKind(error), input_digest: inputDigest, result_state: archiveRejected ? "discarded" : "unknown" }, summary: "Knowledge 候选生成未完成" });
     await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "failed", summary: "Knowledge 候选生成未完成" });
     throw error;
   }
-  return { status: candidate ? "candidate_created" : "candidate_skipped", processed: 1, task_id: task.task_id,
+  return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: candidate ? "candidate_created" : "candidate_skipped", processed: 1, task_id: task.task_id,
     claim_id: claimId, trace_id: traceId, independent_review_required: Boolean(candidate), raw_content_stored: false };
 }

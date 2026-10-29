@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, rm, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,66 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { TraceKernel } from "../core/trace-kernel.ts";
 import { migrateTraceStorage } from "../scripts/trace-storage-migration.ts";
 import { TraceShardStore, type TraceRecordRow } from "../common/craft-common-store-local/src/trace-shards.ts";
+
+test("Trace reads use read-only connections while preserving transaction visibility", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-trace-readonly-"));
+  const id = "readonly-trace", shards = new TraceShardStore(root);
+  try {
+    shards.create("trace", id, { status: "started" });
+    shards.transaction(id, () => {
+      shards.save("trace", id, { status: "completed" });
+      assert.equal(shards.find("trace", id)?.status, "completed");
+    });
+    const shard = createHash("sha256").update(id).digest()[0]! % 16;
+    const writer = new DatabaseSync(join(shards.directory, `${shard.toString(16).padStart(2, "0")}.db`));
+    try {
+      writer.exec("BEGIN IMMEDIATE");
+      writer.prepare("UPDATE records SET payload_json=? WHERE kind='trace' AND id=? AND version=2")
+        .run(JSON.stringify({ status: "uncommitted" }), id);
+      assert.equal(shards.find("trace", id)?.status, "completed");
+      writer.exec("ROLLBACK");
+    } finally { writer.close(); }
+    assert.equal(shards.remove(id, [], [], []), 2);
+    assert.equal(shards.find("trace", id), null);
+  } finally { shards.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Trace read does not initialize an invalid shard database", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-trace-invalid-read-")), id = "invalid-shard";
+  const shard = createHash("sha256").update(id).digest()[0]! % 16, directory = join(root, "trace", "v1");
+  await mkdir(directory, { recursive: true });
+  const file = join(directory, `${shard.toString(16).padStart(2, "0")}.db`), malformed = new DatabaseSync(file);
+  malformed.exec("CREATE TABLE unrelated(value TEXT)"); malformed.close();
+  const shards = new TraceShardStore(root);
+  try {
+    assert.throws(() => shards.find("trace", id), /records are unavailable/u);
+    const inspect = new DatabaseSync(file, { readOnly: true });
+    try { assert.equal(inspect.prepare("SELECT name FROM sqlite_master WHERE name='records'").get(), undefined); }
+    finally { inspect.close(); }
+  } finally { shards.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Trace reads remain available while a separate process holds a writer transaction", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-trace-process-read-"));
+  const id = "process-trace", shards = new TraceShardStore(root);
+  try {
+    shards.create("trace", id, { status: "committed" });
+    const shard = createHash("sha256").update(id).digest()[0]! % 16;
+    const file = join(shards.directory, `${shard.toString(16).padStart(2, "0")}.db`);
+    const child = spawn(process.execPath, ["-e", `const {DatabaseSync}=require('node:sqlite'); const db=new DatabaseSync(process.argv[1]);
+      db.exec('BEGIN IMMEDIATE'); process.stdout.write('ready\\n'); process.stdin.once('data',()=>{db.exec('ROLLBACK'); db.close();});`, file], { stdio: ["pipe", "pipe", "pipe"] });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.stdout.once("data", () => resolve()); child.once("error", reject);
+        child.once("exit", code => { if (code !== 0) reject(new Error(`writer process exited ${code}`)); });
+      });
+      assert.equal(shards.find("trace", id)?.status, "committed");
+      const exited = new Promise<number | null>(resolve => child.once("exit", resolve));
+      child.stdin.end("done");
+      assert.equal(await exited, 0);
+    } finally { if (child.exitCode === null) child.kill(); }
+  } finally { shards.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 test("new Trace writes stay outside the central database and remain readable after reopening", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-trace-shards-"));
@@ -87,6 +147,12 @@ test("Hook signal turn lookup uses scoped indexed rows across shards and orders 
     assert.deepEqual(tied.map(row => row.id), ["hook-signal-tie-a", "hook-signal-tie-b"]);
     assert.deepEqual(shards.hookSignalsForTurn("project", "p2", "s1", "t1", 100), []);
     assert.equal(shards.hookSignalsForTurn("project", "p1", "s1", "t1", 3).length, 3);
+    for (const host of ["codex", "claude"]) shards.create("codex_hook_signal", `host-${host}`, {
+      trace_id: `host-${host}`, scope: { kind: "project", id: "p1" }, session_id: "s1", session_host: host, turn_id: "t1",
+      signal: { id: `host-${host}`, kind: "edit" }, content_stored: false,
+    });
+    assert.deepEqual(shards.hookSignalsForTurn("project", "p1", "s1", "t1", 100, "codex").map(row => row.id), ["host-codex"]);
+    assert.deepEqual(shards.hookSignalsForTurn("project", "p1", "s1", "t1", 100, "claude").map(row => row.id), ["host-claude"]);
     assert.deepEqual(shards.hookSignalsForTurn("project", "p1", "s1", "t1", 0), []);
     const legacyRoot = await mkdtemp(join(tmpdir(), "craft-hook-signal-legacy-shard-"));
     const legacyDirectory = join(legacyRoot, "trace", "v1");
@@ -334,8 +400,8 @@ test("Trace shard reads, filtering, retention, nested transactions and removal h
     shards.appendEvent(traceId, "started", { sequence: 1 });
     shards.appendEvent(traceId, "completed", { sequence: 2 });
 
-    const existing = (shards as unknown as { existing(): Array<[string, DatabaseSync]> }).existing();
-    for (const [, database] of existing) database.prepare("UPDATE records SET updated_at=? WHERE kind='trace'").run("2025-02-01T00:00:00.000Z");
+    const internal = shards as unknown as { existing(): Array<[number, DatabaseSync]>; database(shard: number, create: boolean): DatabaseSync };
+    for (const [shard] of internal.existing()) internal.database(shard, true).prepare("UPDATE records SET updated_at=? WHERE kind='trace'").run("2025-02-01T00:00:00.000Z");
 
     assert.equal(shards.find("trace", traceId, 1)?.status, "completed");
     assert.equal(shards.find("trace_event", "event-a")?.summary, "latest");

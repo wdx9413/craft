@@ -13,7 +13,7 @@ const RESERVED = new Set(["id", "version", "created_at", "updated_at"]);
 /** Legacy Codebase graph records retain their original storage format in 16 small WAL databases. */
 export class CodebaseShardStore {
   readonly directory: string;
-  #databases = new Map<number, DatabaseSync>();
+  #databases = new Map<string, DatabaseSync>();
 
   constructor(dataRoot: string) { this.directory = join(dataRoot, "codebase", "legacy-graph-v1"); }
 
@@ -27,7 +27,8 @@ export class CodebaseShardStore {
   }
 
   private databaseForShard(shard: number, create: boolean): DatabaseSync | null {
-    const cached = this.#databases.get(shard);
+    const key = `${shard}:${create ? "write" : "read"}`;
+    const cached = this.#databases.get(key);
     if (cached) return cached;
     const file = join(this.directory, `${shard.toString(16).padStart(2, "0")}.db`);
     if (!create && !existsSync(file)) return null;
@@ -40,17 +41,20 @@ export class CodebaseShardStore {
       const stat = lstatSync(file);
       if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Codebase shard must be a regular file");
     }
-    const database = new DatabaseSync(file);
+    const database = new DatabaseSync(file, { readOnly: !create });
     try {
       database.exec(`PRAGMA busy_timeout=${sqliteBusyTimeoutMs()}`);
       if (create && String((database.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toLowerCase() !== "wal")
         database.exec("PRAGMA journal_mode=WAL");
-      if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get()) database.exec(`CREATE TABLE records(
+      if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get()) {
+        if (!create) throw new Error("Codebase shard records are unavailable");
+        database.exec(`CREATE TABLE records(
         kind TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,payload_json TEXT NOT NULL,
         created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(kind,id,version));
         CREATE INDEX records_latest ON records(kind,id,version DESC);`);
+      }
     } catch (error) { database.close(); throw error; }
-    this.#databases.set(shard, database);
+    this.#databases.set(key, database);
     return database;
   }
 

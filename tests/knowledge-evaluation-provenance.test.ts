@@ -3,11 +3,25 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationCaseBindingDigest, knowledgeEvaluationEvidence } from "../core/knowledge-evaluation-provenance.ts";
+import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationCaseBindingDigest, knowledgeEvaluationEvidence, knowledgeEvaluationSourceMatches } from "../core/knowledge-evaluation-provenance.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { payload, stableDigest } from "../core/digest.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+
+test("evaluation source binding rejects legacy, duplicate and changed revisions", () => {
+  const claim = { id: "claim", source_id: "source" };
+  const source = { id: "source", version: 1, content_digest: "digest", status: "active", trust: "verified" };
+  const ref = { claim_id: "claim", source_id: "source", source_version: 1, source_digest: "digest", source_status: "active", source_trust: "verified" };
+  assert.equal(knowledgeEvaluationSourceMatches({ candidate_source_refs: [ref] }, claim, source), true);
+  for (const run of [{}, { candidate_source_refs: [] }, { candidate_source_refs: [ref, ref] },
+    ...["source_id", "source_version", "source_digest", "source_status", "source_trust"].map(key => ({ candidate_source_refs: [{ ...ref, [key]: "changed" }] }))]) {
+    assert.equal(knowledgeEvaluationSourceMatches(run, claim, source), false);
+  }
+  assert.equal(knowledgeEvaluationSourceMatches({ candidate_source_refs: [ref] }, claim, null), false);
+  assert.equal(knowledgeEvaluationSourceMatches({ candidate_source_refs: [ref] }, claim, { ...source, status: "disabled" }), false);
+  assert.equal(knowledgeEvaluationSourceMatches({ candidate_source_refs: [ref] }, claim, { ...source, version: 2 }), false);
+});
 
 test("formal proof rechecks bound support versions, policy and source independence", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-support-proof-"));
@@ -205,8 +219,8 @@ test("Knowledge adjudication case digest supplies explicit null and empty defaul
 });
 
 test("Only sanitized independent real-session held-out Knowledge cases are evaluation eligible", () => {
-  const sourceEvidence = [{ id: "eval-evidence", confidence: "confirmed", metadata: { source_session_id: "eval-session", task_id: "eval-task" } } as JsonObject];
-  const independentClaimEvidence = [{ claim_id: "claim", evidence: { id: "claim-evidence", metadata: { source_session_id: "claim-session", task_id: "claim-task" } } as JsonObject }];
+  const sourceEvidence = [{ id: "eval-evidence", confidence: "confirmed", metadata: { source_session_id: "eval-session", task_id: "eval-task", source_ref_digest: `sha256:${"a".repeat(64)}` } } as JsonObject];
+  const independentClaimEvidence = [{ claim_id: "claim", evidence: { id: "claim-evidence", metadata: { source_session_id: "claim-session", task_id: "claim-task", source_ref_digest: `sha256:${"b".repeat(64)}` } } as JsonObject }];
   const base: JsonObject = {
     source_session_id: "eval-session", source_task_id: "eval-task", source_evidence_ids: ["eval-evidence"],
     evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "host_adjudicated", sanitized: true, expected_claim_ids: ["claim"],
@@ -251,8 +265,18 @@ test("Only sanitized independent real-session held-out Knowledge cases are evalu
     assert.equal(assess(base, sourceEvidence, [{ claim_id: "claim", evidence: { metadata } }]).status, "unverified_claim_source");
   assert.equal(assess(base, sourceEvidence, [{ claim_id: "claim", evidence: { metadata: { source_session_id: "eval-session", task_id: "claim-task" } } }]).status, "session_leak");
   assert.equal(assess(base, sourceEvidence, [{ claim_id: "claim", evidence: { metadata: { source_session_id: "claim-session", task_id: "eval-task" } } }]).status, "session_leak");
+  const sameSourceRef = `sha256:${"a".repeat(64)}`;
+  assert.equal(assess(base, [{ ...sourceEvidence[0]!, metadata: { ...(sourceEvidence[0]!.metadata as JsonObject), source_ref_digest: sameSourceRef } }],
+    [{ claim_id: "claim", evidence: { metadata: { source_session_id: "different-session", task_id: "different-task", source_ref_digest: sameSourceRef } } }]).status, "session_leak");
+  assert.equal(assess(base, [{ ...sourceEvidence[0]!, metadata: { ...(sourceEvidence[0]!.metadata as JsonObject), source_ref_digest: sameSourceRef } }],
+    [{ claim_id: "claim", evidence: { metadata: { source_session_id: "different-session", task_id: "different-task", source_ref_digest: `sha256:${"b".repeat(64)}` } } }]).status, "verified_independent");
+  const sameGoal = `sha256:${"c".repeat(64)}`;
+  assert.equal(assess(base, [{ ...sourceEvidence[0]!, metadata: { ...(sourceEvidence[0]!.metadata as JsonObject), task_goal_digest: sameGoal } }],
+    [{ claim_id: "claim", evidence: { metadata: { source_session_id: "different-session", task_id: "different-task", source_ref_digest: `sha256:${"b".repeat(64)}`, task_goal_digest: sameGoal } } }]).status, "session_leak");
   const valid = assess(base);
   assert.deepEqual(valid, { status: "verified_independent", evaluation_eligible: true });
+  assert.equal(assess(base, [{ ...sourceEvidence[0]!, metadata: { source_session_id: "eval-session", task_id: "eval-task" } }]).status, "insufficient_independence_evidence");
+  assert.equal(assess(base, sourceEvidence, [{ claim_id: "claim", evidence: { metadata: { source_session_id: "claim-session", task_id: "claim-task" } } }]).status, "insufficient_independence_evidence");
 });
 
 test("Knowledge evaluation separates exact legacy review attestations from task Sources without trusting forged roles", async () => {
@@ -260,8 +284,8 @@ test("Knowledge evaluation separates exact legacy review attestations from task 
   const store = await new CraftStore(craftPaths(root)).open();
   try {
     store.create("knowledge_source", "source", { scope: "global" });
-    store.create("evidence", "task", { confidence: "confirmed", metadata: { source_session_id: "generation", task_id: "generation-task" } });
-    store.create("evidence", "held-out", { confidence: "confirmed", metadata: { source_session_id: "evaluation", task_id: "evaluation-task" } });
+    store.create("evidence", "task", { confidence: "confirmed", metadata: { source_session_id: "generation", task_id: "generation-task", source_ref_digest: `sha256:${"a".repeat(64)}` } });
+    store.create("evidence", "held-out", { confidence: "confirmed", metadata: { source_session_id: "evaluation", task_id: "evaluation-task", source_ref_digest: `sha256:${"b".repeat(64)}` } });
     const reviewId = "knowledge_host_review_bound";
     const attestation = { source_type: "host_model_review", confidence: "bounded",
       metadata: { review_id: reviewId, source_id: "source", source_digest: "sha256:source" } };

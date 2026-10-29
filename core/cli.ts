@@ -472,7 +472,12 @@ async function dispatchMain(args: string[]): Promise<void> {
         try { const started = await server.start(option(args, "--port") === undefined ? 4173 : Number(option(args, "--port"))); const workbenchUrl = started.url.replace("/#token=", "/workbench#token=");
           stdout.write(`Craft API: ${started.url}\n`);
           if (workbenchDir !== null) stdout.write(`Craft Workbench: ${workbenchUrl}\n`);
-          if (args[0] === "gui") openBrowser(workbenchUrl); await new Promise<void>((resolve) => { const stop = () => resolve(); process.once("SIGINT", stop); process.once("SIGTERM", stop); }); }
+          if (args[0] === "gui") openBrowser(workbenchUrl); await new Promise<void>((resolve) => {
+            const parentPipe = args.includes("--parent-stdin");
+            const stop = () => { process.off("SIGINT", stop); process.off("SIGTERM", stop); if (parentPipe) { process.stdin.off("end", stop); process.stdin.pause(); } resolve(); };
+            process.once("SIGINT", stop); process.once("SIGTERM", stop);
+            if (parentPipe) { process.stdin.once("end", stop); process.stdin.resume(); }
+          }); }
         finally { await server.close(); if (supervisorRun.owned) await supervisor.close(); } return;
       }
       else if (args[0] === "inbox" && args[1] === "refresh") result = service.attentionRefresh({ limit: option(args, "--limit") });

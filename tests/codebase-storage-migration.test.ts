@@ -38,6 +38,83 @@ async function fixture(t: test.TestContext) {
   return { root, project, paths, store, source, file, content, payload, entry, put, setPayload };
 }
 
+test("snapshot migration rejects an unavailable historical root beside an existing root", async t => {
+  const f = await fixture(t);
+  f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('workspace','repo',2,?,'now','now')")
+    .run(JSON.stringify({ root_path: join(f.root, "missing"), state_revision: 1 }));
+  const result = await migrateCodebaseSnapshots(f.store, [f.entry]);
+  assert.equal(result.migrated, 0);
+  assert.equal(result.blocked[0]?.reason, "project_root_changed_or_missing");
+  assert.equal(f.store.get("workspace_checkpoint", "snapshot").snapshot_root, f.source);
+  f.store.database.prepare("UPDATE records SET payload_json=? WHERE kind='workspace' AND id='repo' AND version=2")
+    .run(JSON.stringify({ state_revision: 1 }));
+  const noRoot = await migrateCodebaseSnapshots(f.store, [f.entry]);
+  assert.equal(noRoot.blocked[0]?.reason, "project_root_changed_or_missing");
+});
+
+test("snapshot migration does not publish after workspace ownership changes during copying", async t => {
+  const f = await fixture(t);
+  const original = fs.copyFileSync;
+  let changed = false;
+  const mocked = t.mock.method(fs, "copyFileSync", (from: Parameters<typeof fs.copyFileSync>[0], to: Parameters<typeof fs.copyFileSync>[1], mode?: number) => {
+    const result = original(from, to, mode);
+    if (!changed) {
+      changed = true;
+      f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('workspace','repo',2,?,'now','now')")
+        .run(JSON.stringify({ root_path: join(f.root, "other"), state_revision: 1 }));
+    }
+    return result;
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = await migrateCodebaseSnapshots(f.store, [f.entry]);
+    assert.equal(result.migrated, 0);
+    assert.equal(result.blocked[0]?.reason, "workspace_changed_concurrently");
+    assert.equal(f.store.get("workspace_checkpoint", "snapshot").snapshot_root, f.source);
+    f.store.database.prepare("DELETE FROM records WHERE kind='workspace' AND id='repo' AND version=2").run();
+    const retry = await migrateCodebaseSnapshots(f.store, [f.entry], { backup_directory: result.backup_directory! });
+    assert.equal(retry.migrated, 1);
+    assert.deepEqual(retry.blocked, []);
+    assert.equal(f.store.get("workspace_checkpoint", "snapshot").snapshot_root, f.entry.target_root);
+  } finally { mocked.mock.restore(); syncBuiltinESMExports(); }
+});
+
+test("snapshot migration does not publish when the project root disappears during copying", async t => {
+  const f = await fixture(t);
+  const original = fs.copyFileSync;
+  let changed = false;
+  const mocked = t.mock.method(fs, "copyFileSync", (from: Parameters<typeof fs.copyFileSync>[0], to: Parameters<typeof fs.copyFileSync>[1], mode?: number) => {
+    const result = original(from, to, mode);
+    if (!changed) { changed = true; renameSync(f.project, join(f.root, "moved-project")); }
+    return result;
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = await migrateCodebaseSnapshots(f.store, [f.entry]);
+    assert.equal(result.migrated, 0);
+    assert.equal(result.blocked.length, 1);
+    assert.equal(f.store.get("workspace_checkpoint", "snapshot").snapshot_root, f.source);
+  } finally { mocked.mock.restore(); syncBuiltinESMExports(); }
+});
+
+test("snapshot migration rejects a replacement directory at the same project path", async t => {
+  const f = await fixture(t);
+  const original = fs.copyFileSync;
+  let changed = false;
+  const mocked = t.mock.method(fs, "copyFileSync", (from: Parameters<typeof fs.copyFileSync>[0], to: Parameters<typeof fs.copyFileSync>[1], mode?: number) => {
+    const result = original(from, to, mode);
+    if (!changed) { changed = true; renameSync(f.project, join(f.root, "moved-project")); mkdirSync(f.project); }
+    return result;
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = await migrateCodebaseSnapshots(f.store, [f.entry]);
+    assert.equal(result.migrated, 0);
+    assert.equal(result.blocked[0]?.reason, "project_root_changed_or_missing");
+    assert.equal(f.store.get("workspace_checkpoint", "snapshot").snapshot_root, f.source);
+  } finally { mocked.mock.restore(); syncBuiltinESMExports(); }
+});
+
 test("snapshot migration rejects unsafe identities, stale bindings and out-of-scope sources", async t => {
   const f = await fixture(t);
   assert.equal((await migrateCodebaseSnapshots(f.store, [])).backup_directory, null);
@@ -109,12 +186,13 @@ test("snapshot migration verifies resumed scoped backups and detects backup inte
   const initial = await migrateCodebaseSnapshots(f.store, [f.entry]);
   const directory = initial.backup_directory!, manifestPath = join(directory, "manifest.json"), raw = readFileSync(manifestPath, "utf8");
   const backupManifest = JSON.parse(raw) as Record<string, unknown>;
-  assert.equal(backupManifest.backup_scope, "checkpoint_rows");
-  assert(fs.statSync(join(directory, "craft.db")).size < 100_000, "migration backup should contain only the exact checkpoint rows being changed");
+  assert.equal(backupManifest.backup_scope, "checkpoint_and_workspace_rows");
+  assert(fs.statSync(join(directory, "craft.db")).size < 100_000, "migration backup should contain only the relevant checkpoint and workspace rows");
   const backupDb = new DatabaseSync(join(directory, "craft.db"), { readOnly: true });
   try {
-    assert.equal(Number((backupDb.prepare("SELECT COUNT(*) n FROM records").get() as { n: number }).n), 1);
+    assert.equal(Number((backupDb.prepare("SELECT COUNT(*) n FROM records").get() as { n: number }).n), 2);
     assert.equal((backupDb.prepare("SELECT payload_json FROM records WHERE kind='workspace_checkpoint' AND id='snapshot' AND version=1").get() as { payload_json: string }).payload_json, JSON.stringify(f.payload));
+    assert.deepEqual(JSON.parse((backupDb.prepare("SELECT payload_json FROM records WHERE kind='workspace' AND id='repo' AND version=1").get() as { payload_json: string }).payload_json), { root_path: f.project, state_revision: 1 });
   } finally { backupDb.close(); }
   await assert.rejects(migrateCodebaseSnapshots(f.store, [f.entry], { backup_directory: f.root }), /outside its data root/u);
   writeFileSync(manifestPath, JSON.stringify({ ...JSON.parse(raw), checkpoint_ids: [] }));
@@ -130,6 +208,55 @@ test("snapshot migration verifies resumed scoped backups and detects backup inte
   const damagedBackup = new DatabaseSync(join(directory, "craft.db"));
   try { corruptSchema(damagedBackup); } finally { damagedBackup.close(); }
   await assert.rejects(migrateCodebaseSnapshots(f.store, [f.entry], { backup_directory: directory }), /integrity check/u);
+});
+
+test("snapshot migration refuses a resumed backup when workspace records changed", async t => {
+  const f = await fixture(t);
+  writeFileSync(f.file, "changed");
+  const initial = await migrateCodebaseSnapshots(f.store, [f.entry]);
+  assert.equal(initial.blocked[0]?.reason, "source_size_changed");
+  writeFileSync(f.file, f.content);
+  f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('workspace','repo',2,?,'now','now')")
+    .run(JSON.stringify({ root_path: f.project, state_revision: 2 }));
+  const retry = await migrateCodebaseSnapshots(f.store, [f.entry], { backup_directory: initial.backup_directory! });
+  assert.equal(retry.migrated, 0);
+  assert.equal(retry.blocked[0]?.reason, "workspace_differs_from_backup");
+  assert.equal(f.store.get("workspace_checkpoint", "snapshot").snapshot_root, f.source);
+});
+
+test("snapshot migration refuses checkpoint changes made after its backup", async t => {
+  const f = await fixture(t);
+  const original = fs.writeFileSync;
+  let changed = false;
+  const mocked = t.mock.method(fs, "writeFileSync", (path: Parameters<typeof fs.writeFileSync>[0], data: Parameters<typeof fs.writeFileSync>[1], options?: Parameters<typeof fs.writeFileSync>[2]) => {
+    const result = original(path, data, options);
+    if (!changed && String(path).endsWith("manifest.json")) { changed = true; f.setPayload({ ...f.payload, additional: "changed" }); }
+    return result;
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = await migrateCodebaseSnapshots(f.store, [f.entry]);
+    assert.equal(result.migrated, 0);
+    assert.equal(result.blocked[0]?.reason, "checkpoint_differs_from_backup");
+    assert.equal(f.store.get("workspace_checkpoint", "snapshot").snapshot_root, f.source);
+  } finally { mocked.mock.restore(); syncBuiltinESMExports(); }
+});
+
+test("failed backup rolls back its source read transaction before retry", async t => {
+  const f = await fixture(t);
+  const prepare = DatabaseSync.prototype.prepare;
+  const mocked = t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, query: string, ...values: unknown[]) {
+    const statement = Reflect.apply(prepare, this, [query, ...values]);
+    if (this === f.store.database && query.startsWith("SELECT kind,id,version,payload_json,created_at,updated_at FROM records WHERE kind='workspace'")) {
+      return { all: () => { throw new Error("injected workspace read failure"); } } as never;
+    }
+    return statement;
+  });
+  try { await assert.rejects(migrateCodebaseSnapshots(f.store, [f.entry]), /injected workspace read failure/u); }
+  finally { mocked.mock.restore(); }
+  const retry = await migrateCodebaseSnapshots(f.store, [f.entry]);
+  assert.equal(retry.migrated, 1);
+  assert.deepEqual(retry.blocked, []);
 });
 
 test("snapshot migration rejects a newly created backup that fails integrity validation", async t => {

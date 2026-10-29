@@ -1,3 +1,4 @@
+import { deliveryEvaluationFixture } from "./helpers/delivery-evaluation-fixture.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -81,7 +82,7 @@ test("governs A2A delegation with a proven baseline and no raw remote context", 
   try {
     const provider = f.service.enterpriseIdentityProviderRegister({ provider_id: "idp", kind: "short_lived_broker", issuer: "https://issuer.example.test", audience: "craft", broker_ref: "broker", organization_ref: "org" }).provider as JsonObject;
     f.service.enterpriseIdentityProviderVerify({ provider_id: provider.id, evidence_ids: [f.confirmed.id], observed_claims: ["short_lived_credentials", "token_exchange", "audit_subject", "revocation"], verified_by: "security" });
-    f.store.create("a2a_agent_card", "card", { card_digest: "sha256:card", name: "Remote", endpoint: "https://remote.example.test/a2a" }); f.store.create("delivery_evaluation_run", "baseline", { status: "eligible_for_signoff" });
+    f.store.create("a2a_agent_card", "card", { card_digest: "sha256:card", name: "Remote", endpoint: "https://remote.example.test/a2a" }); deliveryEvaluationFixture(f.service, "baseline");
     assert.throws(() => f.service.a2aAgentTrustApprove({ trust_id: "bad", card_id: "card", provider_id: provider.id, allowed_effects: ["external_write"], evidence_ids: [f.confirmed.id], approval_ref: "approval" }), /read-only/);
     const trust = f.service.a2aAgentTrustApprove({ trust_id: "trust", card_id: "card", provider_id: provider.id, allowed_effects: ["read_only"], evidence_ids: [f.confirmed.id], approval_ref: "approval" }).trust as JsonObject;
     assert.equal(f.service.a2aAgentTrustApprove({ trust_id: "trust", card_id: "card", provider_id: provider.id, allowed_effects: ["read_only"], evidence_ids: [f.confirmed.id], approval_ref: "approval" }).idempotent, true);
@@ -145,12 +146,12 @@ test("keeps operational, enterprise, and remote-collaboration rejection paths ex
     assert.throws(() => f.service.enterpriseAccessTicketIssue({ ticket_id: "write", binding_id: binding.id, principal_id: principal.id, task_id: f.task.id, credential_lease_id: lease.id, effect: "external_write", request_digest: `sha256:${"c".repeat(64)}`, approval_ref: "approval", autonomy_consumption_id: "consumption" }), /conflict/);
     assert.throws(() => f.service.enterpriseAccessTicketConsume({ ticket_id: write.id, request_digest: requestDigest, consumer_ref: "broker", now: "2100-01-01T00:00:00.000Z" }), /expired/);
 
-    f.store.create("a2a_agent_card", "card", { card_digest: "sha256:card" }); f.store.create("delivery_evaluation_run", "baseline", { status: "inconclusive" }); f.store.save("enterprise_identity_provider", String(provider.id), { ...(f.store.get("enterprise_identity_provider", String(provider.id))), lifecycle: "declared" });
+    f.store.create("a2a_agent_card", "card", { card_digest: "sha256:card" }); deliveryEvaluationFixture(f.service, "baseline", "inconclusive"); f.store.save("enterprise_identity_provider", String(provider.id), { ...(f.store.get("enterprise_identity_provider", String(provider.id))), lifecycle: "declared" });
     assert.throws(() => f.service.a2aAgentTrustApprove({ trust_id: "trust", card_id: "card", provider_id: provider.id, allowed_effects: ["read_only"], evidence_ids: [f.confirmed.id], approval_ref: "approval" }), /verified/);
     f.store.save("enterprise_identity_provider", String(provider.id), { ...(f.store.get("enterprise_identity_provider", String(provider.id))), lifecycle: "verified" });
     const trust = f.service.a2aAgentTrustApprove({ trust_id: "trust", card_id: "card", provider_id: provider.id, allowed_effects: ["read_only"], evidence_ids: [f.confirmed.id], approval_ref: "approval" }).trust as JsonObject;
     assert.throws(() => f.service.a2aCollaborationSessionCreate({ session_id: "session", task_id: f.task.id, trust_id: trust.id, evaluation_run_id: "baseline", justification_evidence_id: f.confirmed.id, budget: {} }), /baseline/);
-    f.store.save("delivery_evaluation_run", "baseline", { status: "eligible_for_signoff" }); const session = f.service.a2aCollaborationSessionCreate({ session_id: "session", task_id: f.task.id, trust_id: trust.id, evaluation_run_id: "baseline", justification_evidence_id: f.confirmed.id, budget: {} }).session as JsonObject;
+    f.store.save("delivery_evaluation_run", "baseline", { ...f.store.get("delivery_evaluation_run", "baseline"), status: "eligible_for_signoff" }); const session = f.service.a2aCollaborationSessionCreate({ session_id: "session", task_id: f.task.id, trust_id: trust.id, evaluation_run_id: "baseline", justification_evidence_id: f.confirmed.id, budget: {} }).session as JsonObject;
     assert.equal(f.service.a2aCollaborationSessionCreate({ session_id: "session", task_id: f.task.id, trust_id: trust.id, evaluation_run_id: "baseline", justification_evidence_id: f.confirmed.id, budget: {} }).idempotent, true);
     const delegation = f.service.a2aDelegationPrepare({ delegation_id: "delegation", session_id: session.id, objective: "read", evidence_ids: [f.confirmed.id] }).delegation as JsonObject;
     assert.equal(f.service.a2aDelegationPrepare({ delegation_id: "delegation", session_id: session.id, objective: "read", evidence_ids: [f.confirmed.id] }).idempotent, true);
@@ -227,7 +228,7 @@ test("A2A controls reject inactive sessions and conflicting delegation identitie
   try {
     const provider = f.service.enterpriseIdentityProviderRegister({ provider_id: "provider", kind: "short_lived_broker", issuer: "https://issuer.example.test", audience: "craft", broker_ref: "broker", organization_ref: "org" }).provider as JsonObject;
     f.service.enterpriseIdentityProviderVerify({ provider_id: provider.id, evidence_ids: [f.confirmed.id], observed_claims: ["short_lived_credentials", "token_exchange", "audit_subject", "revocation"], verified_by: "security" });
-    f.store.create("a2a_agent_card", "card", { card_digest: "sha256:card" }); f.store.create("delivery_evaluation_run", "baseline", { status: "eligible_for_signoff" });
+    f.store.create("a2a_agent_card", "card", { card_digest: "sha256:card" }); deliveryEvaluationFixture(f.service, "baseline");
     assert.throws(() => f.service.a2aAgentTrustApprove({ trust_id: "trust", card_id: "card", provider_id: provider.id, allowed_effects: ["read_only", "read_only"], evidence_ids: [f.confirmed.id], approval_ref: "approval" }), /unique/);
     const trust = f.service.a2aAgentTrustApprove({ trust_id: "trust", card_id: "card", provider_id: provider.id, allowed_effects: ["read_only"], evidence_ids: [f.confirmed.id], approval_ref: "approval" }).trust as JsonObject;
     f.store.save("a2a_agent_card", "card", { ...(f.store.get("a2a_agent_card", "card")), card_digest: "sha256:changed" });

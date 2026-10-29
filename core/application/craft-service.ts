@@ -2918,9 +2918,15 @@ export class CraftService extends ServiceFoundation {
     const candidateSet = new Set(candidateIds);
     const now = args.now === undefined ? Date.now() : validIsoTime(args.now, "now"); const excluded: JsonObject[] = [];
     const index = new Bm25Index();
-    const candidates = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
+    const claimPage = this.store.list("knowledge_claim", 10_001);
+    const partial = claimPage.length > 10_000;
+    const candidates = claimPage.slice(0, 10_000).flatMap((claim) => {
       const formallyReviewed = claim.status === "reviewed" && knowledgeClaimPromotionProofVerified(this.store, claim);
       if (!formallyReviewed && !(claim.status === "candidate" && candidateSet.has(String(claim.id)))) { excluded.push({ claim_id: claim.id, reason: "not_reviewed" }); return []; }
+      if (claim.status === "candidate" && typeof claim.source_id === "string") {
+        const source = this.store.find("knowledge_source", claim.source_id);
+        if (!source || source.status !== "active" || source.trust === "untrusted") { excluded.push({ claim_id: claim.id, reason: "source_unavailable" }); return []; }
+      }
       if (claim.valid_until && Date.parse(String(claim.valid_until)) < now) { excluded.push({ claim_id: claim.id, reason: "expired" }); return []; }
       if (claim.scope !== "global" && claim.scope !== scope) { excluded.push({ claim_id: claim.id, reason: "out_of_scope" }); return []; }
       const claimContent = claim.content_ref ? this.store.contentStore.readCompatSync(claim.content_ref as never, typeof claim.scope === "string" ? claim.scope : undefined).body : String(claim.content ?? "");
@@ -2943,9 +2949,14 @@ export class CraftService extends ServiceFoundation {
     }
     const context = included.map((item) => `[Knowledge ${item.claim_id}]\n${item.content}\nEvidence: ${(item.evidence_ids as string[]).join(", ")}\n`).join("\n"); const bundleId = String(args.bundle_id ?? id("wiki_context_bundle")); const existing = this.store.find("wiki_context_bundle", bundleId);
     const identity = { query, scope, max_items: maxItems, max_chars: maxChars, now: args.now ?? null, candidate_claim_ids: [...candidateSet].sort() };
-    if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Wiki context bundle idempotency conflict"); return { bundle: existing, context, included, excluded, idempotent: true }; }
-    const bundle = this.store.create("wiki_context_bundle", bundleId, { ...identity, identity_digest: valueDigest(identity), context_digest: valueDigest(context), claim_refs: included.map((item) => ({ claim_id: item.claim_id, claim_version: item.claim_version })), excluded, used_chars: usedChars, semantic_retrieval: "disabled_by_default" });
-    return { bundle, context, included, excluded, idempotent: false };
+    const claimRefs = included.map((item) => ({ claim_id: item.claim_id, claim_version: item.claim_version }));
+    if (existing) {
+      if (existing.identity_digest !== valueDigest(identity)) throw new Error("Wiki context bundle idempotency conflict");
+      if (existing.context_digest !== valueDigest(context) || valueDigest(existing.claim_refs) !== valueDigest(claimRefs) || valueDigest(existing.excluded) !== valueDigest(excluded) || existing.used_chars !== usedChars || existing.partial !== partial) throw new Error("Wiki context bundle changed since compilation");
+      return { bundle: existing, context, included, excluded, partial, idempotent: true };
+    }
+    const bundle = this.store.create("wiki_context_bundle", bundleId, { ...identity, identity_digest: valueDigest(identity), context_digest: valueDigest(context), claim_refs: claimRefs, excluded, used_chars: usedChars, partial, semantic_retrieval: "disabled_by_default" });
+    return { bundle, context, included, excluded, partial, idempotent: false };
   }
   wikiContextBundleGet(args: JsonObject): JsonObject { return { bundle: this.store.get("wiki_context_bundle", text(args.bundle_id, "bundle_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
   wikiContextBundleList(args: JsonObject): JsonObject { return this.list("wiki_context_bundle", "bundles", args); }
@@ -3316,7 +3327,8 @@ export class CraftService extends ServiceFoundation {
     if (args.mode === "citation_support") return { assessment: new ContextHostEvaluation(this.store).evaluateKnowledge(args), changes_routing: false };
     const mode = args.mode === undefined ? "retrieval" : text(args.mode, "mode");
     if (mode !== "retrieval" && mode !== "candidate_shadow") throw new Error("Knowledge evaluation mode is unsupported");
-    const caseIds = args.case_ids === undefined ? this.store.list("knowledge_evaluation_case", 10_000).map((item) => String(item.id)) : uniqueTextArray(args.case_ids, "case_ids");
+    const caseIds = args.case_ids === undefined ? this.store.list("knowledge_evaluation_case", 10_001).map((item) => String(item.id)) : uniqueTextArray(args.case_ids, "case_ids");
+    if (caseIds.length > 10_000) throw new Error("Knowledge evaluation cases exceed the bounded limit");
     if (!caseIds.length) throw new Error("Knowledge evaluation requires at least one case");
     const candidateClaimIds = mode === "candidate_shadow" ? uniqueTextArray(args.candidate_claim_ids, "candidate_claim_ids") : [];
     if (mode === "retrieval" && args.candidate_claim_ids !== undefined) throw new Error("candidate_claim_ids require candidate_shadow mode");
@@ -3324,9 +3336,16 @@ export class CraftService extends ServiceFoundation {
     if (candidateClaims.some((claim) => claim.status !== "candidate")) throw new Error("Candidate shadow evaluation requires current candidate Claims");
     const candidateRefs = candidateClaims.map((claim) => ({ claim_id: claim.id, claim_version: claim.version,
       identity_digest: claim.identity_digest ?? null, content_digest: claim.content_digest ?? null }));
+    const sourceRefsFor = (claims: JsonObject[]) => claims.map((claim) => {
+      const source = typeof claim.source_id === "string" ? this.store.find("knowledge_source", claim.source_id) : null;
+      return { claim_id: claim.id, source_id: claim.source_id ?? null, source_version: source?.version ?? null,
+        source_digest: source?.content_digest ?? null, source_status: source?.status ?? null, source_trust: source?.trust ?? null };
+    });
+    const candidateSourceRefs = sourceRefsFor(candidateClaims);
     const topK = finiteInteger(args.top_k, "top_k", 5, 1, 50);
     const now = args.now ?? new Date().toISOString();
     const caseRefs: JsonObject[] = [];
+    const selectedVersions: JsonObject[] = [];
     let truePositives = 0, falsePositives = 0, falseNegatives = 0;
     const results = caseIds.map((caseId) => {
       const item = this.store.get("knowledge_evaluation_case", caseId);
@@ -3342,6 +3361,17 @@ export class CraftService extends ServiceFoundation {
       const selected = (compiled.included as JsonObject[]).map((claim) => String(claim.claim_id));
       const expected = item.expected_claim_ids as string[];
       const matched = expected.filter((claim) => selected.includes(claim));
+      const baseline = mode === "candidate_shadow" && typeof item.query === "string" && item.query.trim()
+        ? this.wikiContextCompile({ query: item.query, scope: item.scope, max_items: topK, max_chars: 100_000, now })
+        : { included: [] };
+      if ((compiled as JsonObject).partial === true || (baseline as JsonObject).partial === true) throw new Error("Knowledge evaluation corpus is incomplete");
+      const baselineSelected = (baseline.included as JsonObject[]).map((claim) => String(claim.claim_id));
+      const baselineRefs = (baseline.included as JsonObject[]).map((claim) => ({ claim_id: claim.claim_id, claim_version: claim.claim_version }));
+      const selectedRefs = (compiled.included as JsonObject[]).map((claim) => ({ claim_id: claim.claim_id, claim_version: claim.claim_version }));
+      selectedVersions.push(...selectedRefs, ...baselineRefs);
+      const candidateBundle = (compiled as JsonObject).bundle as JsonObject | undefined;
+      const baselineBundle = (baseline as JsonObject).bundle as JsonObject | undefined;
+      const baselineMatched = expected.filter((claim) => baselineSelected.includes(claim));
       const evidenceCovered = matched.filter((claim) => Array.isArray(this.store.get("knowledge_claim", claim).evidence_ids) && (this.store.get("knowledge_claim", claim).evidence_ids as unknown[]).length > 0);
       const provenanceEvidence = knowledgeEvaluationEvidence(this.store, item);
       const provenance = assessKnowledgeEvaluationProvenance(item, provenanceEvidence.sourceEvidence, provenanceEvidence.claimEvidence,
@@ -3353,6 +3383,13 @@ export class CraftService extends ServiceFoundation {
       falsePositives += selectedCandidates.filter((claim) => !expectedCandidates.includes(claim)).length;
       falseNegatives += expectedCandidates.filter((claim) => !selectedCandidates.includes(claim)).length;
       return { case_id: item.id, selected_claim_ids: selected, expected_claim_ids: expected, matched_claim_ids: matched,
+        ...(mode === "candidate_shadow" ? { selected_claim_refs: selectedRefs, baseline_selected_claim_ids: baselineSelected, baseline_claim_refs: baselineRefs,
+          candidate_bundle_ref: candidateBundle ? { id: candidateBundle.id, version: candidateBundle.version, context_digest: candidateBundle.context_digest } : null,
+          baseline_bundle_ref: baselineBundle ? { id: baselineBundle.id, version: baselineBundle.version, context_digest: baselineBundle.context_digest } : null,
+          baseline_matched_claim_ids: baselineMatched, baseline_recall: baselineMatched.length / expected.length,
+          regressed_claim_ids: baselineMatched.filter(claim => !matched.includes(claim)),
+          gained_claim_ids: matched.filter(claim => !baselineMatched.includes(claim)),
+          recall_delta: (matched.length - baselineMatched.length) / expected.length } : {}),
         recall: matched.length / expected.length, evidence_coverage: evidenceCovered.length / expected.length,
         candidate_leaks: selected.filter((claim) => this.store.get("knowledge_claim", claim).status !== "reviewed" && !candidateClaimIds.includes(claim)),
         candidate_false_positive_claim_ids: selectedCandidates.filter((claim) => !expectedCandidates.includes(claim)),
@@ -3364,18 +3401,39 @@ export class CraftService extends ServiceFoundation {
     const provenanceEligible = results.every((item) => item.evaluation_eligible);
     const candidatePrecision = truePositives + falsePositives === 0 ? 1 : truePositives / (truePositives + falsePositives);
     const candidateRecall = truePositives + falseNegatives === 0 ? 1 : truePositives / (truePositives + falseNegatives);
+    const baselineRecall = mode === "candidate_shadow" ? results.reduce((total, item) => total + Number(item.baseline_recall), 0) / results.length : null;
+    const regressionCases = mode === "candidate_shadow" ? results.filter(item => Array.isArray(item.regressed_claim_ids) && item.regressed_claim_ids.length > 0).length : 0;
+    for (const ref of caseRefs) {
+      const current = this.store.find("knowledge_evaluation_case", String(ref.case_id));
+      if (!current || current.version !== ref.case_version || (current.identity_digest ?? null) !== ref.identity_digest) throw new Error("Knowledge evaluation case changed during evaluation");
+    }
+    for (const ref of selectedVersions) {
+      const current = this.store.find("knowledge_claim", String(ref.claim_id));
+      if (!current || current.version !== ref.claim_version || current.status === "reviewed" && !knowledgeClaimPromotionProofVerified(this.store, current)) {
+        throw new Error("Knowledge selected Claim changed during evaluation");
+      }
+    }
+    if (mode === "candidate_shadow") {
+      const currentClaims = candidateClaimIds.map(claimId => this.store.get("knowledge_claim", claimId));
+      const currentRefs = currentClaims.map(claim => ({ claim_id: claim.id, claim_version: claim.version,
+        identity_digest: claim.identity_digest ?? null, content_digest: claim.content_digest ?? null }));
+      if (valueDigest(currentRefs) !== valueDigest(candidateRefs) || valueDigest(sourceRefsFor(currentClaims)) !== valueDigest(candidateSourceRefs)) {
+        throw new Error("Knowledge candidate or source changed during evaluation");
+      }
+    }
     const minRecall = Number(args.min_recall ?? 1), minEvidence = Number(args.min_evidence_coverage ?? 1), minCandidatePrecision = Number(args.min_candidate_precision ?? 1);
     if (![minRecall, minEvidence, minCandidatePrecision].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) throw new Error("Knowledge evaluation thresholds must be between 0 and 1");
     const runId = String(args.run_id ?? id("knowledge_evaluation_run"));
     const existing = this.store.find("knowledge_evaluation_run", runId);
-    const identity = { mode, case_ids: caseIds, candidate_claim_refs: candidateRefs, top_k: topK, now,
+    const identity = { mode, case_ids: caseIds, candidate_claim_refs: candidateRefs, candidate_source_refs: candidateSourceRefs, top_k: topK, now,
       min_recall: minRecall, min_evidence_coverage: minEvidence, min_candidate_precision: minCandidatePrecision };
     if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge evaluation run idempotency conflict"); return { run: existing, idempotent: true }; }
     const status = recall >= minRecall && evidenceCoverage >= minEvidence && candidatePrecision >= minCandidatePrecision
-      && leaked === 0 && provenanceEligible ? "eligible" : "insufficient";
+      && leaked === 0 && regressionCases === 0 && provenanceEligible ? "eligible" : "insufficient";
     const run = this.store.create("knowledge_evaluation_run", runId, { ...identity, case_refs: caseRefs, identity_digest: valueDigest(identity), results,
       metrics: { recall, evidence_coverage: evidenceCoverage, candidate_leaks: leaked, candidate_precision: candidatePrecision,
-        candidate_recall: candidateRecall, provenance_eligible: provenanceEligible }, status, changes_routing: false });
+        candidate_recall: candidateRecall, provenance_eligible: provenanceEligible,
+        ...(baselineRecall === null ? {} : { baseline_recall: baselineRecall, recall_delta: recall - baselineRecall, regressed_case_count: regressionCases, case_count: results.length }) }, status, changes_routing: false });
     return { run, idempotent: false };
   }
   knowledgeEvaluationRunGet(args: JsonObject): JsonObject { return { run: this.store.get("knowledge_evaluation_run", text(args.run_id, "run_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }

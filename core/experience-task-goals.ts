@@ -9,15 +9,16 @@ const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=
 export interface ExperienceTaskGoalArgs {
   experience_dir: string;
   scope: string;
+  session_host: "codex" | "claude";
   session_id: string;
   turn_id: string;
   task_goal?: string;
 }
 
-function goalIdentity(args: ExperienceTaskGoalArgs): { scope: string; session_id: string; turn_id: string } {
+function goalIdentity(args: ExperienceTaskGoalArgs): { scope: string; session_host: "codex" | "claude"; session_id: string; turn_id: string } {
   if (!/^project:[A-Za-z0-9_-]{1,96}$/u.test(args.scope) || !args.session_id.trim() || args.session_id.length > 200
-    || !args.turn_id.trim() || args.turn_id.length > 200) throw new Error("Experience task-goal identity is invalid");
-  return { scope: args.scope, session_id: args.session_id, turn_id: args.turn_id };
+    || !args.turn_id.trim() || args.turn_id.length > 200 || (args.session_host !== "codex" && args.session_host !== "claude")) throw new Error("Experience task-goal identity is invalid");
+  return { scope: args.scope, session_host: args.session_host, session_id: args.session_id, turn_id: args.turn_id };
 }
 
 function directory(path: string, create: boolean): boolean {
@@ -28,7 +29,12 @@ function directory(path: string, create: boolean): boolean {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     if (!create) return false;
-    mkdirSync(path, { mode: 0o700 });
+    try { mkdirSync(path, { mode: 0o700 }); }
+    catch (mkdirError) {
+      if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") throw mkdirError;
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Experience task-goal path must contain regular directories");
+    }
     return true;
   }
 }
@@ -71,6 +77,10 @@ export function storeExperienceTaskGoal(args: ExperienceTaskGoalArgs): void {
   try { writeFileSync(fd, JSON.stringify({ ...identity, identity_digest: identityDigest })); }
   finally { closeSync(fd); }
   try { linkSync(tempPath, path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if (readPendingFile(path).identity_digest !== identityDigest) throw new Error("Experience task-goal idempotency conflict");
+  }
   finally { unlinkSync(tempPath); }
 }
 

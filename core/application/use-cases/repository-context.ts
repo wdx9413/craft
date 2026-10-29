@@ -71,7 +71,11 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   const budgetOmitted = Number(context.codebase_budget_omitted_count), budgetRebalanced = context.codebase_budget_rebalanced;
   const chars = Number(context.total_used_chars), items = Number(context.total_items);
   const reasons: string[] = [];
-  if (receipt?.partial === true) reasons.push("context_contribution_unavailable");
+  if (receipt?.partial === true) {
+    const failures = Array.isArray(receipt.contributor_failures) ? receipt.contributor_failures as JsonObject[] : [];
+    if (failures.some(item => item.member === "knowledge" && item.reason === "source_verification_incomplete")) reasons.push("knowledge_source_verification_incomplete");
+    if (!failures.length || failures.some(item => item.member !== "knowledge" || item.reason !== "source_verification_incomplete")) reasons.push("context_contribution_unavailable");
+  }
   if (knowledgeSourceDiscovery.status === "unavailable") reasons.push("knowledge_source_discovery_unavailable");
   else if (knowledgeSourceDiscovery.status !== "ready")
     reasons.push("knowledge_source_discovery_incomplete");

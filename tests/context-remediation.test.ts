@@ -26,7 +26,6 @@ async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-context-fixes-")), repo = join(root, "repo"); mkdirSync(repo); execFileSync("git", ["-C", repo, "init", "-q"]);
   writeFileSync(join(repo, "login.ts"), "export function loginUser() { return true; }");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open(), service = new CraftService(store); service.knowledgeMemoryInstallBuiltins();
-  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:p", alias_kind: "path", alias: repo });
   const scope = (service.scopeIdentityResolveProject({ project_root: repo }).identity as JsonObject).canonical_scope as JsonObject;
   return { root, repo, store, service, scope, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
 }
@@ -124,6 +123,9 @@ test("feedback attributes selected code and schedules correction without alterin
     assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", usage_stage: "verified" }), /Evidence/);
     assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", usage_stage: "bad" }), /usage_stage/);
     assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", asset_refs: "bad" }), /array/);
+    f.service.evidenceRecord({ evidence_id: "asserted", source_type: "program", confidence: "confirmed", claim: "Caller assertion", metadata: { context_receipt_id: id, verdict: "passed" } }, true);
+    assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", usage_stage: "verified", evidence_ids: ["asserted"] }), /Evidence/);
+    assert.equal((f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", usage_stage: "used", evidence_ids: ["asserted"] }).feedback as JsonObject).evidence_verified, false);
     f.store.create("evidence", "verified", { source_type: "program", confidence: "confirmed", metadata: { context_receipt_id: id, verdict: "passed" } });
     assert.equal((f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", usage_stage: "verified", evidence_ids: ["verified"] }).feedback as JsonObject).evidence_verified, true);
   } finally { f.close(); }
@@ -237,8 +239,7 @@ test("formal release survives candidate edits and failures while test planning r
 test("standalone memory governance suggests rather than overwrites topics and confirms pinned entries", async () => {
   const f = await fixture();
   try {
-    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "p", alias_kind: "path", alias: f.repo });
-    const scope = { scope_kind: "project", scope_id: "p" };
+    const scope = { scope_kind: "project", scope_id: f.scope.id };
     f.store.create("evidence", "user", { source_type: "human", confidence: "bounded" });
     const memory = f.service.memoryLedgerRemember({ ...scope, memory_id: "preference", source_id: "builtin.evidence-wiki", kind: "preference", content: "Prefer Python tools", topic: "language", evidence_ids: ["user"] }).memory as JsonObject;
     f.service.memoryLedgerRemember({ ...scope, memory_id: "another-topic", source_id: "builtin.evidence-wiki", kind: "preference", content: "Python", topic: "short", evidence_ids: ["user"] });
@@ -251,8 +252,8 @@ test("standalone memory governance suggests rather than overwrites topics and co
     assert.throws(() => governance.confirm({ memory_id: memory.id, explicit_consent: true, expected_version: memory.version }), /Evidence/);
     const args = { memory_id: memory.id, explicit_consent: true, expected_version: memory.version, evidence_ids: ["user"] };
     assert.deepEqual(governance.confirm(args), governance.confirm(args));
-    f.store.create("memory_candidate", "candidate", { scope: { kind: "project", id: "p" }, status: "candidate" });
-    f.store.create("context_correction_task", "correction", { status: "pending_review", asset_ref: { member: "memory", id: memory.id, version: memory.version, scope: { kind: "project", id: "p" } } });
+    f.store.create("memory_candidate", "candidate", { scope: f.scope, status: "candidate" });
+    f.store.create("context_correction_task", "correction", { status: "pending_review", asset_ref: { member: "memory", id: memory.id, version: memory.version, scope: f.scope } });
     const tasks = governance.governanceTasks(scope); assert.equal((tasks.candidates as unknown[]).length, 1); assert.equal((tasks.corrections as unknown[]).length, 1);
   } finally { f.close(); }
 });
@@ -262,9 +263,9 @@ test("Knowledge SDK synchronizes expiration, source drift, documents and evidenc
   try {
     const sdk = new KnowledgeClaimGovernance(f.store);
     assert.throws(() => sdk.synchronize({ now: "bad" }), /timestamp/);
-    const base = { source_id: "builtin.evidence-wiki", scope: "project:p", status: "reviewed", content: "fact" };
-    f.store.create("knowledge_source", "missing", { scope: "project:p", status: "active", trust: "verified" });
-    f.store.create("knowledge_document", "missing", { scope: "project:p", status: "current", content_digest: "old" });
+    const base = { source_id: "builtin.evidence-wiki", scope: `project:${f.scope.id}`, status: "reviewed", content: "fact" };
+    f.store.create("knowledge_source", "missing", { scope: `project:${f.scope.id}`, status: "active", trust: "verified" });
+    f.store.create("knowledge_document", "missing", { scope: `project:${f.scope.id}`, status: "current", content_digest: "old" });
     f.store.create("knowledge_claim", "expired", { ...base, valid_until: "2020-01-01" });
     f.store.create("knowledge_claim", "drift", { ...base, review: { source_digest: "old" } });
     f.store.create("knowledge_claim", "missing", { ...base, source_id: "missing" });
@@ -275,8 +276,8 @@ test("Knowledge SDK synchronizes expiration, source drift, documents and evidenc
     const affected = sdk.synchronize({ now: "2026-10-09T00:00:00Z" }).affected as JsonObject[]; assert.equal(affected.length, 6);
     assert.equal(f.store.get("knowledge_claim", "expired").status, "expired"); assert.equal(f.store.get("knowledge_claim", "a").status, "disputed"); assert.equal(f.store.get("knowledge_claim", "healthy").status, "reviewed");
     assert.equal(sdk.synchronize().count, 0);
-    f.store.create("knowledge_document", "changed", { scope: "project:p", status: "changed", content_digest: "d" });
-    f.store.create("knowledge_document", "current", { scope: "project:p", status: "current", content_digest: "d" });
+    f.store.create("knowledge_document", "changed", { scope: `project:${f.scope.id}`, status: "changed", content_digest: "d" });
+    f.store.create("knowledge_document", "current", { scope: `project:${f.scope.id}`, status: "current", content_digest: "d" });
     f.store.create("knowledge_claim", "changed-document", { ...base, document_id: "changed", document_digest: "d", content_ref: { path: "notes/reviewed.md" } });
     f.store.create("knowledge_claim", "wrong-digest", { ...base, document_id: "current", document_digest: "old" });
     f.store.create("knowledge_claim", "matching-document", { ...base, document_id: "current", document_digest: "d" });
@@ -316,7 +317,7 @@ test("Graph matching recommends named routes and explains missing material witho
 test("standalone Claim SDK preserves validation, legacy replay and current/historical read gates", async () => {
   const f = await fixture();
   try {
-    const sdk = new KnowledgeClaimGovernance(f.store), scope = "project:p";
+    const sdk = new KnowledgeClaimGovernance(f.store), scope = `project:${f.scope.id}`;
     f.store.create("evidence", "proof", { confidence: "confirmed" }); f.store.create("evidence", "weak", { confidence: "unverified" });
     const args = { claim_id: "claim", kind: "fact", scope, content: "retained fact", evidence_ids: ["proof"], tags: ["fact"], title: "fact", valid_until: "2030-01-01" };
     const original = sdk.knowledgeClaimSave(args).claim as JsonObject; assert.equal(sdk.knowledgeClaimSave(args).idempotent, true);
@@ -346,7 +347,7 @@ test("standalone Claim SDK preserves validation, legacy replay and current/histo
     f.store.create("knowledge_claim", "no-source", { scope: "global", evidence_ids: ["proof"], status: "candidate" });
     assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "no-source", status: "reviewed", reviewer: "human", reason: "review" }), /managed Host review and independent effectiveness evaluation/);
     f.service.knowledgeSourceRegister({ source_id: "source-to-delete", kind: "custom", label: "Temporary source",
-      scope_kind: "project", scope_id: "p", locator: join(f.root, "temporary.md"), content_digest: "temporary-source-digest", trust: "bounded", access: "read_only" });
+      scope_kind: "project", scope_id: String(f.scope.id), locator: join(f.root, "temporary.md"), content_digest: "temporary-source-digest", trust: "bounded", access: "read_only" });
     f.store.create("knowledge_claim", "missing-source", { scope, evidence_ids: ["proof"], status: "candidate", source_id: "source-to-delete" });
     f.store.remove("knowledge_source", "source-to-delete");
     assert.throws(() => sdk.knowledgeClaimReview({ claim_id: "missing-source", status: "reviewed", reviewer: "human", reason: "review" }), /managed Host review and independent effectiveness evaluation/);
@@ -366,8 +367,8 @@ test("Knowledge claim governance rejects historical scope drift and repairs lega
     const sdk = new KnowledgeClaimGovernance(f.store);
     f.store.create("evidence", "scope-proof", { confidence: "confirmed" });
     f.service.knowledgeSourceRegister({ source_id: "legacy-project-source", kind: "custom", label: "Legacy project source",
-      scope_kind: "project", scope_id: "p", locator: join(f.root, "legacy-source.md"), content_digest: "legacy-project-source-digest", trust: "bounded", access: "read_only" });
-    const claim = sdk.knowledgeClaimSave({ claim_id: "scope-drift", kind: "fact", scope: "project:p", content: "scoped fact", evidence_ids: ["scope-proof"] }).claim as JsonObject;
+      scope_kind: "project", scope_id: String(f.scope.id), locator: join(f.root, "legacy-source.md"), content_digest: "legacy-project-source-digest", trust: "bounded", access: "read_only" });
+    const claim = sdk.knowledgeClaimSave({ claim_id: "scope-drift", kind: "fact", scope: `project:${f.scope.id}`, content: "scoped fact", evidence_ids: ["scope-proof"] }).claim as JsonObject;
     sdk.knowledgeClaimReview({ claim_id: "scope-drift", status: "disputed", reviewer: "fixture", reason: "revision boundary" });
     const pointer = JSON.parse(String((f.store.database.prepare("SELECT payload_json FROM records WHERE kind='knowledge_claim' AND id=?").get("scope-drift") as { payload_json: string }).payload_json)) as JsonObject;
     const partition = pointer._knowledge_partition as JsonObject;
@@ -671,7 +672,7 @@ test("Hook capture reports held preferences instead of falsely claiming a durabl
     const bridge = new CodexHookBridge(f.service), base = { hook_event_name: "UserPromptSubmit", cwd: f.repo, session_id: "session" };
     await bridge.handle("context", { ...base, turn_id: "one", prompt: "记住：以后默认用 Python" });
     const response = await bridge.handle("context", { ...base, turn_id: "two", prompt: "记住：以后默认用 Java" }); const payload = JSON.parse(String(response.additionalContext));
-    assert.equal(payload.memory_capture.memory_written, false); assert.equal(payload.memory_capture.next_action, "confirm_topic_or_explicit_replacement"); assert.equal(payload.session_id, base.session_id); assert.equal(f.store.count("memory_ledger"), 1);
+    assert.equal(payload.memory_capture.memory_written, false); assert.equal(payload.memory_capture.next_action, "confirm_topic_or_explicit_replacement"); assert.equal(f.store.count("memory_ledger"), 1);
     f.service.memoryGovernance.policySave({ mode: "off" }); const disabled = await bridge.handle("memory", { ...base, turn_id: "off", prompt: "记住：no match" }); assert.equal(JSON.parse(String(disabled.additionalContext)).memory_capture.memory_written, false);
   } finally { f.close(); }
 });
@@ -712,8 +713,9 @@ test("Hosts without native turn IDs receive fresh local turns and can reuse thei
   try {
     f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "preference", memory_id: "m", scope_kind: f.scope.kind, scope_id: f.scope.id, content: "login review" });
     const bridge = new CodexHookBridge(f.service), input = { hook_event_name: "UserPromptSubmit", cwd: f.repo, session_id: "session", prompt: "login review" };
-    const first = JSON.parse(String((await bridge.handle("context", input)).additionalContext));
-    assert(first.turn_id.startsWith("hook_turn_")); assert.equal((await f.service.contextOpen({ project_root: f.repo, query: input.prompt, session_id: first.session_id, turn_id: first.turn_id })).hook_reused, true);
-    const next = JSON.parse(String((await bridge.handle("context", input)).additionalContext)); assert.notEqual(next.turn_id, first.turn_id);
+    await bridge.handle("context", input);
+    const first = f.store.list("context_hook_session", 1)[0]!; const turnId = String(first.last_turn_id);
+    assert(turnId.startsWith("hook_turn_")); assert.equal((await f.service.contextOpen({ project_root: f.repo, query: input.prompt, session_id: input.session_id, turn_id: turnId })).hook_reused, true);
+    await bridge.handle("context", input); const next = f.store.list("context_hook_session", 1)[0]!; assert.notEqual(next.last_turn_id, turnId);
   } finally { f.close(); }
 });

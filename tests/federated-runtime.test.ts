@@ -1,3 +1,4 @@
+import { deliveryEvaluationFixture } from "./helpers/delivery-evaluation-fixture.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -22,7 +23,7 @@ async function fixture() {
   const provider = service.enterpriseIdentityProviderRegister({ provider_id: "provider", kind: "short_lived_broker", issuer: "https://issuer.example.test", audience: "craft", broker_ref: "broker", organization_ref: "org" }).provider as JsonObject;
   service.enterpriseIdentityProviderVerify({ provider_id: provider.id, evidence_ids: [confirmed.id], observed_claims: ["short_lived_credentials", "token_exchange", "audit_subject", "revocation"], verified_by: "security" });
   const card = store.create("a2a_agent_card", "card", { card_digest: "sha256:card", skills: ["research"], endpoint: "https://remote.example.test/a2a" });
-  const baseline = store.create("delivery_evaluation_run", "baseline", { status: "eligible_for_signoff" });
+  const baseline = deliveryEvaluationFixture(service, "baseline");
   const trust = service.a2aAgentTrustApprove({ trust_id: "trust", card_id: card.id, provider_id: provider.id, allowed_effects: ["read_only"], evidence_ids: [confirmed.id], approval_ref: "approved" }).trust as JsonObject;
   const session = service.a2aCollaborationSessionCreate({ session_id: "session", task_id: task.id, trust_id: trust.id, evaluation_run_id: baseline.id, justification_evidence_id: confirmed.id, budget: { tokens: 10 }, max_delegations: 5 }).session as JsonObject;
   const artifact = service.artifactRegister({ artifact_id: "artifact", kind: "file", name: "proof", uri: "file:///proof", producer_type: "test", producer_id: "test" }) as JsonObject;
@@ -100,8 +101,8 @@ test("keeps multi-Agent topology shadowed until paired evidence and makes deploy
     const baseline = f.service.harnessTopologyDefine({ topology_id: "single", task_id: f.task.id, roles: ["primary"], mode: "baseline" }).topology as JsonObject;
     const candidate = f.service.harnessTopologyDefine({ topology_id: "evaluated", task_id: f.task.id, roles: ["primary", "independent_evaluator"], mode: "candidate", max_agents: 2 }).topology as JsonObject;
     assert.equal((f.service.harnessTopologySelect({ task_id: f.task.id, baseline_topology_id: baseline.id }).topology as JsonObject).id, baseline.id);
-    f.store.create("delivery_evaluation_run", "candidate-eval", { status: "inconclusive" }); assert.throws(() => f.service.harnessTopologyPromote({ topology_id: candidate.id, evaluation_run_id: "candidate-eval", evidence_ids: [f.confirmed.id] }), /eligible/);
-    f.store.save("delivery_evaluation_run", "candidate-eval", { status: "eligible_for_signoff" }); assert.throws(() => f.service.harnessTopologyPromote({ topology_id: candidate.id, evaluation_run_id: "candidate-eval", evidence_ids: [f.bounded.id] }), /confirmed/);
+    deliveryEvaluationFixture(f.service, "candidate-eval", "inconclusive"); assert.throws(() => f.service.harnessTopologyPromote({ topology_id: candidate.id, evaluation_run_id: "candidate-eval", evidence_ids: [f.confirmed.id] }), /eligible/);
+    f.store.save("delivery_evaluation_run", "candidate-eval", { ...f.store.get("delivery_evaluation_run", "candidate-eval"), status: "eligible_for_signoff" }); assert.throws(() => f.service.harnessTopologyPromote({ topology_id: candidate.id, evaluation_run_id: "candidate-eval", evidence_ids: [f.bounded.id] }), /confirmed/);
     assert.equal((f.service.harnessTopologyPromote({ topology_id: candidate.id, evaluation_run_id: "candidate-eval", evidence_ids: [f.confirmed.id] }).topology as JsonObject).lifecycle, "routing_eligible"); assert.equal(f.service.harnessTopologyPromote({ topology_id: candidate.id, evaluation_run_id: "candidate-eval", evidence_ids: [f.confirmed.id] }).idempotent, true);
     const candidateTwo = f.service.harnessTopologyDefine({ topology_id: "evaluated-two", task_id: f.task.id, roles: ["primary", "diagnostic_research"], mode: "candidate" }).topology as JsonObject;
     f.service.harnessTopologyPromote({ topology_id: candidateTwo.id, evaluation_run_id: "candidate-eval", evidence_ids: [f.confirmed.id] });
@@ -147,7 +148,7 @@ test("fails closed at every newly introduced authorization and topology boundary
     assert.throws(() => f.service.harnessTopologySelect({ task_id: f.task.id, baseline_topology_id: candidate.id }), /baseline/);
     const selection = f.service.harnessTopologySelect({ task_id: f.task.id, baseline_topology_id: baseline.id, selection_id: "coverage-selection" });
     assert.equal(f.service.harnessTopologySelect({ task_id: f.task.id, baseline_topology_id: baseline.id, selection_id: "coverage-selection" }).idempotent, true);
-    replace(f, "harness_topology", candidate.id, { lifecycle: "routing_eligible" });
+    replace(f, "harness_topology", candidate.id, { lifecycle: "routing_eligible", evaluation_run_id: "baseline", evaluation_run_version: f.store.get("delivery_evaluation_run", "baseline").version });
     assert.throws(() => f.service.harnessTopologySelect({ task_id: f.task.id, baseline_topology_id: baseline.id, selection_id: (selection.selection as JsonObject).id }), /idempotency/);
 
     // Readiness validates malformed facts, failed preflight, invalid binding, and idempotency.

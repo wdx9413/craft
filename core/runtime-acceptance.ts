@@ -59,6 +59,17 @@ export class RuntimeAcceptanceKernel {
 
   evaluate(args: JsonObject): JsonObject {
     const plan = this.store.get("runtime_acceptance_plan", text(args.plan_id, "plan_id")); const records = this.store.list("runtime_acceptance_record", 10_000, (item) => item.plan_id === plan.id);
+    const sessions = new Set<string>(), observations = new Set<string>();
+    for (const record of records) {
+      const session = typeof record.host_session_id === "string" ? this.store.find("host_session", record.host_session_id) : null;
+      const observation = typeof record.observation_id === "string" ? this.store.find("outcome_observation", record.observation_id) : null;
+      if (!session || !observation || session.version !== record.host_session_version || observation.version !== record.observation_version
+        || session.host_id !== record.host_id || session.environment_fingerprint !== plan.environment_fingerprint
+        || observation.trace_id !== session.trace_id || observation.host_id !== record.host_id || observation.observer_kind !== plan.observer_kind
+        || observation.observer_id === record.host_id || observation.verdict !== record.verdict) throw new Error("Runtime acceptance evidence changed or is unbound");
+      if (sessions.has(String(session.id)) || observations.has(String(observation.id))) throw new Error("Runtime acceptance requires distinct sessions and observations");
+      sessions.add(String(session.id)); observations.add(String(observation.id));
+    }
     const pairs = (plan.host_ids as string[]).flatMap((host) => (plan.case_ids as string[]).flatMap((caseId) => Array.from({ length: Number(plan.trials_per_pair) }, (_, index) => ({ host, caseId, trial: index + 1 }))));
     let candidateWins = 0; let baselineWins = 0; let ties = 0; let incomplete = 0;
     for (const pair of pairs) {
@@ -69,14 +80,28 @@ export class RuntimeAcceptanceKernel {
       if (candidatePassed && !basePassed) candidateWins += 1; else if (basePassed && !candidatePassed) baselineWins += 1; else ties += 1;
     }
     const total = pairs.length; const complete = incomplete === 0; const strictProof = Number(plan.trials_per_pair) === 5 && candidateWins === total && baselineWins === 0;
-    const status = !complete ? "inconclusive" : strictProof ? "eligible" : baselineWins >= candidateWins ? "rejected" : "inconclusive";
+    // Harness names are supplied by the caller; the current Host records do not
+    // attest the executed asset version or code snapshot. A winning comparison
+    // is therefore diagnostic until that binding can be verified.
+    const status = !complete ? "inconclusive" : strictProof ? "inconclusive" : baselineWins >= candidateWins ? "rejected" : "inconclusive";
     const evaluationId = String(args.evaluation_id ?? `runtime_acceptance_evaluation_${plan.id}`); const identity = { plan_id: plan.id, total_pairs: total, candidate_wins: candidateWins, baseline_wins: baselineWins, ties, incomplete, status };
     const existing = this.store.find("runtime_acceptance_evaluation", evaluationId); const evaluationDigest = digestJson(identity);
     if (existing) { if (existing.evaluation_digest !== evaluationDigest) throw new Error("Runtime acceptance evaluation idempotency conflict"); return { evaluation: existing, idempotent: true }; }
-    const evaluation = this.store.create("runtime_acceptance_evaluation", evaluationId, { ...identity, evaluation_digest: evaluationDigest, candidate_default_activation_permitted: status === "eligible" });
+    const evaluation = this.store.create("runtime_acceptance_evaluation", evaluationId, { ...identity, evaluation_digest: evaluationDigest, candidate_default_activation_permitted: false,
+      candidate_execution_binding: "unverified", ...(strictProof ? { inconclusive_reason: "candidate_execution_binding_unverified" } : {}) });
     const saved = this.store.save("runtime_acceptance_plan", String(plan.id), { ...payload(plan), status: "evaluated", latest_evaluation_id: evaluation.id });
     return { plan: saved, evaluation, idempotent: false };
   }
 
-  get(args: JsonObject): JsonObject { const plan = this.store.get("runtime_acceptance_plan", text(args.plan_id, "plan_id")); return { plan, records: this.store.list("runtime_acceptance_record", 10_000, (item) => item.plan_id === plan.id), evaluation: plan.latest_evaluation_id ? this.store.get("runtime_acceptance_evaluation", String(plan.latest_evaluation_id)) : null }; }
+  get(args: JsonObject): JsonObject {
+    const plan = this.store.get("runtime_acceptance_plan", text(args.plan_id, "plan_id"));
+    const evaluation = plan.latest_evaluation_id ? this.store.get("runtime_acceptance_evaluation", String(plan.latest_evaluation_id)) : null;
+    // Older records can claim eligibility without binding the executed version.
+    // Project the current gate without rewriting the historical audit record.
+    const current = evaluation ? { ...evaluation, recorded_status: evaluation.status,
+      status: evaluation.status === "eligible" ? "inconclusive" : evaluation.status,
+      candidate_default_activation_permitted: false, candidate_execution_binding: "unverified",
+      ...(evaluation.status === "eligible" ? { inconclusive_reason: "candidate_execution_binding_unverified" } : {}) } : null;
+    return { plan, records: this.store.list("runtime_acceptance_record", 10_000, (item) => item.plan_id === plan.id), evaluation: current };
+  }
 }
