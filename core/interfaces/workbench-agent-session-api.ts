@@ -4,7 +4,7 @@ import { detectWorkbenchClis } from "./workbench-cli-detection.ts";
 import { ClaudeWorkbenchHistory } from "./claude-workbench-history.ts";
 import { ClaudeNativeSessions } from "./claude-native-sessions.ts";
 import { claudeWorkbenchCommands } from "./claude-workbench-commands.ts";
-import { listWorkbenchDirectories } from "./workbench-directories.ts";
+import { listWorkbenchDirectories, listWorkbenchFiles } from "./workbench-directories.ts";
 import { claudeWorkbenchModels } from "./claude-workbench-models.ts";
 import { claudeWorkbenchUsage } from "./claude-workbench-usage.ts";
 import { WorkbenchMessageQueue } from "./workbench-message-queue.ts";
@@ -23,6 +23,8 @@ export async function agentSessionRoute(sessions: CodexWorkbenchSessions, method
   if (url.pathname === `${BASE}/projects` && method === "GET") return { status: 200, value: sessions.links.projectPage(Number(url.searchParams.get("limit") ?? 50), url.searchParams.get("cursor"), url.searchParams.get("workspace")) };
   if (url.pathname === `${BASE}/providers` && method === "GET") return { status: 200, value: await detectWorkbenchClis() };
   if (url.pathname === `${BASE}/directories` && method === "GET") return { status: 200, value: await listWorkbenchDirectories(url.searchParams.get("path")) };
+  if (url.pathname === `${BASE}/files` && method === "GET") return { status: 200, value: await listWorkbenchFiles(
+    required(url.searchParams.get("workspace"), "workspace"), url.searchParams.get("query") ?? "", Number(url.searchParams.get("limit") ?? "200")) };
   if (url.pathname === `${BASE}/models` && method === "GET") return { status: 200, value: await sessions.models() };
   if (url.pathname === `${BASE}/codex-skills` && method === "GET") return { status: 200, value: await sessions.skills(required(url.searchParams.get("workspace"), "workspace")) };
   if (url.pathname === `${BASE}/claude-commands` && method === "GET") return { status: 200, value: await claudeWorkbenchCommands(url.searchParams.get("workspace")) };
