@@ -319,3 +319,12 @@ test("change apply never resurrects archived work objects", async () => {
     assert.equal(f.store.get("work_object", "root").status, "needs_review");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
+test("workbench object list bounds its limit", async () => {
+  const f = await fixture();
+  try {
+    f.workbench.objectPut({ workspace_id: "w1", object_id: "l1", object_type: "task", name: "L1", source_paths: [] });
+    assert.equal((f.workbench.objectList({ workspace_id: "w1" }).objects as JsonObject[]).length, 1);
+    assert.equal((f.workbench.objectList({ workspace_id: "w1", limit: 1000 }).objects as JsonObject[]).length, 1);
+    for (const limit of [0, 1001, 1.5, "abc"]) assert.throws(() => f.workbench.objectList({ workspace_id: "w1", limit }), /limit must be an integer between 1 and 1000/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});

@@ -191,7 +191,9 @@ export class WorkbenchKernel {
   objectList(args: JsonObject): JsonObject {
     const workspaceId = id(args.workspace_id, "workspace_id", "workspace");
     this.store.get("workspace", workspaceId);
-    return { objects: this.store.list("work_object", Number(args.limit ?? 100), (item) => item.workspace_id === workspaceId &&
+    const limit = args.limit === undefined ? 100 : Number(args.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new Error("limit must be an integer between 1 and 1000");
+    return { objects: this.store.list("work_object", limit, (item) => item.workspace_id === workspaceId &&
       (args.status === undefined || item.status === args.status)) };
   }
 
