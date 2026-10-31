@@ -167,10 +167,10 @@ export class ContentMigrationKernel {
       if (!locator) throw new Error(`Legacy source locator is missing: ${candidate.id}`);
       const sourcePath = resolve(sourceRoot, locator);
       const relativePath = relative(sourceRoot, sourcePath);
-      if (!relativePath || relativePath.startsWith("..")) throw new Error(`Legacy source locator escapes source root: ${locator}`);
+      if (!relativePath || relativePath.split(/[\\/]+/).includes("..")) throw new Error(`Legacy source locator escapes source root: ${locator}`);
       const resolvedPath = realpathSync(sourcePath);
       const resolvedRelative = relative(sourceRoot, resolvedPath);
-      if (!resolvedRelative || resolvedRelative.startsWith("..")) throw new Error(`Legacy source path escapes source root: ${locator}`);
+      if (!resolvedRelative || resolvedRelative.split(/[\\/]+/).includes("..")) throw new Error(`Legacy source path escapes source root: ${locator}`);
       const raw = readFileSync(resolvedPath, "utf8");
       const sourceDigest = String(candidate.payload.source_digest ?? "");
       if (!sourceDigest || digest(raw) !== sourceDigest) throw new Error(`Legacy source digest drifted: ${locator}`);

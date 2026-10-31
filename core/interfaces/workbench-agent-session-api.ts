@@ -84,7 +84,13 @@ export async function agentSessionRoute(sessions: CodexWorkbenchSessions, method
       await sessions.steer(task, id, String(item.prompt), String(item.operation_id));
       await sessions.store.transactionWithRetry(() => queue.settle(task, id, String(item.id), true));
       return { status: 202, value: { accepted: true, prompt: item.prompt } };
-    } catch (error) { await sessions.store.transactionWithRetry(() => queue.settle(task, id, String(item.id), false)); throw new Error("steering outcome may be unknown; inspect before retrying", { cause: error }); }
+    } catch (error) {
+      // Keep the original failure as the cause. If settling also fails the item
+      // stays claimed for the queue reconcile surface; it must not replace the
+      // steering error with a settle error.
+      try { await sessions.store.transactionWithRetry(() => queue.settle(task, id, String(item.id), false)); } catch { /* reconcile later */ }
+      throw new Error("steering outcome may be unknown; inspect before retrying", { cause: error });
+    }
   }
   if (action === "queue-dispatch") {
     const queue = new WorkbenchMessageQueue(sessions.store);
@@ -106,7 +112,10 @@ export async function agentSessionRoute(sessions: CodexWorkbenchSessions, method
       else throw new Error("provider is unavailable");
       await sessions.store.transactionWithRetry(() => queue.settle(task, id, String(claimed.id), true));
       return { status: 202, value: { provider: link.provider, prompt: claimed.prompt, ...result } };
-    } catch (error) { await sessions.store.transactionWithRetry(() => queue.settle(task, id, String(claimed.id), false)); throw new Error("queue dispatch outcome may be unknown; inspect before retrying", { cause: error }); }
+    } catch (error) {
+      try { await sessions.store.transactionWithRetry(() => queue.settle(task, id, String(claimed.id), false)); } catch { /* reconcile later */ }
+      throw new Error("queue dispatch outcome may be unknown; inspect before retrying", { cause: error });
+    }
   }
   if (action === "goal") return { status: 200, value: await sessions.goal(task, id, required(body.objective, "objective")) };
   if (action === "takeover") return { status: 200, value: await sessions.takeover(task, id, body.pid, body.started, body.session_count) };

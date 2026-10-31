@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, type Stats } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ensureProjectStorageDirectory, type CraftPaths } from "./infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { readRepositoryState, sameRepositoryState, type RepositoryState } from "./workspace-repository-state.ts";
@@ -40,7 +40,8 @@ function includePaths(value: unknown): string[] {
 
 function nested(root: string, path: string): string {
   const target = resolve(root, path);
-  if (relative(root, target).startsWith("..") || relative(root, target) === "") {
+  const rel = relative(root, target);
+  if (rel === ".." || rel.startsWith(`..${sep}`)) {
     if (target !== root) throw new Error("workspace path escapes root");
   }
   return target;

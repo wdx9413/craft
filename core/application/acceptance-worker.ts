@@ -10,7 +10,7 @@ export type AcceptanceEvaluationResult = { result: "passed" | "failed" | "blocke
 export type AcceptanceJobExecutor = (job: JsonObject) => Promise<AcceptanceEvaluationResult>;
 
 function positive(value: unknown, name: string, fallback: number): number { const parsed = value === undefined ? fallback : value; if (typeof parsed !== "number" || !Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`${name} must be a positive integer`); return parsed; }
-function contained(root: string, target: string): boolean { const rel = relative(root, target); return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)); }
+function contained(root: string, target: string): boolean { const rel = relative(root, target); return rel === "" || (!rel.split(/[\\/]+/).includes("..") && !isAbsolute(rel)); }
 function artifactLocation(input: JsonObject): { workspace: string; relativePath: string; target: string } {
   const workspace = resolve(text(input.workspace, "input.workspace"));
   const relativePath = text(input.relative_path, "input.relative_path");

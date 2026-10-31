@@ -56,7 +56,7 @@ export function experienceGraphDirectory(paths: CraftPaths, id: string, legacy =
 /** Check every managed component, including the leaf; local data never follows links. */
 export function checkedExperiencePath(paths: CraftPaths, path: string, create = false, baseDirectory = paths.experienceDir): string {
   const root = resolve(baseDirectory), target = resolve(path), part = relative(root, target);
-  if (!part || part.startsWith("..") || isAbsolute(part)) throw new Error("Experience path is outside the managed directory");
+  if (!part || part.split(/[\\/]+/).includes("..") || isAbsolute(part)) throw new Error("Experience path is outside the managed directory");
   let current = root;
   for (const segment of ["", ...part.split(/[\\/]/u)]) {
     current = segment ? join(current, segment) : current;

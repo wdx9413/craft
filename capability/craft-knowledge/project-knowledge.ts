@@ -10,7 +10,7 @@ type MemoryDescriptor = { memory_id: string; path: string; name: string; digest:
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(String(value)).digest("hex")}`; }
 function recordDigest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function safeChild(root: string, path: string): string { const target = resolve(root, path);
-  if (relative(root, target).startsWith("..")) throw new Error("Project Knowledge path escapes the trusted project root");
+  if (relative(root, target).split(/[\\/]+/).includes("..")) throw new Error("Project Knowledge path escapes the trusted project root");
   return target;
 }
 function noSecret(value: string): void { if (/(?:api[_-]?key|password|secret|token)\s*[:=]\s*[^\s]{8,}/i.test(value)) throw new Error("Project Knowledge content appears to contain a secret"); }

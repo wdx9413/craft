@@ -120,7 +120,7 @@ export class DockerSandboxAdapter {
     const ticketId = text(args.ticket_id, "ticket_id"); const runtimeRoot = text(args.runtime_root, "runtime_root");
     const workspace = resolve(runtimeRoot, ticketId);
     const relativeWorkspace = relative(resolve(runtimeRoot), workspace);
-    if (!relativeWorkspace || relativeWorkspace.startsWith("..") || isAbsolute(relativeWorkspace)) {
+    if (!relativeWorkspace || relativeWorkspace.split(/[\\/]+/).includes("..") || isAbsolute(relativeWorkspace)) {
       throw new Error("Docker workspace escapes the runtime root");
     }
     await mkdir(workspace, { recursive: true });
