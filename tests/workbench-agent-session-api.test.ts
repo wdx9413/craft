@@ -93,6 +93,15 @@ test("agent session API enforces authentication, task ownership and shared nativ
     assert.equal((await app().handleAsync({ method: "GET", path: `${base}/directories` })).status, 401);
     assert.equal((await app().handleAsync({ method: "GET", path: `${base}/directories`, token: "secret", origin: "https://example.com" })).status, 403);
     assert.equal(JSON.parse((await call("GET", `${base}/directories?path=${encodeURIComponent(root)}`)).body).path, root);
+    const picked = await agentSessionRoute(sessions, "POST", new URL(`http://localhost${base}/pick-reference-folder`), { workspace: root }, undefined, async initial => {
+      assert.equal(initial, root); return { path: root };
+    });
+    assert.deepEqual(picked, { status: 200, value: { path: root } });
+    const pickedWithoutWorkspace = await agentSessionRoute(sessions, "POST", new URL(`http://localhost${base}/pick-reference-folder`), {}, undefined, async initial => {
+      assert.equal(initial, null); return { cancelled: true };
+    });
+    assert.deepEqual(pickedWithoutWorkspace, { status: 200, value: { cancelled: true } });
+    await assert.rejects(agentSessionRoute(sessions, "POST", new URL(`http://localhost${base}/pick-reference-folder`), { workspace: 9 }), /workspace is required/u);
     assert.equal((await app().handleAsync({ method: "GET", path: base, token: "secret", origin: "https://example.com" })).status, 403);
     assert.equal((await new WorkbenchWebApp(service, "secret", origin).handleAsync({ method: "GET", path: base, token: "secret" })).status, 503);
     assert.equal((await call("POST", base, { provider: "claude" })).status, 422);
