@@ -80,6 +80,10 @@ test("Windows folder dialog launches PowerShell and parses selected or cancelled
     assert.deepEqual(await promise, expected);
     assert.match(invocation!.file, /WindowsPowerShell[\\/]v1\.0[\\/]powershell\.exe$/u);
     assert.deepEqual(invocation!.args.slice(0, 4), ["-NoProfile", "-STA", "-NonInteractive", "-WindowStyle"]);
+    const script = invocation!.args.at(-1)!;
+    assert.match(script, /IFileOpenDialog/u);
+    assert.match(script, /FOS_PICKFOLDERS/u);
+    assert.doesNotMatch(script, /FolderBrowserDialog/u);
     assert.equal(invocation!.options.env.CRAFT_WORKBENCH_PICKER_INITIAL, String.raw`C:\start`);
     assert.equal(child.stdout.encoding, "utf8");
   }
