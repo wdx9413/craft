@@ -5,6 +5,8 @@ import { isAbsolute, join } from "node:path";
 
 export type WorkbenchFolderPick = { path: string } | { cancelled: true };
 export type WorkbenchFolderPicker = (initial?: string | null) => Promise<WorkbenchFolderPick>;
+export type WorkbenchFilesPick = { paths: string[] } | { cancelled: true };
+export type WorkbenchFilesPicker = (initial?: string | null) => Promise<WorkbenchFilesPick>;
 type FolderDialogRunner = (initial: string) => Promise<unknown>;
 type FolderDialogStream = {
   setEncoding(encoding: BufferEncoding): unknown;
@@ -182,21 +184,59 @@ if ($selected) {
 }
 `.trim();
 
+const FILES_DIALOG_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = '选择要引用的文件'
+$dialog.Multiselect = $true
+$dialog.CheckFileExists = $true
+$dialog.CheckPathExists = $true
+$dialog.RestoreDirectory = $true
+$dialog.AutoUpgradeEnabled = $true
+$initial = $env:CRAFT_WORKBENCH_PICKER_INITIAL
+if ($initial -and [System.IO.Directory]::Exists($initial)) { $dialog.InitialDirectory = $initial }
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+$owner.Opacity = 0
+$owner.Size = New-Object System.Drawing.Size(1, 1)
+$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+$owner.Location = New-Object System.Drawing.Point(-32000, -32000)
+$selected = @()
+$owner.Show()
+try {
+  if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { $selected = @($dialog.FileNames) }
+} finally {
+  $dialog.Dispose()
+  $owner.Close()
+  $owner.Dispose()
+}
+if ($selected.Count -gt 0) {
+  [Console]::Out.Write((ConvertTo-Json @{ paths = @($selected) } -Compress))
+} else {
+  [Console]::Out.Write('{"cancelled":true}')
+}
+`.trim();
+
 function initialDirectory(initial?: string | null): string {
   const value = typeof initial === "string" ? initial.trim() : "";
   return value && value.length <= MAX_PATH_LENGTH && isAbsolute(value) && !value.includes("\0") ? value : homedir();
 }
 
-export async function runWindowsFolderDialog(initial: string, {
+async function runWindowsDialog(script: string, mode: "folder" | "files", initial: string, {
   platform = process.platform,
   systemRoot = process.env.SystemRoot,
   spawnProcess = spawn as unknown as FolderDialogSpawn,
 }: FolderDialogDependencies = {}): Promise<unknown> {
-  if (platform !== "win32") throw new Error("system folder picker is only available on Windows");
+  if (platform !== "win32") throw new Error("system picker is only available on Windows");
   const executable = join(systemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   return await new Promise((resolve, reject) => {
-    const child = spawnProcess(executable, ["-NoProfile", "-STA", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", DIALOG_SCRIPT], {
-      env: { ...process.env, CRAFT_WORKBENCH_PICKER_INITIAL: initial },
+    const child = spawnProcess(executable, ["-NoProfile", "-STA", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script], {
+      env: { ...process.env, CRAFT_WORKBENCH_PICKER_INITIAL: initial, CRAFT_WORKBENCH_PICKER_MODE: mode },
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -207,11 +247,19 @@ export async function runWindowsFolderDialog(initial: string, {
     child.stderr.on("data", chunk => { stderr += String(chunk); if (stderr.length > 64 * 1024) child.kill(); });
     child.on("error", reject);
     child.on("exit", code => {
-      if (code !== 0) { reject(new Error(stderr.trim() || "folder picker exited unexpectedly")); return; }
+      if (code !== 0) { reject(new Error(stderr.trim() || "picker exited unexpectedly")); return; }
       try { resolve(JSON.parse(stdout.trim())); }
-      catch { reject(new Error("folder picker returned an invalid response")); }
+      catch { reject(new Error("picker returned an invalid response")); }
     });
   });
+}
+
+export async function runWindowsFolderDialog(initial: string, dependencies: FolderDialogDependencies = {}): Promise<unknown> {
+  return runWindowsDialog(DIALOG_SCRIPT, "folder", initial, dependencies);
+}
+
+export async function runWindowsFilesDialog(initial: string, dependencies: FolderDialogDependencies = {}): Promise<unknown> {
+  return runWindowsDialog(FILES_DIALOG_SCRIPT, "files", initial, dependencies);
 }
 
 /** Open the host folder picker and return a canonical, existing directory path. */
@@ -226,4 +274,23 @@ export async function pickWorkbenchFolder(initial?: string | null, runner: Folde
   const path = await realpath(record.path);
   if (!(await stat(path)).isDirectory()) throw new Error("selected path is not a folder");
   return { path };
+}
+
+/** Open the host file picker and return canonical paths for up to 20 files. */
+export async function pickWorkbenchFiles(initial?: string | null, runner: FolderDialogRunner = runWindowsFilesDialog): Promise<WorkbenchFilesPick> {
+  const result = await runner(initialDirectory(initial));
+  if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("file picker returned an invalid response");
+  const record = result as Record<string, unknown>;
+  if (record.cancelled === true) return { cancelled: true };
+  if (!Array.isArray(record.paths) || record.paths.length < 1 || record.paths.length > 20
+    || record.paths.some(path => typeof path !== "string" || !path || path.length > MAX_PATH_LENGTH || path.includes("\0"))) {
+    throw new Error("file picker returned invalid paths");
+  }
+  const paths: string[] = [];
+  for (const selected of record.paths) {
+    const path = await realpath(selected);
+    if (!(await stat(path)).isFile()) throw new Error("selected path is not a file");
+    if (!paths.includes(path)) paths.push(path);
+  }
+  return { paths };
 }

@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { pickWorkbenchFolder, runWindowsFolderDialog } from "../core/interfaces/workbench-folder-picker.ts";
+import { pickWorkbenchFiles, pickWorkbenchFolder, runWindowsFilesDialog, runWindowsFolderDialog } from "../core/interfaces/workbench-folder-picker.ts";
 
 class DialogStream {
   encoding = "";
@@ -61,6 +61,36 @@ test("workbench folder picker rejects malformed and non-directory results", asyn
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("workbench file picker returns canonical unique selected files", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-file-picker-")));
+  try {
+    const first = join(root, "first.txt"), second = join(root, "second.txt");
+    writeFileSync(first, "first"); writeFileSync(second, "second");
+    let initial = "";
+    const result = await pickWorkbenchFiles(root, async value => { initial = value; return { paths: [first, second, first] }; });
+    assert.equal(initial, root);
+    assert.deepEqual(result, { paths: [first, second] });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("workbench file picker handles cancellation and rejects malformed selections", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-file-picker-invalid-")));
+  try {
+    const file = join(root, "file.txt"); writeFileSync(file, "file");
+    let initial = "";
+    assert.deepEqual(await pickWorkbenchFiles("relative/path", async value => { initial = value; return { cancelled: true }; }), { cancelled: true });
+    assert.equal(initial, homedir());
+    await assert.rejects(pickWorkbenchFiles(null, async () => null), /invalid response/u);
+    await assert.rejects(pickWorkbenchFiles(null, async () => []), /invalid response/u);
+    await assert.rejects(pickWorkbenchFiles(null, async () => ({ paths: [] })), /invalid paths/u);
+    await assert.rejects(pickWorkbenchFiles(null, async () => ({ paths: Array.from({ length: 21 }, () => file) })), /invalid paths/u);
+    await assert.rejects(pickWorkbenchFiles(null, async () => ({ paths: [1] })), /invalid paths/u);
+    await assert.rejects(pickWorkbenchFiles(null, async () => ({ paths: ["bad\0path"] })), /invalid paths/u);
+    await assert.rejects(pickWorkbenchFiles(null, async () => ({ paths: [join(root, "missing")] })), /ENOENT/u);
+    await assert.rejects(pickWorkbenchFiles(null, async () => ({ paths: [root] })), /not a file/u);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("Windows folder dialog launches PowerShell and parses selected or cancelled results", async () => {
   for (const [stdout, expected] of [
     [String.raw`{"path":"C:\\selected"}`, { path: String.raw`C:\selected` }],
@@ -87,6 +117,24 @@ test("Windows folder dialog launches PowerShell and parses selected or cancelled
     assert.equal(invocation!.options.env.CRAFT_WORKBENCH_PICKER_INITIAL, String.raw`C:\start`);
     assert.equal(child.stdout.encoding, "utf8");
   }
+});
+
+test("Windows files dialog uses multi-select and the system file picker", async () => {
+  const child = new DialogProcess();
+  let invocation: { args: string[]; options: any } | undefined;
+  const result = runWindowsFilesDialog("C:\\start", {
+    platform: "win32",
+    systemRoot: "C:\\Windows",
+    spawnProcess: (_, args, options) => {
+      invocation = { args, options };
+      setImmediate(() => { child.stdout.emit('{"paths":["C:\\\\one.txt"]}'); child.emitExit(0); });
+      return child;
+    },
+  });
+  assert.deepEqual(await result, { paths: ["C:\\one.txt"] });
+  assert.equal(invocation!.options.env.CRAFT_WORKBENCH_PICKER_MODE, "files");
+  assert.match(invocation!.args.at(-1)!, /OpenFileDialog/u);
+  assert.match(invocation!.args.at(-1)!, /Multiselect = \$true/u);
 });
 
 test("Windows folder dialog falls back to the standard Windows directory", async () => {

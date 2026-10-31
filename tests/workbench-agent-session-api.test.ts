@@ -105,6 +105,10 @@ test("agent session API enforces authentication, task ownership and shared nativ
       assert.equal(initial, root); return { path: root };
     });
     assert.deepEqual(pickedProject, { status: 200, value: { path: root } });
+    const pickedFiles = await agentSessionRoute(sessions, "POST", new URL(`http://localhost${base}/pick-reference-files`), { workspace: root }, undefined, undefined, async initial => {
+      assert.equal(initial, root); return { paths: [root] };
+    });
+    assert.deepEqual(pickedFiles, { status: 200, value: { paths: [root] } });
     await assert.rejects(agentSessionRoute(sessions, "POST", new URL(`http://localhost${base}/pick-reference-folder`), { workspace: 9 }), /workspace is required/u);
     assert.equal((await app().handleAsync({ method: "GET", path: base, token: "secret", origin: "https://example.com" })).status, 403);
     assert.equal((await new WorkbenchWebApp(service, "secret", origin).handleAsync({ method: "GET", path: base, token: "secret" })).status, 503);

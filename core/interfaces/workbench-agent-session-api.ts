@@ -11,7 +11,7 @@ import { WorkbenchMessageQueue } from "./workbench-message-queue.ts";
 import { reconcileQueueItem } from "./workbench-queue-recovery.ts";
 import { type ClaudeWorkbenchRuns } from "./claude-workbench-runs.ts";
 import { findClaudeExecutable } from "./claude-executable.ts";
-import { pickWorkbenchFolder, type WorkbenchFolderPicker } from "./workbench-folder-picker.ts";
+import { pickWorkbenchFiles, pickWorkbenchFolder, type WorkbenchFilesPicker, type WorkbenchFolderPicker } from "./workbench-folder-picker.ts";
 
 const BASE = "/api/workbench/agent-sessions";
 function required(value: unknown, field: string): string {
@@ -20,13 +20,17 @@ function required(value: unknown, field: string): string {
 }
 
 /** The caller must enforce the Workbench origin, token and request size checks. */
-export async function agentSessionRoute(sessions: CodexWorkbenchSessions, method: string, url: URL, body: JsonObject, claudeRuns?: ClaudeWorkbenchRuns | null, pickFolder: WorkbenchFolderPicker = pickWorkbenchFolder): Promise<{ status: number; value: JsonObject }> {
+export async function agentSessionRoute(sessions: CodexWorkbenchSessions, method: string, url: URL, body: JsonObject, claudeRuns?: ClaudeWorkbenchRuns | null, pickFolder: WorkbenchFolderPicker = pickWorkbenchFolder, pickFiles: WorkbenchFilesPicker = pickWorkbenchFiles): Promise<{ status: number; value: JsonObject }> {
   if (url.pathname === `${BASE}/projects` && method === "GET") return { status: 200, value: sessions.links.projectPage(Number(url.searchParams.get("limit") ?? 50), url.searchParams.get("cursor"), url.searchParams.get("workspace")) };
   if (url.pathname === `${BASE}/providers` && method === "GET") return { status: 200, value: await detectWorkbenchClis() };
   if (url.pathname === `${BASE}/directories` && method === "GET") return { status: 200, value: await listWorkbenchDirectories(url.searchParams.get("path")) };
   if ((url.pathname === `${BASE}/pick-reference-folder` || url.pathname === `${BASE}/pick-project-folder`) && method === "POST") {
     const workspace = body.workspace === undefined || body.workspace === null ? null : required(body.workspace, "workspace");
     return { status: 200, value: await pickFolder(workspace) };
+  }
+  if (url.pathname === `${BASE}/pick-reference-files` && method === "POST") {
+    const workspace = body.workspace === undefined || body.workspace === null ? null : required(body.workspace, "workspace");
+    return { status: 200, value: await pickFiles(workspace) };
   }
   if (url.pathname === `${BASE}/files` && method === "GET") return { status: 200, value: await listWorkbenchFiles(
     required(url.searchParams.get("workspace"), "workspace"), url.searchParams.get("query") ?? "", Number(url.searchParams.get("limit") ?? "200")) };
