@@ -306,3 +306,16 @@ test("workbench change apply rejects stale revisions after a prior write", async
     assert.equal(((applied.impact as JsonObject).impacted_object_ids as string[]).length, 2);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
+test("change apply never resurrects archived work objects", async () => {
+  const f = await fixture();
+  try {
+    f.workbench.objectPut({ workspace_id: "w1", object_id: "root", object_type: "task", name: "Root", source_paths: ["src/root.ts"] });
+    f.workbench.objectPut({ workspace_id: "w1", object_id: "derived", object_type: "task", name: "Derived", depends_on: ["root"], source_paths: [] });
+    f.workbench.objectPut({ workspace_id: "w1", object_id: "derived", object_type: "task", name: "Derived", status: "archived" });
+    const applied = f.workbench.changeApply({ workspace_id: "w1", summary: "touch root", affected_paths: ["src/root.ts"] });
+    assert.deepEqual((applied.impact as JsonObject).root_object_ids as string[], ["root"]);
+    assert.deepEqual((applied.impact as JsonObject).impacted_object_ids as string[], ["root"]);
+    assert.equal(f.store.get("work_object", "derived").status, "archived");
+    assert.equal(f.store.get("work_object", "root").status, "needs_review");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});

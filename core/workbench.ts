@@ -136,7 +136,10 @@ export class WorkbenchKernel {
     this.store.get("workspace", workspaceId);
     const roots = new Set(strings(args.object_ids, "object_ids"));
     const paths = strings(args.affected_paths, "affected_paths");
-    const objects = this.store.list("work_object", 10_000, (item) => item.workspace_id === workspaceId);
+    // Archived work is outside the active graph, matching contextAssemble.
+    // changeApply uses this list, so including it here would resurrect archived
+    // objects as needs_review when a path they reference changes.
+    const objects = this.store.list("work_object", 10_000, (item) => item.workspace_id === workspaceId && item.status !== "archived");
     for (const object of objects) {
       const objectPaths = Array.isArray(object.source_paths) ? object.source_paths.map(String) : [];
       if (paths.some((path) => objectPaths.includes(path))) roots.add(String(object.id));
