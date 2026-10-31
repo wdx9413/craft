@@ -255,8 +255,9 @@ export class CodexWorkbenchSessions {
     const owner = candidate.source === "craft" ? this.store.get(OWNER_KIND, linkId) : externalCodexOwner(link.native_session_id);
     if (!owner || owner.pid !== pid || owner.started !== started || (candidate.source === "craft" && (!sameCodexProcess(owner) || !codexGroupHasSessionFile(owner, owner.thread_id))) || (candidate.source === "external" && (owner.executable !== candidate.executable || owner.session_count !== candidate.session_count))) throw new Error("进程身份已变化，请重新检查会话");
     if ((link.turn_state === "starting" || link.turn_state === "running") && typeof link.operation_id === "string") this.links.markTurnUnknown(taskId, linkId, link.operation_id);
-    process.kill(candidate.source === "craft" ? -pid : pid, "SIGTERM");
+    process.kill(candidate.source === "craft" && process.platform !== "win32" ? -pid : pid, "SIGTERM");
     for (let i = 0; i < 30; i++) {
+      if (process.platform === "win32" && !(() => { try { process.kill(pid, 0); return true; } catch { return false; } })()) return { stopped: true };
       if (candidate.source === "craft" ? !sameCodexProcess(owner) && !codexGroupHasSessionFile(owner, owner.thread_id) : externalCodexOwner(link.native_session_id)?.pid !== pid) return { stopped: true };
       await new Promise(resolve => setTimeout(resolve, 100));
     }
