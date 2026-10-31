@@ -225,30 +225,35 @@ export class WorkbenchKernel {
 
   contextProfileSave(args: JsonObject): JsonObject {
     const profileId = id(args.profile_id, "profile_id", "context_profile");
-    const previous = this.store.find("context_profile", profileId);
-    const taskId = args.task_id === undefined ? previous?.task_id ?? null : text(args.task_id, "task_id");
-    const workspaceId = args.workspace_id === undefined ? previous?.workspace_id ?? null : text(args.workspace_id, "workspace_id");
-    if (taskId !== null) this.store.get("task", String(taskId));
-    if (workspaceId !== null) this.store.get("workspace", String(workspaceId));
-    const memoryKinds = profileSelector(args.memory_kinds ?? previous?.memory_kinds, "memory_kinds", MEMORY_KINDS);
-    const objectTypes = strings(args.object_types ?? previous?.object_types, "object_types");
-    const requiredMemoryIds = strings(args.required_memory_ids ?? previous?.required_memory_ids, "required_memory_ids");
-    const requiredObjectIds = strings(args.required_object_ids ?? previous?.required_object_ids, "required_object_ids");
-    const maxItems = Number(args.max_items ?? previous?.max_items ?? 12); const maxChars = Number(args.max_chars ?? previous?.max_chars ?? 12_000);
-    if (!Number.isInteger(maxItems) || maxItems < 1 || !Number.isInteger(maxChars) || maxChars < 1) throw new Error("Context profile limits must be positive integers");
-    for (const memoryId of requiredMemoryIds) {
-      const memory = this.store.get("memory_item", memoryId);
-      if (!matchesScope(memory, taskId === null ? undefined : String(taskId), workspaceId === null ? undefined : String(workspaceId))) {
-        throw new Error("Required memory does not belong to the context profile scope");
+    // Read the previous profile, validate every referenced subject, and commit
+    // in one IMMEDIATE transaction so a concurrent edit cannot leave a stored
+    // profile pointing at a task, workspace, memory or object that just changed.
+    return this.store.transaction(() => {
+      const previous = this.store.find("context_profile", profileId);
+      const taskId = args.task_id === undefined ? previous?.task_id ?? null : text(args.task_id, "task_id");
+      const workspaceId = args.workspace_id === undefined ? previous?.workspace_id ?? null : text(args.workspace_id, "workspace_id");
+      if (taskId !== null) this.store.get("task", String(taskId));
+      if (workspaceId !== null) this.store.get("workspace", String(workspaceId));
+      const memoryKinds = profileSelector(args.memory_kinds ?? previous?.memory_kinds, "memory_kinds", MEMORY_KINDS);
+      const objectTypes = strings(args.object_types ?? previous?.object_types, "object_types");
+      const requiredMemoryIds = strings(args.required_memory_ids ?? previous?.required_memory_ids, "required_memory_ids");
+      const requiredObjectIds = strings(args.required_object_ids ?? previous?.required_object_ids, "required_object_ids");
+      const maxItems = Number(args.max_items ?? previous?.max_items ?? 12); const maxChars = Number(args.max_chars ?? previous?.max_chars ?? 12_000);
+      if (!Number.isInteger(maxItems) || maxItems < 1 || !Number.isInteger(maxChars) || maxChars < 1) throw new Error("Context profile limits must be positive integers");
+      for (const memoryId of requiredMemoryIds) {
+        const memory = this.store.get("memory_item", memoryId);
+        if (!matchesScope(memory, taskId === null ? undefined : String(taskId), workspaceId === null ? undefined : String(workspaceId))) {
+          throw new Error("Required memory does not belong to the context profile scope");
+        }
       }
-    }
-    for (const objectId of requiredObjectIds) {
-      const workObject = this.store.get("work_object", objectId);
-      if (workspaceId === null || workObject.workspace_id !== workspaceId) throw new Error("Required work object does not belong to the context profile workspace");
-    }
-    return { profile: this.store.save("context_profile", profileId, { name: text(args.name ?? previous?.name, "name"), task_id: taskId,
-      workspace_id: workspaceId, memory_kinds: memoryKinds, object_types: objectTypes, required_memory_ids: requiredMemoryIds,
-      required_object_ids: requiredObjectIds, max_items: maxItems, max_chars: maxChars }) };
+      for (const objectId of requiredObjectIds) {
+        const workObject = this.store.get("work_object", objectId);
+        if (workspaceId === null || workObject.workspace_id !== workspaceId) throw new Error("Required work object does not belong to the context profile workspace");
+      }
+      return { profile: this.store.save("context_profile", profileId, { name: text(args.name ?? previous?.name, "name"), task_id: taskId,
+        workspace_id: workspaceId, memory_kinds: memoryKinds, object_types: objectTypes, required_memory_ids: requiredMemoryIds,
+        required_object_ids: requiredObjectIds, max_items: maxItems, max_chars: maxChars }) };
+    });
   }
 
   contextProfileAssemble(args: JsonObject): JsonObject {
@@ -305,21 +310,26 @@ export class WorkbenchKernel {
 
   taskGraphCreate(args: JsonObject): JsonObject {
     const taskId = args.task_id === undefined ? null : text(args.task_id, "task_id"); const workspaceId = args.workspace_id === undefined ? null : text(args.workspace_id, "workspace_id");
-    if (taskId !== null) this.store.get("task", taskId); if (workspaceId !== null) this.store.get("workspace", workspaceId);
-    const nodes = graphNodes(args.nodes);
-    for (const node of nodes) {
-      if (node.context_profile_id === null) {
-        if (node.context_profile_version !== null) throw new Error("A context profile version requires a context profile id");
-        continue;
+    // Validate the task, workspace and every pinned context profile against the
+    // same transaction that creates the graph so the graph cannot pin a profile
+    // that was concurrently deleted or re-scoped.
+    return this.store.transaction(() => {
+      if (taskId !== null) this.store.get("task", taskId); if (workspaceId !== null) this.store.get("workspace", workspaceId);
+      const nodes = graphNodes(args.nodes);
+      for (const node of nodes) {
+        if (node.context_profile_id === null) {
+          if (node.context_profile_version !== null) throw new Error("A context profile version requires a context profile id");
+          continue;
+        }
+        if (!Number.isInteger(node.context_profile_version) || Number(node.context_profile_version) < 1) throw new Error("context_profile_version must be a positive integer");
+        const profile = this.store.get("context_profile", String(node.context_profile_id), Number(node.context_profile_version));
+        if (profile.task_id !== null && profile.task_id !== taskId) throw new Error("Task graph node profile does not match the task");
+        if (profile.workspace_id !== null && profile.workspace_id !== workspaceId) throw new Error("Task graph node profile does not match the workspace");
       }
-      if (!Number.isInteger(node.context_profile_version) || Number(node.context_profile_version) < 1) throw new Error("context_profile_version must be a positive integer");
-      const profile = this.store.get("context_profile", String(node.context_profile_id), Number(node.context_profile_version));
-      if (profile.task_id !== null && profile.task_id !== taskId) throw new Error("Task graph node profile does not match the task");
-      if (profile.workspace_id !== null && profile.workspace_id !== workspaceId) throw new Error("Task graph node profile does not match the workspace");
-    }
-    const graph = this.store.create("task_graph", id(args.graph_id, "graph_id", "task_graph"), { name: text(args.name, "name"), task_id: taskId,
-      workspace_id: workspaceId, nodes, status: "active" });
-    return { graph, ready_node_ids: (nodes as JsonObject[]).filter((node) => !(node.depends_on as string[]).length).map((node) => node.id) };
+      const graph = this.store.create("task_graph", id(args.graph_id, "graph_id", "task_graph"), { name: text(args.name, "name"), task_id: taskId,
+        workspace_id: workspaceId, nodes, status: "active" });
+      return { graph, ready_node_ids: (nodes as JsonObject[]).filter((node) => !(node.depends_on as string[]).length).map((node) => node.id) };
+    });
   }
 
   taskGraphAdvance(args: JsonObject): JsonObject {

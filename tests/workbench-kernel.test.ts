@@ -295,3 +295,14 @@ test("workbench object writes are atomic against workspace revision drift", asyn
     assert.equal(Number(f.store.get("workspace", "w1").state_revision), 3);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
+test("workbench change apply rejects stale revisions after a prior write", async () => {
+  const f = await fixture();
+  try {
+    f.workbench.objectPut({ workspace_id: "w1", object_id: "c1", object_type: "task", name: "C1", source_paths: ["src/c1.ts"] });
+    f.workbench.objectPut({ workspace_id: "w1", object_id: "c2", object_type: "task", name: "C2", depends_on: ["c1"], source_paths: [] });
+    assert.throws(() => f.workbench.changeApply({ workspace_id: "w1", summary: "stale", affected_paths: ["src/c1.ts"], expected_state_revision: 1 }), /changed/u);
+    const applied = f.workbench.changeApply({ workspace_id: "w1", summary: "ok", affected_paths: ["src/c1.ts"], expected_state_revision: Number(f.store.get("workspace", "w1").state_revision) });
+    assert.equal(Number((applied.change as JsonObject).state_revision), Number(f.store.get("workspace", "w1").state_revision));
+    assert.equal(((applied.impact as JsonObject).impacted_object_ids as string[]).length, 2);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
