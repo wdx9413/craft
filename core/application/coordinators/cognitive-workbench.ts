@@ -13,13 +13,21 @@ export interface CognitiveWorkbenchPorts {
   saveClaim: Command;
 }
 
+/** The aggregate resource view reads six collections at once, so its limit is capped. */
+function boundedLimit(value: unknown): number {
+  if (value === undefined) return 50;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1_000) throw new Error("limit must be an integer between 1 and 1000");
+  return parsed;
+}
+
 /** UI inputs are translated here; domain commands retain all write gates. */
 export class CognitiveWorkbenchCoordinator {
   readonly ports: CognitiveWorkbenchPorts;
   constructor(ports: CognitiveWorkbenchPorts) { this.ports = ports; }
   resources(args: JsonObject = {}): JsonObject {
     if (args.kind !== undefined) return this.ports.resourceCatalog(args);
-    const limit = Number(args.limit ?? 50);
+    const limit = boundedLimit(args.limit);
     return { version: CRAFT_RELEASE_VERSION, resources: {
       claims: this.ports.store.list("knowledge_claim", limit), wiki: this.ports.store.list("wiki_page", limit),
       memory_candidates: this.ports.store.list("memory_candidate", limit), memories: this.ports.store.list("memory_ledger", limit),

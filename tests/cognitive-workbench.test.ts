@@ -56,3 +56,19 @@ test("Workbench Knowledge rolls back its owned Evidence when Claim persistence f
     assert.equal(store.find("evidence", "workbench-rollback-evidence"), null);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("Workbench aggregate resource limit is bounded", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-workbench-limit-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const coordinator = new CognitiveWorkbenchCoordinator({
+    store, resourceCatalog: () => ({}), registerSource: () => ({}), proposeMemory: () => ({}),
+    recordEvidence: () => ({}), saveClaim: () => ({}),
+  });
+  try {
+    // A missing limit defaults to 50 and a valid value is honoured.
+    assert.equal(((coordinator.resources().resources as JsonObject).claims as JsonObject[]).length, 0);
+    assert.equal(((coordinator.resources({ limit: "1000" }).resources as JsonObject).claims as JsonObject[]).length, 0);
+    // Out-of-range and non-integer limits fail closed instead of scanning every kind.
+    for (const limit of [0, 1001, 1.5, "abc"]) assert.throws(() => coordinator.resources({ limit }), /limit must be an integer between 1 and 1000/u);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
