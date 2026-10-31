@@ -24,7 +24,7 @@ export async function agentSessionRoute(sessions: CodexWorkbenchSessions, method
   if (url.pathname === `${BASE}/projects` && method === "GET") return { status: 200, value: sessions.links.projectPage(Number(url.searchParams.get("limit") ?? 50), url.searchParams.get("cursor"), url.searchParams.get("workspace")) };
   if (url.pathname === `${BASE}/providers` && method === "GET") return { status: 200, value: await detectWorkbenchClis() };
   if (url.pathname === `${BASE}/directories` && method === "GET") return { status: 200, value: await listWorkbenchDirectories(url.searchParams.get("path")) };
-  if (url.pathname === `${BASE}/pick-reference-folder` && method === "POST") {
+  if ((url.pathname === `${BASE}/pick-reference-folder` || url.pathname === `${BASE}/pick-project-folder`) && method === "POST") {
     const workspace = body.workspace === undefined || body.workspace === null ? null : required(body.workspace, "workspace");
     return { status: 200, value: await pickFolder(workspace) };
   }
