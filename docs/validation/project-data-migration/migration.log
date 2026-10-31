@@ -1,0 +1,37 @@
+(node:<pid>) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:<pid>) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ typed project migration freezes full bodies without a writer and imports candidates with remapped provenance (595.441334ms)
+✔ migration rejects malformed legacy records, foreign parents and unsafe content without partial writes (884.738ms)
+✔ neutral Sources stay pinned, neutral Evidence loses confidence, and independent source ACLs stay narrow (210.441ms)
+✔ migration binds shard bodies and refuses ambiguous Evidence ownership (307.744583ms)
+✔ full-body and registry drift invalidate preflight while failed publication rolls back all records (545.933708ms)
+✔ migration refuses later publications, foreign receipts and changed content files (503.883958ms)
+✔ migration validates roots, dependency boundaries, recipes and the advertised schema (576.183833ms)
+✔ bounded migration rejects oversized dependency graphs, metadata totals and content totals (890.829875ms)
+✔ legacy ownership declarations are parsed as pairs and unavailable Sources never acquire trust (338.510958ms)
+✔ migration refuses staged metadata conflicts and preexisting targets without a matching receipt (418.288917ms)
+✔ another process can change or finish migration between staging and publication without duplicate imports (1614.796208ms)
+✔ migration receipts cannot be altered, reused under another binding or restored after registry drift (417.368416ms)
+✔ an existing unscoped reference prevents automatic removal of migrated identities (299.801791ms)
+✔ negative governance states are retained and revocation never becomes an active candidate (217.839042ms)
+✔ a forged after-digest cannot conceal mutation of the frozen candidate payload or content manifest (400.350084ms)
+✔ the Context MCP surface executes the migration contract and reconciles a lost response (341.637083ms)
+✔ registry rollback refuses normalized canonical pointers and unverified migration receipts (370.520792ms)
+✔ a process crash after a shard stage leaves no published half-migration and an exact retry adopts it (495.347625ms)
+✔ writer contention and a failed restore never expose partial migration state (351.528041ms)
+✔ verified content ownership, sensitivity and negative manifest state survive legacy import (399.876167ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10793.379667
+---------------------------|---------|----------|---------|---------|-------------------
+File                       | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+---------------------------|---------|----------|---------|---------|-------------------
+All files                  |     100 |      100 |     100 |     100 |                   
+ project-data-migration.ts |     100 |      100 |     100 |     100 |                   
+---------------------------|---------|----------|---------|---------|-------------------

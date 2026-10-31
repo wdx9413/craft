@@ -18,7 +18,8 @@ export type PythonDataFlowResult = { result?: JsonObject; diagnostic?: JsonObjec
 export function resolvePythonAnalyzerPath(cwd = process.cwd(), fileExists: (path: string) => boolean = existsSync,
   moduleUrl: string | null = import.meta.url): string | undefined {
   const entry = process.argv[1] ?? "";
-  const moduleAnalyzer = moduleUrl ? [join(dirname(fileURLToPath(moduleUrl)), "analyzers", "analyze-python.py")] : [];
+  const moduleAnalyzer = moduleUrl ? [join(dirname(fileURLToPath(moduleUrl)), "analyzers", "analyze-python.py"),
+    join(dirname(fileURLToPath(moduleUrl)), "..", "..", "..", "capability", "craft-codebase", "analyzers", "analyze-python.py")] : [];
   const candidates = [...moduleAnalyzer, join(dirname(entry), "..", "..", "scripts", "codebase", "analyze-python.py"),
     join(cwd, "scripts", "codebase", "analyze-python.py"),
     join(cwd, "capability", "craft-codebase", "analyzers", "analyze-python.py")];
@@ -54,8 +55,11 @@ export function analyzePythonCheckpoint(files: readonly RepositoryFile[], option
     return { analysis };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return { analysis: analyzePythonFallback(files),
-      diagnostic: { language: "python", status: "partial", reason: "python_runtime_unavailable_regex_fallback" } };
+    if (code === "ENOENT") {
+      const analysis = analyzePythonFallback(files);
+      analysis.file_units = (analysis.file_units as PythonFileUnit[]).map(unit => ({ ...unit, unit_digest: pythonFileUnitDigest(unit) }));
+      return { analysis, diagnostic: { language: "python", status: "partial", reason: "python_runtime_unavailable_regex_fallback" } };
+    }
     const reason = code === "ETIMEDOUT" ? "analysis_timed_out" : "analysis_failed";
     return { diagnostic: { language: "python", status: "unavailable", reason } };
   }

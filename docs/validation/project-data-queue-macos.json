@@ -1,0 +1,108 @@
+{
+  "schema": "craft.local-validation.v1",
+  "captured_at": "2026-10-30T09:30:30.559Z",
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v23.11.0"
+  },
+  "regression": {
+    "tests": 89,
+    "passed": 89,
+    "failed": 0
+  },
+  "coverage": {
+    "core/project-data-inventory.ts": {
+      "instrumented_statements": 67,
+      "instrumented_branches": 58,
+      "instrumented_functions": 1,
+      "uncovered": 0,
+      "statements_percent": 100,
+      "branches_percent": 100,
+      "functions_percent": 100,
+      "lines_percent": 100
+    },
+    "core/interfaces/workbench-queue-runner.ts": {
+      "instrumented_statements": 65,
+      "instrumented_branches": 36,
+      "instrumented_functions": 7,
+      "uncovered": 0,
+      "statements_percent": 100,
+      "branches_percent": 100,
+      "functions_percent": 100,
+      "lines_percent": 100
+    },
+    "core/interfaces/workbench-agent-session-api.ts": {
+      "instrumented_statements": 12,
+      "instrumented_branches": 14,
+      "instrumented_functions": 0,
+      "uncovered": 0,
+      "source_lines": [
+        88,
+        99
+      ]
+    }
+  },
+  "subjects": [
+    {
+      "path": "core/project-data-inventory.ts",
+      "sha256": "65f6e11c77d2e52b58968338ad3d61bc3a66d5e2c8c85336801b98735163df81"
+    },
+    {
+      "path": "core/scope-identity.ts",
+      "sha256": "39cb211ae1cc24a256d795e65d6f9b5fd0d98efe3b346d1c3342d05a36c5604a"
+    },
+    {
+      "path": "core/mcp/tool-catalog.ts",
+      "sha256": "226411fdd06e4719f152547a0e1385b9ca36403cb09e3c06757822fb73cc7bd3"
+    },
+    {
+      "path": "core/interfaces/workbench-queue-runner.ts",
+      "sha256": "4678637aea8f115241530530398dd33d24bc7881a48f75cedd249b693fee6202"
+    },
+    {
+      "path": "core/interfaces/workbench-agent-session-api.ts",
+      "sha256": "0491b20b136498470f07c3d66ed556113ba83058143791ca44a728ac57ff9277"
+    },
+    {
+      "path": "tests/project-data-inventory.test.ts",
+      "sha256": "9f24ba95392a67277fa7baa2cf47253eb396f4f5d8cbcfc713c01ae23ccdfb99"
+    },
+    {
+      "path": "tests/project-registry-migration.test.ts",
+      "sha256": "79fd075e0bd269fdefe006c440a6ed768a6ed7e3c44005aae8f053137bc622d4"
+    },
+    {
+      "path": "tests/scope-identity.test.ts",
+      "sha256": "02dacdead427c474ef383ace62dfc59b4a39c6bede55ec7e75d2328f52551f8e"
+    },
+    {
+      "path": "tests/memory-partition-store.test.ts",
+      "sha256": "a40482f3a3eb107c32d497e9808698ef07b7aaec97b98e4a86e4ec47503497a7"
+    },
+    {
+      "path": "tests/workbench-queue-runner.test.ts",
+      "sha256": "c4dac84c98d67cb92820b8eafbc7615afa40ff31a4d103260e78c662b1b5c6fe"
+    },
+    {
+      "path": "tests/workbench-message-queue.test.ts",
+      "sha256": "e7313dc6706a55b357f64600d843b29e68dd3b5a85cf0c06e1309bd681362455"
+    },
+    {
+      "path": "tests/workbench-agent-session-api.test.ts",
+      "sha256": "a73a3fb6b247a479d175beb045f576b13ca7e5ba7c7e7c1fea329bf87aa8b184"
+    },
+    {
+      "path": "tests/workbench-queue-recovery.test.ts",
+      "sha256": "16b9a7bb55be17e399e08665251dfbfd34eee0f1bfa39be8402a6d61e412b753"
+    }
+  ],
+  "limits": [
+    "isolated local SQLite databases; synthetic records and simulated send boundary",
+    "SIGKILL recovery tested on macOS only",
+    "inventory covers latest published central records, not orphaned shards or a frozen complete dataset",
+    "no business data imported; no user database modified",
+    "no desktop multi-window or real dual-engine queue proof",
+    "no package publication or installed-plugin upgrade"
+  ]
+}

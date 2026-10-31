@@ -5,7 +5,7 @@ import { HookSignalSanitizer } from "../core/interfaces/codex-hook-signal-saniti
 import { randomUUID } from "node:crypto";
 import { beginHookRuntimeDiagnostic, hookStorageFailureDetails } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
 import { operationErrorCode } from "../common/craft-common-log/src/index.ts";
-import { launchMemoryArchiveWorker, MEMORY_ARCHIVE_WORKER_FLAG, runMemoryArchiveWorker } from "../core/interfaces/memory-archive-worker.ts";
+import { launchMemoryArchiveWorker, MEMORY_ARCHIVE_WORKER_FLAG } from "../core/interfaces/memory-archive-launcher.ts";
 
 type CodexHookMember = "context" | "knowledge" | "memory" | "experience";
 
@@ -121,5 +121,5 @@ async function main(): Promise<void> {
 
 if (process.argv[2] === MEMORY_ARCHIVE_WORKER_FLAG) {
   process.env.CRAFT_HOOK_MODE = "0";
-  runMemoryArchiveWorker().catch(() => { process.exitCode = 1; });
+  import("../core/interfaces/memory-archive-worker.ts").then(module => module.runMemoryArchiveWorker()).catch(() => { process.exitCode = 1; });
 } else main().catch(() => { process.stdout.write("{}\n"); process.exitCode = 0; });

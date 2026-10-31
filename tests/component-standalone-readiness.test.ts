@@ -323,7 +323,13 @@ test("standalone readiness reflects automatic memory commitment and the coding e
     f.store.create("workflow_evolution_proposal", "draft", { request_id: "readiness-draft-request", status: "draft" });
     const knowledgePending = await knowledge.handlers.craft_component_readiness_get({ component: "knowledge" });
     assert.equal(knowledgePending.state, "effect_evaluation_pending");
-    assert.equal(knowledgePending.task_effect_gate, "unavailable");
+    assert.equal(knowledgePending.task_effect_gate, "available");
+    assert.equal(knowledgePending.next_action, "collect_independent_controlled_task_effect_evidence");
+    const advanced = new McpServer(f.service, "component-knowledge");
+    assert(advanced.tools.some(tool => tool.name === "craft_knowledge_task_effect_context"));
+    assert(advanced.tools.some(tool => tool.name === "craft_knowledge_task_effect_assess"));
+    await assert.rejects(async () => advanced.handlers.craft_knowledge_task_effect_context({ retrieval_run_id: "missing" }), /Unknown knowledge_evaluation_run/);
+    await assert.rejects(async () => advanced.handlers.craft_knowledge_task_effect_assess({ retrieval_run_id: "missing", baseline_id: "a", candidate_id: "b" }), /Unknown knowledge_evaluation_run/);
     assert.equal((await memory.handlers.craft_component_readiness_get({ component: "memory" })).state, "ready");
     assert.equal((await experience.handlers.craft_component_readiness_get({ component: "experience" })).state, "evaluation_required");
   } finally { await dispose(f); }

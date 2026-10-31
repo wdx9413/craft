@@ -13,6 +13,8 @@ import type { ModelTransport } from "../core/model-gateway.ts";
 import { knowledgeEvaluationAdjudicationVerified } from "../core/knowledge-evaluation-provenance.ts";
 import { runSessionKnowledgeAdjudicationOnce } from "../deploy/experience-learning/session-knowledge-adjudication.ts";
 import type { ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
+import { payload, stableDigest } from "../core/digest.ts";
+import { attachTaskEffectReceiptFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 const sha = (digit: string) => `sha256:${digit.repeat(64)}`;
 async function fixture(output = JSON.stringify({ decision: "accepted", expected_claim_ids: ["managed-claim"] }), gate?: Promise<void>,
@@ -59,6 +61,24 @@ async function fixture(output = JSON.stringify({ decision: "accepted", expected_
   });
   return { root, store, service, case_, calls, held, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
+
+test("task contracts and bound negative labels are included in managed adjudication", async () => {
+  const f = await fixture(JSON.stringify({ decision: "accepted", expected_claim_ids: [] }), undefined, { synthetic_legacy_source: true });
+  const contract = { checks: [{ id: "answer", kind: "stdout_contains", value: "correct" }], safety_checks: [{ id: "safe", kind: "exit_code", equals: 0 }] };
+  try {
+    assert.throws(() => f.service.knowledgeEvaluationCaseSave({ query: "negative", expected_claim_ids: [] }), /Negative Knowledge cases/);
+    const candidate = f.service.knowledgeEvaluationCaseSave({ ...payload(f.case_), case_id: "negative-case", expected_claim_ids: [], task_contract: contract }).case as JsonObject;
+    const result = await f.service.knowledgeEvaluationCaseAdjudicateManaged({ case_id: candidate.id, expected_version: candidate.version });
+    const adjudicated = result.case as JsonObject, adjudication = result.adjudication as JsonObject;
+    assert.deepEqual(adjudicated.expected_claim_ids, []); assert.deepEqual(adjudicated.task_contract, contract);
+    assert.equal(adjudication.task_contract_digest, stableDigest(contract));
+    assert.equal(knowledgeEvaluationAdjudicationVerified(f.store, adjudicated), true);
+    assert.equal(knowledgeEvaluationAdjudicationVerified(f.store, { ...adjudicated, task_contract: { ...contract, checks: [] } }), false);
+    const request = f.calls[0]!.request as JsonObject;
+    assert.ok(JSON.stringify(request.messages).includes('task_contract'));
+    assert.ok(JSON.stringify(request.messages).includes('检查过松'));
+  } finally { await f.close(); }
+});
 
 test("public adjudication owns the Host call and rejects caller-supplied Trace fields", async () => {
   const f = await fixture();
@@ -116,7 +136,8 @@ test("replacing held-out Evidence through the public API invalidates prior forma
   const f = await fixture(undefined, undefined, { synthetic_legacy_source: true });
   try {
     const adjudicated = await f.service.knowledgeEvaluationCaseAdjudicateManaged({ case_id: f.case_.id, expected_version: f.case_.version });
-    f.service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [(adjudicated.case as JsonObject).id], candidate_claim_ids: ["managed-claim"] });
+    const retrieval = f.service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [(adjudicated.case as JsonObject).id], candidate_claim_ids: ["managed-claim"] }).run as JsonObject;
+    attachTaskEffectReceiptFixture(f.store, retrieval);
     for (const n of [1, 2]) {
       const evidence = f.service.evidenceRecord({ evidence_id: `support-${n}`, source_type: "program", confidence: "confirmed",
         claim: "fixture support", metadata: { source_session_id: `session-${n}`, task_id: `task-${n}` } });
@@ -135,7 +156,8 @@ test("replacing a bound support Evidence invalidates formal Knowledge at read ti
   const f = await fixture(undefined, undefined, { synthetic_legacy_source: true });
   try {
     const adjudicated = await f.service.knowledgeEvaluationCaseAdjudicateManaged({ case_id: f.case_.id, expected_version: f.case_.version });
-    f.service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [(adjudicated.case as JsonObject).id], candidate_claim_ids: ["managed-claim"] });
+    const retrieval = f.service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [(adjudicated.case as JsonObject).id], candidate_claim_ids: ["managed-claim"] }).run as JsonObject;
+    attachTaskEffectReceiptFixture(f.store, retrieval);
     for (const n of [1, 2]) {
       const evidence = f.service.evidenceRecord({ evidence_id: `support-${n}`, source_type: "program", confidence: "confirmed",
         claim: "fixture support", metadata: { source_session_id: `session-${n}`, task_id: `task-${n}` } });
@@ -154,7 +176,8 @@ test("replacing the Claim source with a public assertion blocks formal Context",
   const f = await fixture(undefined, undefined, { synthetic_legacy_source: true });
   try {
     const adjudicated = await f.service.knowledgeEvaluationCaseAdjudicateManaged({ case_id: f.case_.id, expected_version: f.case_.version });
-    f.service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [(adjudicated.case as JsonObject).id], candidate_claim_ids: ["managed-claim"] });
+    const retrieval = f.service.knowledgeEvaluationRun({ mode: "candidate_shadow", case_ids: [(adjudicated.case as JsonObject).id], candidate_claim_ids: ["managed-claim"] }).run as JsonObject;
+    attachTaskEffectReceiptFixture(f.store, retrieval);
     for (const n of [1, 2]) {
       const support = f.service.evidenceRecord({ evidence_id: `claim-source-support-${n}`, source_type: "program", confidence: "confirmed",
         claim: "fixture support", metadata: { source_session_id: `session-${n}`, task_id: `task-${n}` } });

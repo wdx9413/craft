@@ -1,0 +1,52 @@
+Selected existing-runner group: workbench-controlled-evaluations
+["--test","--test-isolation=none","--test-concurrency=1","--experimental-test-coverage","--test-coverage-include=core/workbench-evaluations.ts","--test-coverage-include=core/interfaces/workbench-evaluations.ts","--test-coverage-lines=100","--test-coverage-functions=100","--test-coverage-branches=100","tests/workbench-evaluation-concurrency.test.ts","tests/bundled-knowledge-task-effects.test.ts","tests/workbench-evaluations.test.ts","tests/knowledge-task-effects.test.ts","tests/evaluation-process.test.ts","tests/evaluation-process-crash.test.ts"]
+(node:84868) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:84868) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ packaged Knowledge task-effect routes return domain errors rather than module-loading failures (1321.509542ms)
+✔ bundled Knowledge routes prepare bounded context and re-read real controlled reports without granting software runs admission (1366.438ms)
+✔ evaluation validation and shutdown refuse unsafe reservations before execution (14.494209ms)
+✔ a fresh manager observes unresolved records without overwriting another owner's state (9.847583ms)
+✔ terminal persistence failure never reports success or creates an unhandled rejection (185.928ms)
+✔ worker SIGKILL becomes unknown and an identical controlled operation never replays (212.860375ms)
+✔ Craft IPC disconnect aborts the worker, reaps commands and exits without an IPC error (192.467208ms)
+✔ installed evaluation package executes in a worker and returns progress (243.098ms)
+✔ installed evaluation worker completes when an adapter leaves inherited output pipes open (177.405625ms)
+✔ task contracts require bounded deterministic outcomes and safety assertions (1.098ms)
+✔ Knowledge authority requires exact adjudicated tasks and a controlled positive paired effect (443.807834ms)
+✔ concurrent duplicate submissions run once and the fifth active reservation is refused (362.340792ms)
+✔ progress retention is bounded while a real worker is active and cancellation settles (109.912667ms)
+✔ a configuration growing after stat is refused before reservation (18.851084ms)
+✔ configuration reads handle short reads, enforce the exact byte ceiling and reject non-files (343.022917ms)
+✔ configuration read failure closes its descriptor and creates no execution record (10.679041ms)
+✔ report verification keeps the same input budget for frozen configurations (199.534792ms)
+✔ a named pipe is rejected without waiting for a writer (14.373084ms)
+✔ preparation rejects non-Error failures and early cancellation never starts a worker (21.692291ms)
+✔ cancellation during report persistence cannot become a completed execution (176.045458ms)
+✔ a changed engine environment rejects an otherwise completed synthetic agent run (303.340292ms)
+✔ report binding independently rejects changed subject, suite and runtime even with a matching file hash (187.3275ms)
+✔ comparison rejects plan and result changes between verification and copy and cleans its temporary directory (198.496917ms)
+✔ comparison rejects changed result keys before reading paths outside its frozen result set (205.961917ms)
+✔ two comparisons crossing the transaction boundary create only one diagnostic receipt (206.270083ms)
+✔ controlled worker preserves context input receipts from the installed evaluator package (308.546333ms)
+✔ evaluation API authenticates, freezes inputs, deduplicates, reports and cancels real workers (844.115458ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8512.540333
+ℹ start of coverage report
+ℹ ---------------------------------------------------------------------------
+ℹ file                       | line % | branch % | funcs % | uncovered lines
+ℹ ---------------------------------------------------------------------------
+ℹ core                       |        |          |         | 
+ℹ  interfaces                |        |          |         | 
+ℹ   workbench-evaluations.ts | 100.00 |   100.00 |  100.00 | 
+ℹ  workbench-evaluations.ts  | 100.00 |   100.00 |  100.00 | 
+ℹ ---------------------------------------------------------------------------
+ℹ all files                  | 100.00 |   100.00 |  100.00 | 
+ℹ ---------------------------------------------------------------------------
+ℹ end of coverage report

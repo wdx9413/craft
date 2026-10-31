@@ -1,0 +1,64 @@
+{
+  "scope": "local synthetic lifecycle, cold process with persistent isolated datastore",
+  "node": "v23.11.0",
+  "platform": "darwin",
+  "bundle": "dist/plugin/craft-codex-hook.cjs",
+  "bundle_sha256": "9510307f4942a7320275f5c70081956ab68fd7e4cef83a30b126bcdebcc73109",
+  "started_at": "2026-10-30T07:03:42.688Z",
+  "finished_at": "2026-10-30T07:06:06.532Z",
+  "summary": {
+    "SessionStart": {
+      "samples": 100,
+      "p50_ms": 150,
+      "p95_ms": 177,
+      "p99_ms": 188,
+      "max_ms": 210,
+      "target_met": true
+    },
+    "UserPromptSubmit": {
+      "samples": 100,
+      "p50_ms": 284,
+      "p95_ms": 321,
+      "p99_ms": 341,
+      "max_ms": 387,
+      "target_met": true
+    },
+    "PostToolUse.noop": {
+      "samples": 100,
+      "p50_ms": 145,
+      "p95_ms": 157,
+      "p99_ms": 171,
+      "max_ms": 173,
+      "target_met": true
+    },
+    "PostToolUse.edit": {
+      "samples": 100,
+      "p50_ms": 255,
+      "p95_ms": 296,
+      "p99_ms": 341,
+      "max_ms": 350,
+      "target_met": true
+    },
+    "Stop": {
+      "samples": 100,
+      "p50_ms": 287,
+      "p95_ms": 364,
+      "p99_ms": 423,
+      "max_ms": 469,
+      "target_met": true
+    },
+    "SessionEnd": {
+      "samples": 100,
+      "p50_ms": 281,
+      "p95_ms": 360,
+      "p99_ms": 386,
+      "max_ms": 471,
+      "target_met": true
+    }
+  },
+  "limitations": [
+    "Synthetic empty repository and preinitialized isolated datastore, not production or populated-scope latency.",
+    "Each case uses a new process; filesystem caches are not cleared.",
+    "16-way concurrency is a separate test and exceeded the 500 ms P95 target."
+  ]
+}

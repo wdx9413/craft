@@ -1,0 +1,194 @@
+{
+  "schema": "craft.queue-recovery-validation.v1",
+  "captured_at": "2026-10-30T12:24:58.202Z",
+  "environment": {
+    "node": "v23.11.0",
+    "platform": "darwin",
+    "architecture": "arm64"
+  },
+  "sources": [
+    {
+      "path": "craft/core/interfaces/workbench-queue-recovery.ts",
+      "sha256": "530c2be100a299bffc809499c8ec9cb38f9b9b6d18fc68745e1ce623369ed47e"
+    },
+    {
+      "path": "craft/core/interfaces/workbench-message-queue.ts",
+      "sha256": "25d27fa6797e853e769acd713792708895d6fd3cddf690d2710be294ca120018"
+    },
+    {
+      "path": "craft/core/interfaces/workbench-agent-session-api.ts",
+      "sha256": "200a687b6ffe7fb9e5f17aedd1623caa6208db7281609dddcf1030d1d8c88886"
+    },
+    {
+      "path": "craft/core/interfaces/codex-workbench-sessions.ts",
+      "sha256": "46027ff581b85ee5c94b4f6861e0c7f8b43c7f4bca2ea078c260e5ed4a5701c9"
+    },
+    {
+      "path": "craft/core/interfaces/claude-linked-turn.ts",
+      "sha256": "b374ebb684232c2b702da69748b74da7763c133bb21c3f328cc8b5fd54993114"
+    },
+    {
+      "path": "craft/core/interfaces/workbench-server.ts",
+      "sha256": "c234753d1835dfe0ce79e5cbdf7792c78d03c3c64b416523303109c9e2a73e38"
+    },
+    {
+      "path": "craft/tests/workbench-queue-reconciliation.test.ts",
+      "sha256": "fb88c3a94957d2ea79330c3363d4d4b2c292b5dd10f1e3d46c69f5629598b4a9"
+    },
+    {
+      "path": "craft/tests/workbench-queue-recovery.test.ts",
+      "sha256": "ffd1b0ae955b9572559c5109c79161c08776e6d2cb92aff213bee0b043fff1fa"
+    },
+    {
+      "path": "craft/tests/claude-linked-turn.test.ts",
+      "sha256": "d5ec6b2c2cf36fb126460dfca9b8c7de9f9534003de459b3d94d7d79aff0144a"
+    },
+    {
+      "path": "craft/tests/workbench-agent-session-api.test.ts",
+      "sha256": "929577274eb16975b17235667ab05d25b8514c09c5de18450afb70bf40013ac3"
+    },
+    {
+      "path": "craft/tests/workbench-recovery-surface.test.ts",
+      "sha256": "051a70e72bd60ec5be4afa3515fd8fffa83511e1749fcfa11483a10d74a9318b"
+    },
+    {
+      "path": "craft-workbench/workbench/queue-recovery.js",
+      "sha256": "620ebc2486f87c58d2c349892a598775fb76ea6d1abf459c6c7885bd6db6b5c5"
+    },
+    {
+      "path": "craft-workbench/workbench/agent-workspace.js",
+      "sha256": "aaa4706979455cb04a1dd0587851425f6b361a46550cddfc30c744a6c4423982"
+    },
+    {
+      "path": "craft-workbench/workbench/entry.css",
+      "sha256": "32c49762527da4454d8305807568bdde46fc665fd036f61150bd914345a921e9"
+    },
+    {
+      "path": "craft-workbench/tests/queue-recovery.test.ts",
+      "sha256": "b223daf53c978faba4a86c78447b492330ae539329eb3f5e09ec832b46889e5c"
+    },
+    {
+      "path": "craft-workbench/tests/agent-workspace.test.ts",
+      "sha256": "65f3cf85b8a0aab0580fc6c82086e65bbb17c3126fde5d248ddb3c16988259fb"
+    },
+    {
+      "path": "craft-workbench/tests/runtime-package.test.ts",
+      "sha256": "dc506746a7f38965b8996f25dcd53819c4e67716f6725ee3a8f0fbae0120db91"
+    },
+    {
+      "path": "craft-workbench/UX-CONTRACT.md",
+      "sha256": "37d08daba3908ad27819a91e3004b2b31f874b71d6bd876dfcdc9d8ffc05ddb2"
+    }
+  ],
+  "artifact": {
+    "path": "craft-workbench/vendor/craft-agent-harness-0.12.131.tgz",
+    "sha256": "821a1ddd9d3765a8670ea86cf4407c85783c6ed5a73863ca4973fa7f99660f65",
+    "scope": "local compiled runtime archive"
+  },
+  "checks": {
+    "core_related": {
+      "passed": 53
+    },
+    "workbench": {
+      "passed": 51
+    },
+    "recovery_policy_coverage": {
+      "lines": 100,
+      "branches": 100,
+      "functions": 100
+    },
+    "inline_recovery_coverage": {
+      "lines": 100,
+      "branches": 100,
+      "functions": 100
+    },
+    "typecheck": true,
+    "installed_cli_http": true,
+    "sidecar_prepared": true,
+    "browser": {
+      "polling": {
+        "sameButton": true,
+        "connected": true,
+        "nextRowDisabled": true,
+        "focused": "保留消息"
+      },
+      "escape": {
+        "native_starts": 0,
+        "queued": 2
+      },
+      "narrow": {
+        "width": 780,
+        "height": 820,
+        "horizontalOverflow": false,
+        "focused": "保留消息",
+        "buttonsVisible": true
+      },
+      "discardAndContinue": {
+        "native_starts": 1,
+        "queued": [],
+        "receipts": [
+          {
+            "state": "sent"
+          },
+          {
+            "state": "dismissed",
+            "resolution": "user_discarded_unknown"
+          }
+        ],
+        "task_messages": 0
+      },
+      "completedTurnObserved": true,
+      "finalNativeStarts": 1
+    },
+    "installed_and_staged_runtime_byte_match": {
+      "files": 6,
+      "passed": true
+    }
+  },
+  "screenshots": [
+    {
+      "path": "craft-workbench/docs/validation/queue-recovery/02-confirmation-aligned.png",
+      "sha256": "3ba29d6c9c870a38dedb6a34527a3409c6b8acacae0906c47c2753cffe64436b",
+      "width": 1456,
+      "height": 833
+    },
+    {
+      "path": "craft-workbench/docs/validation/queue-recovery/03-narrow-confirmation.png",
+      "sha256": "9419f816a1ea34350ba45011fefd0ef0619fd3b52f2e553c1724b3f27cd7127f",
+      "width": 780,
+      "height": 820
+    },
+    {
+      "path": "craft-workbench/docs/validation/queue-recovery/04-recovered-and-continued.png",
+      "sha256": "6125a27524b8b6e876fe73811eb9cb70be1a7ebc267e4d28eb1037e555f31a94",
+      "width": 1456,
+      "height": 833
+    }
+  ],
+  "static_audit": {
+    "summary": {
+      "errors": 55,
+      "total": 55,
+      "unresolved": 3,
+      "violations": 52,
+      "warnings": 0
+    },
+    "snapshot_findings": 36,
+    "runtime_findings": 19,
+    "passed": false
+  },
+  "limits": [
+    "Browser uses production Workbench/API with a simulated native transport; no real model invoked",
+    "No native desktop-window or Windows/Linux execution acceptance",
+    "Only named policy/confirmation modules have complete coverage; not the entire increment",
+    "Live or unidentifiable dispatchers and unresolved native turns remain paused",
+    "Global UI audit is not passed",
+    "No user database migration, remote push, publication or installed-plugin upgrade"
+  ],
+  "browser_workspace": {
+    "space_id": 4,
+    "page": "p1",
+    "state_at_capture": "active and blank for remaining goal UI checks"
+  },
+  "fixture_server_stopped": true
+}

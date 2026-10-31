@@ -1,4 +1,5 @@
-import ts from "typescript";
+import type ts from "typescript";
+import { getTypeScript, getTypeScriptVersion } from "./typescript-runtime.ts";
 import { posix } from "node:path";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
@@ -18,7 +19,7 @@ export type TypeScriptFileUnit = JsonObject & {
 export type TypeScriptAnalysisOptions = { readonly include_paths?: readonly string[]; readonly include_file_units?: boolean };
 // Include Craft's serialized graph schema so cached file units are rebuilt when
 // emitted symbol facts change even if the TypeScript compiler itself is unchanged.
-export const TYPESCRIPT_ANALYZER_VERSION = `${ts.version}:craft-ts-semantic-v5`;
+export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v5`;
 export function typeScriptFileUnitDigest(unit: Omit<TypeScriptFileUnit, "unit_digest"> | TypeScriptFileUnit): string {
   return stableDigest({ path: unit.path, source_digest: unit.source_digest, analyzer_version: unit.analyzer_version,
     external_module: unit.external_module, nodes: unit.nodes, edges: unit.edges, unresolved_relations: unit.unresolved_relations, budget_limited: unit.budget_limited });
@@ -27,12 +28,15 @@ const parsed = new Map<string, ts.SourceFile>();
 const programs = new Map<string, ts.Program>();
 const MAX_GRAPH_NODES = 60_000;
 const MAX_GRAPH_EDGES = 150_000;
-const DECLARATION_KIND = new Map<ts.SyntaxKind, string>([
-  [ts.SyntaxKind.FunctionDeclaration, "function"], [ts.SyntaxKind.MethodDeclaration, "method"], [ts.SyntaxKind.MethodSignature, "method"],
-  [ts.SyntaxKind.PropertyDeclaration, "property"], [ts.SyntaxKind.PropertySignature, "property"], [ts.SyntaxKind.ClassDeclaration, "class"],
-  [ts.SyntaxKind.InterfaceDeclaration, "interface"], [ts.SyntaxKind.TypeAliasDeclaration, "type"], [ts.SyntaxKind.EnumDeclaration, "enum"],
-  [ts.SyntaxKind.EnumMember, "enum_member"], [ts.SyntaxKind.VariableDeclaration, "variable"], [ts.SyntaxKind.Parameter, "parameter"],
+let declarationKinds: Map<ts.SyntaxKind, string> | undefined;
+function declarationKindMap(): Map<ts.SyntaxKind, string> {
+  return declarationKinds ??= new Map<ts.SyntaxKind, string>([
+  [getTypeScript().SyntaxKind.FunctionDeclaration, "function"], [getTypeScript().SyntaxKind.MethodDeclaration, "method"], [getTypeScript().SyntaxKind.MethodSignature, "method"],
+  [getTypeScript().SyntaxKind.PropertyDeclaration, "property"], [getTypeScript().SyntaxKind.PropertySignature, "property"], [getTypeScript().SyntaxKind.ClassDeclaration, "class"],
+  [getTypeScript().SyntaxKind.InterfaceDeclaration, "interface"], [getTypeScript().SyntaxKind.TypeAliasDeclaration, "type"], [getTypeScript().SyntaxKind.EnumDeclaration, "enum"],
+  [getTypeScript().SyntaxKind.EnumMember, "enum_member"], [getTypeScript().SyntaxKind.VariableDeclaration, "variable"], [getTypeScript().SyntaxKind.Parameter, "parameter"],
 ]);
+}
 // Analysis is persisted as bounded immutable graph shards, so the compiler can
 // retain a much larger checkpoint graph without creating a single giant row.
 const MAX_ANALYSIS_CHARS = 32_000_000;
@@ -53,9 +57,9 @@ export function createCheckpointCompilerHost(files: readonly Source[]): ts.Compi
     sources, reused: 0,
     getSourceFile(name, target) {
       const file = sources.get(name); if (!file) return undefined;
-      const key = stableDigest([ts.version, name, file.digest]);
+      const key = stableDigest([getTypeScript().version, name, file.digest]);
       const cached = parsed.get(key); if (cached) { host.reused++; return cached; }
-      const source = ts.createSourceFile(name, file.content, target, true);
+      const source = getTypeScript().createSourceFile(name, file.content, target, true);
       parsed.set(key, source);
       while (parsed.size > 2000) parsed.delete(parsed.keys().next().value!);
       return source;
@@ -71,11 +75,11 @@ export function createCheckpointCompilerHost(files: readonly Source[]): ts.Compi
 /** Compiler binds names in an in-memory checkpoint; it never reads outside that checkpoint. */
 export function analyzeTypeScript(files: readonly Source[], analysisOptions: TypeScriptAnalysisOptions = {}): JsonObject {
   const host = createCheckpointCompilerHost(files), sources = host.sources;
-  const options: ts.CompilerOptions = { allowJs: true, checkJs: true, noLib: true, noResolve: false, target: ts.ScriptTarget.Latest, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext };
+  const options: ts.CompilerOptions = { allowJs: true, checkJs: true, noLib: true, noResolve: false, target: getTypeScript().ScriptTarget.Latest, module: getTypeScript().ModuleKind.NodeNext, moduleResolution: getTypeScript().ModuleResolutionKind.NodeNext };
   const rootNames = [...sources.keys()].sort();
-  const programKey = stableDigest({ analyzer_version: ts.version, root_names: rootNames });
+  const programKey = stableDigest({ analyzer_version: getTypeScript().version, root_names: rootNames });
   const oldProgram = programs.get(programKey);
-  const program = ts.createProgram(rootNames, options, host, oldProgram);
+  const program = getTypeScript().createProgram(rootNames, options, host, oldProgram);
   programs.delete(programKey);
   programs.set(programKey, program);
   while (programs.size > 2) programs.delete(programs.keys().next().value!);
@@ -104,9 +108,9 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
     list.push(fact); target.set(path, list); unitChars.set(path, nextFileChars); unitTotalChars += encodedLength;
   };
   const declarationId = (node: ts.Node): string | undefined => {
-    if (!(ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isMethodSignature(node) || ts.isPropertyDeclaration(node)
-      || ts.isPropertySignature(node) || ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)
-      || ts.isEnumDeclaration(node) || ts.isEnumMember(node) || ts.isVariableDeclaration(node) || ts.isParameter(node))) return undefined;
+    if (!(getTypeScript().isFunctionDeclaration(node) || getTypeScript().isMethodDeclaration(node) || getTypeScript().isMethodSignature(node) || getTypeScript().isPropertyDeclaration(node)
+      || getTypeScript().isPropertySignature(node) || getTypeScript().isClassDeclaration(node) || getTypeScript().isInterfaceDeclaration(node) || getTypeScript().isTypeAliasDeclaration(node)
+      || getTypeScript().isEnumDeclaration(node) || getTypeScript().isEnumMember(node) || getTypeScript().isVariableDeclaration(node) || getTypeScript().isParameter(node))) return undefined;
     const named = node as ts.NamedDeclaration;
     const path = sources.get(node.getSourceFile().fileName)?.path;
     // Selected output files must resolve only to declarations whose bounded
@@ -132,7 +136,7 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
     const file = sources.get(source.fileName)!;
     const fileId = id([file.path, "file"]); fileNodes.set(source.fileName, fileId);
     if (outputPaths.has(file.path)) {
-      const fileNode = { id: fileId, kind: "file", path: file.path, name: file.path, source_digest: file.digest, language: file.language, external_module: ts.isExternalModule(source), span: { start_offset: 0, end_offset: 0 } };
+      const fileNode = { id: fileId, kind: "file", path: file.path, name: file.path, source_digest: file.digest, language: file.language, external_module: getTypeScript().isExternalModule(source), span: { start_offset: 0, end_offset: 0 } };
       if (!appendNode(fileNode, true)) throw new Error("TypeScript file graph exceeds analysis budget");
       unitNodes.set(file.path, []); unitEdges.set(file.path, []); unitChars.set(file.path, 0);
       appendUnitFact(file.path, unitNodes, fileNode);
@@ -142,15 +146,15 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
     const file = sources.get(source.fileName)!;
     if (!outputPaths.has(file.path)) continue;
     const visit = (node: ts.Node): void => {
-      if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isMethodSignature(node) || ts.isPropertyDeclaration(node)
-        || ts.isPropertySignature(node) || ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)
-        || ts.isEnumDeclaration(node) || ts.isEnumMember(node) || ts.isVariableDeclaration(node) || ts.isParameter(node)) {
+      if (getTypeScript().isFunctionDeclaration(node) || getTypeScript().isMethodDeclaration(node) || getTypeScript().isMethodSignature(node) || getTypeScript().isPropertyDeclaration(node)
+        || getTypeScript().isPropertySignature(node) || getTypeScript().isClassDeclaration(node) || getTypeScript().isInterfaceDeclaration(node) || getTypeScript().isTypeAliasDeclaration(node)
+        || getTypeScript().isEnumDeclaration(node) || getTypeScript().isEnumMember(node) || getTypeScript().isVariableDeclaration(node) || getTypeScript().isParameter(node)) {
         if (node.name) {
           const nodeId = id([file.path, node.name.getStart(), node.name.getText()]);
-          const functionInitializer = ts.isVariableDeclaration(node) && node.initializer !== undefined
-            && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer));
-          const declaration = ts.isVariableDeclaration(node) && ts.isVariableDeclarationList(node.parent) ? node.parent.parent : node;
-          const symbolNode = { id: nodeId, kind: "symbol", declaration_kind: DECLARATION_KIND.get(node.kind)!, path: file.path,
+          const functionInitializer = getTypeScript().isVariableDeclaration(node) && node.initializer !== undefined
+            && (getTypeScript().isArrowFunction(node.initializer) || getTypeScript().isFunctionExpression(node.initializer));
+          const declaration = getTypeScript().isVariableDeclaration(node) && getTypeScript().isVariableDeclarationList(node.parent) ? node.parent.parent : node;
+          const symbolNode = { id: nodeId, kind: "symbol", declaration_kind: declarationKindMap().get(node.kind)!, path: file.path,
             name: node.name.getText(), source_digest: file.digest, language: file.language, span: span(node.name), declaration_span: span(declaration) };
           if (functionInitializer) symbolNode.declaration_kind = "function";
           const emitted = appendNode(symbolNode, false);
@@ -163,7 +167,7 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
           }
         }
       }
-      ts.forEachChild(node, visit);
+      getTypeScript().forEachChild(node, visit);
     };
     visit(source);
   }
@@ -181,13 +185,13 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
   };
   const resolveTargets = (at: ts.Node): { graph: string[]; unit: string[] } => {
     let symbol = checker.getSymbolAtLocation(at);
-    if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (symbol && symbol.flags & getTypeScript().SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
     return resolveDeclarationTargets(symbol?.declarations ?? []);
   };
   const callOwner = (node: ts.Node, fallback: string, owners: Map<ts.Node, string> = declarations): string => {
     let parent = node.parent;
     while (parent) {
-      if (ts.isFunctionLike(parent)) {
+      if (getTypeScript().isFunctionLike(parent)) {
         const owner = owners.get(parent);
         if (owner) return owner;
       }
@@ -209,7 +213,7 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
     };
     const visit = (node: ts.Node, owner: string, unitOwner: string): void => {
       const current = declarations.get(node) ?? owner, unitCurrent = unitDeclarations.get(node) ?? unitOwner;
-      if (ts.isIdentifier(node)) {
+      if (getTypeScript().isIdentifier(node)) {
         const parent = node.parent;
         const declarationName = "name" in parent && parent.name === node && unitDeclarations.has(parent);
         if (!declarationName) {
@@ -218,14 +222,14 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
           for (const target of targets.unit) addUnit("references", unitCurrent, target, node);
         }
       }
-      if (ts.isTypeReferenceNode(node)) {
+      if (getTypeScript().isTypeReferenceNode(node)) {
         const targets = resolveTargets(node.typeName);
         for (const target of targets.graph) add("type_definition", current, target, node.typeName);
         for (const target of targets.unit) addUnit("type_definition", unitCurrent, target, node.typeName);
         if (!targets.graph.length) unresolved(file.path);
       }
-      if (ts.isHeritageClause(node) && (node.token === ts.SyntaxKind.ImplementsKeyword || node.token === ts.SyntaxKind.ExtendsKeyword)) {
-        const relation: "implements" | "extends" = node.token === ts.SyntaxKind.ImplementsKeyword ? "implements" : "extends";
+      if (getTypeScript().isHeritageClause(node) && (node.token === getTypeScript().SyntaxKind.ImplementsKeyword || node.token === getTypeScript().SyntaxKind.ExtendsKeyword)) {
+        const relation: "implements" | "extends" = node.token === getTypeScript().SyntaxKind.ImplementsKeyword ? "implements" : "extends";
         for (const heritage of node.types) {
           const targets = resolveTargets(heritage.expression);
           for (const target of targets.graph) add(relation, current, target, heritage.expression);
@@ -233,20 +237,20 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
           if (!targets.graph.length) unresolved(file.path);
         }
       }
-      if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
-        const resolved = ts.resolveModuleName(node.moduleSpecifier.text, source.fileName, options, host).resolvedModule;
+      if ((getTypeScript().isImportDeclaration(node) || getTypeScript().isExportDeclaration(node)) && node.moduleSpecifier && getTypeScript().isStringLiteral(node.moduleSpecifier)) {
+        const resolved = getTypeScript().resolveModuleName(node.moduleSpecifier.text, source.fileName, options, host).resolvedModule;
         const target = resolved && fileNodes.get(posix.normalize(resolved.resolvedFileName));
         if (target) {
           add("imports", fileNodes.get(source.fileName)!, target, node.moduleSpecifier);
           addUnit("imports", fileNodes.get(source.fileName)!, target, node.moduleSpecifier);
         } else unresolved(file.path);
       }
-      if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+      if (getTypeScript().isCallExpression(node) || getTypeScript().isNewExpression(node)) {
         const signature = checker.getResolvedSignature(node);
-        let symbol = checker.getSymbolAtLocation(ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression);
-        if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+        let symbol = checker.getSymbolAtLocation(getTypeScript().isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression);
+        if (symbol && symbol.flags & getTypeScript().SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
         const expressionType = checker.getTypeAtLocation(node.expression);
-        const callable = ts.isNewExpression(node) ? expressionType.getConstructSignatures() : expressionType.getCallSignatures();
+        const callable = getTypeScript().isNewExpression(node) ? expressionType.getConstructSignatures() : expressionType.getCallSignatures();
         const candidates = callable.length ? [signature?.declaration, ...(symbol?.declarations ?? [])].filter((value): value is ts.Declaration => value !== undefined) : [];
         const targets = resolveDeclarationTargets(candidates);
         let target = targets.graph.find(Boolean);
@@ -258,7 +262,7 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
             ?? target : target);
         if (unitTarget) addUnit("calls", callOwner(node, unitCurrent, unitDeclarations), unitTarget, node.expression);
       }
-      ts.forEachChild(node, child => visit(child, current, unitCurrent));
+      getTypeScript().forEachChild(node, child => visit(child, current, unitCurrent));
     };
     visit(source, fileNodes.get(source.fileName)!, fileNodes.get(source.fileName)!);
   }
@@ -270,7 +274,7 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
   if (analysisOptions.include_file_units === true) {
     result.file_units = [...outputPaths].sort().map(path => {
       const unit = { path, source_digest: allFiles.get(path)!.digest, analyzer_version: TYPESCRIPT_ANALYZER_VERSION,
-        external_module: ts.isExternalModule(sourceFiles.find(source => sources.get(source.fileName)?.path === path)!),
+        external_module: getTypeScript().isExternalModule(sourceFiles.find(source => sources.get(source.fileName)?.path === path)!),
         nodes: unitNodes.get(path)!, edges: unitEdges.get(path)!, unresolved_relations: unresolvedByPath.get(path)!, budget_limited: unitBudgetLimited.has(path) };
       return { ...unit, unit_digest: typeScriptFileUnitDigest(unit) } satisfies TypeScriptFileUnit;
     });

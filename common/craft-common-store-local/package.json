@@ -43,12 +43,13 @@
   "engines": {
     "node": ">=23"
   },
-  "dependencies": {
-    "@types/node": ">=23 <26"
-  },
+  "dependencies": {},
   "license": "MIT",
   "publishConfig": {
     "access": "public",
     "provenance": true
+  },
+  "devDependencies": {
+    "@types/node": ">=23 <26"
   }
 }

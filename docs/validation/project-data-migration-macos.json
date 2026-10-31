@@ -1,0 +1,174 @@
+{
+  "schema": "craft.project-data-migration-validation.v1",
+  "validated_at": "2026-10-30T14:35:13.589133+00:00",
+  "scope": "isolated data; nine base record kinds with whitelisted references, additive Context MCP actions, runtime dependency boundaries",
+  "source_state": "uncommitted working trees on main; source hashes identify tested code, not a published release",
+  "git_base": {
+    "craft": "6757e8ee3ca79cab14c283cc045f029588d36fad",
+    "craft-workbench": "065e28bfd5ca21f4d17ec5eb649503a0fb47687e"
+  },
+  "source_sha256": {
+    "craft/core/project-data-migration.ts": "0fa0db784493f36ab6b976fb6a1780b0ba9829e133fe0916deaf02017dd6c90c",
+    "craft/core/scope-identity.ts": "3afa1f147be43f90f654448e304670c4aeccf6a2f50f05e9bbedb5089f5e073f",
+    "craft/core/mcp/tool-schema.ts": "0c2fcf4cafbdb1bcb558a62738a3275bbc6088ad7c65dbfbf56d6b9888b8475b",
+    "craft/core/mcp/tool-catalog.ts": "0a1200e95092446558087e7ac4a99aac4d9178e2ae947ecb9babfbe6d65411ad",
+    "craft/core/project-knowledge-content.ts": "e52bf56535784c08ec0e96430ea97f5d6cbcd9baa6133c3450a7d1a959fdc241",
+    "craft/core/workbench-evaluations.ts": "4d357547abbc622d9a3baeec89bb5d800dcdc0c79cdc7df865cc03c496cbf94e",
+    "craft/core/knowledge-task-effects.ts": "b04a234baa855f663eac526833292b39ee070be45d22aaff4eff09ab1a0913f8",
+    "craft/core/application/craft-service.ts": "f0cf394abe7e94a0d78ebe88ac9a6938347a6522cd910627281ca440dd231db4",
+    "craft/core/interfaces/workbench-evaluations.ts": "653da566499a225a69a70bf70a5e9ff76303c2b179a28f01f09cc7b0983641f8",
+    "craft/core/interfaces/claude-executable.ts": "86249482fb325625e61436240bce6fac10725beac300b652b5d309f69be10f12",
+    "craft/core/interfaces/codex-executable.ts": "f10fe71b6705ff829741ff8f54a0b99ff66983a24f3146736ac46d9b1bd0b466",
+    "craft/core/interfaces/workbench-cli-path.ts": "5bcdca78204f59701c44193cdf8ca1effefb18d202c621b4a2fa4c977767fba0",
+    "craft/core/infrastructure/claude-executable.ts": "1028ce5bb5042068443d4c6a443c5f92d4995e3ffcebe8b1006c018b3b3424d4",
+    "craft/core/infrastructure/codex-executable.ts": "26716370921c82508b6cbc37251e8f50c34f88165c3416372dbe81d93a3868c8",
+    "craft/core/infrastructure/cli-path.ts": "ce315a1090908a5e781daa1113d49c774b3c11632ff3d7e45428a1bf12d31f54",
+    "craft/tests/project-data-migration.test.ts": "12d1980ef308aa2f97bb8cba3ea35043aef418e541cf2e2733d62e6e95ee61ba",
+    "craft/tests/claude-executable.test.ts": "9d69a90789a20965dd16f450a19fe44f090f146d38881765c2bbecf471fc0ede",
+    "craft-workbench/tests/runtime-package.test.ts": "4c1cb6383d002acc1704172b94ba9312d5eef720f99837674764d8293119c2c6"
+  },
+  "verification": {
+    "tests": {
+      "migration": {
+        "passed": 20,
+        "failed": 0,
+        "log": "docs/validation/project-data-migration/migration.log",
+        "sha256": "3566bc5b3e9a7c340d9d78a1827eb7ef438de8a59103d2189772791692c5ab51"
+      },
+      "identity-storage-schema": {
+        "passed": 104,
+        "failed": 0,
+        "log": "docs/validation/project-data-migration/identity-storage-schema.log",
+        "sha256": "64ffc66c51f47d4d5e12626efc6268e0b599752e5d40c49233278a64a5892904"
+      },
+      "evaluation-layer": {
+        "passed": 4,
+        "failed": 0,
+        "log": "docs/validation/project-data-migration/evaluation-layer.log",
+        "sha256": "ff3d67f8ff19cd97f90197f8055c689fb79cca87f17ab5ea28e34cdba055574a"
+      },
+      "cli-discovery": {
+        "passed": 5,
+        "failed": 0,
+        "log": "docs/validation/project-data-migration/cli-discovery.log",
+        "sha256": "27955dbd73bb8aac042454260b949546d8265b731a4304671fb5a15933f5715d"
+      },
+      "workbench": {
+        "passed": 52,
+        "failed": 0,
+        "log": "docs/validation/project-data-migration/workbench.log",
+        "sha256": "285bbb838e4ac8b1fcc3561207b75301080fb1ebb9cadcad95f1df12a3e1cd60"
+      }
+    },
+    "total_related_tests": 185,
+    "migration_module_coverage": {
+      "lines": 100,
+      "branches": 100,
+      "functions": 100
+    },
+    "cli_infrastructure_modules_coverage": {
+      "lines": 100,
+      "branches": 100,
+      "functions": 100
+    },
+    "layer_audit": {
+      "modules": 541,
+      "violations": 0,
+      "import_exemptions_added": 0
+    },
+    "surface_audit": "clean",
+    "typecheck": "passed",
+    "core_plugin_build": "passed",
+    "plugin_package_check": "passed",
+    "gate_logs": {
+      "layering": {
+        "log": "docs/validation/project-data-migration/layering.log",
+        "sha256": "d8fe361b3d84950a67c5063674af5d78510ece76e9639dc72888d49e712d25c2"
+      },
+      "surfaces": {
+        "log": "docs/validation/project-data-migration/surfaces.log",
+        "sha256": "5bbb754d2a26e1826ed26a3289c3c4fd64caac8a3ad698dd3ba7a78244558b8e"
+      },
+      "docs": {
+        "log": "docs/validation/project-data-migration/docs.log",
+        "sha256": "95428d2e4984d5113a95ead373d9b250f081d0496e887cff412416ad3d3d7984"
+      },
+      "consistency": {
+        "log": "docs/validation/project-data-migration/consistency.log",
+        "sha256": "2537d3666e1acea5e7204d847fa68d135fb91f0f3a05d08d0438e81dbbce9bbd"
+      },
+      "plugin-package": {
+        "log": "docs/validation/project-data-migration/plugin-package.log",
+        "sha256": "13e60193518c8db80f9baee58322995ec19ea9dcd48dc49f5f9ca588968fa887"
+      },
+      "runtime-protocol": {
+        "log": "docs/validation/project-data-migration/runtime-protocol.log",
+        "sha256": "b7bf12a5f5c4869dc994e8cc3908382c8c21c155c72476b249d6ae72bfef7846"
+      },
+      "core-build": {
+        "log": "docs/validation/project-data-migration/core-build.log",
+        "sha256": "78333edcd2044065c0d09b2d517c4c0466798a1aa05fdc8b6c3cd90ca54ef8ff"
+      }
+    },
+    "docs_audit": "passed",
+    "consistency_audit": "passed",
+    "runtime_protocol_check": "passed",
+    "diff_check": "passed in both main working trees; new files checked separately"
+  },
+  "artifact": {
+    "version": "0.12.131",
+    "protocol": 1,
+    "path": "craft-workbench/vendor/craft-agent-harness-0.12.131.tgz",
+    "sha256": "e1b8f67e256159a91035b1e3551ace5313f08e78cea83b173a3c0ee640d1f0a9",
+    "fixed_lock_sha256": "e77aa538fb3ba7c1d81c0c0c51b436af0e1dc709e3b0ccb679f5d34ac6e15ed7",
+    "frozen_offline_install": "passed",
+    "sidecar_preparation": "passed",
+    "matched_source_tar_installed_sidecar_files": [
+      "dist/core/project-data-migration.js",
+      "dist/core/scope-identity.js",
+      "dist/core/workbench-evaluations.js",
+      "dist/core/infrastructure/claude-executable.js",
+      "dist/core/infrastructure/codex-executable.js",
+      "dist/core/infrastructure/cli-path.js",
+      "dist/core/interfaces/workbench-evaluations.js",
+      "dist/core/interfaces/claude-executable.js",
+      "dist/core/interfaces/codex-executable.js",
+      "dist/core/interfaces/workbench-cli-path.js",
+      "dist/core/mcp/tool-catalog.js",
+      "dist/core/mcp/tool-schema.js"
+    ],
+    "compiled_sha256": {
+      "dist/core/project-data-migration.js": "793d63461a589fb3fd118f16ed0470f92f29a861eb9357a181ad0fa264858a8b",
+      "dist/core/scope-identity.js": "a99e691d505e4c0a61435f218dc4fd11a35041599a88d897d7c81c8798f4327a",
+      "dist/core/workbench-evaluations.js": "0fc15d838cf9bcf96076454bce71f101fa60238663c270c2b192f586e533c7c9",
+      "dist/core/infrastructure/claude-executable.js": "ada0b12927618eeafe7243b62e7b44ff44504660ca642648f542370262f8559e",
+      "dist/core/infrastructure/codex-executable.js": "6e74935b01625f4d0d1f12fa132c47315d0b7da227ade6cb622e74e4b52fc8eb",
+      "dist/core/infrastructure/cli-path.js": "4cf66d8b3a53b6fcfd15a7920e24e804cac916b385e7880759a58c81ed795bae",
+      "dist/core/interfaces/workbench-evaluations.js": "0e81252a127933bbc79e3587cd9658eabec4e011c6f5de683fbd03daf19ac986",
+      "dist/core/interfaces/claude-executable.js": "454a8ca0128ab7594cfdfad8e29260d8f18873b809e6385e7cb386ee1dca5704",
+      "dist/core/interfaces/codex-executable.js": "e22b8e94c9967e209396cf00fc3ff311d056df7b62ba3d99601531884d74d67e",
+      "dist/core/interfaces/workbench-cli-path.js": "473e60453ac90fc02323b9390310bf49cb4b0b24680e9d00a99ace5bb09ab603",
+      "dist/core/mcp/tool-catalog.js": "51379fe117bfb84513c9c7d5735d9b060656bab820e6e930a89f4cd35eb394b3",
+      "dist/core/mcp/tool-schema.js": "e3500e4a046342cfec6be18a6f39bbca0402f6c34588dadd048015f7527d0245"
+    }
+  },
+  "confirmed": [
+    "Preflight works while another SQLite connection holds the primary writer and makes no primary writes.",
+    "Source/body/reference drift, foreign scope, unsupported recipes, mixed owner pointers, unknown sensitivity and budgets fail closed.",
+    "Source and content identity, ACLs, tenant, negative states and restrictive sensitivity remain bound; old authority is not promoted.",
+    "Body text is preserved literally; copies use new ids bound to verified content and remapped dependencies.",
+    "Real second-process updates/completion/restore are reconciled without duplicate imports; a SIGKILL after a shard stage can be retried.",
+    "Receipt publication and restore-delete failures roll back published pointers atomically.",
+    "Frozen candidate payload and content metadata are checked independently of receipt after-digests.",
+    "Data restore precedes registration restore; new canonical ownership and recreated targets still block registration restore.",
+    "Actual Context MCP dispatch and installed public runtime exercise the new actions; task_message remains empty."
+  ],
+  "limitations": [
+    "No real user data migration, database maintenance window or offline disaster-recovery exercise was performed.",
+    "Executable Experience Graph/Procedure, other Evidence source models, Codebase/Context/Evolution and historic admission receipts need separate recipes or rebuilds.",
+    "Automatic rollback conservatively refuses any later primary publication outside this batch, including unrelated projects; immutable content files remain for audit.",
+    "Data limits are not process-memory or latency guarantees; root relocation is not supported.",
+    "No native Tauri interaction, target Windows/Linux validation, full-change coverage or real held-out Knowledge benefit is established.",
+    "No Git commit/push, remote publication or installed Codex/Claude plugin upgrade occurred."
+  ]
+}

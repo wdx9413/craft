@@ -422,6 +422,34 @@ export class CraftStore {
     return this.#database;
   }
 
+  /** Yield between failed BEGIN attempts; never replay a callback that started. */
+  async transactionWithRetry<T>(operation: (database: DatabaseSync) => T, options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<T> {
+    const timeout = options.timeoutMs ?? 750;
+    if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > 15_000) throw new Error("write retry timeout must be 0..15000 ms");
+    if (this.#transactionDepth > 0 || this.#readSnapshotDepth > 0) throw new Error("asynchronous write retry cannot run inside a transaction or read snapshot");
+    const deadline = performance.now() + timeout;
+    for (;;) {
+      options.signal?.throwIfAborted();
+      let entered = false;
+      try {
+        return contextLockBudget.run(0, () => this.transaction(database => {
+          entered = true;
+          const result = operation(database);
+          if (result && (typeof result === "object" || typeof result === "function") && typeof (result as { then?: unknown }).then === "function") {
+            // Observe a rejected Promise, but never treat async completion as a commit.
+            void Promise.resolve(result).catch(() => undefined);
+            throw new Error("write retry callback must be synchronous");
+          }
+          return result;
+        }));
+      } catch (error) {
+        const details = error && typeof error === "object" ? (error as { safeDetails?: Record<string, unknown> }).safeDetails : undefined;
+        if (entered || details?.database_role !== "primary" || details.phase !== "transaction_begin" || details.retryable !== true || performance.now() >= deadline) throw error;
+        await new Promise<void>(resolve => setTimeout(resolve, Math.min(25, Math.max(1, deadline - performance.now()))));
+      }
+    }
+  }
+
   transaction<T>(operation: (database: DatabaseSync) => T): T {
     const database = this.database;
     const nested = this.#transactionDepth > 0;

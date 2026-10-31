@@ -1,5 +1,6 @@
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { stableDigest } from "./digest.ts";
+import { knowledgeTaskEffectProofVerified } from "./knowledge-task-effect-proof.ts";
 
 export type KnowledgeEvaluationProvenanceStatus =
   | "missing_provenance"
@@ -23,8 +24,8 @@ type ClaimEvidence = { claim_id: string; evidence: JsonObject };
 
 /** Retrieval scores are not task-effect evidence. A verified effect path is
  * required before this gate can accept any promotion. */
-export function knowledgeTaskEffectEvidenceVerified(): boolean {
-  return false;
+export function knowledgeTaskEffectEvidenceVerified(store: CraftStore, run?: JsonObject): boolean {
+  return !!run && knowledgeTaskEffectProofVerified(store, run);
 }
 
 /** A run applies only to the exact active source revision it evaluated. */
@@ -41,6 +42,7 @@ export function knowledgeEvaluationSourceMatches(run: JsonObject, claim: JsonObj
 /** Bind a second-pass Host decision to the exact persisted case and inputs. */
 export function knowledgeEvaluationCaseBindingDigest(item: JsonObject): string {
   return stableDigest({ case_id: item.id, case_version: item.version, identity_digest: item.identity_digest ?? null,
+    ...(item.task_contract === undefined ? {} : { task_contract: item.task_contract }),
     candidate_claim_refs: Array.isArray(item.candidate_claim_refs) ? item.candidate_claim_refs : [],
     source_evidence_ids: Array.isArray(item.source_evidence_ids) ? item.source_evidence_ids : [] });
 }
@@ -52,6 +54,7 @@ export function knowledgeEvaluationAdjudicationVerified(store: CraftStore, item:
   return record !== null && record.execution_origin === "managed_codex_cli"
     && record.case_id === item.id && record.status === "adjudicated"
     && record.result_case_version === item.version && record.result_case_identity_digest === item.identity_digest
+    && (item.task_contract === undefined || record.task_contract_digest === stableDigest(item.task_contract))
     && ["accepted", "corrected"].includes(String(record.decision))
     && Array.isArray(record.expected_claim_ids)
     && stableDigest(record.expected_claim_ids) === stableDigest(item.expected_claim_ids);
@@ -82,9 +85,10 @@ export function knowledgeEvaluationEvidence(store: CraftStore, item: JsonObject)
     const evidence = store.find("evidence", id, undefined, false);
     return evidence ? [evidence] : [];
   });
-  const claimIds = Array.isArray(item.expected_claim_ids)
+  let claimIds = Array.isArray(item.expected_claim_ids)
     ? [...new Set(item.expected_claim_ids.filter((id): id is string => typeof id === "string"))]
     : [];
+  if (!claimIds.length && Array.isArray(item.candidate_claim_refs)) claimIds = [...new Set((item.candidate_claim_refs as JsonObject[]).filter(ref => ref && typeof ref.claim_id === "string").map(ref => String(ref.claim_id)))];
   const claimEvidence = claimIds.flatMap((claimId) => {
     const claim = store.find("knowledge_claim", claimId, undefined, false);
     const evidenceIds = claim && Array.isArray(claim.evidence_ids)
@@ -108,7 +112,6 @@ export function knowledgeEvaluationEvidence(store: CraftStore, item: JsonObject)
  * model reviews do not carry this local chain and therefore fail closed.
  */
 export function knowledgeClaimPromotionProofVerified(store: CraftStore, claim: JsonObject): boolean {
-  if (!knowledgeTaskEffectEvidenceVerified()) return false;
   if (claim.status !== "reviewed" || !Number.isSafeInteger(claim.version) || Number(claim.version) < 2) return false;
   const review = claim.review as JsonObject | undefined;
   if (!review) return false;
@@ -137,7 +140,7 @@ export function knowledgeClaimPromotionProofVerified(store: CraftStore, claim: J
     || assessment.claim_identity_digest !== (claim.identity_digest ?? null) || assessment.verdict !== "eligible"
     || assessment.effectiveness_run_id !== runId || assessment.policy_id !== review.policy_id
     || assessment.policy_revision !== review.policy_revision
-    || !run || run.mode !== "candidate_shadow" || run.status !== "eligible" || !knowledgeEvaluationSourceMatches(run, claim, source)
+    || !run || !knowledgeTaskEffectEvidenceVerified(store, run) || run.mode !== "candidate_shadow" || run.status !== "eligible" || !knowledgeEvaluationSourceMatches(run, claim, source)
     || (run.metrics as JsonObject | undefined)?.provenance_eligible !== true) return false;
   const supportRefs = assessment.support_refs;
   const required = Number(assessment.required_independent_support), confidence = assessment.minimum_confidence;
@@ -232,7 +235,8 @@ export function assessKnowledgeEvaluationProvenance(
     return (evidence?.metadata as JsonObject | undefined)?.provenance === "codex_session_program_verification";
   })) return { status: "insufficient_outcome_evidence", evaluation_eligible: false };
 
-  const claimIds = Array.isArray(item.expected_claim_ids) ? item.expected_claim_ids : [];
+  const claimIds = Array.isArray(item.expected_claim_ids) && item.expected_claim_ids.length ? item.expected_claim_ids
+    : Array.isArray(item.candidate_claim_refs) ? (item.candidate_claim_refs as JsonObject[]).filter(ref => ref && typeof ref.claim_id === "string").map(ref => ref.claim_id) : [];
   if (!claimIds.length) return { status: "missing_claim_evidence", evaluation_eligible: false };
   for (const claimId of claimIds) {
     if (typeof claimId !== "string") return { status: "unverified_claim_source", evaluation_eligible: false };

@@ -22,7 +22,7 @@ const INTEGER_PARAMS = ["limit", "max_days", "version", "capacity", "max_concurr
   "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "expected_revision", "observed_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version", "activation_profile_version", "budget_account_version", "contract_version", "conformance_version", "max_latency_ms", "dormant_after_days"];
 const NUMBER_PARAMS = ["score", "value", "threshold", "confidence", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd", "input_per_million", "output_per_million", "minimum_recall", "max_cost_usd"];
 
-const OBJECT_PARAMS = ["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores", "args",
+const OBJECT_PARAMS = ["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores", "args", "task_contract",
   "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "authorization_requests", "notification_refs", "cost_hint", "design_axes", "report",
   "limits", "resources", "actual", "actual_resources", "estimated_resources", "observation", "trial_budget", "policy_fingerprints", "structured_data", "field_sources",
   "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks", "state", "action_results", "workbench", "runtime", "privacy", "acceptance", "budget", "allocation", "action_contract", "result_schema", "state_before", "state_after", "usage", "model_fingerprint", "environment_fingerprint", "capability_fingerprint", "policy_fingerprint", "metadata", "trace", "scope",
@@ -83,6 +83,7 @@ const ENUMS_BY_TOOL: Readonly<Record<string, Readonly<Record<string, readonly st
 // Domain contracts override the legacy name heuristic. Keep ambiguous names local
 // to their tool so fixing one product cannot change unrelated admin operations.
 const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>>> = {
+  craft_scope_identity_resolve_project: { record_refs: "array" },
   craft_info: { include_zero_counts: "boolean" },
   craft_evaluation_model_ticket_issue: { project_root: "string" },
   craft_procedure_configuration_save: { scope: "string", definition: "object", scope_envelope: "object", principal_ids: "array" },

@@ -99,17 +99,17 @@ test("retrieval-only shadow evaluation cannot automatically promote Knowledge", 
 test("previous retrieval-only promotion cannot enter formal Knowledge context", async () => {
   const f = await fixture();
   try {
-    const reviewed = attachVerifiedPromotionFixture(f.store, candidate(f.service, "legacy-retrieval-only").claim);
+    const reviewed = attachVerifiedPromotionFixture(f.store, candidate(f.service, "legacy-retrieval-only").claim, { task_effect: false });
     assert.equal(reviewed.status, "reviewed");
     assert.equal(knowledgeClaimPromotionProofVerified(f.store, reviewed), false);
     assert.deepEqual(f.service.wikiContextCompile({ query: "focused test", scope: "project:demo" }).included, []);
   } finally { await close(f); }
 });
 
-test("unavailable task effect verifier preserves reviewed claim while retrieval stays closed", async () => {
+test("missing task effect evidence preserves legacy label while formal retrieval stays closed", async () => {
   const f = await fixture();
   try {
-    const reviewed = attachVerifiedPromotionFixture(f.store, candidate(f.service, "effect-verifier-unavailable").claim);
+    const reviewed = attachVerifiedPromotionFixture(f.store, candidate(f.service, "effect-verifier-unavailable").claim, { task_effect: false });
     const before = f.store.get("knowledge_claim", String(reviewed.id));
     const assessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [reviewed.id] }).assessments as JsonObject[])[0]!;
     assert.equal(assessment.verdict, "revalidation_required");
@@ -120,7 +120,7 @@ test("unavailable task effect verifier preserves reviewed claim while retrieval 
   } finally { await close(f); }
 });
 
-test("legacy promotion remains excluded while task effect verification is unavailable", async () => {
+test("legacy promotion with an incomplete authority chain is quarantined for revalidation", async () => {
   const f = await fixture();
   try {
     const { claim, first } = candidate(f.service, "legacy-repromotion");
@@ -138,7 +138,8 @@ test("legacy promotion remains excluded while task effect verification is unavai
     assert.equal(firstPass.promoted, false);
     assert((firstPass.reasons as string[]).includes("independent_effectiveness_evaluation_required"));
     const quarantined = f.store.get("knowledge_claim", String(claim.id));
-    assert.equal(quarantined.status, "reviewed");
+    assert.equal(quarantined.status, "candidate");
+    assert.equal(quarantined.promotion_revalidation_required, true);
     assert.equal(knowledgeClaimPromotionProofVerified(f.store, quarantined), false);
     const retry = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: [claim.id] }).assessments as JsonObject[])[0]!;
     assert.equal(retry.promoted, false);

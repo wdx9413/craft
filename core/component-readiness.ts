@@ -3,7 +3,7 @@ import { CRAFT_RELEASE_VERSION } from "./version.ts";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { learningWorkerDiagnostic } from "./learning-worker-diagnostic.ts";
-import { knowledgeTaskEffectEvidenceVerified } from "./knowledge-evaluation-provenance.ts";
+import { knowledgeClaimPromotionProofVerified } from "./knowledge-evaluation-provenance.ts";
 
 const COMPONENTS = new Set(["knowledge", "memory", "experience"]);
 
@@ -146,15 +146,16 @@ export class ComponentReadinessKernel {
     const claims = countByStatus(this.store, "knowledge_claim");
     const receipts = this.store.count("context_resolution_receipt");
     const evaluationCases = this.store.count("knowledge_evaluation_case");
-    const taskEffectGateAvailable = knowledgeTaskEffectEvidenceVerified();
+    const hasQualifiedClaim = this.store.list("knowledge_claim", 10_000, item => item.status === "reviewed", false)
+      .some(claim => knowledgeClaimPromotionProofVerified(this.store, claim));
     const state = activeSources === 0 ? "bootstrap_required"
-      : (claims.reviewed ?? 0) === 0 ? "evidence_review_pending" : taskEffectGateAvailable ? "ready" : "effect_evaluation_pending";
+      : (claims.reviewed ?? 0) === 0 ? "evidence_review_pending" : hasQualifiedClaim ? "ready" : "effect_evaluation_pending";
     return {
       component: "knowledge", state, counts: { active_sources: activeSources, claims, context_receipts: receipts, evaluation_cases: evaluationCases },
-      task_effect_gate: taskEffectGateAvailable ? "available" : "unavailable",
+      task_effect_gate: "available",
       next_action: state === "bootstrap_required" ? "install_or_register_a_scoped_source"
         : state === "evidence_review_pending" ? "search_or_draft_evidence_backed_claims_then_review_them"
-          : state === "effect_evaluation_pending" ? "implement_and_collect_independent_task_effect_evidence"
+          : state === "effect_evaluation_pending" ? "collect_independent_controlled_task_effect_evidence"
           : "resolve_a_bounded_context_receipt_for_the_current_scope",
       model_effect_proven: false,
       usage: {

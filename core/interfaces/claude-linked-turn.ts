@@ -29,22 +29,30 @@ export class ClaudeLinkedTurn {
     const id = `claude_submit_${createHash("sha256").update(JSON.stringify([this.taskId, this.linkId, submissionId])).digest("hex")}`;
     this.links.store.transaction(() => {
       if (this.links.store.find("workbench_claude_submission", id)) throw new Error("submission operation already used; inspect session before retrying");
-      this.links.store.create("workbench_claude_submission", id, { task_id: this.taskId, link_id: this.linkId, status: "reserved" });
+      this.links.store.create("workbench_claude_submission", id, { task_id: this.taskId, link_id: this.linkId, submission_id: submissionId, native_session_id: link.native_session_id, status: "reserved" });
       this.links.reserveTurn(this.taskId, this.linkId, operation);
     });
     let started = false;
     return (approvals, onEvent, abortController) => {
       if (started) throw new Error("submission operation already started");
       started = true;
-      return this.dispatch(link, prompt, executable, resume, operation, approvals, onEvent, abortController, workMode as "default" | "plan" | undefined);
+      return this.dispatch(link, prompt, executable, resume, operation, id, approvals, onEvent, abortController, workMode as "default" | "plan" | undefined);
     };
   }
 
-  private async dispatch(link: Record<string, unknown>, prompt: string, executable: string, resume: boolean, operation: string, approvals: ClaudeWorkbenchApprovals, onEvent: (event: SDKMessage) => void, abortController?: AbortController, workMode?: "default" | "plan"): Promise<void> {
+  private async dispatch(link: Record<string, unknown>, prompt: string, executable: string, resume: boolean, operation: string, submission: string, approvals: ClaudeWorkbenchApprovals, onEvent: (event: SDKMessage) => void, abortController?: AbortController, workMode?: "default" | "plan"): Promise<void> {
+    let acknowledged = false;
     try {
       for await (const event of this.adapter.run({ sessionId: String(link.native_session_id), workspace: String(link.workspace), model: link.model as string | null, permission: link.permission as "ask" | "read_only" | "auto" | "full", workMode, prompt, executable, resume, abortController }, approvals)) {
         if (event.type === "system" && event.subtype === "init") this.links.acknowledgeTurn(this.taskId, this.linkId, operation, operation);
-        if (event.type === "result") this.links.completeTurn(this.taskId, this.linkId, operation, operation, event.subtype === "success" && !event.is_error ? "completed" : "failed");
+        if ((event.type === "assistant" && !acknowledged) || event.type === "result") {
+          this.links.store.transaction(() => {
+            const marker = this.links.store.get("workbench_claude_submission", submission);
+            if (marker.status !== "accepted") this.links.store.updateIfVersion("workbench_claude_submission", submission, Number(marker.version), { ...marker, status: "accepted" });
+            if (event.type === "result") this.links.completeTurn(this.taskId, this.linkId, operation, operation, event.subtype === "success" && !event.is_error ? "completed" : "failed");
+          });
+          acknowledged = true;
+        }
         onEvent(event);
       }
     } catch (error) {

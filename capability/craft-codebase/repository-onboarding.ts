@@ -35,7 +35,7 @@ export interface RepositoryOnboardingPort {
   analyzeJava?: typeof analyzeJavaCheckpoint;
   analyzeLsp?: (request: LspStdioRequest, timeoutMs: number) => JsonObject;
 }
-const REPOSITORY_INDEX_POLICY = 12;
+const REPOSITORY_INDEX_POLICY = 13;
 const SEMANTIC_RETRY_DELAY_MS = 5 * 60 * 1_000;
 
 function hasSemanticAdapterFailure(prior: JsonObject | null | undefined): boolean {

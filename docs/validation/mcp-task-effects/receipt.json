@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-10-30T18:55:01.881965+00:00",
+  "runtime_version": "0.12.131",
+  "eval_version": "0.1.5",
+  "scope": "Local development source, compiled ESM, CJS full MCP and isolated Context MCP without node_modules. Installed runtime variants also tested through MCP initialization, discovery and tool calls.",
+  "root_cause": "CJS bundling replaced import.meta.url with undefined before createRequire could load Eval version metadata.",
+  "repair": "Static JSON dependency import embeds the same evaluator metadata in CJS and uses declared dependency metadata in ESM.",
+  "tests": {
+    "source_related": 13,
+    "installed_runtime_focused": 5,
+    "workbench": 57,
+    "installed_focused_cases_overlap_source": true,
+    "workbench_evaluations_coverage": {
+      "lines": 100,
+      "functions": 100,
+      "branches": 89.62,
+      "whole_increment_complete": false
+    }
+  },
+  "assertions": [
+    "Missing retrieval records return domain errors, not module-loading failures.",
+    "Synthetic 21-task policy context agrees across ESM, bundled CJS and discovery-routed standalone Context.",
+    "MCP reads two real controlled software reports; suite policy rejects them rather than granting Knowledge effects.",
+    "Changed controlled report is rejected; candidate remains candidate, no knowledge_task_effect or task_message created.",
+    "Invalid paths, in_place and oversized configurations rejected before reservation.",
+    "Shutdown during asynchronous preflight prevents later reservations.",
+    "Fresh manager returns unknown without overwriting another owner persisted state.",
+    "Injected failure of both terminal writes stays unknown and original operation is never replayed."
+  ],
+  "package_parity": {
+    "dist/core/workbench-evaluations.js": {
+      "sha256": "060d8be79d52e0b0543b947c3ccf8a8e3a28f0abdd0d13eb186243eeb42ba148",
+      "verified_targets": [
+        "dist",
+        "archive",
+        "installed_runtime",
+        "sidecar"
+      ]
+    },
+    "dist/bin/craft-evaluation-worker.js": {
+      "sha256": "797e89cdcacdce394db68bcdfb5c27d3d8bf906978ab21cc01606a797b4af486",
+      "verified_targets": [
+        "dist",
+        "archive",
+        "installed_runtime",
+        "sidecar"
+      ]
+    },
+    "dist/plugin/craft-mcp.cjs": {
+      "sha256": "d56d0acbfbe9e8924ec2be402847e657349119eb650f5df1b4ff53eb77a4950b",
+      "verified_targets": [
+        "dist",
+        "archive",
+        "installed_runtime"
+      ]
+    },
+    "dist/plugin/craft-mcp-full.cjs": {
+      "sha256": "8453496860041e726d8ae19d983b84d089c4b27d618ec22491ac8d45fdf890f9",
+      "verified_targets": [
+        "dist",
+        "archive",
+        "installed_runtime"
+      ]
+    },
+    "dist/plugin/craft-mcp-http.cjs": {
+      "sha256": "9ca8747b2941092f41b0a797fac1e21f377c1e3d3abd9475096cee14a474078f",
+      "verified_targets": [
+        "dist",
+        "archive",
+        "installed_runtime"
+      ]
+    }
+  },
+  "standalone_context_payload_matches_dist": true,
+  "sidecar_scope": "Business runtime ESM only; plugin bundles are intentionally not copied to the sidecar.",
+  "provenance_file": "./runtime-provenance.json",
+  "limitations": [
+    "Synthetic policy records do not prove real-session independence, live-model benefit or Knowledge promotion eligibility.",
+    "Terminal write failures are injected at the store boundary, not a real full disk.",
+    "macOS and local packages only; native desktop, Windows/Linux, formal publishing and installed user-plugin upgrade not verified.",
+    "Whole-goal incremental branch coverage is still incomplete.",
+    "These are mutable local development archives at the existing version, not immutable formal release or rollback proof."
+  ],
+  "source_sha256": {
+    "core/workbench-evaluations.ts": "ebd5d47628e2be97cd3316cbe139495512beaaabbe5f0cb2e354691b9af27d28",
+    "tsconfig.json": "dd8564d6ae7f8601507de8a9be47ab9cc6a8eec4d2d28d2a458d3d6c5fc590e0",
+    "tests/bundled-knowledge-task-effects.test.ts": "34e3226e4ba470fba50f9a36ee0d6c724a6d218a4a1ed3de8e437facecc9027f"
+  },
+  "artifacts_sha256": {
+    "before.json": "5eaa1cf61d0f8b7fa330cbfa514335e32efdd05cbaf432ad6a72115e3bfb035e",
+    "remaining-branches.txt": "9e2207620c502d3d9906254f95bbd87385359b5e9770f5efb4daa34a606fdc7c",
+    "core-build.txt": "b4be1c39d3e2cf5533e51ebe1ecc1f572d7bbb7727a6391f6a08f0f1c4b75374",
+    "workbench-tests.txt": "959cdcdfb805e3778465678ec8e40cfedc297a4413f6b2b3b2138074858e1228",
+    "runtime-check.txt": "ae86da9f23b14a602277fe7818aab295cb64da948abb0fe9143e54740e16cc03",
+    "regression.txt": "eeb9cd9c64a994dd5e5913c7c001bcb3a5128329c8873c75a6b9ee5bb14d2a50",
+    "installed.txt": "f69868aabdd63a52e4ae40148c46f2991363ff6bfa1f432bd75cdfc34516d207",
+    "docs-check.txt": "71593f69de545dc3b1f7d91f8bd19d1b095b1e2f68ac7bc6202983155aece1a4",
+    "layering.txt": "4f47f144a33b9ae4e1918d04a8064b665580b64ad3a1414fb364ab3dfec4d2ee",
+    "red.txt": "b6cc4ef7ad7e07ec149d5889b45e5e3697f5375b0c884512492b4eac0e3e601c",
+    "plugin-check.txt": "6cb7ed64d36c4e47668296f1f7e6dbf996cd0830991504dfbe8ea52a1faf0a05",
+    "typecheck.txt": "206f89314820bd597e763cc113f2ab5ed93a1c7cc42e06e73c929d4978ee3115",
+    "plugin-build.txt": "61423b548e74b74de87d60a7cd33576510ab7113196d56a602d5147aee2e96c8",
+    "sidecar.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "runtime-provenance.json": "7a44065244925bde5c83b8542497d6b397d6de6fc330dc877dda6a7efc71714d"
+  },
+  "platform": {
+    "system": "Darwin",
+    "architecture": "arm64",
+    "node": "v23.11.0"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "core_build": "passed",
+    "plugin_build_and_package": "passed",
+    "layering": "passed",
+    "docs": "passed",
+    "protocol": 1,
+    "sidecar_prepare": "passed",
+    "branches": [
+      "craft main",
+      "craft-eval main",
+      "craft-workbench main"
+    ],
+    "diff_check": "passed"
+  }
+}

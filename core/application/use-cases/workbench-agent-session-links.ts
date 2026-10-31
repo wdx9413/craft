@@ -54,6 +54,35 @@ export class WorkbenchAgentSessionLinks {
     return { links: links.slice(0, 100), truncated: links.length > 100 };
   }
 
+  projectPage(limit = 50, cursor?: string | null, workspace?: string | null): JsonObject {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("limit must be 1..100");
+    let after = ["", ""];
+    if (cursor) {
+      if (cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/u.test(cursor)) throw new Error("invalid session cursor");
+      try {
+        const value: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+        if (!Array.isArray(value) || value.length !== 2 || value.some(item => typeof item !== "string" || !item || item.length > 512)) throw new Error();
+        after = value;
+      } catch { throw new Error("invalid session cursor"); }
+    }
+    if (workspace !== undefined && workspace !== null) field(workspace, "workspace", 4096);
+    return this.store.readSnapshot(() => {
+      const rows = this.store.database.prepare(`SELECT r.id, r.updated_at FROM records r
+        JOIN (SELECT id, MAX(version) version FROM records WHERE kind=? GROUP BY id) latest ON latest.id=r.id AND latest.version=r.version
+        WHERE r.kind=? AND (?='' OR r.updated_at<? OR (r.updated_at=? AND r.id<?))
+        AND (?='' OR json_extract(r.payload_json,'$.workspace')=?)
+        ORDER BY r.updated_at DESC,r.id DESC LIMIT ?`).all(KIND, KIND, after[0], after[0], after[0], after[1], workspace ?? "", workspace ?? "", limit + 1) as Array<{ id: string; updated_at: string }>;
+      const page = rows.slice(0, limit);
+      const links = page.map(row => {
+        const link = this.store.get(KIND, row.id);
+        const task = this.store.find("task", String(link.task_id));
+        return { ...link, title: typeof task?.title === "string" ? task.title : "工作会话" };
+      });
+      const last = page.at(-1);
+      return { links, next_cursor: rows.length > limit && last ? Buffer.from(JSON.stringify([last.updated_at, last.id])).toString("base64url") : null };
+    });
+  }
+
   get(taskId: unknown, linkId: unknown): JsonObject {
     const task = field(taskId, "task_id", 256);
     const link = this.store.get(KIND, field(linkId, "link_id", 256));

@@ -1,0 +1,55 @@
+(node:50075) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:50075) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✖ packaged Knowledge task-effect routes return domain errors rather than module-loading failures (410.681083ms)
+✖ bundled Knowledge routes prepare bounded context and re-read real controlled reports without granting software runs admission (691.603458ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1330.720834
+
+✖ failing tests:
+
+test at tests/bundled-knowledge-task-effects.test.ts:38:1
+✖ packaged Knowledge task-effect routes return domain errors rather than module-loading failures (410.681083ms)
+  AssertionError [ERR_ASSERTION]: bundled CJS
+  + actual - expected
+  
+  + "The argument 'filename' must be a file URL object, file URL string, or absolute path string. Received undefined"
+  - 'Unknown knowledge_evaluation_run: missing-bundle-fixture'
+  
+      at file:///Users/didi/Documents/work/my-craft/craft/tests/bundled-knowledge-task-effects.test.ts:45:16
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async withClient (file:///Users/didi/Documents/work/my-craft/craft/tests/bundled-knowledge-task-effects.test.ts:31:5)
+      at async TestContext.<anonymous> (file:///Users/didi/Documents/work/my-craft/craft/tests/bundled-knowledge-task-effects.test.ts:41:54)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:297:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: "The argument 'filename' must be a file URL object, file URL string, or absolute path string. Received undefined",
+    expected: 'Unknown knowledge_evaluation_run: missing-bundle-fixture',
+    operator: 'strictEqual'
+  }
+
+test at tests/bundled-knowledge-task-effects.test.ts:72:1
+✖ bundled Knowledge routes prepare bounded context and re-read real controlled reports without granting software runs admission (691.603458ms)
+  AssertionError [ERR_ASSERTION]: The argument 'filename' must be a file URL object, file URL string, or absolute path string. Received undefined
+  
+  true !== false
+  
+      at file:///Users/didi/Documents/work/my-craft/craft/tests/bundled-knowledge-task-effects.test.ts:89:89
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async withClient (file:///Users/didi/Documents/work/my-craft/craft/tests/bundled-knowledge-task-effects.test.ts:31:5)
+      at async TestContext.<anonymous> (file:///Users/didi/Documents/work/my-craft/craft/tests/bundled-knowledge-task-effects.test.ts:88:54)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual'
+  }

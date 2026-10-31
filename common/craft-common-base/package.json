@@ -76,12 +76,14 @@
     "node": ">=23"
   },
   "dependencies": {
-    "craft-common-store-local": "0.12.131",
-    "@types/node": ">=23 <26"
+    "craft-common-store-local": "0.12.131"
   },
   "license": "MIT",
   "publishConfig": {
     "access": "public",
     "provenance": true
+  },
+  "devDependencies": {
+    "@types/node": ">=23 <26"
   }
 }

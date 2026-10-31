@@ -10,7 +10,8 @@ const pluginRoot = resolve(root, "plugins", "craft");
 const sourceSkill = resolve(root, "skills", "craft-route");
 const targetSkill = resolve(pluginRoot, "skills", "craft-route");
 const contextSkillMembers = ["craft-codebase", "craft-knowledge", "craft-memory", "craft-experience"];
-const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs", "craft-mcp-http.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js", "craft-experience-learning-worker.js"];
+const compilerAssets = ["craft-typescript.cjs", "craft-typescript-version.json", "craft-typescript-LICENSE.txt", "craft-typescript-NOTICE.txt"];
+const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs", "craft-mcp-http.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js", "craft-experience-learning-worker.js", ...compilerAssets];
 const targetBundleDirectory = resolve(pluginRoot, "dist", "plugin");
 const components = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
 const pluginsRoot = resolve(root, "plugins");
@@ -43,7 +44,7 @@ for (const component of components) {
   // The parser worker is resolved relative to the bundle's own directory at
   // startup (`resolveParserWorkerPath`), so a component plugin that ships the
   // MCP bundle without it cannot boot on its own.
-  const componentBundles = ["craft-mcp.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js"];
+  const componentBundles = ["craft-mcp.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js", ...compilerAssets];
   if (["craft-context", "craft-knowledge", "craft-experience"].includes(component)) componentBundles.push("craft-experience-learning-worker.js");
   for (const bundle of componentBundles) {
     await cp(resolve(root, "dist", "plugin", bundle), resolve(componentBundleDirectory, bundle));

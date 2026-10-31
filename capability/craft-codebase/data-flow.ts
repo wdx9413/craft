@@ -1,4 +1,5 @@
-import ts from "typescript";
+import type ts from "typescript";
+import { getTypeScript } from "./typescript-runtime.ts";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { buildControlFlowGraph } from "./control-flow.ts";
@@ -17,13 +18,13 @@ const MAX_FLOWS = 4_000;
 const MAX_FIXED_POINT_STEPS = 50_000;
 
 function isFunctionLike(node: ts.Node): node is ts.FunctionLikeDeclaration {
-  return ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node)
-    || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node);
+  return getTypeScript().isFunctionDeclaration(node) || getTypeScript().isMethodDeclaration(node) || getTypeScript().isConstructorDeclaration(node)
+    || getTypeScript().isGetAccessorDeclaration(node) || getTypeScript().isSetAccessorDeclaration(node) || getTypeScript().isFunctionExpression(node) || getTypeScript().isArrowFunction(node);
 }
 
 function functionBody(node: ts.Node): ts.ConciseBody | undefined {
   if (isFunctionLike(node)) return node.body;
-  if (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node)) {
+  if (getTypeScript().isVariableDeclaration(node) || getTypeScript().isPropertyDeclaration(node)) {
     const initializer = node.initializer;
     return initializer && isFunctionLike(initializer) ? initializer.body : undefined;
   }
@@ -36,48 +37,48 @@ function locateFunction(source: ts.SourceFile, offset: number): FunctionTarget |
     const name = (node as ts.NamedDeclaration).name;
     if (name?.getStart(source) === offset) {
       const body = functionBody(node);
-      const initializer = (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node)) ? node.initializer : undefined;
+      const initializer = (getTypeScript().isVariableDeclaration(node) || getTypeScript().isPropertyDeclaration(node)) ? node.initializer : undefined;
       const functionLike = isFunctionLike(node) ? node : initializer && isFunctionLike(initializer) ? initializer : undefined;
       if (body && functionLike) { found = { declaration: node, functionLike, body }; return; }
     }
-    if (!found) ts.forEachChild(node, visit);
+    if (!found) getTypeScript().forEachChild(node, visit);
   };
   visit(source);
   return found;
 }
 
 function isTrackedDeclaration(node: ts.Node): node is ts.NamedDeclaration {
-  return ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node);
+  return getTypeScript().isVariableDeclaration(node) || getTypeScript().isParameter(node) || getTypeScript().isBindingElement(node);
 }
 
 function declarationKind(node: ts.Declaration): string {
-  return ts.isParameter(node) ? "parameter" : "variable";
+  return getTypeScript().isParameter(node) ? "parameter" : "variable";
 }
 
 function isAssignment(kind: ts.SyntaxKind): boolean {
-  return kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
+  return kind >= getTypeScript().SyntaxKind.FirstAssignment && kind <= getTypeScript().SyntaxKind.LastAssignment;
 }
 
 function isCompoundAssignment(kind: ts.SyntaxKind): boolean {
-  return isAssignment(kind) && kind !== ts.SyntaxKind.EqualsToken;
+  return isAssignment(kind) && kind !== getTypeScript().SyntaxKind.EqualsToken;
 }
 
 function isIncrement(kind: ts.SyntaxKind): boolean {
-  return kind === ts.SyntaxKind.PlusPlusToken || kind === ts.SyntaxKind.MinusMinusToken;
+  return kind === getTypeScript().SyntaxKind.PlusPlusToken || kind === getTypeScript().SyntaxKind.MinusMinusToken;
 }
 
 function isNameOnly(node: ts.Identifier): boolean {
   const parent = node.parent;
   if (isTrackedDeclaration(parent) && parent.name === node) return true;
-  if ((ts.isPropertyAccessExpression(parent) || ts.isPropertyAccessChain(parent)) && parent.name === node) return true;
-  if (ts.isPropertyAssignment(parent) && parent.name === node) return true;
-  if (ts.isLabeledStatement(parent) && parent.label === node) return true;
+  if ((getTypeScript().isPropertyAccessExpression(parent) || getTypeScript().isPropertyAccessChain(parent)) && parent.name === node) return true;
+  if (getTypeScript().isPropertyAssignment(parent) && parent.name === node) return true;
+  if (getTypeScript().isLabeledStatement(parent) && parent.label === node) return true;
   return false;
 }
 
 function assignmentTarget(node: ts.Identifier): ts.BinaryExpression | undefined {
   const parent = node.parent;
-  return ts.isBinaryExpression(parent) && parent.left === node && isAssignment(parent.operatorToken.kind) ? parent : undefined;
+  return getTypeScript().isBinaryExpression(parent) && parent.left === node && isAssignment(parent.operatorToken.kind) ? parent : undefined;
 }
 
 function isWithin(node: ts.Node, ancestor: ts.Node): boolean {
@@ -87,12 +88,12 @@ function isWithin(node: ts.Node, ancestor: ts.Node): boolean {
 
 function markUnmodeledFlow(node: ts.Identifier, symbol: ts.Symbol, checker: ts.TypeChecker, functionBodyNode: ts.Node, unsupported: Set<string>): void {
   for (let parent = node.parent; parent && parent !== functionBodyNode; parent = parent.parent) {
-    if (ts.isVariableDeclaration(parent) && parent.initializer && isWithin(node, parent.initializer) && ts.isIdentifier(parent.name)) {
+    if (getTypeScript().isVariableDeclaration(parent) && parent.initializer && isWithin(node, parent.initializer) && getTypeScript().isIdentifier(parent.name)) {
       if (checker.getSymbolAtLocation(parent.name) !== symbol) unsupported.add("AliasFlowNotModeled");
     }
-    if (ts.isBinaryExpression(parent) && isAssignment(parent.operatorToken.kind)) {
+    if (getTypeScript().isBinaryExpression(parent) && isAssignment(parent.operatorToken.kind)) {
       if (isWithin(node, parent.left) && parent.left !== node) unsupported.add("FieldOrDestructuredWriteNotModeled");
-      if (isWithin(node, parent.right) && ts.isIdentifier(parent.left) && checker.getSymbolAtLocation(parent.left) !== symbol)
+      if (isWithin(node, parent.right) && getTypeScript().isIdentifier(parent.left) && checker.getSymbolAtLocation(parent.left) !== symbol)
         unsupported.add("AliasFlowNotModeled");
     }
   }
@@ -143,7 +144,7 @@ export function solveDataFlowFixedPoint(blocks: readonly JsonObject[], edges: re
 }
 
 export function createDataFlowCompilerHost(fileName: string, content: string, source: ts.SourceFile): ts.CompilerHost {
-  const host = ts.createCompilerHost({ allowJs: true, checkJs: true, noLib: true, noResolve: true, target: ts.ScriptTarget.Latest });
+  const host = getTypeScript().createCompilerHost({ allowJs: true, checkJs: true, noLib: true, noResolve: true, target: getTypeScript().ScriptTarget.Latest });
   host.getCurrentDirectory = () => "/craft-checkpoint";
   host.getCanonicalFileName = value => value;
   host.fileExists = value => value === fileName;
@@ -160,14 +161,14 @@ export function buildDataFlowGraph(content: string, path: string, symbolId: stri
   if (typeof requestedName !== "string" || !requestedName.trim() || requestedName.length > 256) throw new Error("Data-flow variable name is invalid");
   const extension = path.split(".").at(-1)?.toLowerCase();
   if (!extension || !["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"].includes(extension)) throw new Error("Data-flow query requires a TypeScript or JavaScript source file");
-  const scriptKind = extension === "tsx" ? ts.ScriptKind.TSX : extension === "jsx" ? ts.ScriptKind.JSX : ["js", "mjs", "cjs"].includes(extension) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+  const scriptKind = extension === "tsx" ? getTypeScript().ScriptKind.TSX : extension === "jsx" ? getTypeScript().ScriptKind.JSX : ["js", "mjs", "cjs"].includes(extension) ? getTypeScript().ScriptKind.JS : getTypeScript().ScriptKind.TS;
   const fileName = `/craft-checkpoint/${path}`;
-  const source = ts.createSourceFile(fileName, content, ts.ScriptTarget.Latest, true, scriptKind);
+  const source = getTypeScript().createSourceFile(fileName, content, getTypeScript().ScriptTarget.Latest, true, scriptKind);
   const target = locateFunction(source, symbolOffset);
   if (!target) throw new Error("Data-flow query requires an indexed function, method, or function-valued declaration");
-  const options: ts.CompilerOptions = { allowJs: true, checkJs: true, noLib: true, noResolve: true, target: ts.ScriptTarget.Latest };
+  const options: ts.CompilerOptions = { allowJs: true, checkJs: true, noLib: true, noResolve: true, target: getTypeScript().ScriptTarget.Latest };
   const host = createDataFlowCompilerHost(fileName, content, source);
-  const program = ts.createProgram([fileName], options, host);
+  const program = getTypeScript().createProgram([fileName], options, host);
   const checker = program.getTypeChecker();
   const unsupported = new Set<string>();
   const variables = new Map<ts.Symbol, Variable>();
@@ -175,7 +176,7 @@ export function buildDataFlowGraph(content: string, path: string, symbolId: stri
   const walk = (node: ts.Node, includeRootFunction = false): void => {
     if (isFunctionLike(node) && node !== target.functionLike && !includeRootFunction) return;
     if (isTrackedDeclaration(node)) {
-      if (node.name && ts.isIdentifier(node.name)) {
+      if (node.name && getTypeScript().isIdentifier(node.name)) {
         const symbol = checker.getSymbolAtLocation(node.name);
         if (symbol && node.name.text === requestedName) {
           if (variables.size < MAX_VARIABLE_CANDIDATES) variables.set(symbol, { symbol, name: node.name.text,
@@ -185,9 +186,9 @@ export function buildDataFlowGraph(content: string, path: string, symbolId: stri
         }
       } else if (node.name) unsupported.add("DestructuredVariable");
     }
-    ts.forEachChild(node, child => walk(child));
+    getTypeScript().forEachChild(node, child => walk(child));
   };
-  if (ts.isBlock(target.body)) for (const statement of target.body.statements) walk(statement);
+  if (getTypeScript().isBlock(target.body)) for (const statement of target.body.statements) walk(statement);
   else walk(target.body);
   for (const parameter of target.functionLike.parameters) walk(parameter, true);
   if (!variables.size) return { symbol_id: symbolId, variable: requestedName, status: "not_found", candidates: [], definitions: [], uses: [], flows: [], partial_reasons: [], source_content_included: false };
@@ -241,29 +242,29 @@ export function buildDataFlowGraph(content: string, path: string, symbolId: stri
   }
   const inspect = (node: ts.Node): void => {
     if (isFunctionLike(node) && node !== target.functionLike) return;
-    if (ts.isBinaryExpression(node) && isAssignment(node.operatorToken.kind)
-      && (ts.isObjectLiteralExpression(node.left) || ts.isArrayLiteralExpression(node.left))) {
+    if (getTypeScript().isBinaryExpression(node) && isAssignment(node.operatorToken.kind)
+      && (getTypeScript().isObjectLiteralExpression(node.left) || getTypeScript().isArrayLiteralExpression(node.left))) {
       let writesRequestedName = false;
       const findWrite = (candidate: ts.Node): void => {
-        if (ts.isIdentifier(candidate) && candidate.text === requestedName) writesRequestedName = true;
-        ts.forEachChild(candidate, findWrite);
+        if (getTypeScript().isIdentifier(candidate) && candidate.text === requestedName) writesRequestedName = true;
+        getTypeScript().forEachChild(candidate, findWrite);
       };
       findWrite(node.left);
       if (writesRequestedName) unsupported.add("FieldOrDestructuredWriteNotModeled");
     }
-    if (isTrackedDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
+    if (isTrackedDeclaration(node) && node.name && getTypeScript().isIdentifier(node.name)) {
       const symbol = checker.getSymbolAtLocation(node.name);
       if (symbol && variables.has(symbol)) {
-        if (ts.isVariableDeclaration(node)) makeDefinition(node.name, symbol, node, "declaration");
-        else if (ts.isBindingElement(node)) unsupported.add("DestructuredVariable");
+        if (getTypeScript().isVariableDeclaration(node)) makeDefinition(node.name, symbol, node, "declaration");
+        else if (getTypeScript().isBindingElement(node)) unsupported.add("DestructuredVariable");
       }
     }
-    if (ts.isIdentifier(node) && !isNameOnly(node)) {
+    if (getTypeScript().isIdentifier(node) && !isNameOnly(node)) {
       const symbol = checker.getSymbolAtLocation(node);
       if (symbol && variables.has(symbol)) {
         const assignment = assignmentTarget(node);
         const parent = node.parent;
-        const increment = (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) && parent.operand === node && isIncrement(parent.operator);
+        const increment = (getTypeScript().isPrefixUnaryExpression(parent) || getTypeScript().isPostfixUnaryExpression(parent)) && parent.operand === node && isIncrement(parent.operator);
         if (assignment) {
           if (isCompoundAssignment(assignment.operatorToken.kind)) addUse(node, symbol);
           makeDefinition(node, symbol, assignment, "assignment");
@@ -276,9 +277,9 @@ export function buildDataFlowGraph(content: string, path: string, symbolId: stri
         }
       }
     }
-    ts.forEachChild(node, inspect);
+    getTypeScript().forEachChild(node, inspect);
   };
-  if (ts.isBlock(target.body)) for (const statement of target.body.statements) inspect(statement);
+  if (getTypeScript().isBlock(target.body)) for (const statement of target.body.statements) inspect(statement);
   else inspect(target.body);
   for (const parameter of target.functionLike.parameters) inspect(parameter);
   if (omittedEvents) unsupported.add("EventBudgetExceeded");

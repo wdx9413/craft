@@ -1,4 +1,5 @@
-import ts from "typescript";
+import type ts from "typescript";
+import { getTypeScript } from "./typescript-runtime.ts";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 
@@ -11,13 +12,13 @@ const MAX_BLOCKS = 500;
 const MAX_EDGES = 800;
 
 function isFunctionLike(node: ts.Node): node is ts.FunctionLikeDeclaration {
-  return ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node)
-    || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node);
+  return getTypeScript().isFunctionDeclaration(node) || getTypeScript().isMethodDeclaration(node) || getTypeScript().isConstructorDeclaration(node)
+    || getTypeScript().isGetAccessorDeclaration(node) || getTypeScript().isSetAccessorDeclaration(node) || getTypeScript().isFunctionExpression(node) || getTypeScript().isArrowFunction(node);
 }
 
 function functionBody(node: ts.Node): ts.ConciseBody | undefined {
   if (isFunctionLike(node)) return node.body;
-  if (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node)) {
+  if (getTypeScript().isVariableDeclaration(node) || getTypeScript().isPropertyDeclaration(node)) {
     const initializer = node.initializer;
     return initializer && isFunctionLike(initializer) ? initializer.body : undefined;
   }
@@ -32,7 +33,7 @@ function locateBody(source: ts.SourceFile, symbolOffset: number): ts.ConciseBody
       const body = functionBody(node);
       if (body) { found = body; return; }
     }
-    if (!found) ts.forEachChild(node, visit);
+    if (!found) getTypeScript().forEachChild(node, visit);
   };
   visit(source);
   return found;
@@ -44,8 +45,8 @@ export function buildControlFlowGraph(content: string, path: string, symbolId: s
   if (content.length > 1_000_000) throw new Error("Control-flow source exceeds the 1 MiB budget");
   const extension = path.split(".").at(-1)?.toLowerCase();
   if (!extension || !["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"].includes(extension)) throw new Error("Control-flow query requires a TypeScript or JavaScript source file");
-  const scriptKind = extension === "tsx" ? ts.ScriptKind.TSX : extension === "jsx" ? ts.ScriptKind.JSX : extension === "js" || extension === "mjs" || extension === "cjs" ? ts.ScriptKind.JS : ts.ScriptKind.TS;
-  const source = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true, scriptKind);
+  const scriptKind = extension === "tsx" ? getTypeScript().ScriptKind.TSX : extension === "jsx" ? getTypeScript().ScriptKind.JSX : extension === "js" || extension === "mjs" || extension === "cjs" ? getTypeScript().ScriptKind.JS : getTypeScript().ScriptKind.TS;
+  const source = getTypeScript().createSourceFile(path, content, getTypeScript().ScriptTarget.Latest, true, scriptKind);
   const body = locateBody(source, symbolOffset);
   if (!body) throw new Error("Control-flow query requires an indexed function, method, or function-valued declaration");
 
@@ -66,7 +67,7 @@ export function buildControlFlowGraph(content: string, path: string, symbolId: s
     const startPosition = sourcePosition(start), endPosition = sourcePosition(end);
     const block: FlowBlock = { id, kind, span: { start_offset: start, end_offset: end, start_line: startPosition.line,
       start_column: startPosition.column, end_line: endPosition.line, end_column: endPosition.column },
-      ...(node ? { syntax_kind: ts.SyntaxKind[node.kind] } : {}) };
+      ...(node ? { syntax_kind: getTypeScript().SyntaxKind[node.kind] } : {}) };
     blocks.push(block);
     return block;
   };
@@ -92,7 +93,7 @@ export function buildControlFlowGraph(content: string, path: string, symbolId: s
     return { ...(entry ? { entry } : {}), exits };
   };
   const compileLoop = (statement: ts.IterationStatement, isPostTest: boolean): Fragment => {
-    const conditionNode = ts.isForStatement(statement) ? statement.condition ?? statement
+    const conditionNode = getTypeScript().isForStatement(statement) ? statement.condition ?? statement
       : (statement as ts.ForInStatement | ts.ForOfStatement | ts.DoStatement | ts.WhileStatement).expression;
     const condition = addBlock("loop_condition", conditionNode);
     const breaks: string[] = [];
@@ -100,9 +101,9 @@ export function buildControlFlowGraph(content: string, path: string, symbolId: s
     let bodyStatement: ts.Statement;
     let incrementor: ts.Expression | undefined;
     let hasCondition = true;
-    if (ts.isWhileStatement(statement)) bodyStatement = statement.statement;
-    else if (ts.isDoStatement(statement)) { bodyStatement = statement.statement; isPostTest = true; }
-    else if (ts.isForStatement(statement)) {
+    if (getTypeScript().isWhileStatement(statement)) bodyStatement = statement.statement;
+    else if (getTypeScript().isDoStatement(statement)) { bodyStatement = statement.statement; isPostTest = true; }
+    else if (getTypeScript().isForStatement(statement)) {
       bodyStatement = statement.statement;
       incrementor = statement.incrementor;
       hasCondition = statement.condition !== undefined;
@@ -134,8 +135,8 @@ export function buildControlFlowGraph(content: string, path: string, symbolId: s
     return { entry: loopEntry, exits };
   };
   const compile = (statement: ts.Statement, loop?: LoopTarget): Fragment => {
-    if (ts.isBlock(statement)) return compileSequence(statement.statements, loop);
-    if (ts.isIfStatement(statement)) {
+    if (getTypeScript().isBlock(statement)) return compileSequence(statement.statements, loop);
+    if (getTypeScript().isIfStatement(statement)) {
       const condition = addBlock("condition", statement.expression);
       const thenPart = compile(statement.thenStatement, loop);
       const elsePart = statement.elseStatement ? compile(statement.elseStatement, loop) : undefined;
@@ -145,37 +146,37 @@ export function buildControlFlowGraph(content: string, path: string, symbolId: s
       const falseExits = elsePart ? (elsePart.entry ? elsePart.exits : [{ from_block_id: condition.id, kind: "false" }]) : [{ from_block_id: condition.id, kind: "false" }];
       return { entry: condition.id, exits: [...exits, ...falseExits] };
     }
-    if (ts.isWhileStatement(statement) || ts.isDoStatement(statement) || ts.isForStatement(statement)
-      || ts.isForInStatement(statement) || ts.isForOfStatement(statement)) return compileLoop(statement as ts.IterationStatement, ts.isDoStatement(statement));
-    if (ts.isReturnStatement(statement)) {
+    if (getTypeScript().isWhileStatement(statement) || getTypeScript().isDoStatement(statement) || getTypeScript().isForStatement(statement)
+      || getTypeScript().isForInStatement(statement) || getTypeScript().isForOfStatement(statement)) return compileLoop(statement as ts.IterationStatement, getTypeScript().isDoStatement(statement));
+    if (getTypeScript().isReturnStatement(statement)) {
       const block = addBlock("return", statement); returns.push(block.id); return { entry: block.id, exits: [] };
     }
-    if (ts.isThrowStatement(statement)) {
+    if (getTypeScript().isThrowStatement(statement)) {
       const block = addBlock("throw", statement); throws.push(block.id); return { entry: block.id, exits: [] };
     }
-    if (ts.isBreakStatement(statement)) {
+    if (getTypeScript().isBreakStatement(statement)) {
       const block = addBlock("break", statement);
       if (statement.label || !loop) { unsupported.add("BreakStatement"); return { entry: block.id, exits: [{ from_block_id: block.id, kind: "normal" }] }; }
       loop.breaks.push(block.id); return { entry: block.id, exits: [] };
     }
-    if (ts.isContinueStatement(statement)) {
+    if (getTypeScript().isContinueStatement(statement)) {
       const block = addBlock("continue", statement);
       if (statement.label || !loop) { unsupported.add("ContinueStatement"); return { entry: block.id, exits: [{ from_block_id: block.id, kind: "normal" }] }; }
       addEdge(block.id, loop.continue_to, "continue"); return { entry: block.id, exits: [] };
     }
-    if (ts.isSwitchStatement(statement) || ts.isTryStatement(statement) || ts.isLabeledStatement(statement)) unsupported.add(ts.SyntaxKind[statement.kind]);
+    if (getTypeScript().isSwitchStatement(statement) || getTypeScript().isTryStatement(statement) || getTypeScript().isLabeledStatement(statement)) unsupported.add(getTypeScript().SyntaxKind[statement.kind]);
     return atom(statement);
   };
 
   const inspectExpressionFlow = (node: ts.Node): void => {
     if (isFunctionLike(node)) return;
-    if (ts.isConditionalExpression(node)) unsupported.add("ConditionalExpression");
-    if (ts.isBinaryExpression(node) && [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind))
+    if (getTypeScript().isConditionalExpression(node)) unsupported.add("ConditionalExpression");
+    if (getTypeScript().isBinaryExpression(node) && [getTypeScript().SyntaxKind.AmpersandAmpersandToken, getTypeScript().SyntaxKind.BarBarToken, getTypeScript().SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind))
       unsupported.add("ShortCircuitExpression");
-    if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node) || ts.isCallExpression(node)) && node.questionDotToken)
+    if ((getTypeScript().isPropertyAccessExpression(node) || getTypeScript().isElementAccessExpression(node) || getTypeScript().isCallExpression(node)) && node.questionDotToken)
       unsupported.add("OptionalChain");
-    if (ts.isYieldExpression(node)) unsupported.add("YieldExpression");
-    ts.forEachChild(node, inspectExpressionFlow);
+    if (getTypeScript().isYieldExpression(node)) unsupported.add("YieldExpression");
+    getTypeScript().forEachChild(node, inspectExpressionFlow);
   };
 
   const entry = addBlock("entry");
@@ -183,7 +184,7 @@ export function buildControlFlowGraph(content: string, path: string, symbolId: s
   const exceptionExit = addBlock("exception_exit");
   inspectExpressionFlow(body);
   let fragment: Fragment;
-  if (ts.isBlock(body)) fragment = compileSequence(body.statements);
+  if (getTypeScript().isBlock(body)) fragment = compileSequence(body.statements);
   else fragment = atom(body, "expression_body");
   if (fragment.entry) addEdge(entry.id, fragment.entry, "entry");
   else addEdge(entry.id, normalExit.id, "normal");

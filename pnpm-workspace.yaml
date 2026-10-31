@@ -8,6 +8,8 @@ packages:
   - capability/craft-experience
   - capability/craft-codebase
 autoInstallPeers: false
+# Internal packages are built here and bundled into the distributable runtime.
+linkWorkspacePackages: true
 allowBuilds:
   esbuild: true
   tesseract.js: false

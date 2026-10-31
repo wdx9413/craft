@@ -3,6 +3,7 @@ import { observeMethods } from "../../common/craft-common-log/src/index.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { ContextHostEvaluation } from "../context-host-evaluation.ts";
 import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationCaseBindingDigest, knowledgeEvaluationEvidence } from "../knowledge-evaluation-provenance.ts";
+import { knowledgeTaskContract } from "../knowledge-task-contract.ts";
 import { procedureHostControl } from "./procedure-host-control.ts";
 import { procedureDecisionEvaluate } from "./procedure-decision.ts";
 import { readFileSync } from "node:fs";
@@ -3052,7 +3053,7 @@ export class CraftService extends ServiceFoundation {
   assuredPilotReassess(args: JsonObject): JsonObject { return this.assuredPilot.reassess(args); }
   assuredPilotGet(args: JsonObject): JsonObject { return this.assuredPilot.get(args); }
   knowledgeEvaluationCaseSave(args: JsonObject): JsonObject {
-    const query = assertNoSecret(text(args.query, "query"), "query"); const scope = String(args.scope ?? "global"); const expected = uniqueTextArray(args.expected_claim_ids, "expected_claim_ids"); expected.forEach((item) => this.store.get("knowledge_claim", item));
+    const query = assertNoSecret(text(args.query, "query"), "query"); const scope = String(args.scope ?? "global"); const expected = uniqueTextArray(args.expected_claim_ids, "expected_claim_ids", 0); expected.forEach((item) => this.store.get("knowledge_claim", item));
     const candidateClaimRefs = args.candidate_claim_refs === undefined ? undefined : (() => {
       if (!Array.isArray(args.candidate_claim_refs) || args.candidate_claim_refs.length > 100) throw new Error("candidate_claim_refs must be an array of at most 100 current candidate refs");
       const refs = args.candidate_claim_refs.map((value, index) => {
@@ -3071,6 +3072,7 @@ export class CraftService extends ServiceFoundation {
       return refs;
     })();
     const provenance = {
+      ...(args.task_contract === undefined ? {} : { task_contract: knowledgeTaskContract(args.task_contract) }),
       ...(args.source_session_id === undefined ? {} : { source_session_id: text(args.source_session_id, "source_session_id") }),
       ...(args.source_task_id === undefined ? {} : { source_task_id: text(args.source_task_id, "source_task_id") }),
       ...(args.source_evidence_ids === undefined ? {} : { source_evidence_ids: uniqueTextArray(args.source_evidence_ids, "source_evidence_ids") }),
@@ -3079,6 +3081,8 @@ export class CraftService extends ServiceFoundation {
       ...(args.label_source === undefined ? {} : { label_source: text(args.label_source, "label_source") }),
       ...(args.sanitized === undefined ? {} : { sanitized: args.sanitized }),
     };
+    if (!expected.length && !candidateClaimRefs?.length) throw new Error("Negative Knowledge cases require bound candidate Claim refs");
+    if (provenance.task_contract !== undefined) assertNoSecret(JSON.stringify(provenance.task_contract), "task_contract");
     const caseId = String(args.case_id ?? id("knowledge_evaluation_case")); const existing = this.store.find("knowledge_evaluation_case", caseId); const identity = { query, scope, expected_claim_ids: expected, ...provenance,
       ...(candidateClaimRefs === undefined ? {} : { candidate_claim_refs: candidateClaimRefs }) };
     if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge evaluation case idempotency conflict"); return { case: existing, idempotent: true }; }
@@ -3147,9 +3151,9 @@ export class CraftService extends ServiceFoundation {
     const provider = this.modelProviders.find(item => item.provider === "codex-cli");
     if (!provider) throw new Error("Codex CLI provider is unavailable");
     const packet = redactKnowledgeModelText({ query: current.query, initial_expected_claim_ids: current.expected_claim_ids,
-      candidate_claims: claims, verified_held_out_evidence: evidence, sanitized: true, source_content_stored: false }) as JsonObject;
+      candidate_claims: claims, verified_held_out_evidence: evidence, ...(current.task_contract === undefined ? {} : { task_contract: current.task_contract }), sanitized: true, source_content_stored: false }) as JsonObject;
     const inputDigest = stableDigest({ purpose: "knowledge_held_out_adjudication.v1", candidate_binding: binding, packet });
-    const system = `你是留出评测标签的第二阶段审定器。独立核对任务目标、该任务的可验证结果证据和初始标签。decision=accepted 表示原 expected_claim_ids 全部正确；decision=corrected 表示给出正确的 Claim ID；证据不足或冲突时选择 uncertain；标签与证据矛盾时选择 rejected。只能返回给定 Claim ID，不能推断未提供的事实。返回 JSON，包含 decision 和 expected_claim_ids。该审定是机器判断，不是人工真值。${generatedTextLanguageInstruction(this.contentLanguage)}`;
+    const system = `你是留出评测标签的第二阶段审定器。独立核对任务目标、该任务的可验证结果证据和初始标签。decision=accepted 表示原 expected_claim_ids 全部正确；decision=corrected 表示给出正确的 Claim ID；证据不足或冲突时选择 uncertain；标签与证据矛盾时选择 rejected。只能返回给定 Claim ID，不能推断未提供的事实。若提供 task_contract，还必须核对任务检查与安全检查是否由独立任务结果证据支持、是否能判断任务完成和越界行为；缺少依据、检查过松或标准与任务矛盾时必须选择 uncertain 或 rejected，不能接受该合同。返回 JSON，包含 decision 和 expected_claim_ids。该审定是机器判断，不是人工真值。${generatedTextLanguageInstruction(this.contentLanguage)}`;
     const request = buildChatRequest(provider, { model: "gpt-6-luna", messages: [{ role: "system", content: system },
       { role: "user", content: JSON.stringify(packet) }], max_tokens: Math.min(Number(profile.max_output_tokens ?? 1_024), 1_024), temperature: 0 });
     request.body.codex_output_schema = { type: "object", properties: { decision: { type: "string", enum: ["accepted", "corrected", "rejected", "uncertain"] },
@@ -3285,7 +3289,7 @@ export class CraftService extends ServiceFoundation {
     const allowedLabels = candidateRefs.length ? candidateRefs.map((ref) => String(ref.claim_id)) : originalLabels;
     if (labels.some((id) => !allowedLabels.includes(id))) throw new Error("Knowledge adjudication labels must refer to the bound Claims");
     if (decision === "accepted" && stableDigest(labels) !== stableDigest(originalLabels)
-      || decision === "corrected" && (labels.length === 0 || candidateRefs.length === 0 || stableDigest(labels) === stableDigest(originalLabels))
+      || decision === "corrected" && (candidateRefs.length === 0 || stableDigest(labels) === stableDigest(originalLabels))
       || (decision === "rejected" || decision === "uncertain") && labels.length !== 0) throw new Error("Knowledge adjudication result does not match its decision");
     const accepted = decision === "accepted" || decision === "corrected";
     const identity = { query: currentCase.query, scope: currentCase.scope,
@@ -3294,14 +3298,14 @@ export class CraftService extends ServiceFoundation {
       source_evidence_ids: currentCase.source_evidence_ids, evaluation_channel: currentCase.evaluation_channel,
       dataset_partition: currentCase.dataset_partition, sanitized: currentCase.sanitized,
       label_source: accepted ? "host_adjudicated" : "model_candidate", candidate_claim_refs: candidateRefs,
-      adjudication_id: adjudicationId };
+      adjudication_id: adjudicationId, ...(currentCase.task_contract === undefined ? {} : { task_contract: currentCase.task_contract }) };
     const nextCaseVersion = Number(currentCase.version) + 1;
     const nextCaseIdentityDigest = valueDigest(identity);
     return this.store.transaction(() => {
       const adjudication = this.store.create("knowledge_evaluation_adjudication", adjudicationId, {
         scope: currentCase.scope, case_id: caseId, source_case_version: currentCase.version, result_case_version: nextCaseVersion,
         result_case_identity_digest: nextCaseIdentityDigest, trace_id: traceId, trace_model_fingerprint: trace.model_fingerprint,
-        case_binding_digest: bindingDigest, input_digest: inputDigest, response_digest: responseDigest,
+        case_binding_digest: bindingDigest, ...(currentCase.task_contract === undefined ? {} : { task_contract_digest: stableDigest(currentCase.task_contract) }), input_digest: inputDigest, response_digest: responseDigest,
         decision, expected_claim_ids: accepted ? labels : [], status: accepted ? "adjudicated" : decision,
         execution_origin: "managed_codex_cli",
       });
@@ -3438,6 +3442,14 @@ export class CraftService extends ServiceFoundation {
   }
   knowledgeEvaluationRunGet(args: JsonObject): JsonObject { return { run: this.store.get("knowledge_evaluation_run", text(args.run_id, "run_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
   knowledgeEvaluationRunList(args: JsonObject): JsonObject { return this.list("knowledge_evaluation_run", "runs", args); }
+  async knowledgeTaskEffectContext(args: JsonObject): Promise<JsonObject> {
+    const { WorkbenchEvaluations } = await import("../workbench-evaluations.ts");
+    return new WorkbenchEvaluations(this.store).knowledgeContext(text(args.retrieval_run_id, "retrieval_run_id"));
+  }
+  async knowledgeTaskEffectAssess(args: JsonObject): Promise<JsonObject> {
+    const { WorkbenchEvaluations } = await import("../workbench-evaluations.ts");
+    return new WorkbenchEvaluations(this.store).assessKnowledgeEffect(text(args.retrieval_run_id, "retrieval_run_id"), text(args.baseline_id, "baseline_id"), text(args.candidate_id, "candidate_id"));
+  }
   workLaunchPrepare(args: JsonObject): JsonObject { return this.workLaunchPrepareInternal(args); }
   private workLaunchPrepareInternal(args: JsonObject, knowledgeBinding?: JsonObject): JsonObject {
     const host = text(args.host, "host"); const driver = this.requireHostDriver(host);

@@ -66,6 +66,14 @@ test("legacy path bindings require explicit migration before creating a new proj
     const kernel = new ScopeIdentityKernel(store);
     kernel.bindAlias({ scope_kind: "project", scope_id: "project:legacy", alias_kind: "path", alias: realpathSync(root) });
     assert.throws(() => kernel.resolveProject({ project_root: root }), /PROJECT_IDENTITY_MIGRATION_REQUIRED/u);
+    const diagnosis = kernel.resolveProject({ project_root: root, action: "diagnose" });
+    assert.equal(diagnosis.status, "migration_required");
+    assert.deepEqual(diagnosis.legacy_scope_ids, ["project:legacy"]);
+    assert.equal(diagnosis.migration_performed, false);
+    assert.equal((diagnosis.alias_refs as JsonObject[]).length, 1);
+    kernel.bindAlias({ scope_kind: "project", scope_id: "project:other", alias_kind: "path", alias: realpathSync(root) });
+    assert.equal(kernel.resolveProject({ project_root: root, action: "diagnose" }).status, "ambiguous");
+    assert.throws(() => kernel.resolveProject({ project_root: root, action: "force" }), /Unknown/);
     const id = (projectIdentityFromRoot(root).canonical_scope as JsonObject).id;
     assert.equal(store.find("project_identity", String(id)), null);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }

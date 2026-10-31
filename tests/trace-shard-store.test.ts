@@ -12,6 +12,20 @@ import { TraceKernel } from "../core/trace-kernel.ts";
 import { migrateTraceStorage } from "../scripts/trace-storage-migration.ts";
 import { TraceShardStore, type TraceRecordRow } from "../common/craft-common-store-local/src/trace-shards.ts";
 
+test("Trace reads tolerate an uncommitted first schema and re-read after the writer commits", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-trace-schema-race-")), shards = new TraceShardStore(root);
+  const id = "initializing", shard = createHash("sha256").update(id).digest()[0]! % 16;
+  await mkdir(shards.directory, { recursive: true });
+  const writer = new DatabaseSync(join(shards.directory, `${shard.toString(16).padStart(2, "0")}.db`));
+  try {
+    writer.exec("PRAGMA journal_mode=WAL; BEGIN IMMEDIATE; CREATE TABLE records(kind TEXT,id TEXT,version INTEGER,payload_json TEXT,created_at TEXT,updated_at TEXT,PRIMARY KEY(kind,id,version))");
+    writer.prepare("INSERT INTO records VALUES(?,?,?,?,?,?)").run("trace", id, 1, JSON.stringify({ status: "started" }), "now", "now");
+    assert.equal(shards.find("trace", id), null, "uncommitted records must stay invisible without waiting for a writer");
+    writer.exec("COMMIT");
+    assert.equal(shards.find("trace", id)?.status, "started", "an empty schema read must not be cached");
+  } finally { shards.close(); writer.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("Trace reads use read-only connections while preserving transaction visibility", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-trace-readonly-"));
   const id = "readonly-trace", shards = new TraceShardStore(root);

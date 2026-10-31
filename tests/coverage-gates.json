@@ -10,10 +10,59 @@
     "functions": 100,
     "branches": 100
   },
+  "type_only": ["core/application/actions/handler-types.ts", "core/interfaces/mcp/handler-types.ts"],
   "groups": [
     {
+      "name": "native-cli-discovery",
+      "include": ["core/infrastructure/cli-path.ts", "core/infrastructure/claude-executable.ts", "core/infrastructure/codex-executable.ts", "core/interfaces/workbench-cli-path.ts", "core/interfaces/claude-executable.ts", "core/interfaces/codex-executable.ts"],
+      "tests": ["tests/workbench-cli-path.test.ts", "tests/codex-executable.test.ts", "tests/claude-executable.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "knowledge-controlled-task-effects",
+      "include": ["core/knowledge-task-contract.ts", "core/knowledge-task-effect-proof.ts", "core/knowledge-task-effects.ts"],
+      "tests": ["tests/knowledge-task-effects.test.ts", "tests/bundled-knowledge-task-effects.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "project-data-migration",
+      "include": ["core/project-data-inventory.ts", "core/project-data-migration.ts"],
+      "tests": ["tests/project-data-inventory.test.ts", "tests/project-data-migration.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "evaluation-engine-identity",
+      "include": ["core/evaluation-engine-identity.ts"],
+      "tests": ["tests/evaluation-engine-identity.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "codebase-compiler-runtime",
+      "include": ["capability/craft-codebase/typescript-runtime.ts"],
+      "tests": ["tests/typescript-runtime.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "python-symbol-fallback",
+      "include": ["capability/craft-codebase/python-fallback.ts"],
+      "tests": ["tests/python-fallback.test.ts", "tests/python-analysis.test.ts", "tests/python-fallback-index.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "runtime-public-api",
+      "include": ["core/runtime-api.ts"],
+      "tests": ["tests/workbench-ui-server.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "workbench-controlled-evaluations",
+      "include": ["core/workbench-evaluations.ts", "core/interfaces/workbench-evaluations.ts"],
+      "tests": ["tests/workbench-evaluation-concurrency.test.ts", "tests/bundled-knowledge-task-effects.test.ts", "tests/workbench-evaluations.test.ts", "tests/knowledge-task-effects.test.ts", "tests/evaluation-process.test.ts", "tests/evaluation-process-crash.test.ts"],
+      "branches": true
+    },
+    {
       "name": "memory-archive-background-worker",
-      "include": ["core/interfaces/memory-archive-worker.ts", "core/maintenance-scheduler.ts"],
+      "include": ["core/interfaces/memory-archive-worker.ts", "core/interfaces/memory-archive-launcher.ts", "core/maintenance-scheduler.ts"],
       "tests": ["tests/memory-archive-worker.test.ts", "tests/maintenance-scheduler-recovery.test.ts"],
       "branches": true
     },
@@ -1460,7 +1509,7 @@
     {
       "name": "runtime-artifact-graph",
       "include": [
-        "scripts/release/runtime-artifact.ts"
+        "core/runtime-artifact.ts"
       ],
       "tests": [
         "tests/runtime-artifact.test.ts"

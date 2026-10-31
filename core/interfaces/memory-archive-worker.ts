@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { setImmediate as yieldImmediate, setTimeout as delay } from "node:timers/promises";
 import { MemoryFileStore } from "../../capability/craft-memory/memory-files.ts";
 import { craftPaths, dataRoot } from "../infrastructure/paths.ts";
@@ -20,15 +19,7 @@ export function queueHookMaintenance(store: CraftStore, leaseId: string): void {
   }
 }
 
-export const MEMORY_ARCHIVE_WORKER_FLAG = "--memory-archive-worker";
-
-/** Launch independently of the Hook; durable requests remain available if launch fails. */
-export function launchMemoryArchiveWorker(entrypoint: string, dataDirectory: string): void {
-  const args = [...(entrypoint.endsWith(".ts") ? ["--experimental-strip-types"] : []), entrypoint, MEMORY_ARCHIVE_WORKER_FLAG];
-  const child = spawn(process.execPath, args, { detached: true, stdio: "ignore", env: { ...process.env, CRAFT_DATA_DIR: dataDirectory, CRAFT_HOOK_MODE: "0" } });
-  child.on("error", () => { /* Queue survives launch failure and is retried on a later startup. */ });
-  child.unref();
-}
+export { launchMemoryArchiveWorker, MEMORY_ARCHIVE_WORKER_FLAG } from "./memory-archive-launcher.ts";
 
 /** Process one bounded page at a time outside the Hook process. */
 export async function runMemoryArchiveWorker(): Promise<void> {

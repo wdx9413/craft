@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { backupStorage, restoreStorage } from "./storage-backup.ts";
 import { ComponentTraceKernel } from "./component-trace.ts";
 import { TraceKernel } from "./trace-kernel.ts";
 import { createInterface } from "node:readline/promises";
@@ -35,6 +36,9 @@ Usage:
   craft doctor                  Check runtime, credentials, storage, and adapters
   craft migrate history [--apply]
                                 Plan (default) or explicitly apply legacy Knowledge/Experience repair
+  craft storage-backup --output <new-directory>   Back up the data directory for maintenance
+  craft storage-restore --backup <directory> --output <new-directory>
+                                Verify and restore into a new directory
   craft version                 Print the Craft product version
   craft run --goal <text>       Run a governed standalone Agent task
   craft run --project <id> ...  Attach the run to a durable Project Brain
@@ -354,6 +358,15 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
+  if (["storage-backup", "storage-restore"].includes(args[0] ?? "") && !args.includes("--help") && !args.includes("-h")) {
+    const output = option(args, "--output");
+    if (!output) throw new Error("--output must name a new directory outside the source");
+    const archive = option(args, "--backup");
+    if (args[0] === "storage-restore" && !archive) throw new Error("--backup is required for storage-restore");
+    const manifest = args[0] === "storage-backup" ? await backupStorage(craftPaths().root, output) : await restoreStorage(archive!, output);
+    stdout.write(`${JSON.stringify({ output, files: manifest.entries.length, schema: manifest.schema, original_root: manifest.source_root, activation: args[0] === "storage-restore" ? "staged_restore; place at original_root offline before starting Craft" : "backup_only" })}\n`);
+    return;
+  }
   if (args.includes("--help") || args.includes("-h") || ["version", "paths"].includes(args[0] ?? "")) return dispatchMain(args);
   const store = await new CraftStore(craftPaths()).open();
   try {

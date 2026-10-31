@@ -1,0 +1,17 @@
+$ node --experimental-strip-types scripts/ci/audit-surfaces.ts
+(node:<pid>) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:<pid>) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+surface audit: 1091 tool(s) across 8 domain rule(s)
+  governance       113
+  evaluation       181
+  execution        161
+  knowledge        162
+  workspace         48
+  codebase          25
+  collaboration     61
+  workflow         340
+  components         8 surface(s)
+cross-domain: 4 tool(s) match more than one prefix rule, 4 declared
+catch-all: workflow owns 340
+surface audit: clean (1 documented cross-domain tool family(ies))

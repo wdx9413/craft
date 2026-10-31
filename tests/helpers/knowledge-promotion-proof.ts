@@ -3,9 +3,39 @@ import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import { updateKnowledgeScenarioClaim } from "../../capability/craft-knowledge/scenario-catalog.ts";
 import { knowledgeDirectoryForScope } from "../../core/project-knowledge-content.ts";
 import { scopeFromKey } from "../../common/craft-common-base/src/scope-policy.ts";
+import { KNOWLEDGE_TASK_EFFECT_POLICY, knowledgeTaskEffectId, knowledgeTaskEffectAssessmentDigest } from "../../core/knowledge-task-effect-proof.ts";
+
+/** Synthetic issuer receipt for read-side invalidation tests, never live task-effect evidence.
+ * Issuer admission (21 independent tasks, native engines and assert sets) is tested separately. */
+export function attachTaskEffectReceiptFixture(store: CraftStore, run: JsonObject): void {
+  const claim = store.get("knowledge_claim", String((run.candidate_claim_refs as JsonObject[])[0]!.claim_id));
+  const dependencies = new Map<string, JsonObject>();
+  const depend = (kind: string, id: string) => {
+    const record = store.find(kind, id, undefined, false);
+    if (!record) throw new Error(`Task-effect fixture dependency is missing: ${kind}/${id}`);
+    dependencies.set(`${kind}:${id}`, { kind, id, version: record.version, digest: stableDigest(record) });
+  };
+  depend("knowledge_source", String(claim.source_id));
+  for (const id of claim.evidence_ids as string[]) depend("evidence", id);
+  for (const id of run.case_ids as string[]) {
+    const item = store.get("knowledge_evaluation_case", id);
+    depend("knowledge_evaluation_case", id); depend("knowledge_evaluation_adjudication", String(item.adjudication_id));
+    for (const evidenceId of item.source_evidence_ids as string[]) depend("evidence", evidenceId);
+  }
+  const pair = ["baseline", "candidate"].map(side => {
+    const id = `fixture-effect-${side}-${stableDigest(run.id).slice(-20)}`;
+    if (!store.find("workbench_evaluation", id)) store.create("workbench_evaluation", id, { state: "completed", fixture_only: true });
+    depend("workbench_evaluation", id); return id;
+  });
+  const metrics = { fixture_only: true, status: "comparable", expected_pairs: 21, measured_pairs: 21, independent_task_runs: true };
+  const body: JsonObject = { scope: claim.scope, claim_id: claim.id, policy: KNOWLEDGE_TASK_EFFECT_POLICY, retrieval_run_id: run.id,
+    retrieval_run_digest: stableDigest(run), baseline_id: pair[0], candidate_id: pair[1], dependencies: [...dependencies.values()],
+    comparison_digest: stableDigest(metrics), metrics, observed_model: "fixture-only", execution_origin: "controlled_paired_host_tasks", status: "eligible", reasons: [] };
+  store.create("knowledge_task_effect", knowledgeTaskEffectId(run), { ...body, assessment_digest: knowledgeTaskEffectAssessmentDigest(body), fixture_only: true });
+}
 
 /** Build a complete local fixture chain for read-side Knowledge tests. */
-export function attachVerifiedPromotionFixture(store: CraftStore, claim: JsonObject): JsonObject {
+export function attachVerifiedPromotionFixture(store: CraftStore, claim: JsonObject, options: { task_effect?: boolean } = {}): JsonObject {
   const claimId = String(claim.id), suffix = stableDigest(claimId).slice(-20);
   let candidate = claim;
   let source = typeof candidate.source_id === "string" ? store.find("knowledge_source", candidate.source_id) : null;
@@ -54,6 +84,7 @@ export function attachVerifiedPromotionFixture(store: CraftStore, claim: JsonObj
       source_digest: source.content_digest, source_status: source.status, source_trust: source.trust }],
       candidate_claim_refs: [{ claim_id: claimId, claim_version: candidate.version, identity_digest: candidate.identity_digest ?? null,
       content_digest: candidate.content_digest ?? null }], metrics: { provenance_eligible: true } });
+  if (options.task_effect !== false) attachTaskEffectReceiptFixture(store, store.get("knowledge_evaluation_run", runId));
   const reviewId = `fixture-promotion-review-${suffix}`;
   const supportRefs = [1, 2].map(index => {
     const evidence = store.create("evidence", `fixture-support-evidence-${suffix}-${index}`, { confidence: "confirmed",

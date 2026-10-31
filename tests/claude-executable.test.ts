@@ -17,3 +17,14 @@ test("Claude executable discovery prefers a real binary over a shell shim", () =
     assert.throws(() => findClaudeExecutable(join(root, "missing")), /not found/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("Claude discovery ignores empty, relative and directory entries and can locate an exe filename", () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-claude-entry-"));
+  try {
+    mkdirSync(join(root, "claude"));
+    assert.throws(() => findClaudeExecutable(["", "relative-bin", root].join(delimiter), "darwin"), /not found/);
+    const binary = join(root, "claude.exe");
+    writeFileSync(binary, "MZ"); chmodSync(binary, 0o755);
+    assert.equal(findClaudeExecutable(root, "win32"), binary);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

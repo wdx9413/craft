@@ -1,0 +1,16 @@
+(node:57311) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:57311) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ packaged Knowledge task-effect routes return domain errors rather than module-loading failures (1448.174917ms)
+✔ bundled Knowledge routes prepare bounded context and re-read real controlled reports without granting software runs admission (1430.702083ms)
+✔ evaluation validation and shutdown refuse unsafe reservations before execution (16.125375ms)
+✔ a fresh manager observes unresolved records without overwriting another owner's state (10.330375ms)
+✔ terminal persistence failure never reports success or creates an unhandled rejection (181.561291ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3475.593958

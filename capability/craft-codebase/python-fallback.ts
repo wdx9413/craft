@@ -28,14 +28,14 @@ export function analyzePythonFallback(files: readonly RepositoryFile[]): JsonObj
     nodes.push({ id: fileId, kind: "file", path: file.path, name: file.path, language: "python",
       source_digest: file.digest, span: { start_offset: 0, end_offset: 0 } });
     const starts: Array<{ line: number; offset: number }> = [];
-    for (const line of lines) { starts.push({ line: offset, offset }); offset += Buffer.byteLength(line, "utf8") + 1; }
+    for (const line of lines) { starts.push({ line: offset, offset }); offset += line.length + 1; }
 
     for (let index = 0; index < lines.length; index += 1) {
       const match = DEFINITION.exec(lines[index]!);
       if (!match) continue;
       const indent = match[1]!.length, name = match[3]!;
       const lineOffset = starts[index]!.offset;
-      const start = lineOffset + lines[index]!.indexOf(name);
+      const start = lineOffset + match[0].length - name.length;
       let endLine = index;
       for (let next = index + 1; next < lines.length; next += 1) {
         const text = lines[next]!;
@@ -59,7 +59,7 @@ export function analyzePythonFallback(files: readonly RepositoryFile[]): JsonObj
       if (name === definition.name || KEYWORDS.has(name)) continue;
       const targets = definitions.filter(candidate => candidate.name === name);
       if (targets.length !== 1) continue;
-      const callStart = definition.start + (match.index ?? 0);
+      const callStart = definition.start + match.index;
       edges.push({ id: `python_call_${stableDigest({ from: definition.id, to: targets[0]!.id, callStart }).slice(-24)}`,
         kind: "calls", from_node_id: definition.id, to_node_id: targets[0]!.id, provenance: "heuristic", confidence: "partial",
         source_span: { start_offset: callStart, end_offset: callStart + name.length } });
@@ -70,10 +70,11 @@ export function analyzePythonFallback(files: readonly RepositoryFile[]): JsonObj
     const fileNodeIds = new Set(fileNodes.map(node => String(node.id)));
     const fileEdges = edges.filter(edge => fileNodeIds.has(String(edge.from_node_id)));
     return { path: file.path, source_digest: file.digest, analyzer: "python-regex-fallback",
-      analyzer_version: "craft-python-regex-v1", nodes: fileNodes, edges: fileEdges,
+      analyzer_version: "craft-python-regex-v2", nodes: fileNodes, edges: fileEdges,
       class_methods: [], unresolved_calls: 0, unresolved_imports: 0, unresolved_relations: fileEdges.length,
-      incremental_safe: true, budget_limited: false };
+      // Call targets depend on name uniqueness across the entire file set.
+      incremental_safe: false, budget_limited: false };
   });
-  return { format: "craft-static-analysis-v1", analyzer: "python-regex-fallback", analyzer_version: "craft-python-regex-v1",
+  return { format: "craft-static-analysis-v1", analyzer: "python-regex-fallback", analyzer_version: "craft-python-regex-v2",
     nodes, edges, diagnostics: { fallback: true, python_runtime: "unavailable", unresolved_calls: 0 }, file_units: units };
 }

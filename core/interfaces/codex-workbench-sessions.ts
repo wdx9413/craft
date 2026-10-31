@@ -281,7 +281,7 @@ export class CodexWorkbenchSessions {
     const id = `agent_send_${createHash("sha256").update(JSON.stringify([taskId, linkId, operationId])).digest("hex")}`;
     if (this.store.find(SEND_KIND, id)) throw new Error("submission operation already used; inspect session before retrying");
     let marker: JsonObject;
-    try { marker = this.store.create(SEND_KIND, id, { task_id: taskId, link_id: linkId, status: "starting" }); }
+    try { marker = this.store.create(SEND_KIND, id, { task_id: taskId, link_id: linkId, submission_id: operationId, native_session_id: this.links.get(taskId, linkId).native_session_id, status: "starting" }); }
     catch (error) { if (this.store.find(SEND_KIND, id)) throw new Error("submission operation already used; inspect session before retrying"); throw error; }
     try {
       const link = this.links.get(taskId, linkId);
@@ -301,7 +301,7 @@ export class CodexWorkbenchSessions {
     const skills = /(?:^|\s)\$[\w:.-]{1,128}(?=\s|$)/u.test(prompt) ? await this.mentionedSkills(String(link.workspace), prompt) : [];
     const marker = `codex_steer_${createHash("sha256").update(JSON.stringify([taskId, linkId, operationId])).digest("hex")}`;
     if (this.store.find("workbench_codex_steer", marker)) throw new Error("steer operation already used; inspect session before retrying");
-    const record = this.store.create("workbench_codex_steer", marker, { task_id: taskId, link_id: linkId, status: "starting" });
+    const record = this.store.create("workbench_codex_steer", marker, { task_id: taskId, link_id: linkId, submission_id: operationId, native_session_id: link.native_session_id, status: "starting" });
     try {
       await live.adapter.steer(live.threadId, link.turn_id, prompt, skills);
       this.store.updateIfVersion("workbench_codex_steer", marker, Number(record.version), { ...record, status: "accepted" });

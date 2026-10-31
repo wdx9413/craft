@@ -13,12 +13,13 @@ import { CraftService } from "../core/service.ts";
 interface HookCommand { command: string; timeout: number }
 interface HookManifest { hooks: Record<string, Array<{ hooks: HookCommand[] }>> }
 const root = resolve(import.meta.dirname, "..");
+const hookBundle = process.env.CRAFT_TEST_HOOK_BUNDLE ?? join(root, "plugins/craft-context/dist/plugin/craft-codex-hook.cjs");
 
 async function replayFixture(host: "codex" | "claude") {
   const temporary = await mkdtemp(join(tmpdir(), "craft-hook-process-"));
   const data = join(temporary, "data");
   const manifest = JSON.parse(await readFile(join(root, "plugins/craft-context/hooks", host === "codex" ? "codex-hooks.json" : "hooks.json"), "utf8")) as HookManifest;
-  const bundle = process.env.CRAFT_TEST_HOOK_BUNDLE ?? join(root, "plugins/craft-context/dist/plugin/craft-codex-hook.cjs");
+  const bundle = hookBundle;
   const repository = join(temporary, "repo");
   const git = spawnSync("git", ["init", "-q", repository], { encoding: "utf8" });
   assert.equal(git.status, 0, git.stderr);
@@ -123,7 +124,7 @@ test("packaged Hook returns promptly instead of waiting on the full SQLite lock 
     f.store.database.exec("BEGIN IMMEDIATE");
     locked = true;
     const started = performance.now();
-    const child = spawnSync(process.execPath, [join(root, "plugins/craft-context/dist/plugin/craft-codex-hook.cjs"), "--member", "context"], {
+    const child = spawnSync(process.execPath, [hookBundle, "--member", "context"], {
       cwd: root, encoding: "utf8", timeout: 4_000,
       env: { PATH: process.env.PATH, CRAFT_DATA_DIR: f.store.paths.root, NODE_NO_WARNINGS: "1" },
       input: JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: f.store.paths.root, session_id: "busy-timeout", prompt: "verify the change" }),
@@ -157,7 +158,7 @@ test("packaged PostToolUse records an edit while the central database has a writ
     f.store.database.exec("BEGIN IMMEDIATE");
     locked = true;
     const started = performance.now();
-    const child = spawnSync(process.execPath, [join(root, "plugins/craft-context/dist/plugin/craft-codex-hook.cjs"), "--member", "context"], {
+    const child = spawnSync(process.execPath, [hookBundle, "--member", "context"], {
       cwd: f.repository, encoding: "utf8", timeout: 4_000,
       env: { PATH: process.env.PATH, CRAFT_DATA_DIR: f.store.paths.root, NODE_NO_WARNINGS: "1" },
       input: JSON.stringify({ hook_event_name: "PostToolUse", cwd: f.repository, session_id: "codex-process", tool_use_id: "locked-edit",
@@ -279,7 +280,7 @@ test("packaged Hook persists bounded lock wait in fallback diagnostics", async (
   try {
     f.store.database.exec("BEGIN IMMEDIATE");
     locked = true;
-    const child = spawnSync(process.execPath, [join(root, "plugins/craft-context/dist/plugin/craft-codex-hook.cjs"), "--member", "context"], {
+    const child = spawnSync(process.execPath, [hookBundle, "--member", "context"], {
       cwd: root, encoding: "utf8", timeout: 4_000,
       env: { PATH: process.env.PATH, CRAFT_DATA_DIR: f.store.paths.root, NODE_NO_WARNINGS: "1" },
       input: JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: f.store.paths.root, session_id: "busy-timeout", prompt: "verify the change" }),

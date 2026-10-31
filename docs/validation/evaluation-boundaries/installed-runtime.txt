@@ -1,0 +1,25 @@
+(node:78774) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:78774) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ concurrent duplicate submissions run once and the fifth active reservation is refused (1288.014584ms)
+✔ progress retention is bounded while a real worker is active and cancellation settles (251.850542ms)
+✔ a configuration growing after stat is refused before reservation (62.616875ms)
+✔ configuration reads handle short reads, enforce the exact byte ceiling and reject non-files (467.770417ms)
+✔ configuration read failure closes its descriptor and creates no execution record (36.500083ms)
+✔ report verification keeps the same input budget for frozen configurations (207.326875ms)
+✔ a named pipe is rejected without waiting for a writer (22.520917ms)
+✔ preparation rejects non-Error failures and early cancellation never starts a worker (30.48975ms)
+✔ cancellation during report persistence cannot become a completed execution (212.313292ms)
+✔ a changed engine environment rejects an otherwise completed synthetic agent run (319.93025ms)
+✔ report binding independently rejects changed subject, suite and runtime even with a matching file hash (193.1105ms)
+✔ comparison rejects plan and result changes between verification and copy and cleans its temporary directory (193.418666ms)
+✔ comparison rejects changed result keys before reading paths outside its frozen result set (188.706167ms)
+✔ two comparisons crossing the transaction boundary create only one diagnostic receipt (263.273958ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3929.398041

@@ -58,7 +58,14 @@ export class TraceShardStore {
       if (create && String((database.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode).toLowerCase() !== "wal")
         database.exec("PRAGMA journal_mode=WAL;");
       if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get()) {
-        if (!create) throw new Error("Trace shard records are unavailable");
+        if (!create) {
+          // A competing writer can create the file before its schema commits.
+          // No committed tables means no committed records yet. Do not cache
+          // this connection: the next read must see the completed schema.
+          const table = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").get();
+          if (!table) { database.close(); return null; }
+          throw new Error("Trace shard records are unavailable");
+        }
         database.exec(`BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS records(
       kind TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,

@@ -22,7 +22,8 @@
     "docs",
     "deploy",
     "scripts/codebase",
-    "scripts/eval"
+    "scripts/eval",
+    "vendor"
   ],
   "runtime_copies": [
     {

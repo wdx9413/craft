@@ -5,6 +5,8 @@ import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
+import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const pluginRoot = join(root, "plugins", "craft");
@@ -30,6 +32,23 @@ for (const path of [
   join(pluginRoot, "dist", "plugin", "craft-experience-learning-worker.js"),
 ]) await access(path);
 
+const requireLocal = createRequire(import.meta.url);
+const compilerRoot = resolve(requireLocal.resolve("typescript/package.json"), "..");
+const compilerFiles = [
+  ["craft-typescript.cjs", requireLocal.resolve("typescript")],
+  ["craft-typescript-LICENSE.txt", join(compilerRoot, "LICENSE.txt")],
+  ["craft-typescript-NOTICE.txt", join(compilerRoot, "ThirdPartyNoticeText.txt")],
+] as const;
+const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+for (const packagedRoot of [pluginRoot, ...componentProducts.map(product => join(root, "plugins", product.name))]) {
+  const directory = join(packagedRoot, "dist", "plugin");
+  const metadata = JSON.parse(await readFile(join(directory, "craft-typescript-version.json"), "utf8")) as { version: string };
+  assert.equal(metadata.version, (requireLocal("typescript/package.json") as { version: string }).version, "packaged compiler version must match the build dependency");
+  for (const [asset, dependency] of compilerFiles) {
+    assert.equal(digest(await readFile(join(directory, asset))), digest(await readFile(dependency)), `${asset} must match the pinned dependency bytes`);
+  }
+}
+
 for (const product of componentProducts) {
   const name = product.name;
   const componentRoot = join(root, "plugins", name);
@@ -42,6 +61,10 @@ for (const product of componentProducts) {
   assert.equal(componentManifest.interface?.logo, "./assets/craft-icon.svg");
   await access(join(componentRoot, "assets", "craft-icon.svg"));
   await access(join(componentRoot, "dist", "plugin", "craft-mcp.cjs"));
+  await access(join(componentRoot, "dist", "plugin", "craft-typescript.cjs"));
+  await access(join(componentRoot, "dist", "plugin", "craft-typescript-version.json"));
+  await access(join(componentRoot, "dist", "plugin", "craft-typescript-LICENSE.txt"));
+  await access(join(componentRoot, "dist", "plugin", "craft-typescript-NOTICE.txt"));
   if (name === "craft-context") {
     await access(join(componentRoot, "scripts", "codebase", "analyzers", "python-control-flow.py"));
     await access(join(componentRoot, "scripts", "codebase", "analyzers", "python-data-flow.py"));

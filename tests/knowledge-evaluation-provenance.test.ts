@@ -130,14 +130,15 @@ test("formal Knowledge eligibility verifies the exact local promotion proof and 
     verifyWithRevision({ review: { ...(promoted.review as JsonObject), policy_id: undefined } },
       { review: { ...(promoted.review as JsonObject), policy_id: undefined } });
     verifyWithRevision({}, { review: null });
+    // Even mutually consistent metadata edits invalidate the already-issued effect receipt.
     verifyWithRevision({ identity_digest: undefined }, { identity_digest: null }, {
       assessment: { claim_identity_digest: null },
       run: { candidate_claim_refs: [{ claim_id: promoted.id, claim_version: Number(promoted.version) - 1, identity_digest: null, content_digest: promoted.content_digest }] },
-    }, true);
+    });
     verifyWithRevision({ identity_digest: undefined, content_digest: undefined }, { identity_digest: null, content_digest: null }, {
       assessment: { claim_identity_digest: null },
       run: { candidate_claim_refs: [{ claim_id: promoted.id, claim_version: Number(promoted.version) - 1, identity_digest: null, content_digest: null }] },
-    }, true);
+    });
     verifyWithRevision({}, {}, { case: { dataset_partition: "development" } });
     assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, review: { ...(promoted.review as JsonObject), source_digest: "source-old" } }), false);
     assert.equal(knowledgeClaimPromotionProofVerified(store, { ...promoted, review: { ...(promoted.review as JsonObject), effectiveness_run_id: "missing-run" } }), false);

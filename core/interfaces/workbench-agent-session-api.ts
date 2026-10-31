@@ -8,6 +8,7 @@ import { listWorkbenchDirectories } from "./workbench-directories.ts";
 import { claudeWorkbenchModels } from "./claude-workbench-models.ts";
 import { claudeWorkbenchUsage } from "./claude-workbench-usage.ts";
 import { WorkbenchMessageQueue } from "./workbench-message-queue.ts";
+import { reconcileQueueItem } from "./workbench-queue-recovery.ts";
 import { type ClaudeWorkbenchRuns } from "./claude-workbench-runs.ts";
 import { findClaudeExecutable } from "./claude-executable.ts";
 
@@ -19,6 +20,7 @@ function required(value: unknown, field: string): string {
 
 /** The caller must enforce the Workbench origin, token and request size checks. */
 export async function agentSessionRoute(sessions: CodexWorkbenchSessions, method: string, url: URL, body: JsonObject, claudeRuns?: ClaudeWorkbenchRuns | null): Promise<{ status: number; value: JsonObject }> {
+  if (url.pathname === `${BASE}/projects` && method === "GET") return { status: 200, value: sessions.links.projectPage(Number(url.searchParams.get("limit") ?? 50), url.searchParams.get("cursor"), url.searchParams.get("workspace")) };
   if (url.pathname === `${BASE}/providers` && method === "GET") return { status: 200, value: await detectWorkbenchClis() };
   if (url.pathname === `${BASE}/directories` && method === "GET") return { status: 200, value: await listWorkbenchDirectories(url.searchParams.get("path")) };
   if (url.pathname === `${BASE}/models` && method === "GET") return { status: 200, value: await sessions.models() };
@@ -42,13 +44,13 @@ export async function agentSessionRoute(sessions: CodexWorkbenchSessions, method
     if (body.model !== undefined && body.model !== null && typeof body.model !== "string") throw new Error("model is invalid");
     return { status: 201, value: await sessions.create({ task_id: required(body.task_id, "task_id"), workspace: required(body.workspace, "workspace"), model: body.model as string | null | undefined, permission: body.permission, operation_id: required(body.operation_id, "operation_id") }) };
   }
-  const match = /^\/api\/workbench\/agent-sessions\/([^/]+)(?:\/(resume|turns|steer|events|history|interrupt|approval|answer|reconcile|takeover|goal|queue|queue-dispatch|queue-steer|configuration))?$/.exec(url.pathname);
+  const match = /^\/api\/workbench\/agent-sessions\/([^/]+)(?:\/(resume|turns|steer|events|history|interrupt|approval|answer|reconcile|takeover|goal|queue|queue-dispatch|queue-steer|queue-reconcile|configuration))?$/.exec(url.pathname);
   if (!match) return { status: 404, value: { error: "Not found" } };
   const id = decodeURIComponent(match[1]);
   const action = match[2];
   if (action === "queue" && method === "GET") return { status: 200, value: { items: new WorkbenchMessageQueue(sessions.store).list(required(url.searchParams.get("task_id"), "task_id"), id) } };
-  if (action === "queue" && method === "DELETE") { new WorkbenchMessageQueue(sessions.store).cancel(required(url.searchParams.get("task_id"), "task_id"), id, required(url.searchParams.get("item_id"), "item_id")); return { status: 200, value: { cancelled: true } }; }
-  if (action === "queue" && method === "PATCH") return { status: 200, value: { item: new WorkbenchMessageQueue(sessions.store).edit(required(body.task_id, "task_id"), id, required(body.item_id, "item_id"), required(body.prompt, "prompt")) } };
+  if (action === "queue" && method === "DELETE") { await sessions.store.transactionWithRetry(() => new WorkbenchMessageQueue(sessions.store).cancel(required(url.searchParams.get("task_id"), "task_id"), id, required(url.searchParams.get("item_id"), "item_id"))); return { status: 200, value: { cancelled: true } }; }
+  if (action === "queue" && method === "PATCH") return { status: 200, value: { item: await sessions.store.transactionWithRetry(() => new WorkbenchMessageQueue(sessions.store).edit(required(body.task_id, "task_id"), id, required(body.item_id, "item_id"), required(body.prompt, "prompt"))) } };
   if (method === "GET" && action === "goal") return { status: 200, value: await sessions.goal(required(url.searchParams.get("task_id"), "task_id"), id) };
   if (method === "GET" && action === "takeover") return { status: 200, value: sessions.takeoverCandidate(required(url.searchParams.get("task_id"), "task_id"), id) };
   if (method === "GET" && action === "events") {
@@ -73,29 +75,38 @@ export async function agentSessionRoute(sessions: CodexWorkbenchSessions, method
   }
   if (method !== "POST" || !action) return { status: 404, value: { error: "Not found" } };
   const task = required(body.task_id, "task_id");
+  if (action === "queue-reconcile") return { status: 200, value: await reconcileQueueItem(sessions.store, task, id, required(body.item_id, "item_id"), body.expected_version, body.action) };
   if (action === "configuration") return { status: 200, value: { link: sessions.links.configure(task, id, body.model, body.permission) } };
-  if (action === "queue") return { status: 201, value: { item: new WorkbenchMessageQueue(sessions.store).enqueue(task, id, required(body.prompt, "prompt"), body.work_mode) } };
+  if (action === "queue") return { status: 201, value: { item: await sessions.store.transactionWithRetry(() => new WorkbenchMessageQueue(sessions.store).enqueue(task, id, required(body.prompt, "prompt"), body.work_mode)) } };
   if (action === "queue-steer") {
-    const queue = new WorkbenchMessageQueue(sessions.store), item = queue.claimSteer(task, id, required(body.item_id, "item_id"));
+    const queue = new WorkbenchMessageQueue(sessions.store), item = await sessions.store.transactionWithRetry(() => queue.claimSteer(task, id, required(body.item_id, "item_id")));
     try {
       await sessions.steer(task, id, String(item.prompt), String(item.operation_id));
-      queue.settle(task, id, String(item.id), true);
+      await sessions.store.transactionWithRetry(() => queue.settle(task, id, String(item.id), true));
       return { status: 202, value: { accepted: true, prompt: item.prompt } };
-    } catch (error) { queue.settle(task, id, String(item.id), false); throw new Error("steering outcome may be unknown; inspect before retrying", { cause: error }); }
+    } catch (error) { await sessions.store.transactionWithRetry(() => queue.settle(task, id, String(item.id), false)); throw new Error("steering outcome may be unknown; inspect before retrying", { cause: error }); }
   }
   if (action === "queue-dispatch") {
-    const queue = new WorkbenchMessageQueue(sessions.store), link = sessions.links.get(task, id);
-    if (link.last_turn_status === "failed" || link.last_turn_status === "interrupted") throw new Error("queue paused after unsuccessful turn");
-    const item = queue.list(task, id)[0]; if (!item) return { status: 200, value: { empty: true } };
-    const claimed = queue.claim(task, id, String(item.id));
+    const queue = new WorkbenchMessageQueue(sessions.store);
+    // Re-read after acquiring the writer: another window may have claimed the
+    // head while this request yielded for contention. Losing that race is empty.
+    const reservation = await sessions.store.transactionWithRetry(() => {
+      const link = sessions.links.get(task, id);
+      if (link.last_turn_status === "failed" || link.last_turn_status === "interrupted") throw new Error("queue paused after unsuccessful turn");
+      const items = queue.list(task, id), item = items[0];
+      if (!item || item.state !== "queued" || link.turn_state !== "idle" || items.some(row => row.state === "dispatching" || row.state === "unknown")) return null;
+      return { claimed: queue.claim(task, id, String(item.id)), link };
+    });
+    if (!reservation) return { status: 200, value: { empty: true } };
+    const { claimed, link } = reservation;
     try {
       let result: JsonObject;
       if (link.provider === "codex") result = await sessions.send(task, id, String(claimed.prompt), String(claimed.operation_id), claimed.work_mode);
       else if (link.provider === "claude" && claudeRuns) result = claudeRuns.send({ task_id: task, link_id: id, prompt: String(claimed.prompt), operation_id: String(claimed.operation_id), executable: findClaudeExecutable(), work_mode: claimed.work_mode });
       else throw new Error("provider is unavailable");
-      queue.settle(task, id, String(claimed.id), true);
+      await sessions.store.transactionWithRetry(() => queue.settle(task, id, String(claimed.id), true));
       return { status: 202, value: { provider: link.provider, prompt: claimed.prompt, ...result } };
-    } catch (error) { queue.settle(task, id, String(claimed.id), false); throw new Error("queue dispatch outcome may be unknown; inspect before retrying", { cause: error }); }
+    } catch (error) { await sessions.store.transactionWithRetry(() => queue.settle(task, id, String(claimed.id), false)); throw new Error("queue dispatch outcome may be unknown; inspect before retrying", { cause: error }); }
   }
   if (action === "goal") return { status: 200, value: await sessions.goal(task, id, required(body.objective, "objective")) };
   if (action === "takeover") return { status: 200, value: await sessions.takeover(task, id, body.pid, body.started, body.session_count) };

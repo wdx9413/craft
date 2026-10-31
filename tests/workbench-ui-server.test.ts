@@ -3,10 +3,8 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { craftPaths } from "../core/infrastructure/paths.ts";
-import { CraftService, VERSION } from "../core/service.ts";
-import { CraftStore } from "../core/infrastructure/store.ts";
-import { LocalWorkbenchServer, WorkbenchWebApp, workbenchBridge } from "../core/workbench-server.ts";
+import { craftPaths, CraftService, VERSION, CraftStore, WorkbenchWebApp, workbenchBridge } from "../core/runtime-api.ts";
+import { LocalWorkbenchServer } from "../core/workbench-server.ts";
 
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "craft-workbench-"));

@@ -1,4 +1,4 @@
-import ts from "typescript";
+import { getTypeScript } from "./typescript-runtime.ts";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import type { RepositoryFile } from "./repository-files.ts";
@@ -39,8 +39,8 @@ export function planTypeScriptIncremental(files: readonly RepositoryFile[], cach
   if (changed.some(path => path.toLowerCase().endsWith(".d.ts"))) return full([...current.keys()], "global_or_ambient_type_scope");
   for (const path of changed) {
     const file = current.get(path)!;
-    const source = ts.createSourceFile(path, file.content, ts.ScriptTarget.Latest, false);
-    if (!ts.isExternalModule(source) || /\bdeclare\s+(?:global|module)\b/u.test(file.content)) return full([...current.keys()], "changed_module_scope_is_ambiguous");
+    const source = getTypeScript().createSourceFile(path, file.content, getTypeScript().ScriptTarget.Latest, false);
+    if (!getTypeScript().isExternalModule(source) || /\bdeclare\s+(?:global|module)\b/u.test(file.content)) return full([...current.keys()], "changed_module_scope_is_ambiguous");
   }
 
   const nodePath = new Map<string, string>();

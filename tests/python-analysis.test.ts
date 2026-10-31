@@ -1,13 +1,39 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { resolvePythonAnalyzerPath, analyzePythonCheckpoint, analyzePythonControlFlow, analyzePythonDataFlow } from "../capability/craft-codebase/python-analysis.ts";
 import { combineLanguageAnalyses } from "../capability/craft-codebase/multi-language-analysis.ts";
 import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { pythonFileUnitDigest } from "../capability/craft-codebase/python-incremental.ts";
 
 const file = (content = "def f(): pass") => ({ path: "a.py", content, digest: createHash("sha256").update(content).digest("hex"), language: "py" });
 const graph = (language: string, nodes: JsonObject[], edges: JsonObject[] = [], diagnostics: JsonObject = {}) => ({
   format: "craft-static-analysis-v1", analyzer: `${language}-static`, analyzer_version: "1", nodes, edges, diagnostics,
+});
+
+test("compiled Python adapter locates its own packaged resource without relying on the host entrypoint", () => {
+  const root = resolve("fixture-package"), expected = join(root, "capability", "craft-codebase", "analyzers", "analyze-python.py");
+  const module = pathToFileURL(join(root, "dist", "capability", "craft-codebase", "python-analysis.js")).href;
+  assert.equal(resolvePythonAnalyzerPath(resolve("isolated-project"), path => path === expected, module), expected);
+});
+
+test("Python adapter replaces a caller-provided file-unit digest with a binding to the returned unit", () => {
+  const unit = { path: "a.py", source_digest: file().digest, analyzer: "python-ast-static", analyzer_version: "fixture", nodes: [], edges: [], class_methods: [],
+    unresolved_calls: 0, unresolved_imports: 0, unresolved_relations: 0, incremental_safe: true, budget_limited: false, unit_digest: "caller-provided" };
+  const result = analyzePythonCheckpoint([file()], { analyzerPath: "/worker", includeFileUnits: true,
+    execute: () => JSON.stringify({ ...graph("python", [node("f", "file")]), file_units: [unit] }) });
+  const returned = (result.analysis!.file_units as JsonObject[])[0]!;
+  assert.notEqual(returned.unit_digest, unit.unit_digest); assert.equal(returned.unit_digest, pythonFileUnitDigest(unit));
+  assert.equal(returned.path, unit.path); assert.equal(returned.source_digest, unit.source_digest);
+});
+
+test("missing-interpreter fallback units have verifiable digests and require global reanalysis", () => {
+  const result = analyzePythonCheckpoint([file()], { analyzerPath: "/worker", execute: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); } });
+  const unit = (result.analysis!.file_units as JsonObject[])[0]!;
+  assert.equal(typeof unit.unit_digest, "string"); assert.equal(unit.unit_digest, pythonFileUnitDigest(unit as Parameters<typeof pythonFileUnitDigest>[0]));
+  assert.equal(unit.incremental_safe, false); assert.equal(result.diagnostic!.status, "partial");
 });
 const node = (id: string, kind: string, language = "py", name = id): JsonObject => ({ id, kind, path: `${language}.py`, name, language, source_digest: "d", span: { start_offset: 0, end_offset: 0 } });
 

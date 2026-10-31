@@ -1,0 +1,113 @@
+{
+  "schema": "craft.local-package-validation.v1",
+  "captured_at": "2026-10-30T10:12:18.884Z",
+  "environment": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "node": "v23.11.0"
+  },
+  "artifacts": [
+    {
+      "path": "craft-workbench/vendor/craft-agent-harness-0.12.131.tgz",
+      "sha256": "85f21400b927469e6e61dd860f45ef720e369991b070a785afcd240f955e18c8"
+    },
+    {
+      "path": "craft/vendor/craft-eval-0.1.2.tgz",
+      "sha256": "8c73aae23126514a5519051fee931eb053bc2d7ad3c0d2f935fb5a90d6e211c6"
+    }
+  ],
+  "source_inputs": [
+    {
+      "path": "craft/package.json",
+      "sha256": "0b0c99d84592d09af8c078388630d6c1e117966bc63caa7264c2c44341d9cbdc"
+    },
+    {
+      "path": "craft/pnpm-lock.yaml",
+      "sha256": "2924c0dce45d44b1f47e48c0c63515d16d8fe561c32cf69c3505bfec037d1d28"
+    },
+    {
+      "path": "craft/pnpm-workspace.yaml",
+      "sha256": "c05036f59f7d1db04f8eb0e687a045ace66b0dae373135548a97e2fcb8cb115f"
+    },
+    {
+      "path": "craft/core/application/actions/handler-types.ts",
+      "sha256": "bf753c6d29238bfd0a838b5d41a846039e55b1f8c81eadc1469e004c35b1d1e8"
+    },
+    {
+      "path": "craft/core/interfaces/mcp/handler-types.ts",
+      "sha256": "74b2fb84f8b599b162d4a1c58775ac58692fd886b67615129d844c91dd2528aa"
+    },
+    {
+      "path": "craft/tests/runtime-artifact.test.ts",
+      "sha256": "a58703e19c5d60aff86001f7cb54bc724719cc1400157fa238e1eb3f093b4de7"
+    },
+    {
+      "path": "craft-workbench/package.json",
+      "sha256": "e33e36695a488bac8970ac22b4707b49f6d6cb686a3a8f34715d94b2e0e8175d"
+    },
+    {
+      "path": "craft-workbench/pnpm-lock.yaml",
+      "sha256": "7fb6be978e18f3b5c1d68ae7f74c27dac9c0859f64f981116137d654d7b7dbf2"
+    },
+    {
+      "path": "craft-workbench/tests/runtime-package.test.ts",
+      "sha256": "59780e8fdc3d6b57c88f84605c3bb7c7c11a56ecf8a9ab485c584c7f22d17d2f"
+    },
+    {
+      "path": "craft-eval/package.json",
+      "sha256": "b5b525694cc1a1b100a6f6fd206daccef30738e213e22e2e8ec9544d2f61cbc2"
+    },
+    {
+      "path": "craft-eval/package-lock.json",
+      "sha256": "ccf8be3533baffc63efd0af6edc00c878ec260dff46848c42cce9c803a71a060"
+    },
+    {
+      "path": "craft-eval/tsconfig.json",
+      "sha256": "87862fe760fbbc0557a226bb4cfd140e929019816a532d9b936addc94cb8631f"
+    }
+  ],
+  "checks": {
+    "craft_data_queue": {
+      "passed": 89
+    },
+    "hook_archive": {
+      "passed": 26
+    },
+    "runtime_artifact_and_public_types": {
+      "passed": 9
+    },
+    "real_eval_workers": {
+      "passed": 3
+    },
+    "eval_clean_build": {
+      "passed": 83,
+      "installed_esm_exports": true,
+      "installed_cli_validate": true
+    },
+    "workbench_independent": {
+      "passed": 45,
+      "frozen_offline_install": true,
+      "peer_check": true,
+      "sidecar_prepared": true,
+      "compiled_cli_started": true,
+      "source_override": false,
+      "public_registry_inventory_restore": true
+    },
+    "external_types": {
+      "typescript": "6.0.3",
+      "node_types": "25.9.5",
+      "types": [
+        "node"
+      ],
+      "strict": true,
+      "skipLibCheck": false,
+      "passed": true
+    }
+  },
+  "limits": [
+    "test counts overlap; no aggregate full-suite claim",
+    "isolated macOS validation; no Windows/Linux execution or native desktop interaction proof",
+    "no business-scope data import and no user database mutation",
+    "local development archives only; no registry publication, remote push or installed-plugin upgrade"
+  ]
+}

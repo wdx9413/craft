@@ -9,6 +9,64 @@ import { CraftService } from "../core/application/craft-service.ts";
 import { LocalWorkbenchServer, WorkbenchWebApp } from "../core/interfaces/workbench-server.ts";
 import { CodexWorkbenchSessions } from "../core/interfaces/codex-workbench-sessions.ts";
 import { type CodexServerEvent } from "../core/interfaces/codex-app-server-client.ts";
+import { DatabaseSync } from "node:sqlite";
+import { WorkbenchMessageQueue } from "../core/interfaces/workbench-message-queue.ts";
+import { agentSessionRoute } from "../core/interfaces/workbench-agent-session-api.ts";
+
+test("two waiting windows treat a competing queue claim as empty rather than an unknown send", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-queue-windows-")));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const sessions = new CodexWorkbenchSessions(store);
+  const peer = new DatabaseSync(store.paths.databaseFile);
+  let release: ReturnType<typeof setTimeout> | undefined;
+  try {
+    store.create("task", "task", {});
+    const queue = new WorkbenchMessageQueue(store);
+    const link = queue.links.bind({ task_id: "task", provider: "codex", native_session_id: "native", workspace: root, permission: "ask" }).link as Record<string, unknown>;
+    const item = queue.enqueue("task", String(link.id), "one queued input");
+    let submissions = 0;
+    sessions.send = async () => { submissions++; return { link: {}, turn_id: "turn" }; };
+    peer.exec("BEGIN IMMEDIATE");
+    release = setTimeout(() => peer.exec("ROLLBACK"), 60);
+    const url = new URL(`http://localhost/api/workbench/agent-sessions/${link.id}/queue-dispatch`);
+    const results = await Promise.allSettled([agentSessionRoute(sessions, "POST", url, { task_id: "task" }), agentSessionRoute(sessions, "POST", url, { task_id: "task" })]);
+    assert.equal(results.every(result => result.status === "fulfilled"), true, "a normal competing claim must not report a transport failure");
+    const responses = results.map(result => { assert.equal(result.status, "fulfilled"); return result.value; });
+    assert.deepEqual(responses.map(result => result.status).sort(), [200, 202]);
+    assert.equal(responses.find(result => result.status === 200)!.value.empty, true);
+    assert.equal(submissions, 1);
+    assert.equal(store.find("workbench_message_queue", String(item.id)), null);
+    assert.equal(store.list("workbench_message_queue_receipt", 10).length, 1);
+  } finally { clearTimeout(release); peer.close(); sessions.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("atomic queue dispatch stays paused for failed, active and uncertain turns", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-queue-paused-")));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const sessions = new CodexWorkbenchSessions(store);
+  try {
+    store.create("task", "task", {});
+    const queue = new WorkbenchMessageQueue(store);
+    const link = queue.links.bind({ task_id: "task", provider: "codex", native_session_id: "native", workspace: root, permission: "ask" }).link as Record<string, unknown>;
+    const id = String(link.id), first = queue.enqueue("task", id, "first"), second = queue.enqueue("task", id, "second");
+    const dispatch = () => agentSessionRoute(sessions, "POST", new URL(`http://localhost/api/workbench/agent-sessions/${id}/queue-dispatch`), { task_id: "task" });
+    sessions.send = async () => assert.fail("a paused queue must not send");
+    const change = (values: Record<string, unknown>) => store.save("workbench_agent_session_link", id, { ...store.get("workbench_agent_session_link", id), ...values });
+    for (const status of ["failed", "interrupted"]) {
+      change({ last_turn_status: status }); await assert.rejects(dispatch(), /paused after unsuccessful/);
+    }
+    change({ last_turn_status: "completed", turn_state: "running" });
+    assert.equal((await dispatch()).value.empty, true);
+    queue.claimSteer("task", id, String(second.id));
+    change({ turn_state: "idle" });
+    assert.equal((await dispatch()).value.empty, true);
+    queue.settle("task", id, String(second.id), false);
+    assert.equal((await dispatch()).value.empty, true);
+    assert.equal(queue.list("task", id)[0].id, first.id);
+    assert.equal(queue.list("task", id)[0].state, "queued");
+    assert.equal(queue.list("task", id)[1].state, "unknown");
+  } finally { sessions.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test("agent session API enforces authentication, task ownership and shared native lifecycle", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-agent-api-")));
@@ -41,6 +99,9 @@ test("agent session API enforces authentication, task ownership and shared nativ
     assert.equal((await call("POST", base, { provider: "codex", permission: "other" })).status, 422);
     assert.equal((await call("POST", base, { provider: "codex", permission: "ask", model: 9 })).status, 422);
     assert.equal((await call("GET", base)).status, 422);
+    assert.equal((await app().handleAsync({ method: "GET", path: `${base}/projects` })).status, 401);
+    assert.equal((await call("GET", `${base}/projects?limit=0`)).status, 422);
+    assert.ok(Array.isArray(JSON.parse((await call("GET", `${base}/projects?limit=1`)).body).links));
     assert.equal((await call("GET", `${base}/bad/path`)).status, 404);
     assert.equal(JSON.parse((await call("GET", `${base}/providers`)).body).providers.length, 2);
     assert.deepEqual(JSON.parse((await call("GET", `${base}/models`)).body), { models: [{ id: "model", name: "Model", is_default: true }], truncated: false });
@@ -59,6 +120,19 @@ test("agent session API enforces authentication, task ownership and shared nativ
     await call("POST", `${base}/${id}/queue`, { task_id: "task", prompt: "next queued task" });
     assert.equal((await call("POST", `${base}/${id}/queue-dispatch`, { task_id: "task" })).status, 202);
     assert.equal(JSON.parse((await call("GET", `${base}/${id}/queue?task_id=task`)).body).items.length, 0);
+    emit({ type: "notification", method: "turn/completed", params: { threadId: "native", turn: { id: "turn", status: "completed" } } });
+    const recovering = JSON.parse((await call("POST", `${base}/${id}/queue`, { task_id: "task", prompt: "acknowledged before receipt failure" })).body).item;
+    const create = store.create; let failReceipt = true;
+    store.create = function(kind, recordId, payload) { if (kind === "workbench_message_queue_receipt" && failReceipt) { failReceipt = false; throw new Error("receipt publication failed"); } return create.call(this, kind, recordId, payload); };
+    try { assert.equal((await call("POST", `${base}/${id}/queue-dispatch`, { task_id: "task" })).status, 422); }
+    finally { store.create = create; }
+    const uncertain = store.get("workbench_message_queue", recovering.id);
+    assert.equal(uncertain.state, "unknown");
+    const recoverPath = `${base}/${id}/queue-reconcile`;
+    assert.equal((await app().handleAsync({ method: "POST", path: recoverPath, body: "{}" })).status, 401);
+    assert.equal((await call("POST", recoverPath, { task_id: "other", item_id: recovering.id, expected_version: uncertain.version, action: "inspect" })).status, 422);
+    assert.equal(JSON.parse((await call("POST", recoverPath, { task_id: "task", item_id: recovering.id, expected_version: uncertain.version, action: "inspect" })).body).outcome, "accepted");
+    assert.equal(store.find("workbench_message_queue", recovering.id), null);
     emit({ type: "notification", method: "turn/completed", params: { threadId: "native", turn: { id: "turn", status: "completed" } } });
     assert.equal((await call("GET", `${base}/${id}/history?task_id=other`)).status, 422);
     assert.equal(JSON.parse((await call("GET", `${base}/${id}/history?task_id=task`)).body).thread.turns[0].items[0].text, "native history");
