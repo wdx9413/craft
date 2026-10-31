@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
-import { findCodexExecutable } from "../core/interfaces/codex-executable.ts";
+import { configuredCodexExecutable, findCodexExecutable, resolveCodexExecutable } from "../core/interfaces/codex-executable.ts";
 
 test("Windows Codex discovery uses a direct binary or the official npm package binary", () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-codex-win-")));
@@ -23,5 +23,24 @@ test("Windows Codex discovery uses a direct binary or the official npm package b
     const directoryOnly = join(root, "directory-only"); mkdirSync(join(directoryOnly, "codex.exe"), { recursive: true });
     assert.throws(() => findCodexExecutable([directoryOnly, ""].join(delimiter), "win32", "x64"), /not found/);
     assert.equal(findCodexExecutable("", "linux", "x64"), "codex");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("configured Codex executable wins over PATH and fails loudly when unusable", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-codex-config-")));
+  const codex = join(root, "codex.exe"), settings = join(root, "settings.json");
+  writeFileSync(codex, "binary", { mode: 0o755 });
+  try {
+    writeFileSync(settings, JSON.stringify({ workbench: { codexExecutable: codex } }));
+    assert.equal(configuredCodexExecutable(settings), codex);
+    writeFileSync(settings, "\uFEFF" + JSON.stringify({ workbench: { codexExecutable: codex } }));
+    assert.equal(configuredCodexExecutable(settings), codex);
+    assert.equal(resolveCodexExecutable("", "win32", "x64", settings), codex);
+    writeFileSync(settings, JSON.stringify({ workbench: { codexExecutable: join(root, "missing.exe") } }));
+    assert.throws(() => resolveCodexExecutable("", "win32", "x64", settings), /not usable/u);
+    const previous = process.env.CRAFT_CODEX_EXECUTABLE;
+    process.env.CRAFT_CODEX_EXECUTABLE = codex;
+    try { assert.equal(configuredCodexExecutable(settings), codex); }
+    finally { if (previous === undefined) delete process.env.CRAFT_CODEX_EXECUTABLE; else process.env.CRAFT_CODEX_EXECUTABLE = previous; }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

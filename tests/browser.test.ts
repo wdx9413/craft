@@ -10,6 +10,15 @@ test("browser invocation uses the native opener on each desktop platform", () =>
   assert.equal(getBrowserInvocation("aix", "http://localhost"), undefined);
 });
 
+test("app mode opens a Chromium window without browser chrome", () => {
+  const url = "http://localhost/workbench#token=secret";
+  assert.deepEqual(getBrowserInvocation("win32", url, { mode: "app", appBrowser: "C:\\Edge\\msedge.exe" }),
+    { command: "C:\\Edge\\msedge.exe", args: [`--app=${url}`] });
+  // Non-Windows keeps the native opener when no app-shell command is defined.
+  assert.deepEqual(getBrowserInvocation("linux", url, { mode: "app", appBrowser: "ignored" }),
+    { command: "xdg-open", args: [url] });
+});
+
 test("openBrowser is injectable, disabled for headless runs, and safe on launch errors", async () => {
   const calls: Array<{ command: string; args: string[] }> = [];
   const fake: BrowserSpawner = (command, args) => { calls.push({ command, args }); return { unref() {} }; };
@@ -18,6 +27,8 @@ test("openBrowser is injectable, disabled for headless runs, and safe on launch 
   try {
     assert.equal(openBrowser("http://localhost", "win32", fake), true);
     assert.deepEqual(calls[0], { command: "cmd.exe", args: ["/c", "start", "", "http://localhost"] });
+    assert.equal(openBrowser("http://localhost", "win32", fake, { mode: "app", appBrowser: "C:\\Edge\\msedge.exe" }), true);
+    assert.deepEqual(calls[1], { command: "C:\\Edge\\msedge.exe", args: ["--app=http://localhost"] });
     assert.equal(openBrowser("http://localhost", "aix", fake), false);
     process.env.CRAFT_NO_BROWSER = "1";
     assert.equal(openBrowser("http://localhost", "linux", fake), false);

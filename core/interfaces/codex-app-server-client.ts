@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { workbenchCliEnvironment } from "./workbench-cli-path.ts";
-import { findCodexExecutable } from "./codex-executable.ts";
+import { resolveCodexExecutable } from "./codex-executable.ts";
 
 type RpcId = string | number;
 type RpcObject = Record<string, unknown>;
@@ -26,7 +26,7 @@ export class CodexAppServerClient {
     this.onEvent = options.onEvent;
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.ownsProcessGroup = !options.start && process.platform !== "win32";
-    this.process = (options.start ?? (() => spawn(findCodexExecutable(), ["app-server", "--listen", "stdio://"], { stdio: "pipe", shell: false, detached: process.platform !== "win32", env: workbenchCliEnvironment() })))();
+    this.process = (options.start ?? (() => spawn(resolveCodexExecutable(), ["app-server", "--listen", "stdio://"], { stdio: "pipe", shell: false, detached: process.platform !== "win32", env: workbenchCliEnvironment() })))();
     this.process.stdout.setEncoding("utf8");
     this.process.stdout.on("data", (chunk: string) => this.receive(chunk));
     this.process.stderr.resume();

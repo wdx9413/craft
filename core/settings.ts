@@ -1,8 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname } from "node:path";
-import { resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { atomicPrivateJson, craftPaths, ensureLayout, type CraftPaths } from "./infrastructure/paths.ts";
 
 export type ModelProtocol = "openai-compatible" | "anthropic";
@@ -22,7 +21,7 @@ export interface CraftSettings {
   locale: "zh-CN" | "en-US";
   theme: "system" | "light" | "dark";
   dataRoot: string;
-  workbench: { port: number; openOnStart: boolean };
+  workbench: { port: number; openOnStart: boolean; codexExecutable: string | null; browserMode: "system" | "app" };
   runtime: { defaultTier: "small" | "medium" | "large"; maxSteps: number; maxTokens: number };
   models: CraftModelConfig[];
   privacy: { telemetry: boolean };
@@ -65,6 +64,14 @@ function httpUrl(value: unknown, name: string, fallback: string): string {
   return raw.replace(/\/+$/u, "");
 }
 
+function optionalAbsolutePath(value: unknown, name: string): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must be an absolute path or null`);
+  const path = value.trim();
+  if (!isAbsolute(path)) throw new Error(`${name} must be an absolute path`);
+  return resolve(path);
+}
+
 function normalizeModels(value: unknown): CraftModelConfig[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new Error("models must be an array");
@@ -95,7 +102,8 @@ export function defaultSettings(paths = craftPaths()): CraftSettings {
   // with "system": the factory and the loader describe the same first launch,
   // so a reset cannot silently pin a different theme than a fresh load.
   return { schemaVersion: 1, locale: "zh-CN", theme: "system", dataRoot: paths.root,
-    workbench: { port: 4173, openOnStart: true }, runtime: { defaultTier: "medium", maxSteps: 32, maxTokens: 12000 },
+    workbench: { port: 4173, openOnStart: true, codexExecutable: null, browserMode: "system" },
+    runtime: { defaultTier: "medium", maxSteps: 32, maxTokens: 12000 },
     models: [], privacy: { telemetry: false }, updatedAt: new Date(0).toISOString() };
 }
 
@@ -113,8 +121,11 @@ export function normalizeSettings(value: unknown, paths = craftPaths()): CraftSe
   if (defaultTier !== "small" && defaultTier !== "medium" && defaultTier !== "large") throw new Error("runtime.defaultTier must be small, medium, or large");
   const updatedAt = text(input.updatedAt, "updatedAt", new Date(0).toISOString());
   if (Number.isNaN(Date.parse(updatedAt))) throw new Error("updatedAt must be an ISO timestamp");
+  const browserMode = text(workbench.browserMode, "workbench.browserMode", "system");
+  if (browserMode !== "system" && browserMode !== "app") throw new Error("workbench.browserMode must be system or app");
   return { schemaVersion: 1, locale: locale as CraftSettings["locale"], theme: theme as CraftSettings["theme"], dataRoot,
-    workbench: { port: number(workbench.port, "workbench.port", 4173, 0, 65535), openOnStart: boolean(workbench.openOnStart, "workbench.openOnStart", true) },
+    workbench: { port: number(workbench.port, "workbench.port", 4173, 0, 65535), openOnStart: boolean(workbench.openOnStart, "workbench.openOnStart", true),
+      codexExecutable: optionalAbsolutePath(workbench.codexExecutable, "workbench.codexExecutable"), browserMode: browserMode as CraftSettings["workbench"]["browserMode"] },
     runtime: { defaultTier: defaultTier as CraftSettings["runtime"]["defaultTier"], maxSteps: number(runtime.maxSteps, "runtime.maxSteps", 32, 1, 10000), maxTokens: number(runtime.maxTokens, "runtime.maxTokens", 12000, 1, 100000000) },
     models: normalizeModels(input.models),
     privacy: { telemetry: boolean(privacy.telemetry, "privacy.telemetry", false) }, updatedAt };
@@ -122,7 +133,7 @@ export function normalizeSettings(value: unknown, paths = craftPaths()): CraftSe
 
 export async function loadSettings(paths = craftPaths()): Promise<CraftSettings> {
   await ensureLayout(paths);
-  try { await access(paths.settingsFile); return normalizeSettings(JSON.parse(await readFile(paths.settingsFile, "utf8")), paths); }
+  try { await access(paths.settingsFile); return normalizeSettings(JSON.parse((await readFile(paths.settingsFile, "utf8")).replace(/^\uFEFF/u, "")), paths); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") return defaultSettings(paths);
     const settings = defaultSettings(paths); await atomicPrivateJson(paths.settingsFile, settings); return settings;
@@ -149,7 +160,7 @@ function syncWrite(path: string, value: unknown): void {
 
 export function loadSettingsSync(paths = craftPaths()): CraftSettings {
   if (!existsSync(paths.settingsFile)) { const settings = defaultSettings(paths); syncWrite(paths.settingsFile, settings); return settings; }
-  try { return normalizeSettings(JSON.parse(readFileSync(paths.settingsFile, "utf8")), paths); }
+  try { return normalizeSettings(JSON.parse(readFileSync(paths.settingsFile, "utf8").replace(/^\uFEFF/u, "")), paths); }
   catch { return defaultSettings(paths); }
 }
 

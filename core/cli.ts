@@ -20,6 +20,7 @@ import { runBuiltinAcceptanceTicks } from "./acceptance-worker.ts";
 import { LocalWorkbenchServer } from "./workbench-server.ts";
 import { LocalSupervisor, SupervisorClient } from "./supervisor.ts";
 import { openBrowser } from "./browser.ts";
+import { loadSettingsSync } from "./settings.ts";
 import { VERSION } from "./service.ts";
 import { credentialStatus, createFetchTransport, providerFromConfig } from "./model-gateway.ts";
 import { digestJson } from "./digest.ts";
@@ -485,7 +486,7 @@ async function dispatchMain(args: string[]): Promise<void> {
         try { const started = await server.start(option(args, "--port") === undefined ? 4173 : Number(option(args, "--port"))); const workbenchUrl = started.url.replace("/#token=", "/workbench#token=");
           stdout.write(`Craft API: ${started.url}\n`);
           if (workbenchDir !== null) stdout.write(`Craft Workbench: ${workbenchUrl}\n`);
-          if (args[0] === "gui") openBrowser(workbenchUrl); await new Promise<void>((resolve) => {
+          if (args[0] === "gui") openBrowser(workbenchUrl, process.platform, undefined, { mode: loadSettingsSync(paths).workbench.browserMode }); await new Promise<void>((resolve) => {
             const parentPipe = args.includes("--parent-stdin");
             const stop = () => { process.off("SIGINT", stop); process.off("SIGTERM", stop); if (parentPipe) { process.stdin.off("end", stop); process.stdin.pause(); } resolve(); };
             process.once("SIGINT", stop); process.once("SIGTERM", stop);

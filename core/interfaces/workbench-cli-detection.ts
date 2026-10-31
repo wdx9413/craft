@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { findClaudeExecutable } from "./claude-executable.ts";
-import { findCodexExecutable } from "./codex-executable.ts";
+import { resolveCodexExecutable } from "./codex-executable.ts";
 import { workbenchCliEnvironment } from "./workbench-cli-path.ts";
 
 type Probe = (command: string) => Promise<string>;
@@ -11,7 +11,7 @@ const providers = [
 
 function probe(command: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const executable = command === "claude" ? findClaudeExecutable() : findCodexExecutable();
+    const executable = command === "claude" ? findClaudeExecutable() : resolveCodexExecutable();
     execFile(executable, ["--version"], { timeout: 5000, maxBuffer: 16 * 1024, windowsHide: true, shell: false, env: workbenchCliEnvironment() }, (error, stdout) => {
       if (error) reject(error); else resolve(stdout);
     });

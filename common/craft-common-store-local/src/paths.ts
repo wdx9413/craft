@@ -40,7 +40,7 @@ export function dataRoot(env: NodeJS.ProcessEnv = process.env): string {
   const settingsPath = env.CRAFT_SETTINGS_FILE?.trim() || join(defaultRoot, "settings.json");
   if (existsSync(settingsPath)) {
     try {
-      const value: unknown = JSON.parse(readFileSync(settingsPath, "utf8"));
+      const value: unknown = JSON.parse(readFileSync(settingsPath, "utf8").replace(/^\uFEFF/u, ""));
       if (value && typeof value === "object" && !Array.isArray(value)) {
         const candidate = (value as Record<string, unknown>).dataRoot;
         if (typeof candidate === "string" && candidate.trim()) return resolve(candidate);
