@@ -90,43 +90,45 @@ export class WorkbenchKernel {
 
   objectPut(args: JsonObject): JsonObject {
     const workspaceId = id(args.workspace_id, "workspace_id", "workspace");
-    const workspace = this.store.get("workspace", workspaceId);
-    const expected = revision(args.expected_state_revision, Number(workspace.state_revision));
-    if (expected !== Number(workspace.state_revision)) throw new Error("Workspace state changed; refresh before writing");
     const objectId = id(args.object_id, "object_id", "work_object");
-    const previous = this.store.find("work_object", objectId);
-    const dependencies = strings(args.depends_on ?? previous?.depends_on, "depends_on");
-    if (dependencies.includes(objectId)) throw new Error("A work object cannot depend on itself");
-    for (const dependencyId of dependencies) {
-      const dependency = this.store.get("work_object", dependencyId);
-      if (dependency.workspace_id !== workspaceId) throw new Error("Work object dependencies must belong to the same workspace");
-      const pending = [dependency]; const visited = new Set<string>();
-      while (pending.length) {
-        const candidate = pending.pop()!; const candidateId = String(candidate.id);
-        if (candidateId === objectId) throw new Error("Work object dependencies must not form a cycle");
-        if (visited.has(candidateId)) continue;
-        visited.add(candidateId);
-        for (const parentId of candidate.depends_on as string[]) pending.push(this.store.get("work_object", parentId));
+    return this.store.transaction(() => {
+      const workspace = this.store.get("workspace", workspaceId);
+      const expected = revision(args.expected_state_revision, Number(workspace.state_revision));
+      if (expected !== Number(workspace.state_revision)) throw new Error("Workspace state changed; refresh before writing");
+      const previous = this.store.find("work_object", objectId);
+      const dependencies = strings(args.depends_on ?? previous?.depends_on, "depends_on");
+      if (dependencies.includes(objectId)) throw new Error("A work object cannot depend on itself");
+      for (const dependencyId of dependencies) {
+        const dependency = this.store.get("work_object", dependencyId);
+        if (dependency.workspace_id !== workspaceId) throw new Error("Work object dependencies must belong to the same workspace");
+        const pending = [dependency]; const visited = new Set<string>();
+        while (pending.length) {
+          const candidate = pending.pop()!; const candidateId = String(candidate.id);
+          if (candidateId === objectId) throw new Error("Work object dependencies must not form a cycle");
+          if (visited.has(candidateId)) continue;
+          visited.add(candidateId);
+          for (const parentId of candidate.depends_on as string[]) pending.push(this.store.get("work_object", parentId));
+        }
       }
-    }
-    if (previous && previous.workspace_id !== workspaceId) throw new Error("Work object already belongs to another workspace");
-    const status = String(args.status ?? previous?.status ?? "draft");
-    if (!OBJECT_STATUS.has(status)) throw new Error("Work object status is unsupported");
-    const acceptedEvidence = status === "accepted" ? strings(args.evidence_ids ?? previous?.accepted_evidence_ids, "evidence_ids") : [];
-    if (status === "accepted" && !acceptedEvidence.length) throw new Error("Accepted work objects require evidence_ids");
-    const data = args.data ?? previous?.data ?? {};
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Work object data must be an object");
-    const nextRevision = expected + 1;
-    const record = { workspace_id: workspaceId, object_type: text(args.object_type ?? previous?.object_type, "object_type"),
-      name: text(args.name ?? previous?.name, "name"), data, depends_on: dependencies,
-      artifact_ids: strings(args.artifact_ids ?? previous?.artifact_ids, "artifact_ids"),
-      source_paths: strings(args.source_paths ?? previous?.source_paths, "source_paths"), status,
-      accepted_evidence_ids: acceptedEvidence,
-      state_revision: nextRevision };
-    const entries: SaveEntry[] = [{ kind: "work_object", id: objectId, payload: record },
-      { kind: "workspace", id: workspaceId, payload: { ...payload(workspace), state_revision: nextRevision } }];
-    const [object, savedWorkspace] = this.store.saveBatch(entries);
-    return { object, workspace: savedWorkspace };
+      if (previous && previous.workspace_id !== workspaceId) throw new Error("Work object already belongs to another workspace");
+      const status = String(args.status ?? previous?.status ?? "draft");
+      if (!OBJECT_STATUS.has(status)) throw new Error("Work object status is unsupported");
+      const acceptedEvidence = status === "accepted" ? strings(args.evidence_ids ?? previous?.accepted_evidence_ids, "evidence_ids") : [];
+      if (status === "accepted" && !acceptedEvidence.length) throw new Error("Accepted work objects require evidence_ids");
+      const data = args.data ?? previous?.data ?? {};
+      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Work object data must be an object");
+      const nextRevision = expected + 1;
+      const record = { workspace_id: workspaceId, object_type: text(args.object_type ?? previous?.object_type, "object_type"),
+        name: text(args.name ?? previous?.name, "name"), data, depends_on: dependencies,
+        artifact_ids: strings(args.artifact_ids ?? previous?.artifact_ids, "artifact_ids"),
+        source_paths: strings(args.source_paths ?? previous?.source_paths, "source_paths"), status,
+        accepted_evidence_ids: acceptedEvidence,
+        state_revision: nextRevision };
+      const entries: SaveEntry[] = [{ kind: "work_object", id: objectId, payload: record },
+        { kind: "workspace", id: workspaceId, payload: { ...payload(workspace), state_revision: nextRevision } }];
+      const [object, savedWorkspace] = this.store.saveBatch(entries);
+      return { object, workspace: savedWorkspace };
+    });
   }
 
   impact(args: JsonObject): JsonObject {
@@ -159,26 +161,28 @@ export class WorkbenchKernel {
 
   changeApply(args: JsonObject): JsonObject {
     const workspaceId = id(args.workspace_id, "workspace_id", "workspace");
-    const workspace = this.store.get("workspace", workspaceId);
-    const expected = revision(args.expected_state_revision, Number(workspace.state_revision));
-    if (expected !== Number(workspace.state_revision)) throw new Error("Workspace state changed; refresh before applying a change");
-    const impact = this.impact(args);
-    const impactedIds = impact.impacted_object_ids as string[];
-    const nextRevision = expected + 1;
     const changeId = id(args.change_id, "change_id", "workspace_change");
-    const entries: SaveEntry[] = impactedIds.map((objectId) => {
-      const object = this.store.get("work_object", objectId);
-      return { kind: "work_object", id: objectId, payload: { ...payload(object), status: "needs_review", accepted_evidence_ids: [], state_revision: nextRevision } };
+    return this.store.transaction(() => {
+      const workspace = this.store.get("workspace", workspaceId);
+      const expected = revision(args.expected_state_revision, Number(workspace.state_revision));
+      if (expected !== Number(workspace.state_revision)) throw new Error("Workspace state changed; refresh before applying a change");
+      const impact = this.impact(args);
+      const impactedIds = impact.impacted_object_ids as string[];
+      const nextRevision = expected + 1;
+      const entries: SaveEntry[] = impactedIds.map((objectId) => {
+        const object = this.store.get("work_object", objectId);
+        return { kind: "work_object", id: objectId, payload: { ...payload(object), status: "needs_review", accepted_evidence_ids: [], state_revision: nextRevision } };
+      });
+      entries.push({ kind: "workspace_change", id: changeId, payload: { workspace_id: workspaceId, summary: text(args.summary, "summary"),
+        affected_paths: strings(args.affected_paths, "affected_paths"), affected_object_ids: impact.root_object_ids,
+        impacted_object_ids: impactedIds, source: args.source ?? "human", previous_checkpoint_id: workspace.latest_checkpoint_id ?? null,
+        state_revision: nextRevision } });
+      entries.push({ kind: "workspace", id: workspaceId, payload: { ...payload(workspace), state_revision: nextRevision,
+        latest_human_change_id: changeId } });
+      const saved = this.store.saveBatch(entries);
+      return { workspace: saved.at(-1), change: saved.at(-2), impact,
+        objects: saved.slice(0, impactedIds.length) };
     });
-    entries.push({ kind: "workspace_change", id: changeId, payload: { workspace_id: workspaceId, summary: text(args.summary, "summary"),
-      affected_paths: strings(args.affected_paths, "affected_paths"), affected_object_ids: impact.root_object_ids,
-      impacted_object_ids: impactedIds, source: args.source ?? "human", previous_checkpoint_id: workspace.latest_checkpoint_id ?? null,
-      state_revision: nextRevision } });
-    entries.push({ kind: "workspace", id: workspaceId, payload: { ...payload(workspace), state_revision: nextRevision,
-      latest_human_change_id: changeId } });
-    const saved = this.store.saveBatch(entries);
-    return { workspace: saved.at(-1), change: saved.at(-2), impact,
-      objects: saved.slice(0, impactedIds.length) };
   }
 
   objectList(args: JsonObject): JsonObject {

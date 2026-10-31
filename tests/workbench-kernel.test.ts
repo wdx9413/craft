@@ -282,3 +282,16 @@ test("workbench defensive branches and edge paths are covered", async () => {
     assert.equal((assembled.profile as JsonObject).name, "VP");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
+test("workbench object writes are atomic against workspace revision drift", async () => {
+  const f = await fixture();
+  try {
+    f.workbench.objectPut({ workspace_id: "w1", object_id: "r1", object_type: "task", name: "R1", source_paths: [] });
+    // A stale caller that read revision 1 must not bump from 1 to 2 after a commit already moved to 2.
+    assert.throws(() => f.workbench.objectPut({ workspace_id: "w1", object_id: "r2", object_type: "task", name: "R2", source_paths: [], expected_state_revision: 1 }), /changed/u);
+    // The workspace revision is exactly what the committed write produced.
+    assert.equal(Number(f.store.get("workspace", "w1").state_revision), 2);
+    // A follow-up with the fresh revision succeeds and advances to 3.
+    f.workbench.objectPut({ workspace_id: "w1", object_id: "r2", object_type: "task", name: "R2", source_paths: [], expected_state_revision: 2 });
+    assert.equal(Number(f.store.get("workspace", "w1").state_revision), 3);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
