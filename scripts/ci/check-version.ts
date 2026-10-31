@@ -49,7 +49,7 @@ for (const path of ["common/craft-common-store-local/package.json", "common/craf
   if (component.version !== packageVersion) throw new Error(`${path} version ${String(component.version)} differs from package.json ${packageVersion}`);
   const peers = (component.peerDependencies ?? {}) as Record<string, unknown>;
   const dependencies = (component.dependencies ?? {}) as Record<string, unknown>;
-  if (peers["craft-agent-harness"] !== undefined || dependencies["craft-agent-harness"] !== undefined) throw new Error(`${path} must not depend on craft-agent-harness`);
+  if (peers["craft"] !== undefined || dependencies["craft"] !== undefined) throw new Error(`${path} must not depend on craft`);
   for (const [name, version] of Object.entries(dependencies)) {
     if (name.startsWith("craft-common-") && version !== packageVersion) throw new Error(`${path} ${name} dependency differs from package.json ${packageVersion}`);
   }

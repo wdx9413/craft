@@ -13,7 +13,7 @@ export function adapterTools(config: AdapterConfig = {}, moduleUrl = import.meta
   const bundle = config.bundlePath ?? (existsSync(bundled) ? bundled : null);
   const launch: Launch = {
     command: bundle ? process.execPath : config.npxCommand ?? "npx",
-    args: bundle ? [bundle, "--product", product] : ["-y", config.packageSpec ?? (adapterVersion ? `craft-agent-harness@${adapterVersion}` : "craft-agent-harness"), "craft-mcp", "--product", product],
+    args: bundle ? [bundle, "--product", product] : ["-y", config.packageSpec ?? (adapterVersion ? `craft@${adapterVersion}` : "craft"), "craft-mcp", "--product", product],
     env: { ...process.env, ...(config.dataDir ? { CRAFT_DATA_DIR: config.dataDir } : {}) },
   };
   const render = (_args: unknown, value: unknown) => [{ type: "text", text: JSON.stringify(value) }];

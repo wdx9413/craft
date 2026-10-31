@@ -431,7 +431,7 @@ test("each capability package loads and registers outside the harness checkout",
       await cp(join(source, "package.json"), join(target, "package.json"));
       const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as Record<string, unknown>;
       assert.equal(manifest.peerDependencies, undefined);
-      assert.equal((manifest.dependencies as Record<string, unknown>)["craft-agent-harness"], undefined);
+      assert.equal((manifest.dependencies as Record<string, unknown>)["craft"], undefined);
     }
     await symlink(realpathSync(join(root, "node_modules", "typescript")), join(nodeModules, "typescript"), "dir");
     const source = `

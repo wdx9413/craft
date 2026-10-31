@@ -39,7 +39,7 @@ test("TraeWork adapter defaults to the syscall surface and keeps an explicit Ful
 test("WorkBuddy connector keeps the compact MCP with a route-first Skill", async () => {
   const connector = await json("adapters/workbuddy-connector/connector-meta.json");
   const server = onlyServer(await json("adapters/workbuddy-connector/mcp.json"));
-  assert.equal(connector.source, "craft-agent-harness");
+  assert.equal(connector.source, "craft");
   assert.equal(connector.type, "mcp");
   assertCurrentReleaseVersion(connector.version);
   assert(Array.isArray(connector.examples_zh) && connector.examples_zh.length >= 2);

@@ -118,7 +118,7 @@
   "artifact": {
     "version": "0.12.131",
     "protocol": 1,
-    "path": "craft-workbench/vendor/craft-agent-harness-0.12.131.tgz",
+    "path": "craft-workbench/vendor/craft-0.12.131.tgz",
     "sha256": "e1b8f67e256159a91035b1e3551ace5313f08e78cea83b173a3c0ee640d1f0a9",
     "fixed_lock_sha256": "e77aa538fb3ba7c1d81c0c0c51b436af0e1dc709e3b0ccb679f5d34ac6e15ed7",
     "frozen_offline_install": "passed",

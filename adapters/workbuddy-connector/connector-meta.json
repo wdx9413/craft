@@ -5,7 +5,7 @@
   "description": "Use durable tasks, evidence, verification, and reusable workflows for substantial work.",
   "description_zh": "为复杂工作提供可续接任务、证据、验证和可复用工作流。",
   "description_en": "Use durable tasks, evidence, verification, and reusable workflows for substantial work.",
-  "source": "craft-agent-harness",
+  "source": "craft",
   "type": "mcp",
   "version": "0.12.131",
   "examples_zh": [

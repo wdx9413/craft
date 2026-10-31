@@ -5,10 +5,10 @@
 
 ## 当前可发布包边界
 
-`craft-agent-harness` 是宿主/编排包，不是子能力的运行时基础库。当前依赖方向为：
+`craft` 是宿主/编排包，不是子能力的运行时基础库。当前依赖方向为：
 
 ```text
-craft-agent-harness → craft-knowledge / craft-memory / craft-experience / craft-codebase
+craft → craft-knowledge / craft-memory / craft-experience / craft-codebase
                     → craft-common-base / craft-common-store-local / craft-common-log
 craft-common-log → craft-common-base / craft-common-store-local
 craft-common-base → craft-common-store-local（共享 JsonObject 类型）

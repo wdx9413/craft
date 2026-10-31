@@ -50,7 +50,7 @@ test("each DSH product has separate discovery and strict JSON call arguments", a
     } finally { f.cleanup(); }
   }
   assert.equal(adapterTools()[0]!.name, "craft_context_tools");
-  adapterTools({ npxCommand: "custom-npx", packageSpec: "craft-agent-harness@fixture" });
+  adapterTools({ npxCommand: "custom-npx", packageSpec: "craft@fixture" });
 });
 
 

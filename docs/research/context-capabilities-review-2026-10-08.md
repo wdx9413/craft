@@ -4,7 +4,7 @@
 
 ## 判断
 
-现有方向合理：Context 是统一入口，Knowledge/Memory/Experience 提供受治理材料，Codebase 提供快照固定的代码结构；四个包声明依赖 common-base、common-store-local、common-log，已经没有反向声明依赖 craft-agent-harness。
+现有方向合理：Context 是统一入口，Knowledge/Memory/Experience 提供受治理材料，Codebase 提供快照固定的代码结构；四个包声明依赖 common-base、common-store-local、common-log，已经没有反向声明依赖 craft。
 
 当前更需要把已有能力收敛成可靠的工作集与任务学习闭环，而不是继续增加子能力或堆接口。不能把“有 SDK”“召回成功”“索引 ready”“测试覆盖率高”分别等同于完整独立业务能力、模型已使用、结构完整或真实收益。
 

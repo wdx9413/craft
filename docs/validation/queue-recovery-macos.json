@@ -81,7 +81,7 @@
     }
   ],
   "artifact": {
-    "path": "craft-workbench/vendor/craft-agent-harness-0.12.131.tgz",
+    "path": "craft-workbench/vendor/craft-0.12.131.tgz",
     "sha256": "821a1ddd9d3765a8670ea86cf4407c85783c6ed5a73863ca4973fa7f99660f65",
     "scope": "local compiled runtime archive"
   },

@@ -1,6 +1,6 @@
 # @craft/capability-experience
 
-Standalone experience kernel package. Depends on `craft-common-store-local`, `craft-common-base`, and `craft-common-log`; it does not depend on `craft-agent-harness`. Import the capability descriptor and register it with a `CraftStore` and optional `CraftTelemetry` via `CORE_KERNELS`. The existing Skill and MCP plugin remains the Host-facing surface.
+Standalone experience kernel package. Depends on `craft-common-store-local`, `craft-common-base`, and `craft-common-log`; it does not depend on `craft`. Import the capability descriptor and register it with a `CraftStore` and optional `CraftTelemetry` via `CORE_KERNELS`. The existing Skill and MCP plugin remains the Host-facing surface.
 
 `@craft/capability-experience/graph-assets` exports `ExperienceGraphAssets(store)` for standalone Graph authoring. `inspect` supports list, template, read, draft, validate and diff; `edit` supports save, submit and migrate. Every asset operation carries an explicit scope and the current access metadata. Saving an existing asset requires `expected_version`; replacing or submitting a draft requires `expected_draft_digest`.
 

@@ -7,7 +7,7 @@
 ## 0. 目标产品契约
 
 1. **默认 Context，独立子能力。** `craft-context` 默认聚合 Knowledge、Memory、Experience 和 Codebase；四能力也各自提供可安装、可调用、可完成业务操作的 Skill + MCP 产品。进入一个 Git 仓库时自动建立或复用该仓库的基础索引，无须用户逐项目激活。需要调用关系或影响候选时再请求语义分析。非仓库任务和失败成员明确返回 `skipped`/`partial` 原因。纯 MCP 不会自行得知任务开始；由 Skill 调用公开入口，可信 Hook 只作可选生命周期增强。
-2. **真实独立性。** 子能力依赖公共协议、存储和观测包，根包组合它们；子能力不反向依赖 `craft-agent-harness`。独立包加载、Skill+MCP 挂载、完整业务调用及数据隔离分别验收。一条业务纵切包括权限、版本、失败和恢复，而非仅 `register()` 成功。
+2. **真实独立性。** 子能力依赖公共协议、存储和观测包，根包组合它们；子能力不反向依赖 `craft`。独立包加载、Skill+MCP 挂载、完整业务调用及数据隔离分别验收。一条业务纵切包括权限、版本、失败和恢复，而非仅 `register()` 成功。
 3. **公共扩展契约。** `craft-common-base` 提供能力与检索协议，`craft-common-store-local` 提供本地持久化，`craft-common-log` 提供无内容 log/trace/metric/usage/cost/evaluation 采集和可替换 Sink。第三方只接观测时不需要初始化 Store 或注册 Craft 能力；贡献 Context 时再实现能力协议。记录评测结果与授予晋升/路由资格分属两个边界，业务成功不受可降级 Sink 失败改写。
 4. **Experience 三种使用方式。** 经验可供只读建议，用户可显式选用固定版本 Procedure，自动推荐/路由则需要独立验证和治理批准。互联网产研共享一份粗粒度 Graph：需求、Bug、诊断、Code Review 是有命名入口、出口、允许路径、输入、产物和验收的子场景；子 Workflow 固定版本复用既有 Work Loop。多出口选择在 Invocation 绑定时固定。
 5. **五产品四接入。** Context 和四子能力分别有 Codex、Claude、独立 Skill+MCP、DSH 产物。同装聚合与单能力时同一任务复用 Receipt，避免重复召回和重复写入；接入验收依次检查产物、`initialize`、`tools/list`、真实调用和真实 Host 任务。Hook 不构成任何一种产品的必需前置条件。

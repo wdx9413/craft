@@ -4,7 +4,7 @@
 
 ## 结论与适用边界
 
-当前结构已经完成真实公共包拆分：三个 `craft-common-*` 与四个 `@craft/capability-*` 均有自己的 `dist`、声明、`exports` 和依赖声明，四个能力包不再依赖 `craft-agent-harness`。因此不能继续沿用“只有插件投影、没有独立包”的旧结论。但发布包可加载、业务能力可独立使用、宿主产品按需装配，是三个不同验收层级；当前最强证据集中在第一层，完整能力的纵向用例仍大量依赖根 Harness。
+当前结构已经完成真实公共包拆分：三个 `craft-common-*` 与四个 `@craft/capability-*` 均有自己的 `dist`、声明、`exports` 和依赖声明，四个能力包不再依赖 `craft`。因此不能继续沿用“只有插件投影、没有独立包”的旧结论。但发布包可加载、业务能力可独立使用、宿主产品按需装配，是三个不同验收层级；当前最强证据集中在第一层，完整能力的纵向用例仍大量依赖根 Harness。
 
 下一步的主要价值来自使现有 Module 有更好的 Depth、Locality 与可验证 Interface，而不是增加更多目录、插件名字或空的 coordinator。本文不建议第二个 Runtime、不建议用 MCP 连接进程内 Module、不建议仅为未来数据库假设增加 Repository Adapter。
 
@@ -14,7 +14,7 @@
 
 ```mermaid
 graph TD
-  H[craft-agent-harness] --> K[Knowledge / Memory / Experience / Codebase]
+  H[craft] --> K[Knowledge / Memory / Experience / Codebase]
   K --> B[craft-common-base]
   K --> S[craft-common-store-local]
   K --> L[craft-common-log]
@@ -66,7 +66,7 @@ graph TD
 
 **问题**：包外部有 `exports`，包内开发却常绕过它直接跨目录取源码；根编译、逐入口 bundle 和正则声明重写支撑发布，独立包消费者的类型兼容尚未成为同等验收面。分层审计目前也只解析相对 import。
 
-**实测**：纯内存对照调用 `auditLayerGraph`：同一 common-base 文件相对导入 `core/application/craft-service.ts` 会返回 `upward`；把它改为 bare import `craft-agent-harness` 后返回空数组。对应 `layer-graph.ts:49` 的过滤逻辑。这是门禁覆盖缺口，不证明当前源码已通过该路径逆向依赖。
+**实测**：纯内存对照调用 `auditLayerGraph`：同一 common-base 文件相对导入 `core/application/craft-service.ts` 会返回 `upward`；把它改为 bare import `craft` 后返回空数组。对应 `layer-graph.ts:49` 的过滤逻辑。这是门禁覆盖缺口，不证明当前源码已通过该路径逆向依赖。
 
 **方向**：让跨包消费走已声明的包入口，构建按实际依赖图进行；隔离环境安装真实待发布包、编译外部消费者，并各跑一个最小完整用例。可以评估 TypeScript project references，但先做一个包的迁移和构建耗时比较，不做全仓一刀切。分层审计需识别工作区包名与 exports 目标，不能只在源码相对路径上成立。
 
