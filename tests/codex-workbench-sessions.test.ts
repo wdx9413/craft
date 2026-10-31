@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { codexGroupHasSessionFile, codexProcessIdentity, externalCodexOwner } from "../core/interfaces/codex-process-owner.ts";
+import { codexGroupHasSessionFile, codexProcessIdentity, externalCodexOwner, isCraftCodexCommand } from "../core/interfaces/codex-process-owner.ts";
 import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
@@ -33,6 +33,14 @@ async function fixture() {
 }
 const notification = (method: string, params: unknown): CodexServerEvent => ({ type: "notification", method, params });
 const approval = (id: string, turnId = "turn"): CodexServerEvent => ({ type: "request", id, method: "item/commandExecution/requestApproval", params: { threadId: "native", turnId, command: "echo ok" } });
+
+test("Craft app-server commands are distinguishable from other Codex CLI listeners", () => {
+  assert.equal(isCraftCodexCommand("codex.exe app-server --listen stdio://"), true);
+  assert.equal(isCraftCodexCommand("/usr/local/bin/codex app-server --listen unix:///tmp/craft.sock"), true);
+  assert.equal(isCraftCodexCommand("C:\\codex.exe -c features.code_mode_host=true app-server --analytics-default-enabled"), false);
+  assert.equal(isCraftCodexCommand("codex app-server"), false);
+  assert.equal(isCraftCodexCommand(null), false);
+});
 
 test("discovers and verifies native sessions before linking them", async () => {
   const f = await fixture();

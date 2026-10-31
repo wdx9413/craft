@@ -4,7 +4,7 @@ import { WorkbenchAgentSessionLinks } from "../application/use-cases/workbench-a
 import { CodexAppServerClient, type CodexServerEvent } from "./codex-app-server-client.ts";
 import { CodexWorkbenchAdapter, codexWorkbenchPolicy } from "./codex-workbench-adapter.ts";
 import { CodexLinkedTurn } from "./codex-linked-turn.ts";
-import { codexGroupHasSessionFile, codexProcessIdentity, sameCodexProcess, externalCodexOwner } from "./codex-process-owner.ts";
+import { codexGroupHasSessionFile, codexProcessIdentity, sameCodexProcess, externalCodexOwner, workbenchCodexProcesses, windowsLockOwner } from "./codex-process-owner.ts";
 
 type Client = Pick<CodexAppServerClient, "initialize" | "request" | "respond" | "close">;
 type Live = { client: Client; adapter: CodexWorkbenchAdapter; linked: CodexLinkedTurn | null; taskId: string; linkId: string; threadId: string; generation: string; sequence: number; events: Array<{ sequence: number; event: CodexServerEvent; size: number }>; eventBytes: number; approvals: Map<string, CodexServerEvent & { type: "request" }>; closed: boolean };
@@ -214,11 +214,28 @@ export class CodexWorkbenchSessions {
     if (this.opening.has(linkId)) throw new Error("session is already opening");
     this.opening.add(linkId);
     let live: Live | undefined;
+    let autoReleased = false;
     try {
       live = this.connection(taskId); this.pending.add(live); live.linkId = linkId; live.threadId = String(link.native_session_id);
       await live.client.initialize();
       if (this.stopped) throw new Error("session manager is closed");
-      await live.adapter.resume(live.threadId, { workspace: String(link.workspace), model: link.model as string | null, permission: link.permission as "ask" | "read_only" | "auto" | "full" });
+      try {
+        await live.adapter.resume(live.threadId, { workspace: String(link.workspace), model: link.model as string | null, permission: link.permission as "ask" | "read_only" | "auto" | "full" });
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("already has an active writer")) throw error;
+        const owner = this.store.find(OWNER_KIND, linkId);
+        const pid = owner && owner.task_id === taskId && owner.thread_id === link.native_session_id
+          && workbenchCodexProcesses().some(candidate => sameCodexProcess(candidate) && candidate.pid === owner.pid)
+          ? windowsLockOwner(link.native_session_id, owner.pid) : null;
+        if (pid === null) throw error;
+        autoReleased = true;
+        process.kill(pid, "SIGTERM");
+        await new Promise(resolve => setTimeout(resolve, 250));
+        live.client.close();
+        live = this.connection(taskId); this.pending.add(live); live.linkId = linkId; live.threadId = String(link.native_session_id);
+        await live.client.initialize();
+        await live.adapter.resume(live.threadId, { workspace: String(link.workspace), model: link.model as string | null, permission: link.permission as "ask" | "read_only" | "auto" | "full" });
+      }
       if (this.stopped) throw new Error("session manager is closed");
       live.linked = new CodexLinkedTurn(this.links, live.adapter, taskId, linkId);
       this.rememberOwner(live);
@@ -226,7 +243,17 @@ export class CodexWorkbenchSessions {
       return live.linked.status();
     } catch (error) {
       live?.client.close();
-      if (error instanceof Error && error.message.includes("already has an active writer")) throw new Error("该 Codex 会话正由其他进程使用，请先在原窗口结束运行并退出，再恢复会话", { cause: error });
+      if (!autoReleased && error instanceof Error && error.message.includes("already has an active writer")) {
+        // Workbench owns these listeners; a stale one from a previous Workbench
+        // process must be retired automatically, not presented as another CLI.
+        for (const candidate of workbenchCodexProcesses()) {
+          try { process.kill(Number(candidate.pid), "SIGTERM"); } catch { /* already gone */ }
+        }
+        throw new Error("该 Codex 会话正由其他进程使用，请先在原窗口结束运行并退出，再恢复会话", { cause: error });
+      }
+      if (autoReleased && error instanceof Error && error.message.includes("already has an active writer")) {
+        throw new Error("Craft 已尝试释放旧进程，但会话仍被占用；请重新连接。", { cause: error });
+      }
       throw error;
     }
     finally { if (live) this.pending.delete(live); this.opening.delete(linkId); }
@@ -247,7 +274,10 @@ export class CodexWorkbenchSessions {
     const owner = this.store.find(OWNER_KIND, linkId);
     if (link.provider !== "codex") return { available: false };
     if (this.live.get(linkId) && !this.live.get(linkId)!.closed) return { available: false };
-    if (owner && owner.task_id === taskId && owner.thread_id === link.native_session_id && sameCodexProcess(owner) && codexGroupHasSessionFile(owner, link.native_session_id)) return { available: true, pid: owner.pid, started: owner.started, source: "craft" };
+    if (owner && owner.task_id === taskId && owner.thread_id === link.native_session_id && codexGroupHasSessionFile(owner, link.native_session_id)
+      && workbenchCodexProcesses().some(candidate => sameCodexProcess(candidate) && candidate.pid === owner.pid)) {
+      return { available: true, pid: owner.pid, started: owner.started, source: "craft" };
+    }
     const external = externalCodexOwner(link.native_session_id);
     return external ? { available: true, ...external, source: "external" } : { available: false };
   }
@@ -260,7 +290,7 @@ export class CodexWorkbenchSessions {
     const owner = candidate.source === "craft" ? this.store.get(OWNER_KIND, linkId) : externalCodexOwner(link.native_session_id);
     if (!owner || owner.pid !== pid || owner.started !== started || (candidate.source === "craft" && (!sameCodexProcess(owner) || !codexGroupHasSessionFile(owner, owner.thread_id))) || (candidate.source === "external" && (owner.executable !== candidate.executable || owner.session_count !== candidate.session_count))) throw new Error("进程身份已变化，请重新检查会话");
     if ((link.turn_state === "starting" || link.turn_state === "running") && typeof link.operation_id === "string") this.links.markTurnUnknown(taskId, linkId, link.operation_id);
-    process.kill(candidate.source === "craft" && process.platform !== "win32" ? -pid : pid, "SIGTERM");
+    process.kill(process.platform === "win32" ? pid : -pid, "SIGTERM");
     for (let i = 0; i < 30; i++) {
       if (process.platform === "win32" && !(() => { try { process.kill(pid, 0); return true; } catch { return false; } })()) return { stopped: true };
       if (candidate.source === "craft" ? !sameCodexProcess(owner) && !codexGroupHasSessionFile(owner, owner.thread_id) : externalCodexOwner(link.native_session_id)?.pid !== pid) return { stopped: true };
