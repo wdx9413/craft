@@ -130,13 +130,18 @@ export class CodexWorkbenchSessions {
       if (!response || typeof response !== "object" || Array.isArray(response) || !Array.isArray((response as JsonObject).data)) throw new Error("Invalid Codex session list");
       const data = (response as JsonObject).data as unknown[];
       if (data.length > 50) throw new Error("Codex session list exceeds limit");
+      const seen = new Set<string>();
       const threads = data.filter((item): item is JsonObject => !!item && typeof item === "object" && !Array.isArray(item))
         .filter(item => typeof item.id === "string" && /^[a-zA-Z0-9_-]{1,128}$/u.test(item.id) && typeof item.cwd === "string" && item.cwd.length <= 4096 && item.ephemeral === false)
+        .filter(item => { const id = String(item.id); if (seen.has(id)) return false; seen.add(id); return true; })
         .map(item => {
           const linkId = `agent_session_${createHash("sha256").update(JSON.stringify(["codex", item.id])).digest("hex")}`;
           const link = this.store.find("workbench_agent_session_link", linkId);
           return { id: item.id, workspace: item.cwd, title: typeof item.name === "string" && item.name.trim() ? item.name.slice(0, 160) : typeof item.preview === "string" ? item.preview.slice(0, 160) : "Codex 会话", updated_at: item.updatedAt, linked_task_id: link?.task_id ?? null, linked_id: link?.id ?? null };
         });
+      const titleCounts = new Map<string, number>();
+      for (const thread of threads) titleCounts.set(String(thread.title), (titleCounts.get(String(thread.title)) ?? 0) + 1);
+      for (const thread of threads) if ((titleCounts.get(String(thread.title)) ?? 0) > 1) thread.title = `${thread.title} · ${String(thread.id).slice(0, 8)}`;
       const next = (response as JsonObject).nextCursor;
       if (next !== null && next !== undefined && (typeof next !== "string" || next.length > 4096)) throw new Error("Invalid Codex session cursor");
       return { threads, next_cursor: next ?? null };
