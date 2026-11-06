@@ -2402,6 +2402,60 @@
       "tests": ["tests/self-evolution-regression.test.ts"],
       "branches": false,
       "branchesNote": "Each of the 14 deterministic checks is a pass/fail assertion whose negative half is not exercised by design; line and function coverage stay at 100%."
+    },
+    {
+      "name": "claude-workbench-api",
+      "include": ["core/interfaces/claude-workbench-api.ts"],
+      "tests": ["tests/claude-workbench-api.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-approvals",
+      "include": ["core/interfaces/claude-workbench-approvals.ts"],
+      "tests": ["tests/claude-workbench-approvals.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-commands",
+      "include": ["core/interfaces/claude-workbench-commands.ts"],
+      "tests": ["tests/claude-workbench-commands.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-history",
+      "include": ["core/interfaces/claude-workbench-history.ts"],
+      "tests": ["tests/claude-workbench-history.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-models",
+      "include": ["core/interfaces/claude-workbench-models.ts"],
+      "tests": ["tests/claude-workbench-models.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "codex-linked-turn",
+      "include": ["core/interfaces/codex-linked-turn.ts"],
+      "tests": ["tests/codex-linked-turn.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "workbench-folder-picker",
+      "include": ["core/interfaces/workbench-folder-picker.ts"],
+      "tests": ["tests/workbench-folder-picker.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "workbench-queue-runner",
+      "include": ["core/interfaces/workbench-queue-runner.ts"],
+      "tests": ["tests/workbench-queue-runner.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "pilot-orchestrator",
+      "include": ["core/pilot-orchestrator.ts"],
+      "tests": ["tests/pilot-orchestrator.test.ts"],
+      "branches": true
     }
   ]
 }
