@@ -248,10 +248,15 @@ try {
   // the combiner round-robin-dropped nodes, orphaning cross-file edges. They now
   // share GRAPH_BUDGET and the persisted diagnostics confirm omitted_nodes=0,
   // omitted_edges=0, unresolved_endpoint_edges=0, budget_limited=false.
-  // Remaining gap: TypeScript checker reports unresolved_relations for calls
-  // through interface-typed service objects (prototype-assigned methods), so
-  // three golden callers are still not emitted. That is a type-binding problem
-  // in craft-codebase, not a graph-budget or merge problem.
+  // Remaining gap (narrowed 2026-11-06): a full-repo probe through
+  // analyzeTypeScript -> combineLanguageAnalyses emits three incoming calls to
+  // codebaseSymbolRead (including createActionHandlers), and an isolated
+  // workspaceOpen -> checkpoint -> codebaseAnalysisImport -> symbolFind ->
+  // callersFind round-trip returns the caller correctly. Yet the full-repo
+  // evaluation's callersFind returns none. So the loss is specific to the
+  // large index (edge-route/shard lookup or id de-duplication at scale), not
+  // the analyzer, the merge, or the query API. The target_node_id and full
+  // diagnostics tree below make the next investigation reproducible.
   // The raw diagnostics tree is the authoritative shape (nested languages[]
   // plus combined counters); keeping it verbatim avoids a lossy flattened copy.
   const relationDiagnostics = indexRecord.diagnostics ?? [];
