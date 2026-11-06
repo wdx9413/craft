@@ -959,14 +959,36 @@ test("compiler returns an explicit bounded partial graph, handles incomplete dec
     const ids = new Set((bounded.nodes as JsonObject[]).map(node => node.id));
     return ids.has(String(edge.from_node_id)) && ids.has(String(edge.to_node_id));
   }), true);
-  const repeatedCalls = `export function target() {}\nexport function caller() { ${Array.from({ length: 155_000 }, () => "target();").join(" ")} }`;
+  const repeatedCalls = `export function target() {}\nexport function caller() { ${Array.from({ length: 305_000 }, () => "target();").join(" ")} }`;
   const boundedEdges = analyzeTypeScript([file("calls.ts", repeatedCalls)]);
   assert.equal((boundedEdges.diagnostics as JsonObject).budget_limited, true);
   assert(Number((boundedEdges.diagnostics as JsonObject).omitted_edges) > 0);
-  assert((boundedEdges.edges as JsonObject[]).length <= 150_000);
-  assert.throws(() => analyzeTypeScript([file(`${"p".repeat(32_000_001)}.ts`, "")]), /file graph exceeds/);
+  assert((boundedEdges.edges as JsonObject[]).length <= 300_000);
+  // The combined-graph byte cap is 64 MiB, so a 32 MiB filename no longer
+  // trips the file-node reserve; assert the real per-unit guard instead (see
+  // exceedsTypeScriptFileUnitBudget below) rather than allocating 64 MiB.
+  assert.equal(exceedsTypeScriptFileUnitBudget(16_000_000, 0, 1), true);
   analyzeTypeScript(Array.from({ length: 2000 }, (_, n) => file(`cache${n}.ts`, "export {};")));
   assert.equal((analyzeTypeScript([file("new-cache.ts", "export {};")]).nodes as JsonObject[]).length, 1);
+});
+
+test("a checkpoint whose edges exceed 32 MiB keeps later files' cross-file calls", () => {
+  // Regression for the real Craft checkout: MAX_ANALYSIS_CHARS used to be
+  // 32 MiB while the importer accepted 64 MiB, so ~112k edges (including
+  // action-handlers -> codebaseSymbolRead) were silently omitted. Each file
+  // contributes many distinct calls; the final file's edge must survive.
+  const file = (path: string, content: string) => ({ path, content, digest: stableDigest([path, content]), language: "typescript" });
+  const files = Array.from({ length: 60 }, (_, index) => file(`src/bulk-${index}.ts`,
+    `export function target${index}() {}\n` + Array.from({ length: 800 }, (_, n) => `export function c${index}_${n}() { target${index}(); }`).join("\n")));
+  files.push(file("src/last.ts", "export function finalTarget() {}\nexport function finalCaller() { finalTarget(); }"));
+  const result = analyzeTypeScript(files);
+  const edges = result.edges as JsonObject[];
+  const finalTarget = (result.nodes as JsonObject[]).find((node) => node.name === "finalTarget");
+  assert.ok(finalTarget, "the last file's target symbol is emitted");
+  assert.ok(edges.some((edge) => edge.kind === "calls" && edge.to_node_id === finalTarget?.id),
+    "cross-file calls from the last analysed file survive the combined-graph budget");
+  assert.equal((result.diagnostics as JsonObject).budget_limited, false);
+  assert.equal(Number((result.diagnostics as JsonObject).omitted_edges), 0);
 });
 
 test("compiler reserves every checkpoint file node before declaration-heavy files exhaust graph limits", () => {

@@ -19,7 +19,10 @@ export type TypeScriptFileUnit = JsonObject & {
 export type TypeScriptAnalysisOptions = { readonly include_paths?: readonly string[]; readonly include_file_units?: boolean };
 // Include Craft's serialized graph schema so cached file units are rebuilt when
 // emitted symbol facts change even if the TypeScript compiler itself is unchanged.
-export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v5`;
+// v6: the combined-graph byte/edge budgets were aligned with the importer. Old
+// cached file units (v5) were built under the 32 MiB cap and are missing the
+// tail of the traversal, so they must be invalidated rather than reused.
+export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v6`;
 export function typeScriptFileUnitDigest(unit: Omit<TypeScriptFileUnit, "unit_digest"> | TypeScriptFileUnit): string {
   return stableDigest({ path: unit.path, source_digest: unit.source_digest, analyzer_version: unit.analyzer_version,
     external_module: unit.external_module, nodes: unit.nodes, edges: unit.edges, unresolved_relations: unit.unresolved_relations, budget_limited: unit.budget_limited });
@@ -27,7 +30,11 @@ export function typeScriptFileUnitDigest(unit: Omit<TypeScriptFileUnit, "unit_di
 const parsed = new Map<string, ts.SourceFile>();
 const programs = new Map<string, ts.Program>();
 const MAX_GRAPH_NODES = 60_000;
-const MAX_GRAPH_EDGES = 150_000;
+// The full Craft checkout emits ~196k relation edges (measured: 84k kept +
+// 112k omitted at the old 150k cap). Storage already accepts up to 300k, so a
+// lower analyzer cap truncated the tail of the traversal and lost cross-file
+// `calls` edges. Align the analyzer with the importer's cap.
+const MAX_GRAPH_EDGES = 300_000;
 let declarationKinds: Map<ts.SyntaxKind, string> | undefined;
 function declarationKindMap(): Map<ts.SyntaxKind, string> {
   return declarationKinds ??= new Map<ts.SyntaxKind, string>([
@@ -37,9 +44,10 @@ function declarationKindMap(): Map<ts.SyntaxKind, string> {
   [getTypeScript().SyntaxKind.EnumMember, "enum_member"], [getTypeScript().SyntaxKind.VariableDeclaration, "variable"], [getTypeScript().SyntaxKind.Parameter, "parameter"],
 ]);
 }
-// Analysis is persisted as bounded immutable graph shards, so the compiler can
-// retain a much larger checkpoint graph without creating a single giant row.
-const MAX_ANALYSIS_CHARS = 32_000_000;
+// The 32 MiB cap was the real truncation: 196k edges average ~200 bytes, so
+// the byte budget was exhausted long before the edge-count budget. The
+// importer accepts 64 MiB; align so later files' `calls` edges survive.
+const MAX_ANALYSIS_CHARS = 64 * 1024 * 1024;
 // Per-file facts are cached independently of the bounded combined graph. Keep
 // this cache bounded too, while allowing ordinary large repositories to reuse
 // unchanged units when the final importable graph reaches its separate cap.

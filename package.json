@@ -39,6 +39,7 @@
     "eval:knowledge": "node --experimental-strip-types capability/craft-eval/suite.ts knowledge",
     "eval:workflow": "node --experimental-strip-types capability/craft-eval/suite.ts workflow",
     "eval:datasec": "node --experimental-strip-types capability/craft-eval/suite.ts datasec",
+    "eval:self-evolution": "node --experimental-strip-types capability/craft-eval/suite.ts self_evolution",
     "experience:worker": "node --experimental-strip-types deploy/experience-learning/worker.ts",
     "learning:worker": "node --experimental-strip-types deploy/experience-learning/worker.ts",
     "eval:end-to-end": "node --experimental-strip-types capability/craft-eval/suite.ts end_to_end",
