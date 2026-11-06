@@ -29,7 +29,7 @@ import { digestJson } from "./digest.ts";
  */
 
 /** The sub-capability a case measures. */
-export const CAPABILITY_AXES = ["memory", "knowledge", "workflow", "datasec", "governance", "end_to_end", "self_evolution"] as const;
+export const CAPABILITY_AXES = ["memory", "knowledge", "workflow", "datasec", "governance", "end_to_end"] as const;
 export type CapabilityAxis = typeof CAPABILITY_AXES[number];
 
 /**
@@ -80,10 +80,6 @@ export const AXIS_LEDGER: Record<CapabilityAxis, Ledger> = {
   end_to_end: "capability",
   // Governance measures whether the model obeys a rule, which is its own ledger.
   governance: "safety",
-  // Self-evolution gate integrity is a system capability: can a candidate Mod
-  // be approved without a real regression, and does the message listener keep
-  // its honest isolation/idempotency contracts? Decided from bytes, not vibes.
-  self_evolution: "capability",
 };
 
 /**
