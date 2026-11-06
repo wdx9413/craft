@@ -704,6 +704,9 @@ if (inScope("self_evolution.unresolved_split_is_honest")) try {
     'fetch("https://example.invalid");',
     "(() => 1)();",
     "notDefined();",
+    "export function pick<T>(items: T[]): T { return items[0]; }",
+    "const table: Record<string, () => void> = {};",
+    "table['run']!();",
   ].join("\n");
   const analysis = analyzeTypeScript([{ path: "main.ts", content: source, digest: hash(source), language: "typescript" }]);
   const d = analysis.diagnostics as Json;
@@ -711,7 +714,11 @@ if (inScope("self_evolution.unresolved_split_is_honest")) try {
     + Number(d.unresolved_imports) + Number(d.unresolved_calls);
   const ok = Number(d.external_references) >= 4 && Number(d.inline_invocations) >= 1
     && Number(d.unresolved_imports) === 1 && Number(d.unresolved_heritage) === 1
-    && Number(d.unresolved_calls) === 1 && Number(d.unresolved_relations) === internal;
+    && Number(d.unresolved_calls) === 1 && Number(d.unresolved_relations) === internal
+    // Generic parameters bind locally and a computed callee has no declaration
+    // to point at; neither may be reported as a broken internal relation.
+    && Number(d.local_type_parameters) >= 1 && Number(d.computed_invocations) >= 1
+    && Number(d.unresolved_type_references) === 0;
   equals("self_evolution.unresolved_split_is_honest", ok ? "split" : `bad:${JSON.stringify(d)}`, "split");
 } catch (error) { unobserved("self_evolution.unresolved_split_is_honest", (error as Error).message); }
 

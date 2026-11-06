@@ -43,3 +43,30 @@ test("qualified builtin type names are external references", () => {
   assert(diagnostics.external_references as number >= 1, JSON.stringify(diagnostics));
   assert.equal(diagnostics.unresolved_type_references, 0);
 });
+
+test("generic parameters and runtime-computed callees are not internal gaps", () => {
+  const source = [
+    "export function first<T>(items: T[]): T { return items[0]; }",
+    "const table: Record<string, () => void> = {};",
+    "table['run']!();",
+    "(undefined as unknown as (() => void) ?? (() => 1))();",
+  ].join("\n");
+  const diagnostics = analyzeTypeScript([file("generic.ts", source)]).diagnostics as JsonObject;
+  assert(diagnostics.local_type_parameters as number >= 1, JSON.stringify(diagnostics));
+  assert(diagnostics.computed_invocations as number >= 1, JSON.stringify(diagnostics));
+  // `T` is bound locally and a computed callee has no declaration to point at:
+  // neither may be reported as a broken internal relation.
+  assert.equal(diagnostics.unresolved_type_references, 0);
+});
+
+test("a non-null asserted method call resolves to the same target as the plain call", () => {
+  const api = file("api.ts", "export interface Api { launch(): void }\nexport declare const svc: Api;\n");
+  const caller = file("caller.ts", 'import { svc } from "./api";\nexport function go() { svc.launch!(); }\n');
+  const analysis = analyzeTypeScript([api, caller]);
+  const launch = (analysis.nodes as JsonObject[]).find((node) => node.name === "launch");
+  const go = (analysis.nodes as JsonObject[]).find((node) => node.name === "go");
+  assert(launch && go, JSON.stringify((analysis.nodes as JsonObject[]).map((node) => node.name)));
+  assert((analysis.edges as JsonObject[]).some((edge) => edge.kind === "calls"
+    && edge.from_node_id === go!.id && edge.to_node_id === launch!.id),
+    "svc.launch!() must resolve like svc.launch()");
+});

@@ -101,4 +101,6 @@ node --check workbench/app.js; node --check workbench/mod-pages.js; node --check
 - `inline_invocations` 统计 `(() => …)()` 这类没有独立声明的立即调用。
 - `unresolved_call_samples` 给出不超过 20 个未解析调用名，便于定位。
 
-实测（craft 自身仓库，1131 个 TS 文件）：`unresolved_relations` 125,980 → **1,210**，`external_references` 124,079，`inline_invocations` 47。评测 `evaluation_pass` 仍为 true 且 precision/recall 全 1.0，说明这不是靠放宽门槛。
+`local_type_parameters`（泛型参数 `T`/`K` 本地绑定）、`computed_invocations`（`a[b]()`、`(a ?? b)()` 等运行时调用）与 `inline_invocations`（`(() => …)()`）也单独计数；`!` 非空断言包裹的方法调用按普通属性调用解析。
+
+实测（craft 自身仓库，1131 个 TS 文件）：`unresolved_relations` 125,980 → **218**（类型引用 / 继承 / 导入均归零，仅剩 218 条同名歧义调用），`external_references` 124,863，`local_type_parameters` 112，`computed_invocations` 128，`inline_invocations` 47。评测 `evaluation_pass` 仍为 true 且 precision/recall 全 1.0，说明这不是靠放宽门槛。
