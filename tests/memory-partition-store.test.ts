@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import fsDefault from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, type PathLike } from "node:fs";
 import { linkDirectorySync, linkFileSync, removeLinkSync, supportsFileSymlinks } from "./symlink-support.ts";
 import { syncBuiltinESMExports } from "node:module";
@@ -62,6 +64,9 @@ test("CraftStore keeps Memory records in the database for their scope and can re
     ];
     for (const record of records) store.create("memory_ledger", record.id, { ...record, status: "active", content: `private body for ${record.id}` });
     const internals = store as any;
+    const taskFile = internals.memoryDatabaseFile({ kind: "task", id: "task:unsafe" }, false);
+    assert.match(taskFile, /memory-tasks\/task--[a-f0-9]{32}\/memory\.db$/u);
+    assert.doesNotMatch(taskFile, /task:unsafe/u);
     assert.equal(internals.memoryDatabaseForRead({ kind: "global", id: "global" }).file,
       internals.partitionDatabaseFile("memory", { kind: "global", id: "global" }, false));
 
@@ -546,17 +551,48 @@ test("legacy Memory migration surfaces unexpected retired-file cleanup errors", 
     initial.close();
 
     reopening = new CraftStore(paths);
-    const readCompat = reopening.contentStore.readCompatSync.bind(reopening.contentStore);
-    let legacyReads = 0;
-    reopening.contentStore.readCompatSync = ((candidate, expectedScope) => {
-      const result = readCompat(candidate, expectedScope);
-      // Swap on the first read so whichever read follows must surface the error;
-      // the number of reads differs between platforms.
-      if (candidate.path === legacyPath && ++legacyReads === 1) { unlinkSync(legacyPath); mkdirSync(legacyPath); }
+    const write = reopening.contentStore.writeSync.bind(reopening.contentStore);
+    reopening.contentStore.writeSync = input => {
+      const result = write(input);
+      if (input.record_id === "cleanup-error") { unlinkSync(legacyPath); mkdirSync(legacyPath); }
       return result;
-    }) as typeof reopening.contentStore.readCompatSync;
-    await assert.rejects(reopening.open(), /EISDIR|operation not permitted|is a directory|bounded regular file/iu);
+    };
+    await assert.rejects(reopening.open(), /EISDIR|operation not permitted|is a directory/iu);
   } finally { reopening?.close(); initial.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("legacy Memory migration tolerates an already-removed retired content file", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-memory-migration-cleanup-missing-"));
+  const paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  try {
+    const content = store.contentStore.writeSync({ kind: "memory", record_id: "cleanup-missing", version: 1, scope: "global:global",
+      status: "active", sensitivity: "internal", source_id: "source", body: "legacy content retained in the new partition" });
+    const legacyPath = join(paths.memoryContentDir, "legacy-cleanup-missing.v1.md");
+    mkdirSync(dirname(legacyPath), { recursive: true });
+    renameSync(content.path, legacyPath);
+    const legacyRef = { ...content, path: legacyPath };
+    store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('memory_ledger','cleanup-missing',1,?,?,?)")
+      .run(JSON.stringify({ scope: { kind: "global", id: "global" }, status: "active", sensitivity: "internal", source_id: "source", content_ref: legacyRef }),
+        "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+
+    const write = store.contentStore.writeSync.bind(store.contentStore);
+    let removedBeforeRetirement = false;
+    store.contentStore.writeSync = input => {
+      const result = write(input);
+      if (input.record_id === "cleanup-missing") {
+        unlinkSync(legacyPath);
+        removedBeforeRetirement = true;
+      }
+      return result;
+    };
+    try { (store as unknown as { migrateLegacyMemoryRecords(): void }).migrateLegacyMemoryRecords(); }
+    finally { store.contentStore.writeSync = write; }
+
+    assert.equal(removedBeforeRetirement, true);
+    assert.equal(existsSync(legacyPath), false);
+    assert.equal(store.get("memory_ledger", "cleanup-missing").content, "legacy content retained in the new partition");
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
 test("a failed outer transaction removes staged Memory rows and never publishes their directory entry", async () => {
@@ -1250,6 +1286,64 @@ test("ready Memory partitions can be opened and read while another connection ow
     reader?.close();
     try { writer.exec("ROLLBACK"); } catch { /* closed or already rolled back */ }
     writer.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Memory writes retry a partition lock after releasing the publication transaction", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-memory-partition-write-retry-"));
+  const paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  const seedId = "partition-lock-seed";
+  store.create("memory_candidate", seedId, { scope: { kind: "global", id: "global" }, status: "candidate", content: "seed" });
+  const header = store.database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1")
+    .get("memory_candidate", seedId) as { payload_json: string };
+  const partitionFile = (JSON.parse(header.payload_json) as JsonObject)._memory_partition as JsonObject;
+  const child = spawn(process.execPath, ["-e", `const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.argv[1]);
+    db.exec('BEGIN IMMEDIATE');process.stdout.write('ready');setTimeout(()=>{db.exec('ROLLBACK');db.close();},60);`, partitionFile.file as string],
+  { stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    await once(child.stdout!, "data");
+    const created = store.create("memory_candidate", "partition-lock-retry", {
+      scope: { kind: "global", id: "global" }, status: "candidate", content: "retry after release",
+    });
+    assert.equal(created.content, "retry after release");
+    assert.equal(await new Promise<number | null>(resolve => child.once("exit", resolve)), 0);
+    assert.equal(store.get("memory_candidate", "partition-lock-retry").content, "retry after release");
+  } finally {
+    if (child.exitCode === null) child.kill();
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Memory partition write retry budget is bounded and leaves failed creates retryable", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-memory-partition-write-retry-budget-"));
+  const paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  store.create("memory_candidate", "partition-budget-seed", { scope: { kind: "global", id: "global" }, content: "seed" });
+  const header = store.database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1")
+    .get("memory_candidate", "partition-budget-seed") as { payload_json: string };
+  const partitionFile = (JSON.parse(header.payload_json) as JsonObject)._memory_partition as JsonObject;
+  const child = spawn(process.execPath, ["-e", `const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.argv[1]);
+    db.exec('BEGIN IMMEDIATE');process.stdout.write('ready');setTimeout(()=>{db.exec('ROLLBACK');db.close();},250);`, partitionFile.file as string],
+  { stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    await once(child.stdout!, "data");
+    assert.throws(() => store.create("memory_candidate", "partition-budget-retry", {
+      scope: { kind: "global", id: "global" }, content: "retry after unlock",
+    }), error => {
+      const details = (error as { safeDetails?: { database_role?: string; phase?: string; retryable?: boolean } }).safeDetails;
+      return details?.database_role === "capability_partition" && details.phase === "transaction_begin" && details.retryable === true;
+    });
+    assert.equal(store.find("memory_candidate", "partition-budget-retry"), null);
+    assert.equal(await new Promise<number | null>(resolve => child.once("exit", resolve)), 0);
+    assert.equal(store.create("memory_candidate", "partition-budget-retry", {
+      scope: { kind: "global", id: "global" }, content: "retry after unlock",
+    }).content, "retry after unlock");
+  } finally {
+    if (child.exitCode === null) child.kill();
+    store.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

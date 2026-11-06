@@ -1,3 +1,11 @@
+## 0.16.0
+
+- Keep migration preflight pagination on one read snapshot while WAL writers continue; a later scan sees committed changes.
+- Recheck Trace sharding routes under the primary writer lock so concurrent legacy migration cannot split writes between the central database and shards.
+- Retry journal-mode initialization and capability-partition write contention only for diagnosed retryable SQLite busy failures; failed writes retain bounded, observable outcomes.
+- Add concurrency, restart, cleanup, and migration regressions for the storage boundary. Store atomicity and migration coverage gates remain at 100%.
+- Local deterministic evaluations do not establish production-scale latency or user benefit.
+
 ## 0.14.0
 
 - Project data inventory and migration are bounded, preflight-bound and recoverable; legacy aliases with ambiguous ownership are diagnosed instead of selected by insertion order.

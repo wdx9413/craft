@@ -190,13 +190,69 @@ test("legacy central Traces keep their existing write path", async () => {
     const now = new Date().toISOString();
     store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run("trace", "legacy-trace", 1, JSON.stringify({ status: "completed", next_sequence: 0, event_count: 0, started_at: "2020-01-01T00:00:00.000Z" }), now, now);
+    store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("trace_event", "legacy-existing-event", 1, JSON.stringify({ trace_id: "legacy-trace", sequence: 1 }), now, now);
     const event = store.create("trace_event", "legacy-event", { trace_id: "legacy-trace", sequence: 1 });
     assert.equal(event.version, 1);
+    assert.throws(() => store.create("trace_event", "legacy-existing-event", { trace_id: "legacy-trace", sequence: 2 }), /already exists/u);
     assert.equal(store.find("trace_event", "legacy-event")?.trace_id, "legacy-trace");
-    assert.equal(store.database.prepare("SELECT count(*) n FROM records WHERE kind='trace_event'").get()?.n, 1);
-    assert.equal(store.listTraceChildren("trace_event", "legacy-trace").length, 1);
+    assert.equal(store.save("trace_event", "legacy-existing-event", { trace_id: "legacy-trace", sequence: 1, summary: "saved" }).version, 2);
+    assert.equal(store.updateIfVersion("trace", "legacy-trace", 1, { status: "updated" }).version, 2);
+    store.traceTransaction("legacy-trace", () => {
+      assert.equal(store.save("trace", "legacy-trace", { status: "completed" }).version, 3);
+    });
+    assert.throws(() => store.updateIfVersion("trace", "legacy-trace", 1, { status: "stale" }), /Concurrent update detected/u);
+    assert.equal(store.database.prepare("SELECT count(*) n FROM records WHERE kind='trace_event'").get()?.n, 3);
+    assert.equal(store.listTraceChildren("trace_event", "legacy-trace").length, 2);
+    assert.equal(store.find("trace", "legacy-trace")?.status, "completed");
+    assert.equal(store.traceShards.find("trace", "legacy-trace"), null);
     assert.equal(store.listTraceRetentionCandidates("9999-01-01T00:00:00.000Z", 10).some(row => row.id === "legacy-trace"), true);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Trace writes recheck the legacy route after acquiring the central writer", async () => {
+  for (const action of ["create", "save", "update", "transaction"] as const) {
+    const root = await mkdtemp(join(tmpdir(), `craft-trace-route-race-${action}-`));
+    const store = await new CraftStore(craftPaths(root)).open();
+    const now = new Date().toISOString();
+    const originalTransaction = store.transaction.bind(store);
+    let migrated = false;
+    try {
+      const insert = store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)");
+      insert.run("trace", "route-race", 1, JSON.stringify({ status: "running" }), now, now);
+      if (action === "save") insert.run("trace_event", "route-race-event", 1, JSON.stringify({ trace_id: "route-race", sequence: 1 }), now, now);
+      store.transaction = ((operation) => {
+        if (!migrated) {
+          migrated = true;
+          const rows = store.database.prepare(`SELECT kind,id,version,payload_json,created_at,updated_at FROM records
+            WHERE (kind='trace' AND id=?) OR json_extract(payload_json,'$.trace_id')=?`).all("route-race", "route-race") as TraceRecordRow[];
+          store.traceShards.importLegacy("route-race", rows, []);
+          store.database.exec("BEGIN IMMEDIATE");
+          try {
+            const remove = store.database.prepare("DELETE FROM records WHERE kind=? AND id=? AND version=?");
+            for (const row of rows) remove.run(row.kind, row.id, row.version);
+            store.database.exec("COMMIT");
+          } catch (error) { store.database.exec("ROLLBACK"); throw error; }
+        }
+        return originalTransaction(operation);
+      }) as typeof store.transaction;
+
+      if (action === "create") store.create("trace_event", "route-race-event", { trace_id: "route-race", sequence: 1 });
+      else if (action === "save") store.save("trace_event", "route-race-event", { trace_id: "route-race", sequence: 1, summary: "updated" });
+      else if (action === "update") store.updateIfVersion("trace", "route-race", 1, { status: "completed" });
+      else {
+        let calls = 0;
+        store.traceTransaction("route-race", () => { calls += 1; store.save("trace", "route-race", { status: "completed" }, 2); });
+        assert.equal(calls, 1);
+      }
+
+      assert.equal(store.database.prepare("SELECT count(*) n FROM records WHERE kind IN ('trace','trace_event')").get()?.n, 0);
+      assert.ok(store.find(action === "update" || action === "transaction" ? "trace" : "trace_event",
+        action === "update" || action === "transaction" ? "route-race" : "route-race-event"));
+      if (action === "update" || action === "transaction") assert.equal(store.find("trace", "route-race")?.status, "completed");
+      if (action === "save") assert.equal(store.find("trace_event", "route-race-event")?.version, 2);
+    } finally { store.transaction = originalTransaction; store.close(); await rm(root, { recursive: true, force: true }); }
+  }
 });
 
 test("legacy Trace rows override a duplicate shard projection and retention sorts missing event times", async t => {

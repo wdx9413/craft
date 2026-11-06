@@ -91,14 +91,16 @@ export class StorageMigrationPreflightReader {
   private readonly kinds: string[];
   private readonly unpartitionedKnowledgeVersions: number;
   private readonly codebaseCheckpointVersions: number;
-  private readonly dataVersion: number;
   private closed = false;
 
   constructor(paths: CraftPaths) {
     this.paths = paths;
     this.database = new DatabaseSync(paths.databaseFile, { readOnly: true });
+    let snapshotStarted = false;
     try {
-      const version = this.currentDataVersion();
+      this.database.exec("BEGIN");
+      snapshotStarted = true;
+      this.database.prepare("SELECT 1 FROM records LIMIT 1").get();
       const inventory = projectAliasInventory(this.database);
       this.aliases = inventory.roots;
       this.unavailableAliases = inventory.unavailable;
@@ -113,9 +115,8 @@ export class StorageMigrationPreflightReader {
               OR (json_extract(payload_json,'$.source_type')='host_model_review'
                 AND json_extract(payload_json,'$.metadata.review_id') GLOB 'knowledge_host_review_*'))))))`);
       this.codebaseCheckpointVersions = this.count("SELECT COUNT(*) n FROM records WHERE kind='workspace_checkpoint'");
-      if (this.currentDataVersion() !== version) throw new Error("Storage preflight database changed; restart inventory");
-      this.dataVersion = version;
     } catch (error) {
+      if (snapshotStarted) this.database.exec("ROLLBACK");
       this.database.close();
       this.closed = true;
       throw error;
@@ -126,17 +127,12 @@ export class StorageMigrationPreflightReader {
     return Number((this.database.prepare(sql).get() as { n: number }).n);
   }
 
-  private currentDataVersion(): number {
-    return Number((this.database.prepare("PRAGMA data_version").get() as { data_version: number }).data_version);
-  }
-
   /** Read one bounded page while reusing the scan's scope mapping and connection. */
   readPage(args: { max_records?: number; cursor?: string } = {}): {
     entries: StoragePreflightEntry[]; examined: number; has_more: boolean; next_cursor: string | null;
     unpartitioned_knowledge_versions: number; codebase_checkpoint_versions: number;
   } {
     if (this.closed) throw new Error("Storage preflight reader is closed");
-    if (this.currentDataVersion() !== this.dataVersion) throw new Error("Storage preflight database changed; restart inventory");
     const limit = args.max_records ?? 100;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error("max_records must be between 1 and 500");
     const after = cursorKey(args.cursor);
@@ -235,7 +231,6 @@ export class StorageMigrationPreflightReader {
         project_scope_digest: scope?.kind === "project" && typeof scope.id === "string" ? stableDigest(scope.id) : null });
     }
     const last = page.at(-1);
-    if (this.currentDataVersion() !== this.dataVersion) throw new Error("Storage preflight database changed; restart inventory");
     const hasMore = rows.length > limit;
     const nextCursor = hasMore && last ? Buffer.from(JSON.stringify([last.kind, last.id, last.version])).toString("base64url") : null;
     return { entries, examined: entries.length, has_more: hasMore, next_cursor: nextCursor,
@@ -245,8 +240,11 @@ export class StorageMigrationPreflightReader {
 
   close(): void {
     if (this.closed) return;
-    this.database.close();
-    this.closed = true;
+    try { this.database.exec("ROLLBACK"); }
+    finally {
+      this.database.close();
+      this.closed = true;
+    }
   }
 }
 

@@ -155,6 +155,19 @@ function ensureJournalMode(database: DatabaseSync): void {
   if (current !== "wal") database.exec("PRAGMA journal_mode=WAL;");
 }
 
+async function ensurePrimaryJournalMode(database: DatabaseSync): Promise<void> {
+  let delayMs = 10;
+  for (let attempt = 0; ; attempt++) {
+    try { ensureJournalMode(database); return; }
+    catch (error) {
+      const failure = storageFailure(error, database, "primary", "journal_mode") as { safeDetails?: { retryable?: boolean } };
+      if (failure.safeDetails?.retryable !== true || attempt >= 7) throw failure;
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      delayMs = Math.min(delayMs * 2, 80);
+    }
+  }
+}
+
 /** Current databases need only read checks; reserve a writer lock for real initialization or repair. */
 function ensureCurrentSchema(database: DatabaseSync): void {
   if (!tableExists(database, "meta")) { applyMigrations(database); return; }
@@ -221,7 +234,7 @@ export class CraftStore {
     try {
       // Concurrent Hosts must wait before the journal-mode change takes a lock.
       database.exec(`PRAGMA busy_timeout=${sqliteBusyTimeoutMs()}; PRAGMA foreign_keys=ON;`);
-      ensureJournalMode(database);
+      await ensurePrimaryJournalMode(database);
       // Preserve an exact pre-migration copy before changing an existing
       // database. Future-schema databases are not touched and fail closed.
       if (existed && storedSchemaVersion(database) < SCHEMA_VERSION) {
@@ -496,19 +509,26 @@ export class CraftStore {
     if (this.#transactionDepth > 0 || this.#readSnapshotDepth > 0) return operation(database);
     database.exec("BEGIN DEFERRED");
     this.#readSnapshotDepth += 1;
+    let result: T;
     try {
-      const result = operation(database);
+      result = operation(database);
       database.exec("COMMIT");
-      return result;
     } catch (error) {
+      this.#readSnapshotDepth -= 1;
       database.exec("ROLLBACK");
       throw error;
-    } finally { this.#readSnapshotDepth -= 1; }
+    }
+    this.#readSnapshotDepth -= 1;
+    return result;
   }
 
   /** Keep all writes for one Trace on its own WAL writer, while old Traces stay on the legacy database. */
   traceTransaction<T>(traceId: string, operation: () => T): T {
-    return this.legacyTrace(traceId) ? this.transaction(() => operation()) : this.traceShards.transaction(traceId, operation);
+    if (!this.legacyTrace(traceId)) return this.traceShards.transaction(traceId, operation);
+    const routed = this.transaction(() => this.legacyTrace(traceId)
+      ? { legacy: true as const, value: operation() }
+      : { legacy: false as const });
+    return routed.legacy ? routed.value : this.traceShards.transaction(traceId, operation);
   }
 
   private legacyTrace(traceId: string): boolean {
@@ -519,6 +539,16 @@ export class CraftStore {
     if (this.database.prepare("SELECT 1 FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id)) return true;
     const traceId = kind === "trace" || kind === "trace_archive" ? id : payload.trace_id;
     return typeof traceId === "string" && this.legacyTrace(traceId);
+  }
+
+  /** Recheck a legacy Trace route while holding the primary writer before a direct record write. */
+  private writeTraceRecord<T>(kind: string, id: string, payload: JsonObject,
+    writeLegacy: (database: DatabaseSync) => T, writeShard: () => T): T {
+    if (!this.traceWriteIsLegacy(kind, id, payload)) return writeShard();
+    const routed = this.transaction(database => this.traceWriteIsLegacy(kind, id, payload)
+      ? { legacy: true as const, value: writeLegacy(database) }
+      : { legacy: false as const });
+    return routed.legacy ? routed.value : writeShard();
   }
 
   private cleanupMemoryRows(rows: PartitionRow[]): void {
@@ -647,7 +677,9 @@ export class CraftStore {
       if (kind === "evolution_cycle" && existingPointer?.domain === "evolution") return this.saveEvolutionPartition(id, payload, version);
       return this.writeMemory(kind, id, payload, "save", undefined, version);
     }
-    if (TRACE_SHARDED_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) return this.traceShards.save(kind, id, payload, version);
+    if (TRACE_SHARDED_KINDS.has(kind)) return this.writeTraceRecord(kind, id, payload,
+      database => { this.assertPartitionDomain(kind, id, payload); return this.insert(database, { kind, id, payload, version }); },
+      () => this.traceShards.save(kind, id, payload, version));
     if (CODEBASE_GRAPH_KINDS.has(kind) && this.codebaseShards.raw(kind, id)
       && !this.database.prepare("SELECT 1 FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id))
       return this.codebaseShards.save(kind, id, payload, version);
@@ -659,7 +691,13 @@ export class CraftStore {
 
   create(kind: string, id: string, payload: JsonObject): JsonObject {
     if (this.memoryScope(kind, { ...payload, id })) return this.writeMemory(kind, id, payload, "create");
-    if (TRACE_SHARDED_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) return this.traceShards.create(kind, id, payload);
+    if (TRACE_SHARDED_KINDS.has(kind)) return this.writeTraceRecord(kind, id, payload,
+      database => {
+        const existing = database.prepare("SELECT 1 present FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id);
+        if (existing) throw new Error(`${kind} already exists: ${id}`);
+        return this.insert(database, { kind, id, payload, version: 1 });
+      },
+      () => this.traceShards.create(kind, id, payload));
     if (CODEBASE_GRAPH_KINDS.has(kind) && this.codebaseShards.raw(kind, id)) throw new Error(`${kind} already exists: ${id}`);
     return this.transaction((database) => {
       const existing = database.prepare("SELECT 1 present FROM records WHERE kind=? AND id=? LIMIT 1")
@@ -725,13 +763,20 @@ export class CraftStore {
   updateIfVersion(kind: string, id: string, expectedVersion: number, payload: JsonObject): JsonObject {
     this.assertPartitionDomain(kind, id, payload);
     if (this.memoryScope(kind, { ...payload, id })) return this.writeMemory(kind, id, payload, "save", expectedVersion);
-    if (TRACE_SHARDED_KINDS.has(kind) && !this.traceWriteIsLegacy(kind, id, payload)) {
+    if (TRACE_SHARDED_KINDS.has(kind)) {
       const traceId = kind === "trace" || kind === "trace_archive" ? id : String(payload.trace_id ?? "");
-      return this.traceShards.transaction(traceId, () => {
+      return this.writeTraceRecord(kind, id, payload, database => {
+        this.assertPartitionDomain(kind, id, payload);
+        const current = Number((database.prepare(
+          "SELECT COALESCE(MAX(version),0) AS version FROM records WHERE kind=? AND id=?",
+        ).get(kind, id) as { version: number }).version);
+        if (current !== expectedVersion) throw new Error(`Concurrent update detected for ${kind}: ${id}`);
+        return this.insert(database, { kind, id, payload, version: current + 1 });
+      }, () => this.traceShards.transaction(traceId, () => {
         const current = this.traceShards.find(kind, id, undefined, traceId);
         if (Number(current?.version ?? 0) !== expectedVersion) throw new Error(`Concurrent update detected for ${kind}: ${id}`);
         return this.traceShards.save(kind, id, payload, expectedVersion + 1);
-      });
+      }));
     }
     if (CODEBASE_GRAPH_KINDS.has(kind) && !this.database.prepare("SELECT 1 FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id)) {
       const current = this.codebaseShards.raw(kind, id);
@@ -1636,7 +1681,8 @@ export class CraftStore {
     return pointer?.domain === "memory" ? { file: pointer.file, scope: pointer.scope } : null;
   }
 
-  private writeMemory(kind: string, id: string, payload: JsonObject, mode: "create" | "save", expectedVersion?: number, version?: number): JsonObject {
+  private writeMemory(kind: string, id: string, payload: JsonObject, mode: "create" | "save", expectedVersion?: number,
+    version?: number, partitionRetry = 0): JsonObject {
     const domain = this.partitionDomain(kind, payload)!;
     const current = this.find(kind, id, undefined, false);
     const currentPointer = mode === "save" && current ? this.partitionPointer(kind, id) : null;
@@ -1652,7 +1698,7 @@ export class CraftStore {
     const requiredVersion = mode === "save" ? expectedVersion ?? payloadVersion : expectedVersion;
     if (requiredVersion !== undefined && Number(current?.version ?? 0) !== requiredVersion) throw new Error(`Concurrent update detected for ${kind}: ${id}`);
     const { database: partition, file } = this.memoryDatabase(scope, domain);
-    return this.transaction(main => {
+    const persist = () => this.transaction(main => {
       // Acquire the publication lock before staging. If BEGIN times out, no
       // partition state has changed. A crash after staging leaves an immutable
       // unpublished row that an identical retry can safely adopt under this lock.
@@ -1688,6 +1734,15 @@ export class CraftStore {
         .run(kind, id, Number(saved.version), JSON.stringify(header), String(saved.created_at), String(saved.updated_at));
       return saved;
     });
+    try { return persist(); }
+    catch (error) {
+      const details = (error as { safeDetails?: Record<string, unknown> }).safeDetails;
+      if (partitionRetry >= 3 || details?.database_role !== "capability_partition"
+        || details.phase !== "transaction_begin" || details.retryable !== true) throw error;
+      // ponytail: three 25 ms retries (75 ms max), only after the primary publication transaction rolls back.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)), 0, 0, 25);
+      return this.writeMemory(kind, id, payload, mode, expectedVersion, version, partitionRetry + 1);
+    }
   }
 
   /** Bounded keyset scan for background asset maintenance, including historical revisions. */

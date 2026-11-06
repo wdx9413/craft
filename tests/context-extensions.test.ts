@@ -364,6 +364,34 @@ test("Context migration backs up and moves verified versions idempotently", asyn
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("Context migration rejects malformed pages, wrong owners, and unverifiable current partitions", async () => {
+  const { store, root } = await openStore();
+  try {
+    const entry = { kind: "context_ephemeral_index", id: "invalid-input", version: 1 };
+    assert.throws(() => (store as any).partitionDatabaseFile("context", { kind: "task", id: "task" }), /Host session scope/u);
+    assert.throws(() => store.migrateLegacyContextVersions(Array.from({ length: 501 }, () => entry)), /page is too large/u);
+    assert.throws(() => store.migrateLegacyContextVersions([{ ...entry, kind: "unknown" }]), /identity is invalid/u);
+    assert.throws(() => store.migrateLegacyContextVersions([{ ...entry, id: "" }]), /identity is invalid/u);
+    assert.throws(() => store.migrateLegacyContextVersions([{ ...entry, version: 0 }]), /identity is invalid/u);
+
+    const wrongOwner = { session_id: "wrong-owner", session_host: "codex", session_scope_id: "session:wrong-owner",
+      _memory_partition: { file: join(root, "memory", "memory.db"), scope: { kind: "global", id: "global" } } };
+    store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run(entry.kind, "wrong-owner", 1, JSON.stringify(wrongOwner), "2020-01-01", "2020-01-01");
+    assert.throws(() => store.migrateLegacyContextVersions([{ ...entry, id: "wrong-owner" }]), /wrong owner/u);
+
+    const current = new ContextExtensionsKernel(store).checkpointResume({ session_id: "bad-current", session_host: "codex" });
+    const currentId = String(current.resume_id);
+    const row = store.database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=1")
+      .get("context_resume_snapshot", currentId) as { payload_json: string };
+    const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+    payload.context_payload_digest = "sha256:incorrect";
+    store.database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=1")
+      .run(JSON.stringify(payload), "context_resume_snapshot", currentId);
+    assert.throws(() => store.migrateLegacyContextVersions([{ kind: "context_resume_snapshot", id: currentId, version: 1 }]), /not verified/u);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("Context migration command preflights, applies, and reports unbound rows", async () => {
   const { store, root } = await openStore();
   try {
@@ -454,6 +482,44 @@ test("Context migration preserves central data when a staged version conflicts",
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("Context migration detects a changed source and retries a missed central pointer CAS", async () => {
+  const { store, root } = await openStore();
+  const entry = { kind: "context_ephemeral_index", id: "cas-retry", version: 1 };
+  const payload = { session_id: "cas-retry", session_host: "codex", session_scope_id: sessionStorageScopeId("codex", "cas-retry"), source: "docs" };
+  try {
+    const insert = store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)");
+    insert.run(entry.kind, entry.id, entry.version, JSON.stringify(payload), "2020-01-01", "2020-01-01");
+    const transaction = store.transaction.bind(store);
+    let changed = false;
+    (store as any).transaction = (operation: Parameters<typeof store.transaction>[0]) => {
+      if (!changed) {
+        changed = true;
+        store.database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=1")
+          .run(JSON.stringify({ ...payload, source: "updated" }), entry.kind, entry.id);
+      }
+      return transaction(operation);
+    };
+    assert.throws(() => store.migrateLegacyContextVersions([entry]), /source changed concurrently/u);
+    (store as any).transaction = transaction;
+    store.database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=1")
+      .run(JSON.stringify(payload), entry.kind, entry.id);
+
+    const originalPrepare = DatabaseSync.prototype.prepare;
+    try {
+      DatabaseSync.prototype.prepare = function (sql: string) {
+        const statement = originalPrepare.call(this, sql);
+        if (this === store.database && sql.startsWith("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=? AND payload_json=?"))
+          return { run: () => ({ changes: 0 }) } as ReturnType<typeof originalPrepare>;
+        return statement;
+      };
+      assert.throws(() => store.migrateLegacyContextVersions([entry]), /source changed concurrently/u);
+    } finally { DatabaseSync.prototype.prepare = originalPrepare; }
+    const retried = store.migrateLegacyContextVersions([entry]);
+    assert.deepEqual(retried, { migrated: 1, already_current: 0 });
+    assert.equal(contextStoragePreflight(craftPaths(root)).records[0]?.status, "partition_digest_verified");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("Context migration backup restores missing versions without overwriting changed data", async () => {
   const { store, root } = await openStore();
   try {
@@ -509,6 +575,52 @@ test("Context migration backup restores missing versions without overwriting cha
     assert.throws(() => store.restoreContextMigrationBackup(name), /backup digest mismatch/u);
     assert.notEqual(run().status, 0);
     assert.throws(() => store.restoreContextMigrationBackup("../bad"), /backup name/u);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Context migration restore rejects malformed backup shapes and unsafe paths", async () => {
+  const { store, root } = await openStore();
+  try {
+    const scope = sessionStorageScopeId("codex", "invalid-backup");
+    const entry = { kind: "context_ephemeral_index", id: "backup-source", version: 1 };
+    const payload = { session_id: "invalid-backup", session_host: "codex", session_scope_id: scope, source: "docs" };
+    store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run(entry.kind, entry.id, entry.version, JSON.stringify(payload), "2020-01-01", "2020-01-01");
+    store.migrateLegacyContextVersions([entry]);
+    const directory = join(root, "backups", "context-migration", "backups");
+    const originalName = (await readdir(directory)).find(name => name.endsWith(".json"))!;
+    const original = JSON.parse(await readFile(join(directory, originalName), "utf8")) as {
+      [key: string]: unknown; records: Array<Record<string, unknown>>;
+    };
+    const runInvalid = async (backup: Record<string, unknown>, reason: RegExp) => {
+      const content = JSON.stringify(backup);
+      const name = `legacy-partition-${createHash("sha256").update(content).digest("hex")}.json`;
+      await writeFile(join(directory, name), content);
+      try { assert.throws(() => store.restoreContextMigrationBackup(name), reason); }
+      finally { await rm(join(directory, name), { force: true }); }
+    };
+    await runInvalid({ ...original, schema: "wrong" }, /backup is invalid/u);
+    await runInvalid({ ...original, records: [] }, /backup is invalid/u);
+    await runInvalid({ ...original, records: [{ ...original.records[0], version: 0 }] }, /backup record is invalid/u);
+    const mismatchedPayload = { ...payload, session_id: "other", session_host: "claude",
+      session_scope_id: sessionStorageScopeId("claude", "other") };
+    await runInvalid({ ...original, records: [{ ...original.records[0], payload_json: JSON.stringify(mismatchedPayload) }] }, /scope mismatch/u);
+
+    const unsafeContent = JSON.stringify(original);
+    const unsafeName = `legacy-partition-${createHash("sha256").update(unsafeContent).digest("hex")}.json`;
+    const unsafeFile = join(directory, unsafeName);
+    await mkdir(unsafeFile);
+    assert.throws(() => store.restoreContextMigrationBackup(unsafeName), /backup is unsafe/u);
+    await rm(unsafeFile, { recursive: true });
+
+    if (supportsFileSymlinks()) {
+      const outside = join(root, "outside-backups"), backupDirectory = join(outside, "backups");
+      await mkdir(backupDirectory, { recursive: true });
+      await writeFile(join(backupDirectory, originalName), JSON.stringify(original));
+      await rm(join(root, "backups", "context-migration"), { recursive: true });
+      await linkDirectory(outside, join(root, "backups", "context-migration"));
+      assert.throws(() => store.restoreContextMigrationBackup(originalName), /directory is unsafe/u);
+    }
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

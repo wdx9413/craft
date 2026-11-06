@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { spawn } from "node:child_process";
 import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, SCHEMA_VERSION } from "../core/infrastructure/store.ts";
@@ -56,6 +57,73 @@ test("read snapshots keep a consistent read while allowing another store to writ
     assert.throws(() => store.readSnapshot(() => { throw new Error("snapshot failed"); }), /snapshot failed/u);
     assert.equal(store.readSnapshot((database) => Number((database.prepare("SELECT COUNT(*) AS count FROM records WHERE kind=?").get("snapshot") as { count: number }).count)), 3);
   } finally { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("read snapshot releases its depth after commit and rollback failures", async t => {
+  const { root, store } = await fixture();
+  const exec = store.database.exec.bind(store.database);
+  let failCommit = true;
+  t.mock.method(store.database, "exec", (sql: string) => {
+    if (sql === "COMMIT" && failCommit) { failCommit = false; throw new Error("snapshot commit failed"); }
+    return exec(sql);
+  });
+  try {
+    assert.throws(() => store.readSnapshot(() => "uncommitted"), /snapshot commit failed/u);
+    t.mock.restoreAll();
+    t.mock.method(store.database, "exec", (sql: string) => {
+      if (sql === "COMMIT") throw new Error("snapshot commit failed");
+      if (sql === "ROLLBACK") { exec(sql); throw new Error("snapshot rollback failed"); }
+      return exec(sql);
+    });
+    assert.throws(() => store.readSnapshot(() => "uncommitted"), /snapshot rollback failed/u);
+    t.mock.restoreAll();
+    assert.equal(store.readSnapshot(() => "recovered"), "recovered");
+  } finally { t.mock.restoreAll(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("concurrent first opens wait for the shared database WAL initialization", async () => {
+  const root = join(tmpdir(), `craft-store-open-race-${process.pid}-${Date.now()}`);
+  const source = `import { once } from 'node:events'; import { CraftStore } from './core/infrastructure/store.ts';
+    import { craftPaths } from './core/infrastructure/paths.ts'; process.stdout.write('ready\\n'); await once(process.stdin, 'data');
+    const store = await new CraftStore(craftPaths(process.argv[1])).open(); process.stdout.write('opened\\n'); store.close();`;
+  const children = Array.from({ length: 4 }, () => spawn(process.execPath,
+    ["--experimental-strip-types", "--input-type=module", "-e", source, root],
+    { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] }));
+  try {
+    await Promise.all(children.map(child => new Promise<void>((resolve, reject) => {
+      child.stdout.once("data", () => resolve()); child.once("error", reject);
+      child.once("exit", code => { if (code !== 0) reject(new Error(`store open worker exited ${code}`)); });
+    })));
+    for (const child of children) child.stdin.end("open");
+    const outcomes = await Promise.all(children.map(child => new Promise<{ code: number | null; stdout: string; stderr: string }>(resolve => {
+      let stdout = "", stderr = "";
+      child.stdout.on("data", chunk => stdout += chunk);
+      child.stderr.on("data", chunk => stderr += chunk);
+      child.once("exit", code => resolve({ code, stdout, stderr }));
+    })));
+    assert.deepEqual(outcomes.map(outcome => outcome.code), [0, 0, 0, 0], outcomes.map(outcome => outcome.stderr).join("\\n"));
+    assert.ok(outcomes.every(outcome => outcome.stdout.includes("opened")));
+  } finally {
+    for (const child of children) if (child.exitCode === null) child.kill();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WAL initialization reports a bounded retryable failure while another connection holds the writer", async () => {
+  const { root, store } = await fixture();
+  const databaseFile = store.paths.databaseFile;
+  store.close();
+  const peer = new DatabaseSync(databaseFile);
+  const opening = new CraftStore(craftPaths(root));
+  try {
+    peer.exec("PRAGMA journal_mode=DELETE; BEGIN IMMEDIATE");
+    await assert.rejects(opening.open(), error => {
+      const details = (error as { safeDetails?: { phase?: string; retryable?: boolean } }).safeDetails;
+      return details?.phase === "journal_mode" && details.retryable === true;
+    });
+    peer.exec("ROLLBACK");
+    assert.equal(await opening.open(), opening);
+  } finally { peer.close(); opening.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("ID-ordered record pages resume after a stable cursor and include latest versions", async () => {

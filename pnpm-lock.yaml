@@ -15,32 +15,32 @@ importers:
         specifier: 1.3.0
         version: 1.3.0(zod@4.6.7)
       '@craft/capability-codebase':
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:capability/craft-codebase
       '@craft/capability-experience':
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:capability/craft-experience
       '@craft/capability-knowledge':
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:capability/craft-knowledge
       '@craft/capability-memory':
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:capability/craft-memory
       '@modelcontextprotocol/sdk':
         specifier: 1.32.2
         version: 1.32.2(supports-color@7.1.0)(zod@4.6.7)
       craft-common-base:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:common/craft-common-base
       craft-common-log:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:common/craft-common-log
       craft-common-store-local:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:common/craft-common-store-local
       craft-eval:
-        specifier: 0.2.0
-        version: 0.2.0
+        specifier: 0.3.0
+        version: 0.3.0
       tesseract.js:
         specifier: ^7.0.0
         version: 7.0.0
@@ -75,13 +75,13 @@ importers:
   capability/craft-codebase:
     dependencies:
       craft-common-base:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-base
       craft-common-log:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-log
       craft-common-store-local:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-store-local
       typescript:
         specifier: '>=5.8 <7'
@@ -90,43 +90,43 @@ importers:
   capability/craft-experience:
     dependencies:
       craft-common-base:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-base
       craft-common-log:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-log
       craft-common-store-local:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-store-local
 
   capability/craft-knowledge:
     dependencies:
       craft-common-base:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-base
       craft-common-log:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-log
       craft-common-store-local:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-store-local
 
   capability/craft-memory:
     dependencies:
       craft-common-base:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-base
       craft-common-log:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-log
       craft-common-store-local:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../../common/craft-common-store-local
 
   common/craft-common-base:
     dependencies:
       craft-common-store-local:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../craft-common-store-local
     devDependencies:
       '@types/node':
@@ -136,10 +136,10 @@ importers:
   common/craft-common-log:
     dependencies:
       craft-common-base:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../craft-common-base
       craft-common-store-local:
-        specifier: 0.15.0
+        specifier: 0.16.0
         version: link:../craft-common-store-local
     devDependencies:
       '@types/node':
@@ -537,8 +537,8 @@ packages:
     resolution: {integrity: sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==}
     engines: {node: '>= 0.10'}
 
-  craft-eval@0.2.0:
-    resolution: {integrity: sha512-lKxKx9EBWN9yD5EHXu+G4cCbFyr5Sin8hxvvDQhLbMi11OMgPen9bJaymFiLZ4OSl/v7c09bs4XAVXFUAbXtZQ==}
+  craft-eval@0.3.0:
+    resolution: {integrity: sha512-X4ZZ0GKdxtKoSlycUEwZ/OJfZ8DYUBhodBsEbBw1u6VYVXKZ/++1aEhB6z03yknaBymgITPBpSfkZGY1bwEiKA==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -1395,7 +1395,7 @@ snapshots:
       object-assign: 4.1.1
       vary: 1.1.2
 
-  craft-eval@0.2.0: {}
+  craft-eval@0.3.0: {}
 
   cross-spawn@7.0.6:
     dependencies:

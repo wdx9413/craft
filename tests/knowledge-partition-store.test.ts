@@ -32,6 +32,9 @@ test("project partitions fail closed when one real root is bound to different pr
     f.store.create("scope_alias", "bad-digest", { scope: { kind: "project", id: "other" }, alias_kind: "path", alias: f.project, alias_digest: "invalid", status: "active" });
     f.store.create("scope_alias", "missing-other", { scope: { kind: "project", id: "ghost" }, alias_kind: "path", alias: join(f.root, "missing"), status: "active" });
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('scope_alias','malformed',1,'{','now','now')").run();
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('project_identity','demo',1,'{','now','now')").run();
+    f.store.create("memory_ledger", "identity-parse-fallback", { scope: { kind: "project", id: "demo" }, content: "valid project memory" });
+    assert.equal(f.store.get("memory_ledger", "identity-parse-fallback").content, "valid project memory");
     f.store.create("knowledge_claim", "before-conflict", { scope: "project:demo", status: "candidate" });
     f.store.create("scope_alias", "other-scope", { scope: { kind: "project", id: "other" }, alias_kind: "path", alias: link, status: "active" });
     assert.throws(() => f.store.create("knowledge_claim", "cross-scope", { scope: "project:demo", status: "candidate" }), /PROJECT_SCOPE_CONFLICT/u);
@@ -226,6 +229,20 @@ test("records-only Knowledge migration paginates without entering content retire
     f.store.database.prepare("DELETE FROM records WHERE kind='knowledge_claim' AND id='unknown'").run();
     const empty = f.store.reconcileKnowledgeStorage({ records_only: true });
     assert.equal(empty.status, "completed"); assert.equal(empty.has_more, false);
+  } finally { cleanup(f); }
+});
+
+test("records-only Knowledge migration completes when the final page has no blocked records", async () => {
+  const f = await fixture();
+  try {
+    const now = new Date().toISOString();
+    f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES('knowledge_claim','records-only-complete',1,?,?,?)")
+      .run(JSON.stringify({ scope: "project:demo", content: "verified legacy claim" }), now, now);
+    const result = f.store.reconcileKnowledgeStorage({ records_only: true });
+    assert.equal(result.status, "completed");
+    assert.equal(result.has_more, false);
+    assert.equal(result.next_cursor, null);
+    assert.equal(result.migrated, 1);
   } finally { cleanup(f); }
 });
 
@@ -519,6 +536,23 @@ test("Knowledge migration backup paths cannot escape the Craft data root", async
     assert.throws(() => backup(f.paths.root), /within the Craft data root/u);
     assert.throws(() => backup(join(f.paths.root, "..")), /within the Craft data root/u);
     assert.throws(() => backup(f.root), /within the Craft data root/u);
+  } finally { cleanup(f); }
+});
+
+test("Knowledge migration rejects a backup whose post-rename readback differs", async () => {
+  const f = await fixture();
+  try {
+    const internals = f.store as unknown as { writeLegacyPartitionBackup: (...args: unknown[]) => void };
+    const fileOps = {
+      write: writeFileSync,
+      rename: (source: string, target: string) => {
+        renameSync(source, target);
+        writeFileSync(target, "concurrent replacement");
+      },
+      unlink: (path: string) => rmSync(path, { force: true }),
+    };
+    assert.throws(() => internals.writeLegacyPartitionBackup("knowledge", { kind: "global", id: "global" },
+      join(f.paths.root, "knowledge"), [], fileOps), /backup readback failed/u);
   } finally { cleanup(f); }
 });
 

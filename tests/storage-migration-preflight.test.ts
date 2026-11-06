@@ -76,7 +76,7 @@ test("unpartitioned Knowledge inventory respects Evidence ownership", async () =
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("paged inventory rejects concurrent changes instead of mixing cached aliases and newer records", async () => {
+test("paged inventory holds one database snapshot while concurrent writers continue", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-preflight-concurrent-")), paths = craftPaths(join(root, "data"));
   const store = await new CraftStore(paths).open();
   try {
@@ -87,13 +87,15 @@ test("paged inventory rejects concurrent changes instead of mixing cached aliase
       assert.equal(first.has_more, true);
       assert.ok(first.next_cursor);
       store.create("memory_ledger", "third", { scope: { kind: "global", id: "global" }, status: "active", content: "third" });
-      assert.throws(() => reader.readPage({ max_records: 1, cursor: first.next_cursor! }), /database changed; restart inventory/u);
+      const second = reader.readPage({ max_records: 1, cursor: first.next_cursor! });
+      assert.equal(second.entries[0]?.id, "second");
+      assert.equal(second.has_more, false);
     } finally { reader.close(); }
     assert.equal(storageMigrationPreflight(paths, { max_records: 10 }).examined, 3);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("inventory rejects writes during metadata initialization and while reading a page", async () => {
+test("inventory snapshot excludes writes during metadata initialization and while reading a page", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-preflight-race-")), paths = craftPaths(join(root, "data"));
   const store = await new CraftStore(paths).open();
   const originalPrepare = DatabaseSync.prototype.prepare;
@@ -107,12 +109,15 @@ test("inventory rejects writes during metadata initialization and while reading 
       }
       return originalPrepare.call(this, sql);
     };
-    assert.throws(() => new StorageMigrationPreflightReader(paths), /database changed; restart inventory/u);
+    const initialized = new StorageMigrationPreflightReader(paths);
+    try {
+      assert.equal(initialized.readPage({ max_records: 10 }).examined, 1);
+    } finally { initialized.close(); }
     const reader = new StorageMigrationPreflightReader(paths);
     try {
       trigger = "SELECT kind,id,version,payload_json FROM records";
       nextId = "during-page";
-      assert.throws(() => reader.readPage(), /database changed; restart inventory/u);
+      assert.equal(reader.readPage({ max_records: 10 }).examined, 2);
     } finally { reader.close(); }
     assert.equal(storageMigrationPreflight(paths, { max_records: 10 }).examined, 3);
   } finally { DatabaseSync.prototype.prepare = originalPrepare; store.close(); rmSync(root, { recursive: true, force: true }); }
@@ -364,6 +369,30 @@ test("storage preflight reader closes its read-only handle if metadata setup fai
     const reopened = new (await import("node:sqlite")).DatabaseSync(paths.databaseFile, { readOnly: true });
     reopened.close();
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("storage preflight closes its handle when the snapshot cannot start", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-storage-preflight-snapshot-failure-")), paths = craftPaths(join(root, "data"));
+  const store = await new CraftStore(paths).open();
+  const originalExec = DatabaseSync.prototype.exec, originalClose = DatabaseSync.prototype.close;
+  let closedReadOnlyHandle = false;
+  try {
+    DatabaseSync.prototype.exec = function (sql: string) {
+      if (this !== store.database && sql === "BEGIN") throw new Error("snapshot start failed");
+      return originalExec.call(this, sql);
+    };
+    DatabaseSync.prototype.close = function () {
+      if (this !== store.database) closedReadOnlyHandle = true;
+      return originalClose.call(this);
+    };
+    assert.throws(() => new StorageMigrationPreflightReader(paths), /snapshot start failed/u);
+    assert.equal(closedReadOnlyHandle, true);
+  } finally {
+    DatabaseSync.prototype.exec = originalExec;
+    DatabaseSync.prototype.close = originalClose;
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("storage preflight resolves only valid project identity roots", async () => {

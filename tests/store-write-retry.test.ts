@@ -36,6 +36,15 @@ test("contended writes yield to timers, execute once and restore the normal busy
     peer.exec("ROLLBACK"); locked = false;
     await assert.rejects(store.transactionWithRetry(() => 1, { timeoutMs: -1 }), /timeout/);
     await assert.rejects(store.transactionWithRetry(() => Promise.resolve(1)), /synchronous/);
+    await assert.rejects(store.transactionWithRetry(() => Promise.reject(new Error("async callback rejection"))), /synchronous/);
+    const functionThenable = Object.assign(() => undefined, { then: (resolve: (value: number) => void) => resolve(1) });
+    await assert.rejects(store.transactionWithRetry(() => functionThenable), /synchronous/);
+    const transaction = store.transaction.bind(store);
+    (store as any).transaction = () => { throw "unstructured transaction failure"; };
+    try {
+      await assert.rejects(store.transactionWithRetry(() => assert.fail("unstructured failure must not run the callback"), { timeoutMs: 0 }),
+        error => error === "unstructured transaction failure");
+    } finally { (store as any).transaction = transaction; }
     await store.readSnapshot(() => assert.rejects(store.transactionWithRetry(() => 1), /inside a transaction/));
     assert.equal(store.database.prepare("PRAGMA busy_timeout").get()!.timeout, originalTimeout);
   } finally { if (locked) peer.exec("ROLLBACK"); peer.close(); store.close(); await rm(root, { recursive: true, force: true }); }

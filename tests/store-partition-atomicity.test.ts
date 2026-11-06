@@ -196,6 +196,36 @@ test("Hook mode retries a transient primary writer lock without replaying the tr
   }
 });
 
+test("transaction begin preserves primitive errors and reports a failed Hook retry", async () => {
+  const f = await fixture();
+  const database = f.store.database as DatabaseSync & { exec: (sql: string) => void };
+  const originalExec = database.exec.bind(database);
+  const priorMode = process.env.CRAFT_HOOK_MODE;
+  try {
+    database.exec = sql => {
+      if (sql === "BEGIN IMMEDIATE") throw "primitive begin failure";
+      originalExec(sql);
+    };
+    assert.throws(() => f.store.transaction(() => undefined), error => error === "primitive begin failure");
+
+    process.env.CRAFT_HOOK_MODE = "1";
+    database.exec = sql => {
+      if (sql === "BEGIN IMMEDIATE") throw new Error("database is locked");
+      originalExec(sql);
+    };
+    assert.throws(() => f.store.transaction(() => undefined), error => {
+      assert.equal((error as { stage?: string }).stage, "storage_lock");
+      assert.equal((error as { safeDetails?: { phase?: string } }).safeDetails?.phase, "transaction_begin");
+      return true;
+    });
+  } finally {
+    database.exec = originalExec;
+    if (priorMode === undefined) delete process.env.CRAFT_HOOK_MODE;
+    else process.env.CRAFT_HOOK_MODE = priorMode;
+    cleanup(f);
+  }
+});
+
 test("storage lock annotation preserves an existing safe phase diagnostic", async () => {
   const f = await fixture(); let writer: DatabaseSync | undefined, partitionWriter: DatabaseSync | undefined;
   try {
