@@ -189,7 +189,7 @@ const CHECKS: Readonly<Record<string, Check>> = {
     try {
       const ws = workspaces.resolveOrCreate({ root_path: dir, name: "ledger-service" });
       const directories = [{ workspace_id: String(ws.id), name: "ledger-service", root_path: dir, description: null }];
-      const resolution = resolveCoordinatorDirectory("在 ledger-service 里改结算逻辑", directories) as JsonObject;
+      const resolution = resolveCoordinatorDirectory("在 ledger-service 里改结算逻辑", directories);
       return resolution.root_path === dir && resolution.ambiguous !== true ? "passed" : "failed";
     } finally { rmSync(dir, { recursive: true, force: true }); }
   },
