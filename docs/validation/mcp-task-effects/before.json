@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "The argument 'filename' must be a file URL object, file URL string, or absolute path string. Received undefined"
+      }
+    ],
+    "structuredContent": {
+      "error_code": "ERR_INVALID_ARG_VALUE",
+      "stage": "dispatch",
+      "details": {}
+    },
+    "isError": true
+  }
+}

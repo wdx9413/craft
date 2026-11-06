@@ -1,0 +1,25 @@
+{
+  "installed": [
+    {
+      "component": "craft-knowledge",
+      "bundle_sha256": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+      "backup": "/private/tmp/craft-before-versions-graph-20261004/craft-knowledge"
+    },
+    {
+      "component": "craft-memory",
+      "bundle_sha256": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+      "backup": "/private/tmp/craft-before-versions-graph-20261004/craft-memory"
+    },
+    {
+      "component": "craft-experience",
+      "bundle_sha256": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+      "backup": "/private/tmp/craft-before-versions-graph-20261004/craft-experience"
+    },
+    {
+      "component": "craft-codebase",
+      "bundle_sha256": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+      "backup": "/private/tmp/craft-before-versions-graph-20261004/craft-codebase"
+    }
+  ],
+  "active_session_reloaded": false
+}

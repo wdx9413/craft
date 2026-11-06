@@ -1,0 +1,130 @@
+{
+  "date": "2026-10-04",
+  "product_version": "0.12.37",
+  "status": "passed local implementation, regression, distribution and downstream portability checks",
+  "checks": {
+    "typecheck": "passed",
+    "typescript_build": "passed",
+    "layering": "passed",
+    "surfaces": "passed",
+    "consistency": "passed",
+    "coverage_inventory": "passed",
+    "plugin_build_and_pack": "passed",
+    "dsh_build_and_pack": "passed",
+    "release_catalog": "passed",
+    "plugin_package": "passed",
+    "plugin_version": "passed",
+    "version": "passed",
+    "doc_links": "passed: 704 links across 231 documents",
+    "review_delta_whitespace": "passed"
+  },
+  "regression_runs": [
+    {
+      "log": "/tmp/craft-context-review-coverage.log",
+      "passed": 225
+    },
+    {
+      "log": "/tmp/craft-context-review-boundaries.log",
+      "passed": 10,
+      "overlaps_previous_run": true
+    },
+    {
+      "log": "/tmp/craft-context-review-https-coverage.log",
+      "passed": 6,
+      "transport": "local HTTPS"
+    }
+  ],
+  "distribution_matrix": {
+    "passed_products": 5,
+    "forms": [
+      "codex",
+      "claude",
+      "skill+mcp",
+      "dsh"
+    ],
+    "combinations": 20,
+    "test_count": 2,
+    "log": "/tmp/craft-context-review-distribution.log",
+    "dsh_registration_stub": true,
+    "real_mcp_processes": true
+  },
+  "component_conformance": {
+    "artifact_sha256": "082c0bcd9c0b6044c8692b7cea773e27ca18f110a2f0503386372958cb14ae40",
+    "reports": [
+      {
+        "product": "knowledge",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:034d59f45297e9e5394626bbb4eb64f478cc57deaff1c7eb0889b9d62946b591",
+        "entrypoint_digest": "082c0bcd9c0b6044c8692b7cea773e27ca18f110a2f0503386372958cb14ae40",
+        "protocol": "2025-11-25",
+        "tool_count": 22,
+        "calls": 22,
+        "host_session_verified": false
+      },
+      {
+        "product": "memory",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:05be75afcac268a59c464fb9ab6f3d63d6f364cb04df5e1359bdcd8cbf14d387",
+        "entrypoint_digest": "082c0bcd9c0b6044c8692b7cea773e27ca18f110a2f0503386372958cb14ae40",
+        "protocol": "2025-11-25",
+        "tool_count": 22,
+        "calls": 14,
+        "host_session_verified": false
+      },
+      {
+        "product": "experience",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:c0a1d31994d963bec00eacfea6c06d7142943be76cdf0d5a0e2ff9cd9c233d87",
+        "entrypoint_digest": "082c0bcd9c0b6044c8692b7cea773e27ca18f110a2f0503386372958cb14ae40",
+        "protocol": "2025-11-25",
+        "tool_count": 28,
+        "calls": 46,
+        "host_session_verified": false
+      },
+      {
+        "product": "codebase",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:0e2994f6db145e10f93c13682ab85b290bc664d5fdf6b4b9467c7abbd266cfae",
+        "entrypoint_digest": "082c0bcd9c0b6044c8692b7cea773e27ca18f110a2f0503386372958cb14ae40",
+        "protocol": "2025-11-25",
+        "tool_count": 15,
+        "calls": 13,
+        "host_session_verified": false
+      }
+    ]
+  },
+  "component_conformance_calls": 95,
+  "incremental_coverage": "context-review-incremental-coverage-2026-10-04.json",
+  "limitations": [
+    "not a whole-repository test run",
+    "no real model Host session",
+    "no real IdP or Docker image validation",
+    "no production deployment",
+    "no new global installation"
+  ],
+  "downstream": {
+    "craft-marketplace": {
+      "payload_sync": "passed",
+      "log": "/tmp/craft-context-review-marketplace-sync.log"
+    },
+    "craft-common-use": {
+      "sync": "passed",
+      "verify_release": "passed: five products and artifacts",
+      "portability_tests": 7,
+      "log": "/tmp/craft-context-review-common-portability.log"
+    }
+  },
+  "completion_component_calls": {
+    "knowledge_receipt_id": "context_resolution_5bc0fc7e376042cb87cf3de376c6bc1f",
+    "memory_receipt_id": "context_resolution_1b135f64821240589838e9ae1847d1f2",
+    "experience_observations": 0
+  }
+}

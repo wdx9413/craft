@@ -1,0 +1,18 @@
+{
+  "version": "0.12.131",
+  "products": [
+    {
+      "name": "craft-context",
+      "surface": "component-context-agent",
+      "hook_member": "context",
+      "category": "Developer Tools"
+    },
+    {
+      "name": "craft-datasec",
+      "surface": "standalone-hooks",
+      "hook_member": null,
+      "category": "Developer Tools",
+      "version": "0.1.6"
+    }
+  ]
+}

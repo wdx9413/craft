@@ -1,0 +1,27 @@
+{
+  "name": "craft-marketplace",
+  "version": "0.12.131",
+  "owner": {
+    "name": "wdx9413"
+  },
+  "metadata": {
+    "description": "Craft's supported v0.12.44 plugin products. Retired projections are intentionally absent."
+  },
+  "plugins": [
+    {
+      "name": "craft",
+      "source": "./",
+      "description": "craft Skill and MCP"
+    },
+    {
+      "name": "craft-context",
+      "source": "./plugins/craft-context",
+      "description": "craft-context Skill and MCP"
+    },
+    {
+      "name": "craft-datasec",
+      "source": "./plugins/craft-datasec",
+      "description": "craft-datasec independent local redaction hooks"
+    }
+  ]
+}

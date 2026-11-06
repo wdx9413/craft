@@ -1,0 +1,97 @@
+uncovered submit: lines 54-54
+  54:       if (existing.input_digest !== binding) throw new Error("operation_id already bound to different inputs");
+uncovered submit: lines 58-58
+  58:     if (this.active.size >= 4) throw new Error("evaluation capacity reached");
+uncovered (top level): lines 45-45
+  45:       if (bytes.length > 1024 * 1024) throw new Error("evaluation config exceeds 1 MiB");
+uncovered (top level): lines 77-77
+  77:         if (stableDigest(await evaluationEngineIdentity(subject)) !== stableDigest(engine)) throw new Error("evaluation engine or environment changed during execution");
+uncovered (top level): lines 81-81
+  81:         this.store.save(KIND, id, { ...this.store.get(KIND, id), state: abort.signal.aborted ? "cancelled" : "completed", run_directory: result.run, report_digest: reportDigest, plan_digest: planDigest, summary: { expected: result.report.expected, passed: result.report.passed, failed: result.report.failed, missing: result.report.missing, inconclusive: result.report.inconclusive } });
+uncovered (top level): lines 83-83
+  83:         this.store.save(KIND, id, { ...this.store.get(KIND, id), state: abort.signal.aborted ? "cancelled" : error instanceof EvaluationOutcomeUnknownError ? "unknown" : "failed", error: error instanceof Error ? error.message : "evaluation failed" });
+uncovered (top level): lines 83-83
+  83:         this.store.save(KIND, id, { ...this.store.get(KIND, id), state: abort.signal.aborted ? "cancelled" : error instanceof EvaluationOutcomeUnknownError ? "unknown" : "failed", error: error instanceof Error ? error.message : "evaluation failed" });
+uncovered (top level): lines 83-83
+  83:         this.store.save(KIND, id, { ...this.store.get(KIND, id), state: abort.signal.aborted ? "cancelled" : error instanceof EvaluationOutcomeUnknownError ? "unknown" : "failed", error: error instanceof Error ? error.message : "evaluation failed" });
+uncovered on_progress: lines 75-75
+  75:           on_progress: event => { live.events.push(event); if (live.events.length > 256) live.events.shift(); },
+uncovered events: lines 91-91
+  91:   events(id: string): JsonObject { return { evaluation: this.get(id), events: this.active.get(id)?.events ?? [] }; }
+uncovered cancel: lines 94-97
+  94:     if (!live) throw new Error("evaluation is not running in this process");
+  95:     live.abort.abort();
+  96:     return this.store.save(KIND, id, { ...record, state: "cancelling" });
+  97:   }
+uncovered report: lines 100-108
+  100:     if (typeof record.run_directory !== "string" || typeof record.report_digest !== "string") throw new Error("controlled evaluation report is not available");
+  101:     const inputs = await this.inputs(id);
+  102:     const snapshot: unknown = JSON.parse(await readFile(join(String(record.report_root), "controlled-report.json"), "utf8"));
+  103:     if (stableDigest(snapshot) !== record.report_digest) throw new Error("controlled evaluation report changed; evidence cannot be trusted");
+  104:     const { reportRun, digest } = await import("craft-eval");
+  105:     const planBytes = await readFile(join(record.run_directory, "plan.json"));
+  106:     if (hash(planBytes) !== record.plan_digest) throw new Error("evaluation execution plan changed after completion");
+  107:     const plan = JSON.parse(planBytes.toString("utf8")) as { subject: { digest: string }; suite_digest: string; runtime: unknown };
+  108:     if (plan.subject.digest !== digest(inputs.subject) || plan.suite_digest !== digest(inputs.suite) || stableDigest(plan.runtime) !== stableDigest(inputs.runtime)) throw new Error("evaluation execution plan does not match reserved inputs");
+uncovered report: lines 108-112
+  108:     if (plan.subject.digest !== digest(inputs.subject) || plan.suite_digest !== digest(inputs.suite) || stableDigest(plan.runtime) !== stableDigest(inputs.runtime)) throw new Error("evaluation execution plan does not match reserved inputs");
+  109:     const report = await reportRun(record.run_directory);
+  110:     if (stableDigest(report) !== record.report_digest) throw new Error("evaluation result files changed after completion; evidence cannot be trusted");
+  111:     return { evaluation: record, report, integrity: "verified_against_controlled_run" };
+  112:   }
+uncovered compare: lines 125-156
+  125:     if (records.some(record => record.state !== "completed")) throw new Error("comparison requires completed controlled runs");
+  126:     for (const key of ["evaluator_version", "node_version", "platform", "architecture"]) {
+  127:       if (typeof records[0]![key] !== "string" || records[0]![key] !== records[1]![key]) throw new Error("observed evaluator environments are not comparable");
+  128:     }
+  129:     const root = await mkdtemp(join(tmpdir(), "craft-controlled-compare-"));
+  130:     try {
+  131:       const { reportRun, compareRuns } = await import("craft-eval");
+  132:       const frozen: string[] = [];
+  133:       for (const [index, record] of records.entries()) {
+  134:         await this.report(String(record.id));
+  135:         const directory = join(root, String(index)); await mkdir(join(directory, "results"), { recursive: true });
+  136:         await copyFile(join(String(record.run_directory), "plan.json"), join(directory, "plan.json"));
+  137:         if (hash(await readFile(join(directory, "plan.json"))) !== record.plan_digest) throw new Error("comparison plan changed while freezing");
+  138:         const controlled = JSON.parse(await readFile(join(String(record.report_root), "controlled-report.json"), "utf8")) as { results: Array<{ case_id: string; trial: number }> };
+  139:         for (const item of controlled.results) {
+  140:           if (!/^[A-Za-z0-9_.-]+$/u.test(item.case_id) || !Number.isSafeInteger(item.trial) || item.trial < 1) throw new Error("invalid controlled comparison result key");
+  141:           const name = `${item.case_id}-${item.trial}.json`;
+  142:           await copyFile(join(String(record.run_directory), "results", name), join(directory, "results", name));
+  143:         }
+  144:         if (stableDigest(await reportRun(directory)) !== record.report_digest) throw new Error("comparison results changed while freezing");
+  145:         frozen.push(directory);
+  146:       }
+  147:       const comparison = await compareRuns(frozen[0]!, frozen[1]!);
+  148:       const binding = { baseline_id: baselineId, candidate_id: candidateId, report_digests: records.map(record => record.report_digest), plan_digests: records.map(record => record.plan_digest) };
+  149:       const id = hash(JSON.stringify(binding));
+  150:       const existing = this.store.find("workbench_evaluation_comparison", id);
+  151:       if (existing) return { comparison: existing, idempotent: true };
+  152:       const receipt = await this.store.transactionWithRetry(() => this.store.find("workbench_evaluation_comparison", id) ?? this.store.create("workbench_evaluation_comparison", id, {
+  153:         ...binding, metrics: comparison, decision: "diagnostic_only", knowledge_promotion_authorized: false,
+  154:       }));
+  155:       return { comparison: receipt };
+  156:     } finally { await rm(root, { recursive: true, force: true }); }
+uncovered (top level): lines 76-81
+  76:         });
+  77:         if (stableDigest(await evaluationEngineIdentity(subject)) !== stableDigest(engine)) throw new Error("evaluation engine or environment changed during execution");
+  78:         const reportDigest = stableDigest(result.report);
+  79:         const planDigest = hash(await readFile(join(result.run, "plan.json")));
+  80:         await writeFile(join(directory, "controlled-report.json"), JSON.stringify(result.report));
+  81:         this.store.save(KIND, id, { ...this.store.get(KIND, id), state: abort.signal.aborted ? "cancelled" : "completed", run_directory: result.run, report_digest: reportDigest, plan_digest: planDigest, summary: { expected: result.report.expected, passed: result.report.passed, failed: result.report.failed, missing: result.report.missing, inconclusive: result.report.inconclusive } });
+uncovered (top level): lines 83-83
+  83:         this.store.save(KIND, id, { ...this.store.get(KIND, id), state: abort.signal.aborted ? "cancelled" : error instanceof EvaluationOutcomeUnknownError ? "unknown" : "failed", error: error instanceof Error ? error.message : "evaluation failed" });
+uncovered (top level): lines 83-83
+  83:         this.store.save(KIND, id, { ...this.store.get(KIND, id), state: abort.signal.aborted ? "cancelled" : error instanceof EvaluationOutcomeUnknownError ? "unknown" : "failed", error: error instanceof Error ? error.message : "evaluation failed" });
+uncovered report: lines 100-100
+  100:     if (typeof record.run_directory !== "string" || typeof record.report_digest !== "string") throw new Error("controlled evaluation report is not available");
+uncovered report: lines 108-108
+  108:     if (plan.subject.digest !== digest(inputs.subject) || plan.suite_digest !== digest(inputs.suite) || stableDigest(plan.runtime) !== stableDigest(inputs.runtime)) throw new Error("evaluation execution plan does not match reserved inputs");
+uncovered compare: lines 125-125
+  125:     if (records.some(record => record.state !== "completed")) throw new Error("comparison requires completed controlled runs");
+uncovered compare: lines 137-137
+  137:         if (hash(await readFile(join(directory, "plan.json"))) !== record.plan_digest) throw new Error("comparison plan changed while freezing");
+uncovered compare: lines 140-140
+  140:           if (!/^[A-Za-z0-9_.-]+$/u.test(item.case_id) || !Number.isSafeInteger(item.trial) || item.trial < 1) throw new Error("invalid controlled comparison result key");
+uncovered compare: lines 144-144
+  144:         if (stableDigest(await reportRun(directory)) !== record.report_digest) throw new Error("comparison results changed while freezing");

@@ -1,0 +1,141 @@
+# Craft
+
+Workbench/Desktop presentation has moved to the sibling `craft-workbench/` project. Core serves APIs without UI by default; desktop release automation is paused. See [presentation separation](docs/technical/modules/presentation-separation.md).
+
+> Current release: v0.12.131. Craft is a general work runtime for people and AI. The default `craft` plugin includes Knowledge, Memory, Capability discovery, Skill Quality, and Workflow Evolution behind one shared control plane; each remains available as an optional standalone component. Interactive tasks keep using the current app as their embedded host; the Codex Context plugin starts a read-only `gpt-6-luna` CLI call only when a learning ticket is waiting, at most once per poll. Knowledge requests use the CLI JSON Schema output constraint to keep responses structured.
+
+[中文](README.md) | [English](README.en.md)
+
+## Product in brief
+
+Craft aims to be a shared digital workbench for people and AI: understand goals, organize capabilities, execute tasks, maintain results, and learn from verified work.
+
+The product is intended for workers across video, sales, education, content creation, software engineering, and other fields. Domain extensions provide appropriate objects, views, tools, and acceptance criteria; users should not need programming knowledge to use the future workbench.
+
+The roadmap has two steps. Short term, Craft is a cross-host governance plugin layer: it plugs into hosts such as Codex CLI, Claude Code, and DeepSeek Harness through MCP/plugins and provides unified capability discovery, authorization gates, evidence chains, and evaluation gates, while execution stays inside the host. Long term, Craft aims to become an autonomous agent platform that carries its own conversation loop, schedules hosts, and improves through gated evaluation. Both steps share one kernel.
+
+The current version keeps local directories as multiple Source Mounts while indexing identical content as one logical capability. Activation Plans and Resolution pin, recheck, and bound read-only capability content. Capability-bound Dispatches can provide that exact context to Codex CLI or Claude Code, then recheck it just before execution and fail closed on drift; this never executes a local Skill or grants extra tool or write permissions. A verification-driven iteration controller classifies independent acceptance as pass, bounded retry, environment/configuration block, or human handoff without granting extra write authority.
+
+| Product pillar | Target capabilities |
+| --- | --- |
+| Work and collaboration | Goals, shared workspace, editable results, capabilities and context |
+| Execution and assurance | Planning, tools, sandboxing and permissions, recovery, verification and observation |
+| Learning and improvement | **Evaluation and experiments**, knowledge and memory, adaptation, compilation and reuse |
+
+See the [product architecture (Chinese)](docs/product/architecture.zh-CN.md) and [roadmap (Chinese)](docs/product/roadmap.zh-CN.md) for scope and implementation status.
+
+## Principles
+
+- Discover, then load: index user-selected directories and return a small candidate set instead of injecting every Skill into model context.
+- Durable long tasks: keep goals, checkpoints, decisions, feedback, artifacts, and evidence across sessions and hosts.
+- Explicit verification: program, model, human, and operational results use distinct Graders; a Signoff Policy decides whether an exact version is reusable.
+- Workflows evolve from use: version successful paths, replay them, and improve them through evaluations.
+- User-owned data: store data under `~/.craft_data` by default. Persist credential environment-variable names, never secret values.
+- Editable and controllable work: the target experience includes partial edits, version comparison, and execution controls. Guarantees depend on the execution backend; file restoration and external compensation are distinct operations.
+
+## Implemented
+
+- Multi-directory capability sources, real-path resolution, linked directories, and incremental scans.
+- Skill frontmatter parsing, SQLite lexical candidate retrieval with a keyword-ranking fallback when FTS5 is unavailable, and on-demand reads; search results omit full bodies.
+- Durable tasks, checkpoints, feedback, artifacts, and evidence.
+- Default routing for substantial work: verified Workflows execute only at their exact selected version; unmatched goals become resumable, evidence-backed safe host plans.
+- Versioned Workflows with inputs, safe paths, redaction, side-effect approval, deterministic commands, assertions, coverage gates, and receipts.
+- Versioned evaluation-suite and Agent-profile primitives.
+- Six-dimensional Harness Configurations, immutable Trials and Outcomes, append-only Traces, automatic evidence capture for Workflow runs, and held-out-eval-gated promotion and rollback.
+- **Runtime Truth Layer (v0.12.13)**: a stable `craft.trace` envelope (with legacy `craft.trace.v1` reads), OTLP/HTTP projection, Tool Call/SSE normalization, resumable context compaction, cross-process correlation, and structured work notes. Raw prompts and business bodies stay out of evolution data; evaluation, Signoff, and Canary gates still control reuse and publication. Context Manifests, controlled Replay, persistent local service state, Project Bundles, feedback signals, domain evaluators, handoff manifests, and cost attribution are included. See [Runtime Truth](docs/technical/modules/runtime-truth.en.md).
+- **Verified Autonomous Work (v0.12.13)**: joins Context Manifest, action authorization, the bounded Action Gateway, Host/tool receipts, state re-observation, mandatory independent acceptance, Artifact/Evidence, and the Delivery Gate into one single-agent path; drift enters `needs_replan`, and writes require approval plus platform Conformance. See [Verified Autonomous Work](docs/technical/modules/v01212-verified-autonomous-work.en.md).
+- **Runtime Completion (v0.12.13)**: bounded Action Gateway, independent Acceptance Gate, Durable Worker, Provider fallback, and digest-only A2A entry points share the same service/MCP base; real shell, browser, remote effects, and OS isolation remain explicit adapter boundaries. See [Runtime Completion](docs/technical/modules/v01213-runtime-completion.en.md).
+- **Generic Adapter Runtime (v0.12.26)**: Craft adds a versioned Adapter Manifest/Registry, cross-platform governed commands, OpenAPI import, durable runs, Context Manifest, trust curves, domain evaluators, and portable project handoffs. See [v0.12.26 Runtime](docs/technical/modules/v01226-runtime.md).
+- **Primary Plugin Composition (v0.12.28)**: the default `craft` plugin reaches all built-in domains through a compact syscall surface. `craft_knowledge_bootstrap_install` idempotently registers the bundled Evidence Wiki and Serena descriptors without reading external files or storing chat. The sibling `craft-*` plugins remain optional single-domain installations. See [Primary Plugin Composition](docs/technical/modules/v01228-primary-plugin-composition.md).
+- **Runtime Proof & Deployment (v0.12.33)**: optional OIDC/JWKS resource-server verification, tenant/principal/scope/TTL-bound remote task handles, real Host Session plus independent Outcome Observer acceptance campaigns, publisher digest attestations, and a grant-bound A2A v1 adapter. Deployment-specific TLS, OAuth login, IdP revocation, business cases, and platform isolation remain explicit adapters rather than default claims. See [Runtime Proof & Deployment](docs/technical/modules/runtime-proof-deployment.md).
+- Automatic Orchestration Trial capture with pinned Agent Profile versions, dispatch and reroute traces, node costs and evidence, and terminal Outcomes.
+- Versioned Graders, provenance-preserving Grades, and Signoff Policies; a model judgment cannot masquerade as program proof.
+- Same-benchmark comparisons for Workflow, Agent Profile, and Harness Configuration versions, with aggregate quality, cost, duration, and failure-type deltas. Comparability requires the exact suite version, split, subject type, and case set.
+- Experience patterns and Skill proposals: derive applicability, successful strategies, failure modes, and Evidence references from multiple Trials and Outcomes. Proposals reuse the existing held-out Eval/Signoff Gate; only a verified version can write an existing `SKILL.md` with explicit approval, digest protection, local backup, and safe rollback.
+- MCP plus Codex, Claude Code, DeepSeek Harness, and generic MCP integration surfaces.
+- A persistent recovery queue that projects due waits, ambiguous effects and failed Sagas into bounded priority work; compatible workers use expiring leases and evidence-backed stale-state checks.
+- Signed webhook subscriptions with HMAC verification, replay defense, deterministic filtering, throttling, allowlisted scalar projection, and optional resource-budget reservation; raw request bodies are not persisted and projected data has no execution authority.
+- Controlled speculative preparation for indexing, summaries, drafts, and metadata prefetch: candidates pin input fingerprints, policy versions, budgets, and TTLs; workers use short leases and ready results require Artifact and Evidence references. Trial, Trace, actual cost, and Outcome are captured automatically; human edits become preference signals but cannot masquerade as program proof, promote a policy by themselves, or authorize external writes.
+- Object-level provenance: immutable exact-version links connect sources, outputs, Workflow/Capability transforms, and Evidence. Optional locators support paragraphs, cells, shots, or domain objects; bounded upstream/downstream traversal, cycle rejection, and newer-version warnings avoid copying business content into the graph.
+- Capability canaries use sticky baseline/candidate routing and evidence-backed quality, cost, latency, and human-correction samples. Regressions stop new candidate traffic and recommend rollback; promotion and rollback are never silently executed.
+- Capability federation packages healthy verified assets without raw trajectories, supports human redaction and independent publication, pins consumers to exact release/asset versions, and fails closed after revocation. Remote hubs and enterprise identity remain adapter work.
+- Hub Sync verifies paginated metadata catalogs against pinned Ed25519 keys, advances a hash-linked monotonic cursor atomically, propagates withdrawals, and searches only the local catalog instead of scanning every remote Skill. Network fetching and content materialization remain adapter work.
+- On-demand materialization verifies a bounded package against the signed catalog digest, writes only safe relative files into `~/.craft_data/cache`, blocks critical findings, gates high-risk findings on security review, and registers only a non-executable candidate asset.
+- Candidate certification binds an exact materialized asset to held-out evaluation, per-Trial Sandbox receipts, evidence-backed program Grades, and Signoff. Independent promotion atomically marks an unchanged asset verified but still grants no execution authority.
+- Continuous supply-chain governance propagates source disablement, catalog withdrawal, digest drift, and high-risk advisories into blocked assets, invalid Activation Profiles, and recoverable recertification work.
+- A single-instance local maintenance worker reclaims expired leases, expires speculative candidates, reconciles Hub supply-chain state, and refreshes recovery work without silently executing user tasks.
+- Long-task dehydration and hydration: freeze minimal references to Task, Workspace revision, Wait, Runtime fingerprints, budgets, and recovery work without raw conversation context or credentials. Revalidation distinguishes still waiting, resume, and replan; short Host leases and Evidence-backed completion prevent concurrent or fabricated restoration.
+- One TypeScript/Node.js runtime on Windows, macOS, and Linux, with no Python dependency.
+- Capability Connector registers built-in and user-approved GitHub/Volcengine Skill sources plus stdio/HTTPS MCP metadata without storing credentials or raw third-party content. Discovery, approval, Activation Profile, and ticketed invocation are separate; Serena MCP assets are read-only. Connectors never install, start, or reconfigure third-party services by themselves.
+
+Versions 0.9.10–0.10.2 also provide scoped file snapshots, local transaction records, restricted TypeScript proposals, and host execution handoffs. Version 0.10.0 adds shared typed work objects; v0.10.1 adds field-level ChangeSets; v0.10.2 adds durable waits, hierarchical budgets, fallback contracts, isolated parsing, trusted egress, an external Effect/Saga Kernel, and tiered autonomy policies. An authorization can require automatic execution, notification, one human approval, or multi-signature approval and is bound to an exact task, action, target, digest, TTL, and single consumption. Ambiguous effects can use pre-authorized read-only reconciliation. The compensation adapter freezes authorization, request digest, approval, and HTTP outcome mappings before dispatch; transport uncertainty and compensation failure remain explicit. Proposal operations are still supplied by the caller, not inferred automatically from raw traces. See [execution boundaries (Chinese)](docs/technical/modules/execution-policy.md).
+
+External Effects and Runtime Host Adapters atomically consume those authorizations when dispatching. Computer Use is a first-class operation kind with an exact action identity, while the actual browser or desktop driver remains a host responsibility.
+
+Vector search is optional. Configured OpenAI-compatible embeddings augment lexical retrieval; absent configuration or service failures retain the lexical path.
+
+## Install
+
+Node.js 23+ is required. Python is not required.
+
+```bash
+npm install -g github:wdx9413/craft
+craft init
+```
+
+For development:
+
+```bash
+git clone https://github.com/wdx9413/craft.git
+cd craft
+pnpm install --frozen-lockfile
+pnpm test
+```
+
+`craft init` currently selects Agent, Supervisor, or Provider mode. Planned onboarding will start with goals and materials and move technical modes into advanced settings; that UI change is not implemented yet. Configuration, SQLite data, indexes, logs, and backups live under `~/.craft_data`; set `CRAFT_DATA_DIR` to override it.
+
+## Codex plugin
+
+Add `https://github.com/wdx9413/craft` as a Git marketplace source. Pin a release tag when possible and sparse-check out both `plugins` and `.agents` (the plugin sources live under `plugins/*`). For the CLI:
+
+```bash
+codex plugin marketplace add git@github.com:wdx9413/craft.git --ref main --sparse plugins --sparse .agents
+codex plugin add craft@craft-marketplace
+```
+
+If an older marketplace snapshot reports that a plugin source path is not a directory or that its plugin connection could not load, remove and re-add the marketplace with those sparse paths. The published plugin package contains only its manifest, `craft-route` Skill, icon assets, and bundled MCP entry points.
+
+Since v0.2.1, the plugin MCP starts from a versioned single-file bundle committed with the plugin. A Codex cache copy therefore needs neither `npm install` nor the source repository's `node_modules`. Reinstall after upgrading from an older version and verify `craft_info` in a new session.
+
+## Claude Code and MCP
+
+Claude metadata is in `.claude-plugin/plugin.json`. Any MCP host can use a global installation:
+
+```json
+{
+  "mcpServers": {
+    "craft": { "command": "craft-mcp", "args": [] }
+  }
+}
+```
+
+Tools use the `craft_` prefix to avoid collisions. For substantial work the Craft Skill automatically starts with `craft_default_route`, without requiring a repeated orchestration prompt. A matching verified Workflow is executed via `craft_default_route_execute`; an unmatched safe plan is progressed with `craft_default_route_update`. A required Project Policy makes structured Git, test, coverage, and review receipts server-enforced; a Host Adapter can receive only its declared next safe action. In a later session, `craft_default_route_find` resolves a uniquely matching active task from a natural-language continuation and never guesses on a tie; `craft_default_route_resume` resumes a known task ID. After two or more passed routes from distinct tasks with confirmed or bounded evidence share a strategy, `craft_route_workflow_proposal_create` may save one Host-distilled, project-neutral `draft` Workflow; it cannot promote or publish it.
+
+## TraeWork
+
+`adapters/trae-work/` is a copyable/importable TraeWork package. `mcp.json` and the compatible `mcp-core.json` select the smaller `craft-mcp` surface; use `mcp-full.json` only for an approved advanced configuration. Upload or place only `skills/craft-route/` under `.trae/skills/` by default; `craft` and `craft-clarify` are separately installable opt-in packages. Install Craft globally first, then import `mcp.json` through TraeWork Desktop Settings → MCP → Local → Manual configuration. Local stdio MCP cannot serve TraeWork web/cloud tasks; those require a deployed HTTPS MCP adapter and a renewed security/evidence review.
+
+## WorkBuddy
+
+`adapters/workbuddy-expert/` is a route-first WorkBuddy Expert upload package with `.codebuddy-plugin/plugin.json`, a PNG avatar, Agent definition, exactly one `craft-route` Skill, and a local syscall MCP dependency. `adapters/workbuddy-connector/` is the separate governance Connector, also with only `craft-route`; it can explicitly opt into Full MCP for administration and must not be uploaded to the Expert page. They share the same Craft state, Evidence, and Policy rather than fork capabilities. Install Craft first so the appropriate `craft-mcp` or `craft-mcp-full` command is on `PATH`; marketplace distribution additionally needs a controlled installer or remote HTTPS MCP and WorkBuddy review.
+
+## Verification
+
+```bash
+pnpm run typecheck
+pnpm test
+```
+
+The test command enforces 100% line, function, and branch coverage. Coverage is calculated by the test runtime, never self-reported by a model.
+
+See the [documentation index](docs/README.md) and [architecture](docs/architecture.en.md) for product direction, boundaries, and data models.

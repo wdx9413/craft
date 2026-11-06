@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "craft": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CODEBUDDY_PLUGIN_ROOT}/bin/craft-mcp.cjs"],
+      "timeout": 30000
+    }
+  }
+}

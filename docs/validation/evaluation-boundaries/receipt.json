@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-10-30T19:54:52.911533+00:00",
+  "platform": {
+    "system": "Darwin",
+    "architecture": "arm64",
+    "node": "v24.14.0"
+  },
+  "scope": "Bounded evaluation configuration reads, execution concurrency/cancellation and controlled report/comparison races. Local development packages only.",
+  "tests": {
+    "source_gate": {
+      "passed": 27,
+      "failed": 0,
+      "lines": 100,
+      "branches": 100,
+      "functions": 100,
+      "modules": [
+        "core/workbench-evaluations.ts",
+        "core/interfaces/workbench-evaluations.ts"
+      ],
+      "registered_group": "workbench-controlled-evaluations",
+      "same_flags_as_existing_gate_runner": true
+    },
+    "installed_compiled_service": {
+      "passed": 14,
+      "failed": 0,
+      "source_fixture_store_used": true,
+      "overlap_source_cases": true
+    },
+    "workbench": {
+      "passed": 57,
+      "failed": 0
+    },
+    "global_inventory": {
+      "status": "incomplete",
+      "managed": 291,
+      "baseline_debt": 193,
+      "new_missing_count": 46,
+      "global_increment_complete": false
+    }
+  },
+  "assertions": [
+    "Six concurrent identical submissions start one command; only four distinct active operations are admitted and the fifth creates no record.",
+    "Real worker cancellation settles; simulated progress IPC retains the newest 256 events only.",
+    "Configuration growing to 4 MiB after descriptor stat reads exactly 1 MiB plus one overflow byte, closes its descriptor and creates no record.",
+    "Short reads are retried, exactly 1 MiB is accepted, oversized/nonregular input is refused, and read errors close descriptors.",
+    "A real POSIX named pipe without a writer is rejected without waiting; no Windows/Linux execution proof claimed.",
+    "Frozen configurations use the same byte budget during report verification.",
+    "Early and late cancellation never becomes completed; changed engine environment rejects a synthetic agent run.",
+    "Subject/suite/runtime binding rejects tampered plans even after the test updates the stored file hash.",
+    "Plan/result changes between verification and copying, and invalid result keys are rejected; comparison temporary directories are removed.",
+    "Two real comparisons interleaved across the transaction boundary produce one diagnostic receipt."
+  ],
+  "package_parity": {
+    "dist/core/workbench-evaluations.js": {
+      "sha256": "c071cccbbbdb6de2d60719228d9f7262711351eae1650e21e6bd1417243bf468",
+      "verified_targets": [
+        "dist",
+        "archive",
+        "installed_runtime",
+        "sidecar"
+      ]
+    },
+    "dist/bin/craft-evaluation-worker.js": {
+      "sha256": "797e89cdcacdce394db68bcdfb5c27d3d8bf906978ab21cc01606a797b4af486",
+      "verified_targets": [
+        "dist",
+        "archive",
+        "installed_runtime",
+        "sidecar"
+      ]
+    },
+    "dist/plugin/craft-mcp.cjs": {
+      "sha256": "dbe3c99dc380503eb7e9dcd4bac351f7ca8865f03b49cb58633c7ecd7f766408",
+      "verified_targets": [
+        "dist",
+        "archive",
+        "installed_runtime"
+      ]
+    },
+    "dist/plugin/craft-mcp-full.cjs": {
+      "sha256": "a7c0c600a7362154a702c1024a78eb1157b6da8be78eb379d1ba7da2dbc42a97",
+      "verified_targets": [
+        "dist",
+        "archive",
+        "installed_runtime"
+      ]
+    },
+    "dist/plugin/craft-mcp-http.cjs": {
+      "sha256": "e1197efb194d8a5669134012e66f6564b9c6597447c558ae3983a02a200e2b00",
+      "verified_targets": [
+        "dist",
+        "archive",
+        "installed_runtime"
+      ]
+    }
+  },
+  "provenance_file": "./runtime-provenance.json",
+  "source_sha256": {
+    "core/workbench-evaluations.ts": "64b62a5df3f69f19707f1de42aac8a778de68050b7ade04306c8b28d252458a1",
+    "core/interfaces/workbench-evaluations.ts": "653da566499a225a69a70bf70a5e9ff76303c2b179a28f01f09cc7b0983641f8",
+    "tests/workbench-evaluation-concurrency.test.ts": "c30b6b06f4a58e21a409ed18d2b7cbb48af6ad732e5ae3763d96a5a7a800c9eb",
+    "tests/coverage-gates.json": "1277fab408a0e0a8d08ec6f09a5db4572aed0451b701139a12758900279be77b"
+  },
+  "limitations": [
+    "Only macOS executed. Windows/Linux and native desktop acceptance remain pending.",
+    "Progress messages and specific file/store boundary interleavings are injected; command execution, cancellation, file copies, named pipe and receipt persistence are real.",
+    "Installed boundary tests select the compiled service from the installed package but use source fixture-store utilities; isolated whole-package startup has separate evidence.",
+    "Byte-read ceilings are measured; peak RSS and production latency are not measured here.",
+    "Global coverage registration and full-goal incremental coverage remain incomplete; the baseline was not changed.",
+    "Runtime 0.12.131/Eval 0.1.5 are mutable local development snapshots; no commit, push, publication or installed-plugin upgrade."
+  ],
+  "artifacts_sha256": {
+    "installed-runtime.txt": "d5f6460d92ada58baf49ab0bd11beee35c92ad38726ac57d283a58d0e93292fc",
+    "coverage-gate.txt": "37201696226c85105d5d3b73bdc49547e82327210ac78e7500c056350d2a1d45",
+    "runtime-provenance.json": "32b6b96cf6816980e08e1889019753a905cde629bf86f671ff4fdaf9ce22f4d6",
+    "core-build.txt": "b4be1c39d3e2cf5533e51ebe1ecc1f572d7bbb7727a6391f6a08f0f1c4b75374",
+    "workbench-tests.txt": "267658187efe1c9b0af1014289fabac440fad7606b9769c79b8cab3f9b8ecd39",
+    "runtime-check.txt": "ae86da9f23b14a602277fe7818aab295cb64da948abb0fe9143e54740e16cc03",
+    "layering-check.txt": "ad966a0d8285da657ea6196a3a7c8b81bb9d148dd46a691a9fde4bee6ed466b1",
+    "docs-check.txt": "265e1ef54b8e7046513c010d4fca9917eebf61e41723081cb8b585438fdc6917",
+    "global-coverage-inventory.txt": "0fa90554d90f8bfbe1f0e23fd1b56620df325eb8fc302152a74462ad299f9e53",
+    "plugin-check.txt": "c82e8768e6faf297c4cfebd1ac7b8b50f3f358dadc45456377841100425a0d3e",
+    "typecheck.txt": "206f89314820bd597e763cc113f2ab5ed93a1c7cc42e06e73c929d4978ee3115",
+    "plugin-build.txt": "9653d9bd84ff75635acb1f5fa5676b2dd90bb32d77cb96bea66c34af075c2f52",
+    "sidecar.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "build_core_plugin": "passed",
+    "plugin_package": "passed",
+    "runtime_protocol": 1,
+    "sidecar_prepare": "passed",
+    "layering": "passed",
+    "docs": "passed",
+    "strict_selected_gate": "passed",
+    "global_coverage_inventory": "failed_unregistered_modules",
+    "diff_check": "passed",
+    "branches": [
+      "craft main",
+      "craft-eval main",
+      "craft-workbench main"
+    ]
+  }
+}

@@ -1,0 +1,53 @@
+(node:80835) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80835) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (32.338792ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (12.869875ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (20.099083ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (20.773834ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (12.116875ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (30.583583ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (20.806583ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.73575ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (9.956708ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (16.654083ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (19.077209ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (291.957333ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (18.586375ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1294.210084ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2378.348417ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (45.632167ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (262.924334ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (12.006416ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (26.126334ms)
+✔ MCP component calls produce correlated terminal Traces without storing input (44.726916ms)
+✔ memory capture modes are explicit and Evidence-gated (15.350042ms)
+✔ Maintenance expires existing Knowledge and Memory records (13.249541ms)
+✔ trial Outcome automatically closes its canonical Trace (10.306375ms)
+✔ component Trace handles terminal reuse and non-Error failures (13.288959ms)
+✔ service exposes the independent outcome observer method (8.904958ms)
+✔ v0.12.32 Trace Review classifies immutable failures and supports idempotent reads (18.778125ms)
+✔ v0.12.32 memory learning cycle is resumable, content-free, and idempotent (21.884541ms)
+✔ v0.12.32 Memory Maintenance is proposal-only and records usage signals (22.071792ms)
+✔ v0.12.32 new review and maintenance MCP tools are exposed on the core surface (10.26675ms)
+✔ v0.12.32 review and maintenance MCP handlers execute through the full surface (25.094708ms)
+✔ v0.12.34 maintenance keeps legacy fallback observable and reports expired governed entries (9.745125ms)
+ℹ tests 31
+ℹ suites 0
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5480.133584
+ℹ start of coverage report
+ℹ -----------------------------------------------------------------------
+ℹ file                   | line % | branch % | funcs % | uncovered lines
+ℹ -----------------------------------------------------------------------
+ℹ core                   |        |          |         | 
+ℹ  memory-maintenance.ts | 100.00 |   100.00 |  100.00 | 
+ℹ  trace-review.ts       | 100.00 |   100.00 |  100.00 | 
+ℹ -----------------------------------------------------------------------
+ℹ all files              | 100.00 |   100.00 |  100.00 | 
+ℹ -----------------------------------------------------------------------
+ℹ end of coverage report

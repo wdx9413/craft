@@ -1,0 +1,218 @@
+# Craft
+
+> 当前发布版本：v0.12.131。Craft 是面向人和 AI 的通用工作运行时：知识、记忆、能力发现、质量评测与 Workflow 演进都由同一 Runtime 实现，并以 MCP 对外提供；默认 `craft` 插件只是将 Skill、MCP 配置和 bundle 打包给 Codex。它们共享同一套状态、策略、Receipt、评测与安全边界，也可按需作为独立 MCP 产品使用。交互式工作继续复用当前 App 作为 Embedded Host；Codex Context 插件只会在出现待处理学习票据时启动只读的 `gpt-6-luna` CLI 调用，每轮最多一次；Knowledge 请求会通过 CLI 的 JSON Schema 输出约束保持响应结构。
+
+[中文](README.md) | [English](README.en.md)
+
+## 简版产品介绍
+
+Craft 的产品目标是一个人和 AI 共同工作的数字工作台：理解目标、组织能力、执行任务、维护成果，并从经过验证的工作中积累经验。
+
+产品面向视频、销售、教育、内容创作、研发等各行业工作者。你可以提出目标、组织资料与工具、一起完成和修改成果，并把有效方法留作下次使用；专业对象和界面由领域扩展提供，不要求所有用户采用编程工作方式。
+
+产品路线分两步：**短期做跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，提供统一的能力发现、授权门禁、证据链与评测门禁，执行仍发生在宿主内，Craft 只治理不越权；**长期做自主 Agent 平台**——由 Craft 直接承载对话循环、调度宿主并依靠评测门禁自我改进。两个阶段共用同一套内核。
+
+当前版本提供的是 TypeScript/Node.js CLI、插件内核、本地维护 Worker、回环 Workbench 和本地 Supervisor。能力目录可以作为多个 Source Mount 保留；相同内容的镜像只形成一个逻辑能力供检索选择，同时保留所有来源、实际选中的实例和优先级。同一声明身份而内容不同的能力会形成显式冲突，绝不静默覆盖。Activation Plan 与 Resolution 会固定、复核并有界加载只读能力内容；新的跨宿主 Dispatch 可把这份内容精确绑定给 Codex CLI、Claude Code 或 DeepSeek Harness，并在执行前再次检查上下文摘要，变化即失败关闭。它不会自动执行本地 Skill，也不会增加工具或写入权限。验证驱动迭代控制器把独立验收结果分类为通过、有限重试、环境/配置阻塞或人工交接；它不把 Agent 自述当作验收，也不自动扩大写入权限。任务图可按依赖组织探索、制作、验证、复核和交付节点，但不替代现有 Runtime 自动派发 Agent。
+
+Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票据、观察回执”协议，可由本地进程、容器或远程执行平台实现。当前仓库提供有限本地适配和首个 Docker CLI 驱动：普通 Probe 不授予可信状态；只有禁网、只读根、Workspace 可写、环境无常见 Secret、超时取消和无残留容器全部通过，Profile 才能成为 `verified`。是否安装 Docker、Daemon 安全配置与各平台内核隔离仍由部署方验收，不能把一致性测试解释为完整安全认证。
+
+| 产品支柱 | 核心能力（目标） |
+| --- | --- |
+| 工作与协作 | 理解目标、共享工作空间、可编辑成果、能力与上下文 |
+| 执行与保障 | 规划调度、工具连接、沙箱与权限、暂停恢复、验证与观察 |
+| 学习与改进 | **评测与实验**、记忆与知识、学习适应、编译与复用 |
+
+完整范围与实施状态见 [产品架构](docs/product/architecture.zh-CN.md) 和 [路线](docs/product/roadmap.zh-CN.md)。
+
+## 核心理念
+
+- 发现而不是全量注入：只索引用户选择的能力目录，先用元数据和文本检索返回少量候选，需要时再读取完整内容。即使能力库很大，也不会把全部 Skill 塞进模型上下文。
+- 长任务可以恢复：目标、进度、待办、决策、反馈、产物和证据保存在用户目录，换 Agent 或换会话仍能继续。
+- 验证方式显式化：程序、模型、人工和业务结果使用不同 Grader；Signoff Policy 决定一个精确版本是否达到复用标准。
+- Workflow 来自真实使用：用户可把成功路径保存为版本化模板，再经过回放和评测逐步提升，而不是依赖平台预置全部行业流程。
+- 数据属于用户：默认写入 `~/.craft_data`，不污染业务项目。API Key 只保存环境变量名，不保存密钥值。
+- 可修改、可掌控：目标体验包括局部编辑、版本对比与执行控制；沙箱按实际后端能力提供保证，文件恢复与外部操作补偿分别处理。
+
+## 当前版本已经实现
+
+- 多能力目录管理、真实路径解析、目录引用/符号链接处理和增量扫描。
+- Skill frontmatter 解析、SQLite 关键词候选检索和按需读取；搜索结果不携带完整正文。当前 Node 无 FTS5 时使用持久化内容的关键词排序降级。
+- 可选 OpenAI-compatible Embeddings 混合检索：未配置时零网络请求；已配置时只索引 Skill 名称、描述和别名，并在调用成功后与关键词结果融合。超时、鉴权、响应格式或维度异常会自动降级为关键词结果。
+- 持久化任务、Checkpoint、显式反馈、Artifact 与 Evidence。
+- 版本化 Workflow、输入替换、路径边界、敏感信息脱敏和副作用授权。
+- 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
+- 版本化评测集与 Agent Profile 基础数据模型。
+- 六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、Workflow 自动取证闭环，以及 held-out Eval 驱动的晋级与回滚。
+- **Runtime Truth Layer（v0.12.13）**：在旧 `craft.trace.v1` 兼容读取之上提供版本无关的 `craft.trace` envelope、OTLP/HTTP 映射、Tool Call/SSE 解析、会话压缩、跨进程 correlation 和结构化工作笔记；原始 Prompt 与业务正文不进入 Trace，自动发布仍受评测、Signoff 和 Canary 门禁约束。新增 Context Manifest、可控 Replay、可持续本地 Runtime、Project Bundle、反馈学习、领域 Evaluator、Handoff 与成本归因。详见 [Runtime Truth](docs/technical/modules/runtime-truth.zh-CN.md)。
+- **Verified Autonomous Work（v0.12.13）**：将 Context Manifest、动作授权、受限 Action Gateway、Host/工具回执、状态再观察、强制 Acceptance Gate、Artifact/Evidence 和 Delivery Gate 收敛为单 Agent 主路径；漂移自动进入 `needs_replan`，写入动作必须经过批准和平台 Conformance。详见 [Verified Autonomous Work](docs/technical/modules/v01212-verified-autonomous-work.zh-CN.md)。
+- **Runtime Completion（v0.12.13）**：新增受限工作区读写、Worker lease/recovery、Provider fallback 路由和标准 A2A message/stream/list 接口；Shell、浏览器、MCP 远程动作和 OS 级隔离仍必须由显式 Adapter 提供。
+- **Runtime Boundaries（v0.12.13）**：有界 Action Gateway、独立 Acceptance Gate、Durable Worker、Provider fallback 和摘要化 A2A 入口均通过同一服务/MCP 底座提供；真实 Shell、浏览器、远程副作用与 OS 沙箱仍需显式 Adapter。详见 [Runtime Completion](docs/technical/modules/v01213-runtime-completion.zh-CN.md)。
+- **Assured Pilot（v0.12.17）**：把已验证的 Host 回执、环境、恢复演练、可信 Capability Profile 与一次性密封 held-out Case 引用收束为可比较样本；环境、能力、Case 或人工工作区漂移即 `needs_replan`。它不读取密封正文，也不把本地记录声称为生产隔离。详见 [Assured Pilot](docs/technical/modules/assured-pilot.md)。
+- **Capability Kit Platform（v0.12.18）**：`Capability Kit Manifest → Registry → Conformance → Task Activation → digest-only Contribution` 是唯一扩展路径。Kit 可投影为 Skill、MCP、CLI 或插件描述；核心事实、授权、Receipt、Evidence、Outcome 与 Eval Gate 不可由 Kit 直接写入。内置 Serena 项目知识和本地工作区两个样例，外部 Kit 不自动下载、执行或启用。详见 [Capability Kit Runtime](docs/technical/modules/capability-kit-runtime.md)。
+- **Platform Ideal State v1（v0.12.21）**：工作主链统一为“定义、准备、行动、交付、学习”；模型可在 Safety Floor 内自动增加求证强度，人工介入仅为可配置兜底。发布资格使用两个无正文 Pilot、同环境同预算的五次配对 Trial，明确区分 `eligible`、`rejected` 与 `inconclusive`。详见 [Platform Ideal State v1](docs/technical/modules/platform-ideal-state-v1.md)。
+- **MCP-first 组件架构（v0.12.28）**：完整 Craft 是组合根，默认包含 Core、Context、Capability、Quality 和受限 Workflow Evolution。Runtime 通过 `craft-mcp --product full|context|knowledge|memory|capability|quality|evolution|admin` 直接服务任何 MCP Host；Plugin 只负责安装体验。Knowledge、Memory 是正式单域产品，Context 是二者的组合入口；Workflow Evolution 仅生成草案，完整准入仍由 Craft 与 Quality 完成。详见 [组件插件架构](docs/technical/modules/component-plugin-architecture.md)。
+- **开发验证平面（v0.12.23）**：`VerificationPlane` 依据变更类别、effect、Candidate 和 Host 风险生成最小检查集，收集同环境 Evidence Receipt，并明确给出 `eligible`、`rejected` 或 `inconclusive`。它不执行命令；Candidate 仍须通过 Release Qualification。详见 [Verification Plane](docs/technical/modules/verification-plane.md)。
+- **模型评测与 Workflow Evolution（v0.12.24）**：`EvaluationModelProfile` 仅保存 Provider、模型、预算和环境变量名引用，默认禁止联网且从不存 API Key；Workflow Evolution 将多条脱敏执行观察提炼为最多两个设计轴的草案请求。草案通过 `craft-quality` 的独立评测、再经 Signoff 和 Canary 后才可成为 `verified` Workflow，届时才进入 Capability 的可选集合。
+- **Trust Profile 与网页边界（v0.12.26）**：`TrustProfile` 将 Trial/Outcome/Evidence 汇总为按任务、项目、能力、模型、Host、effect 和数据范围限定的自主权建议；建议会过期、可撤销，且永远不等于授权。文件操作继续走 Action Gateway；网页 GET/HEAD 走无凭据、有界的 MCP 观察，浏览器点击、填表、提交只生成 Adapter Contract，由宿主插件执行并回传 Receipt。v0.12.26 增加 Generic Adapter SDK、跨平台 Command Adapter、OpenAPI 导入、Durable Runtime、Context Manifest、信任曲线、领域 Evaluator 和项目迁移契约。详见 [v0.12.26 Runtime](docs/technical/modules/v01226-runtime.md)。
+- **完整主插件组合（v0.12.28）**：默认 `craft` 不再被描述为只有编排核心：它通过固定 syscall 词表按需访问 Context、Capability、Quality 与 Workflow Evolution，因而不必把数百个工具 Schema 同时注入模型上下文。`craft-context` 是知识、记忆和 Context Receipt 的推荐独立入口；`craft-quality` 评测 Skill、MCP、Workflow 等任意版本化 Subject。`craft_info.data_space_id` 明确组件是否共享账本。详见 [主插件组合](docs/technical/modules/v01228-primary-plugin-composition.md)。
+- **Turn Cognitive Runtime（v0.12.28）**：Craft 现在可按轮接收 Host 或独立 Agent 的内容无关语义提议，再以 scope 内 Policy 决定是否需要上下文、能力发现、工作准备、候选记忆或评测观察。短对话可以全不触发；候选记忆必须显式采纳后才进入 Ledger。它只声明 Codex/Claude/IDE 的接入契约，不会改宿主配置或在 App 中另起 CLI。详见 [Turn Cognitive Runtime](docs/technical/modules/turn-cognitive-runtime.md)。
+- **Runtime Proof & Deployment（v0.12.33）**：远程 MCP 可使用 JWKS/OIDC Resource Server verifier；Remote Task 以 tenant、principal、scope、receipt、TTL 和一次性 handle 绑定。真实 Harness 效果必须以双 Host、双脱敏 Case、Host Session 与独立 Outcome Observer 的重复 Campaign 证明。供应链增加发布者签名证明；A2A v1 仅作为受限 Federated Grant 的 Adapter。非 loopback 网络监听、TLS/反向代理、IdP、真实 Case 与 Windows 隔离仍是部署方明确配置的边界。详见 [Runtime Proof 与远程部署边界](docs/technical/modules/runtime-proof-deployment.md)。
+- **Remote Access / Session / Observer Contracts（未发布）**：远程 MCP 只有部署方注入可信 verifier 后才可访问，且以 TLS、issuer、audience、scope、到期时间和限流失败关闭；Host 的连续事实与独立状态观察都写入同一条 Trace，观察本身不能晋级。详见 [运行时契约](docs/technical/modules/remote-mcp-session-observer.md)。
+- Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
+- 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
+- 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。
+- 经验模式与 Skill 候选：从多个 Trial、Outcome 与 Evidence 引用提炼适用条件、成功策略和失败模式；候选复用现有 held-out Eval/Signoff Gate，只有已验证版本才可在显式授权、摘要校验和本地备份保护下写入既有 `SKILL.md`，且可安全回滚。
+- 默认编排入口：复杂目标自动优先选择相关的 `verified` Workflow；无匹配时创建可续接的安全 Host 路线。项目可启用 Policy，将每阶段的 Git 基线、测试、覆盖率和 Review 回执变成服务端门禁；Host Adapter 只领取声明支持的下一安全动作。
+- 安全增量研发 Kit：固定“Git 基线与原逻辑测试 → 最小改动 → 测试/覆盖率 → Diff 审查”的顺序，要求每个结论附带命令或产物证据。
+- 可恢复基础编排：Lease 有 TTL 和续租；显式幂等键可安全重试提交；声明的预算耗尽后会阻断未开始节点，同时保留已发生的成本。
+- 持久恢复队列：有界扫描到期等待、未知 Effect/补偿和失败 Saga，生成稳定的优先级工作项；跨平台 Worker 按能力短租领取，过期自动回收，完成回执必须通过来源状态和 Evidence 校验。
+- 授权主动触发：签名 Webhook Subscription 提供 HMAC 验签、重放防御、确定性过滤、节流、白名单字段投影和资源预算预留；原始请求体不落库，投影数据没有执行权限。
+- 受控投机准备：授权事件可以生成固定输入摘要、预算和 TTL 的索引、总结、草稿或元数据候选；Worker 使用短 Lease，成果必须带 Artifact 与 Evidence。候选全程自动记录 Trial、Trace、实际成本和 Outcome，人工修改沉淀为偏好信号，但不会冒充程序证明、直接晋级或自动执行外部写操作。
+- 对象级成果血缘：用精确版本连接 Source、Output、Workflow/Capability 转换器和 Evidence，支持段落、单元格、镜头等 Locator、上下游影响追溯、环检测及新版本陈旧提示，不复制业务正文。
+- 长任务冻结与恢复：把 Task、Workspace 修订、Wait、Runtime 指纹、预算和恢复项固定为不含原始对话及凭据的最小 Snapshot；恢复前区分继续等待、直接续接或重新规划，并用短 Lease 和 Evidence 防止并发或虚假恢复。
+- 分级自主权：按动作配置自动、仅通知、单人审批或多人联签；授权绑定精确任务、目标、请求摘要和有效期，并且只能消费一次。
+- 统一 Host 门禁：External Effect、Runtime Adapter 与 Computer Use Operation 在派发时原子消费授权；子任务也携带自己的稳定动作身份。
+- 动态契约推导：用多次脱敏观测形成 API、MCP 或 GUI Contract 候选，经过人工修订、沙箱证明和证据 Trial 后才成为 verified；版本 Diff 识别 breaking change，独立批准后才能发布 Capability Adapter，并可按精确版本安全撤回。
+- 能力灰度：对新旧 Capability 做稳定双臂分流，达到最小样本后比较失败、成本、时延和人工修正，退化时停止候选流量并给出回滚建议。
+- 能力共享：把已验证 Capability 变成可人工审查和脱敏的版本化能力包，供个人、团队或组织精确订阅，并支持发布方统一撤销。
+- Hub 增量目录：通过固定 Ed25519 公钥验证分页目录，以单调游标和前页摘要阻止丢页及分叉；查询只走本地元数据索引，不扫描一万个远程 Skill。
+- 按需能力落地：只在选中候选后按目录摘要接收有限文件，写入 `~/.craft_data/cache` 隔离区；路径、体积、原生二进制、疑似凭据和 lifecycle scripts 经过门禁及人工审查，最终只登记成待评测 candidate。
+- 候选能力认证：精确绑定 held-out Evaluation、每个 Trial 的 Sandbox Receipt、Evidence、program Grade 与 Signoff；只有无漂移且由独立角色批准的版本才能原子晋级 verified，认证本身不授予执行权。
+- 持续供应链治理：来源停用、条目撤回、摘要漂移或高危安全公告会原子阻断认证资产、使精确 Activation Profile 失效，并投影可恢复的再认证工作。
+- 本地维护 Worker：以单实例前台进程或一次性 Tick 回收过期 Lease、清理过期候选、复核 Hub 供应链并刷新 Recovery Queue；只维护控制面，不擅自执行用户任务。
+- MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
+- Delivery Control Loop：Host/验收事实自动投影为 deliver、collect acceptance、retry-or-handoff 或 human-handoff；批量比较仅建议进入 Signoff，绝不自动发布或执行。
+- Task Control：将任务、工作目录、允许 effect、验收要求和可选能力/预算版本固定为不可变 Contract；一个兼容 Launch 的所有实际事实被收敛成一个下一安全动作，可生成不含 Prompt 的恢复交接。
+- Task Run / Benchmark：Task Run 固定一次 Host 工作的版本和摘要，在漂移时停止重规划；Benchmark 只比较已观察交付，同环境/预算的 held-out 结果才能生成不可自动发布的候选。
+- Verified Work Loop / State Workspace / Eval Campaign：Host 自述完成不等于交付；文件状态、人工修改、环境与预算漂移均形成可追溯事实并要求重规划。Campaign 以真实 Outcome 比较最小 Harness 与有限候选，不默认增加多 Agent。Serena 仅作为受信任项目的按需只读上下文，Craft 只提出更新建议、绝不自动改写其记忆。
+- Managed Host Bridge / Execution Fabric：Fabric 生成的 Launch 会延后 Host 启动；只有精确 Manifest、Prompt 摘要和 Activation Receipt 再次通过，才可启动 Codex CLI 或 Claude Code。写入仍需显式审批；Host 终态自动触发状态再观察，不能冒充交付结果。
+- 可验证演进：本地 `workspace-write` 有基线/提交 Checkpoint 和显式恢复，外部 effect 不在回滚承诺内；Campaign 用已观察 Delivery 生成无正文配对报告，Candidate 必须经 held-out、Signoff、Evidence Canary 和人工结论才可被最小 Harness 选择器推荐。
+- Capability Connector：内置、用户批准的 GitHub/火山引擎 Skill 来源和 stdio/HTTPS MCP 统一登记为无敏感正文的来源元数据；发现、批准、Activation Profile 和调用 ticket 严格分离。Serena MCP 只允许只读 Asset。Connector 不自动安装、启停第三方服务、改写宿主 MCP 配置或保存凭据。
+- **syscall 工具面**：8 个通用动词（`describe` / `list` / `get` / `create` / `update` / `run` / `cancel` / `search`）加 `resource` + `operation` 寻址，替代按操作逐个暴露工具；另保留 8 个主路径直连操作（含一次性内置知识源登记）。注册表由既有工具表机械派生，**全部操作可达而挂载 schema 保持 O(1)**。详见 [Tool Plane](docs/technical/modules/tool-plane.md)。
+- **模型网关**：声明式支持 deepseek、火山引擎方舟、通义千问、Kimi、智谱 GLM、MiniMax、OpenAI GPT、Anthropic Claude 八家模型族。只保存端点、协议、模型分层与**环境变量名**，从不保存密钥；请求渲染与响应解析是纯函数，因此可在没有任何 API Key 时被声明、配置与验证。**内置真实 HTTP transport**（`createFetchTransport`，60 秒超时、429 指数退避、8MB 响应上限），内建宿主与 CLI 默认注入它，因此配置好 Key 即可直接跑模型；`unconfiguredTransport` 只是可注入的降级 seam，不指出缺少的环境变量时不会静默失败。首次运行可用性由 `craft_first_run_readiness` 直接回答。详见 [Model Gateway](docs/technical/modules/model-gateway.md)。
+- **内建宿主（internal host）**：Craft 自己跑循环时，是与 Codex、Claude 并列的第三个 Host Driver，产出同样的 dispatch/receipt/事件记录。循环带六道外部熔断（步数、token、墙钟、无进展、动作重复、预算熔断），可调用的动作是显式白名单且只限读与记录。详见 [Internal Host](docs/technical/modules/internal-host.md)。
+- **资产信封与路由**：能力、知识、工作流共用统一信封；路由按信任、健康、effect、领域标签、预算与风险上限选择最小集合，并返回每一次拒绝的理由。
+- **跨模型可比性**：资产可声明 core invariants 与 model-sensitive 行为；只有核心不变量在每个模型都成立才判 verified，只试过一个模型返回 `inconclusive` 而非通过。详见 [Asset Routing](docs/technical/modules/asset-routing.md)。
+- **运营度量**：只读指标投影，聚合成功率、耗时、token、成本与**每成功 outcome 成本**（空库报告零样本而非满分）。
+- **启动门禁**：默认门禁集中声明为"被记录 / 被计量 / 被回执核验"三件事，`craft_launch_gate` 可评估某次启动是否会被拦下及原因，并支持注入 `fail_closed` 检查。
+- **知识作用域与过期**：知识可声明 `user` / `project` / `task` 作用域与 TTL；过期文档从可重建投影中移除，**Markdown 源文件不受影响**。
+- 单一版本源：版本号以 `package.json` 为准，`version:check` 覆盖插件清单、两个 WorkBuddy 适配器清单与三个适配器 Skill。
+- Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
+
+v0.9.10–v0.10.2 还提供声明范围内的文件快照、本地事务记录、受限 TypeScript 脚本候选和 Host 执行交接。v0.10.0 新增共享结构化工作对象；v0.10.1 用字段级 ChangeSet 阻止同字段覆盖；v0.10.2 新增持久等待、幂等资源结算、Fallback Contract 与 Effect/Saga Kernel。外部写入预声明请求、幂等键、审批和可选补偿；未知结果可先通过预授权只读 GET 对账，未映射状态仍需人工消歧。补偿 Adapter 只执行精确授权且预先冻结解释契约，网络模糊保持未知，补偿失败不会伪装成回滚成功。候选操作尚不是自动从原始轨迹提炼程序；平台与安全缺口见 [执行策略](docs/technical/modules/execution-policy.md)。
+
+向量检索不是必需依赖。短期本地库优先使用零配置检索；需要时可显式配置兼容 OpenAI Embeddings 协议的服务，并与关键词结果融合。
+
+## 安装
+
+要求 Node.js 23 或更高版本。用户不需要安装 Python。
+
+从 GitHub 安装 CLI：
+
+```bash
+npm install -g github:wdx9413/craft
+craft init
+craft semantic configure --provider-name local --base-url https://embedding.example/v1 --model text-embedding --api-key-env EMBEDDING_API_KEY
+```
+
+开发者使用 pnpm：
+
+```bash
+git clone https://github.com/wdx9413/craft.git
+cd craft
+pnpm install --frozen-lockfile
+pnpm test
+```
+
+## 三种使用方式
+
+1. Provider（当前主线，跨宿主治理插件层）：Craft 通过 MCP/插件接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，提供能力发现、任务延续、Workflow、证据、授权与评测门禁；执行仍发生在宿主内，Craft 只治理、不越权。
+2. Supervisor（规划形态）：未来由 Craft 调度 Codex、Claude Code 或其他 Host；当前版本已有可并发领取、依赖阻断和失败换路的编排状态机与 Host Run 生命周期，但还没有自动通用 Host Driver。
+3. Agent：当前版本已提供受限的独立模型循环与 Provider 传输；它仍不是 Codex/Claude 的完全替代品，写入、外部效果和高风险操作继续由 Host/Policy/Approval 控制。
+
+三者共用同一内核，Provider 阶段积累的授权、证据与评测数据是后续自主化的基础。
+
+首次运行 `craft init` 目前仍会选择模式。规划中的普通用户入口将从目标和资料开始，把技术模式移到高级设置，此引导尚未改造。配置、SQLite 数据库、索引、日志和备份都位于 `~/.craft_data`；也可用 `CRAFT_DATA_DIR` 指定另一目录。
+
+## 接入 Codex
+
+在 Codex 插件市场添加 Git 来源：
+
+- 仓库：`https://github.com/wdx9413/craft`
+- 分支/Tag：建议固定发布 Tag；开发时可用 `main`
+- 稀疏路径：`plugins` 和 `.agents`（不要只检出仓库根目录；插件实际位于 `plugins/*`）
+
+命令行首次添加时可直接执行：
+
+```bash
+codex plugin marketplace add git@github.com:wdx9413/craft.git --ref main --sparse plugins --sparse .agents
+codex plugin add craft@craft-marketplace
+```
+
+如果已有旧版 Craft marketplace，升级后仍提示“插件源路径不是目录”或“未能加载插件连接”，说明本地快照保留了旧稀疏路径。删除并按上面两条命令重新添加 marketplace 即可，不需要升级 Craft 版本号。
+
+插件只读取 `plugins/craft/` 中的 manifest、`craft-route` Skill 和两个单文件 MCP bundle；不会把源码、桌面应用、适配器包或 source map 复制进插件缓存。`skills/craft` 与 `skills/craft-clarify` 可作为独立可选包安装，但这样不会自动获得 MCP 数据层。
+
+Workbench/Desktop 展示源码已迁到同级 `craft-workbench/`，核心默认不提供页面，桌面自动发布暂停。核心 Skill/MCP 与四个子能力继续独立使用。详见 [展示层拆分说明](docs/technical/modules/presentation-separation.md)。
+
+## 接入 Claude Code
+
+仓库根目录包含 `.claude-plugin/plugin.json`。把该 Git 仓库作为插件源安装；如果宿主只支持 MCP，则使用下方通用配置。
+
+## 接入 TraeWork
+
+`adapters/trae-work/` 是可复制或导入的 TraeWork 包：`mcp.json` 和兼容的 `mcp-core.json` 默认连接低上下文的 `craft-mcp`；只有已批准的高级配置才导入 `mcp-full.json`。默认只上传或放置 `skills/craft-route/`；`craft` 和 `craft-clarify` 是可单独安装的可选包。先全局安装 Craft，再在 TraeWork 桌面端的“设置 → MCP → 本地 → 手动配置”导入 `mcp.json`。本地 stdio MCP 不能供 TraeWork 网页/云端任务使用；云端需要部署 HTTPS MCP Adapter，并重新完成权限与证据验收。
+
+## 接入 WorkBuddy
+
+`adapters/workbuddy-expert/` 是 WorkBuddy Expert 上传包，包含 `.codebuddy-plugin/plugin.json`、PNG 头像、Agent 定义、唯一的 `craft-route` Skill 及本地 syscall MCP 依赖；默认只开放 16 个路由工具。`adapters/workbuddy-connector/` 是单独的完整治理 Connector，仍只携带 `craft-route`，需要时可显式升级到 Full MCP，不能上传到“专家”页面。两者共享同一 Craft 数据、Evidence 和 Policy，不会产生能力分叉。Expert 包可用于本地联调或提交 WorkBuddy 审核，但不代表已在其市场发布。使用前先安装 Craft，使相应的 `craft-mcp` 或 `craft-mcp-full` 在 `PATH` 中；市场化分发前还需要提供受控安装包或远程 HTTPS MCP，并通过 WorkBuddy 审核。
+
+## 通用 MCP
+
+全局安装后，MCP Host 的配置为：
+
+```json
+{
+  "mcpServers": {
+    "craft": { "command": "craft-mcp", "args": [] }
+  }
+}
+```
+
+当前工具使用 `craft_` 前缀，例如 `craft_source_add`、`craft_capability_search`、`craft_task_checkpoint`、`craft_workflow_trial_run`、`craft_evaluation_run_aggregate` 和 `craft_evaluation_compare`，避免与宿主或其他 MCP 冲突。
+
+v0.9.9 的默认 `craft-mcp` 是精简核心面：路由、能力检索、Task/Evidence、Activation Profile、已签发调用和状态查询，避免把全部工具同时塞进模型上下文。历史集成可显式改用 `craft-mcp-full`，它保留全部旧 `craft_*` 工具。Craft 只生成 Activation Profile 与 profile-bound、会过期的 `call_id`；Host 决定是否实际启停 MCP Server，不能通过通用入口绕过 Policy。
+
+执行按风险分级：普通读取和规划可由 Host 执行；策略要求部分本地生成代码写入使用隔离适配；外部写入需审批，缺少补偿或受信任凭据条件的相关请求被阻断。策略决定不等于后端已经安全隔离：当前文件访问限制、环境凭据清洗、资源/进程控制和 Windows 等价后端仍待补齐，详见 [沙箱边界](docs/technical/modules/execution-policy.md)。
+
+日常由 Craft Skill 自动走高层入口：对复杂目标先调用 `craft_default_route`，无需用户重复“优先已验证 Workflow”等编排话术。它会创建 Task、优先选中匹配的已验证 Workflow，并返回少量候选能力；只有返回 `next_action.kind=execute_verified_workflow` 时，才使用 `craft_default_route_execute` 运行该精确版本并自动归档 Trial/Trace/Outcome。无匹配时默认返回安全增量研发计划；严格项目先用 `craft_project_policy_save` 固化回执要求，Host 在每阶段通过 `craft_route_receipt_record` 写入真实命令结果后，才能用 `craft_default_route_update` 推进。`craft_host_adapter_dispatch` 只把下一安全动作交给已声明支持它的 Adapter。跨会话可直接说“继续上次的 X”：`craft_default_route_find` 只恢复唯一活动路线，并列时绝不猜测；已知 `task_id` 才使用 `craft_default_route_resume`。同一策略只有积累两条不同 Task 的通过路线、且 Evidence 至少为 confirmed/bounded 后，才可生成一个带溯源的 `draft` Workflow，仍必须通过既有评测门禁。短问答和一次性读取不创建 Craft 路线。
+
+## 数据目录
+
+```text
+~/.craft_data/
+├─ config/config.json       # 模式、Host 与模型端点配置
+├─ db/craft.db              # 任务、Workflow、证据、评测等版本化数据
+├─ index/                   # 可重建的能力索引
+├─ logs/                    # 脱敏日志
+├─ backups/                 # 备份
+├─ cache/                   # 可删除缓存
+└─ runtime/                 # 临时运行状态
+```
+
+Craft 只索引能力来源，不移动或修改来源文件。删除 Source 只删除本地索引记录。
+
+`config/config.json` 的 `contentLanguage` 控制 Knowledge 场景说明与 Experience 分类、Workflow 草案中的生成文字；默认 `zh-CN`，可用 `craft config language en-US` 或其他有效 BCP 47 语言标签修改。稳定键、JSON 字段名和从来源原样保留的内容不会翻译。Memory 当前保留用户提供的原文，不调用模型生成或改写。
+
+## 验证
+
+```bash
+pnpm run typecheck
+pnpm test
+```
+
+测试命令同时强制行、函数和分支覆盖率为 100%。覆盖率是测试工具确定性计算的结果，不由模型自报。
+
+用 `craft semantic status` 查看当前状态；`craft semantic disable` 会立即回到纯关键词检索。配置只保存端点、模型和环境变量名，不保存 API Key。MCP 也提供只读的 `craft_semantic_status`；`craft_capability_search` 和默认路由会在语义服务就绪时自动使用混合检索。
+
+产品定义、路线和模块化技术方案见 [Craft 文档中心](docs/README.md)；当前实现边界见 [中文架构说明](docs/architecture.zh-CN.md)。

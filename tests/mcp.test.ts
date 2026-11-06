@@ -1,0 +1,767 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { PassThrough } from "node:stream";
+import { DatabaseSync } from "node:sqlite";
+import test, { mock } from "node:test";
+import { HookPlane } from "../core/hook-plane.ts";
+import type { JsonObject } from "../core/infrastructure/store.ts";
+import { CORE_TOOLS, DOMAIN_SURFACE_NAMES, McpServer, TOOLS, domainSurfaceOf, surfaceToolNames } from "../core/mcp.ts";
+import { serveMcpStdio } from "../core/mcp-stdio.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { initializeConfig } from "../core/config.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
+
+test("Context open advertises the actual material budget bounds", () => {
+  const tool = TOOLS.find(item => item.name === "craft_context_open")!;
+  const properties = tool.inputSchema.properties as JsonObject;
+  assert.deepEqual(properties.max_chars, { type: "integer", minimum: 1, maximum: 1200, description: "Range: 1 to 1200; omit to use the default." });
+  assert.deepEqual(properties.max_items, { type: "integer", minimum: 1, maximum: 3, description: "Range: 1 to 3; omit to use the default." });
+});
+
+test("Experience MCP contract carries the exact source Host session identifier", () => {
+  const properties = (toolName: string) => {
+    const tool = TOOLS.find(item => item.name === toolName) as unknown as JsonObject | undefined;
+    return (tool?.inputSchema as JsonObject | undefined)?.properties as JsonObject | undefined;
+  };
+  assert.equal((properties("craft_learning_cycle_finalize")?.session_id as JsonObject | undefined)?.type, "string");
+  assert.equal((properties("craft_learning_cycle_finalize")?.observed_paths as JsonObject | undefined)?.type, "array");
+  assert.equal((properties("craft_learning_cycle_task_evidence_list")?.session_ids as JsonObject | undefined)?.type, "array");
+  assert.equal((properties("craft_learning_cycle_task_evidence_list")?.limit as JsonObject | undefined)?.type, "integer");
+  assert.equal((properties("craft_experience_observe")?.source_session_id as JsonObject | undefined)?.type, "string");
+  for (const key of ["scope", "source_id", "fragment_id"]) assert(key in (properties("craft_evidence_record") ?? {}), `craft_evidence_record must expose ${key}`);
+});
+
+test("MCP maps SQLite lock failures to a stable storage-busy diagnostic", async () => {
+  const root = await mkdtemp(join(tmpdir(), `craft-mcp-storage-busy-${process.pid}-`));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = await CraftService.open(store);
+  let errorToThrow: Error & { code?: string; errcode?: number; stage?: string; safeDetails?: JsonObject } = Object.assign(new Error("database is locked"), { code: "ERR_SQLITE_ERROR", errcode: 5,
+    stage: "storage_lock", safeDetails: { database_role: "primary", phase: "transaction_begin", busy_timeout_ms: 1, retryable: true } });
+  service.workflowTransition = () => { throw errorToThrow; };
+  const server = new McpServer(service);
+  try {
+    const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_workflow_transition",
+      arguments: { workflow_id: "workflow", target: "verified", reason: "test" } } });
+    const result = (response?.result ?? {}) as JsonObject;
+    const failure = result.structuredContent as JsonObject;
+    assert.equal(result.isError, true);
+    assert.equal(failure.error_code, "STORAGE_BUSY");
+    assert.equal(failure.stage, "storage_lock");
+    assert.deepEqual(failure.details, { database_role: "primary", phase: "transaction_begin", busy_timeout_ms: 1, retryable: true });
+    assert.match(String((result.content as JsonObject[])[0]?.text), /database is locked/u);
+
+    errorToThrow = Object.assign(new Error("no such table"), { code: "ERR_SQLITE_ERROR", errcode: 1 });
+    const otherSqliteError = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_workflow_transition",
+      arguments: { workflow_id: "workflow", target: "verified", reason: "test" } } });
+    assert.equal(((otherSqliteError?.result as JsonObject).structuredContent as JsonObject).error_code, "ERR_SQLITE_ERROR");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Context MCP bounds primary writer contention without changing the connection timeout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-context-lock-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = await CraftService.open(store);
+  const writer = new DatabaseSync(store.paths.databaseFile);
+  try {
+    store.database.exec("PRAGMA busy_timeout=1200");
+    service.contextOpen = async () => store.transaction(() => ({ status: "ready" }));
+    writer.exec("BEGIN IMMEDIATE");
+    const server = new McpServer(service, "component-context-agent"), started = performance.now();
+    const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: root, query: "定位代码" } } });
+    const elapsed = performance.now() - started;
+    const result = response?.result as JsonObject, failure = result.structuredContent as JsonObject;
+    assert.equal(result.isError, true);
+    assert.equal(failure.error_code, "STORAGE_BUSY");
+    assert(elapsed < 900, `Context contention took ${elapsed.toFixed(0)}ms`);
+    assert.equal((failure.details as JsonObject).busy_timeout_ms, 250);
+    assert.equal((store.database.prepare("PRAGMA busy_timeout").get() as { timeout: number }).timeout, 1200);
+    const syscallStarted = performance.now();
+    const syscall = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_run",
+      arguments: { resource: "context", operation: "open", args: { project_root: root, query: "定位代码" } } } });
+    const syscallResult = syscall?.result as JsonObject;
+    assert.equal(syscallResult.isError, true);
+    assert.equal((syscallResult.structuredContent as JsonObject).error_code, "STORAGE_BUSY");
+    assert(performance.now() - syscallStarted < 900);
+    assert.equal((store.database.prepare("PRAGMA busy_timeout").get() as { timeout: number }).timeout, 1200);
+    store.database.exec("PRAGMA busy_timeout=25");
+    const short = await server.handle({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: root, query: "定位代码" } } });
+    assert.equal((((short?.result as JsonObject).structuredContent as JsonObject).details as JsonObject).busy_timeout_ms, 25);
+    assert.equal((store.database.prepare("PRAGMA busy_timeout").get() as { timeout: number }).timeout, 25);
+    writer.exec("ROLLBACK");
+    const success = await server.handle({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: root, query: "定位代码" } } });
+    assert.equal((success?.result as JsonObject).isError, false);
+  } finally {
+    try { writer.exec("ROLLBACK"); } catch { /* writer may not have started */ }
+    writer.close(); store.close(); await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Context bounds a contended legacy Trace write before dispatch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-context-legacy-trace-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = await CraftService.open(store);
+  const writer = new DatabaseSync(store.paths.databaseFile);
+  try {
+    const now = new Date().toISOString();
+    store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+      .run("trace", "legacy-context-trace", 1, JSON.stringify({ status: "running", task_id: "task" }), now, now);
+    store.database.exec("PRAGMA busy_timeout=1200");
+    service.contextOpen = async () => ({ status: "ready" });
+    writer.exec("BEGIN IMMEDIATE");
+    const server = new McpServer(service), started = performance.now();
+    const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: root, query: "定位代码", trace_id: "legacy-context-trace" } } });
+    const elapsed = performance.now() - started;
+    assert.equal((response?.result as JsonObject).isError, false);
+    assert.equal(((response?.result as JsonObject).structuredContent as JsonObject).telemetry_error, "Error");
+    assert(elapsed < 2200, `legacy Trace blocked Context for ${elapsed.toFixed(0)}ms`);
+    assert.equal(Number(store.database.prepare("PRAGMA busy_timeout").get()!.timeout), 1200);
+  } finally { try { writer.exec("ROLLBACK"); } finally { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); } }
+});
+
+test("real Context dispatch reports primary contention and recovers after release", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-context-real-lock-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = await CraftService.open(store);
+  const writer = new DatabaseSync(store.paths.databaseFile);
+  try {
+    store.database.exec("PRAGMA busy_timeout=1200");
+    writer.exec("BEGIN IMMEDIATE");
+    const server = new McpServer(service, "component-context-agent"), started = performance.now();
+    const request = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_context_open",
+      arguments: { project_root: root, query: "定位代码", include_codebase: false } } };
+    const response = await server.handle(request);
+    const result = response?.result as JsonObject;
+    assert.equal(result.isError, true);
+    assert.equal((result.structuredContent as JsonObject).error_code, "STORAGE_BUSY");
+    assert(performance.now() - started < 1200);
+    writer.exec("ROLLBACK");
+    const recovered = await server.handle({ ...request, id: 2 });
+    assert.equal((recovered?.result as JsonObject).isError, false);
+  } finally { try { writer.exec("ROLLBACK"); } catch { /* already released */ } writer.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("MCP negotiates protocols, lists tools, dispatches every handler, and reports errors", async () => {
+  const root = join(tmpdir(), `craft-mcp-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true });
+  const store = await new CraftStore(craftPaths(root)).open();
+  await initializeConfig({ mode: "agent", contentLanguage: "ja-JP" }, craftPaths(root));
+  const server = new McpServer(await CraftService.open(store));
+  try {
+    assert.equal((await server.handle(null))?.error instanceof Object, true);
+    assert.equal((await server.handle({ jsonrpc: "1.0", id: 0, method: "ping" }))?.error instanceof Object, true);
+    assert.equal((await server.handle({ jsonrpc: "1.0", method: "ping" }))?.error instanceof Object, true);
+    assert.equal((await server.handle({ id: 0 }))?.error instanceof Object, true);
+    assert.equal(await server.handle({ method: "x" }), undefined);
+    assert.equal(await server.handle({ id: 1, method: "notifications/initialized" }), undefined);
+    assert.equal(await server.handle({ jsonrpc: "2.0", method: "ping" }), undefined);
+    const initialized = (await server.handle({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }))?.result as Record<string, unknown>;
+    assert.equal(initialized.protocolVersion, "2025-06-18");
+    assert.match(String(initialized.instructions), /Experience prose.*ja-JP/u);
+    assert.match(String(initialized.instructions), /preserve user text, source evidence, IDs, stable keys and JSON keys verbatim/u);
+    assert(String(initialized.instructions).length < 160, "server instructions are copied into each Host tool description");
+    assert.equal(((await server.handle({ id: 1, method: "initialize" }))?.result as Record<string, unknown>).protocolVersion, "2025-11-25");
+    assert.deepEqual((await server.handle({ id: 2, method: "ping" }))?.result, {});
+    assert.equal((((await server.handle({ id: 3, method: "tools/list" }))?.result as Record<string, unknown>).tools as unknown[]).length, TOOLS.length);
+    assert.equal((await server.handle({ id: 4, method: "missing" }))?.error instanceof Object, true);
+    assert.equal((await server.handle({ id: 5, method: "tools/call", params: { name: "missing" } }))?.error instanceof Object, true);
+    assert.equal((await server.handle({ id: 5, method: "tools/call" }))?.error instanceof Object, true);
+    assert.equal((await server.handle({ id: 5, method: "tools/call", params: [] }))?.error instanceof Object, true);
+    assert.equal((await server.handle({ id: 5, method: "tools/call", params: { name: "craft_info", arguments: [] } }))?.error instanceof Object, true);
+    assert.equal(((await server.handle({ id: 5, method: "tools/call", params: { name: "craft_info" } }))?.result as Record<string, unknown>).isError, false);
+    const info = (await server.handle({ id: 6, method: "tools/call", params: { name: "craft_info" } }))?.result as Record<string, unknown>;
+    assert.equal((info.structuredContent as Record<string, unknown>).content_language, "ja-JP");
+    const fullInfo = await server.handle({ id: 6, method: "tools/call", params: { name: "craft_info", arguments: { include_zero_counts: true } } });
+    assert.equal(((((fullInfo?.result as Record<string, unknown>).structuredContent as Record<string, unknown>).counts as Record<string, number>).task), 0);
+    const infoTool = (((await server.handle({ id: 7, method: "tools/list" }))?.result as Record<string, unknown>).tools as Record<string, unknown>[]).find(item => item.name === "craft_info")!;
+    assert.equal(((((infoTool.inputSchema as Record<string, unknown>).properties as Record<string, unknown>).include_zero_counts as Record<string, unknown>).type), "boolean");
+    const invalidDiscovery = await server.handle({ id: 6, method: "tools/call", params: { name: "craft_context_tools_discover", arguments: { intent: "knowledge evaluation" } } });
+    const invalidDiscoveryResult = invalidDiscovery?.result as Record<string, unknown>;
+    const invalidDiscoveryFailure = invalidDiscoveryResult.structuredContent as Record<string, unknown>;
+    assert.equal(invalidDiscoveryResult.isError, true);
+    assert.equal(invalidDiscoveryFailure.error_code, "INVALID_INPUT");
+    assert.equal(invalidDiscoveryFailure.stage, "input_validation");
+    assert.deepEqual((invalidDiscoveryFailure.details as Record<string, unknown>).allowed, ["recall", "knowledge", "memory", "experience", "code", "code-analysis"]);
+    server.handlers.craft_throw_string = () => { throw "string failure"; };
+    const stringFailure = await server.handle({ id: 5, method: "tools/call", params: { name: "craft_throw_string" } });
+    assert.equal((((stringFailure?.result as Record<string, unknown>).content as Record<string, unknown>[])[0]).text, "string failure");
+    const failed = await server.handle({ id: 6, method: "tools/call", params: { name: "craft_task_open", arguments: {} } });
+    assert.equal(((failed?.result as Record<string, unknown>).isError), true);
+    for (const name of ["craft_capability_bundle_propose", "craft_capability_bundle_review", "craft_capability_bundle_publish",
+      "craft_capability_release_subscribe", "craft_capability_subscription_resolve", "craft_capability_release_revoke"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
+    for (const name of ["craft_hub_source_register", "craft_hub_catalog_ingest", "craft_hub_catalog_search", "craft_hub_source_disable"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
+    for (const name of ["craft_capability_materialize_stage", "craft_capability_materialize_review", "craft_capability_materialize_activate"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
+    for (const name of ["craft_capability_certification_assess", "craft_capability_certification_promote"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
+    for (const name of ["craft_supply_chain_advisory_record", "craft_supply_chain_advisory_resolve", "craft_supply_chain_reconcile"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
+    for (const name of ["craft_supply_chain_publisher_register", "craft_supply_chain_attest", "craft_supply_chain_attestation_assert", "craft_supply_chain_attestation_revoke",
+      "craft_remote_tenant_register", "craft_remote_task_bind", "craft_remote_task_authorize", "craft_remote_task_revoke", "craft_remote_task_get",
+      "craft_a2a_v1_discover", "craft_a2a_v1_submit", "craft_a2a_v1_task_get", "craft_a2a_v1_cancel",
+      "craft_runtime_acceptance_plan", "craft_runtime_acceptance_record", "craft_runtime_acceptance_evaluate", "craft_runtime_acceptance_get"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
+
+    const calls: Record<string, Record<string, unknown>> = {
+      craft_info: {}, craft_source_list: {}, craft_semantic_status: {}, craft_task_list: {}, craft_artifact_list: {},
+      craft_evidence_list: {}, craft_workflow_search: {}, craft_eval_suite_list: {}, craft_agent_profile_list: {},
+      craft_orchestration_plan_list: {}, craft_experience_candidate_list: {},
+      craft_task_open: { title: "T", goal: "G" },
+      craft_default_route: { title: "Route", goal: "G" },
+      craft_artifact_register: { kind: "file", name: "a", uri: "file:///a", artifact_id: "artifact_a" },
+      craft_evidence_record: { source_type: "test", claim: "ok", confidence: "confirmed", evidence_id: "evidence_a" },
+      craft_workflow_save: { name: "W", workflow_id: "workflow_a" },
+      craft_eval_suite_save: { name: "E", suite_id: "suite_a", cases: [{ case_id: "held", split: "held_out" }] },
+      craft_agent_profile_save: { name: "A", role: "worker", host: "codex", model: "m", profile_id: "profile_a" },
+      craft_artifact_get: { artifact_id: "artifact_a" }, craft_evidence_get: { evidence_id: "evidence_a" },
+      craft_workflow_get: { workflow_id: "workflow_a" }, craft_eval_suite_get: { suite_id: "suite_a" },
+      craft_agent_profile_get: { profile_id: "profile_a" },
+      craft_orchestration_plan_create: { goal: "O", nodes: [{ id: "n", role: "r", objective: "o", profile_ids: ["profile_a"] }] },
+    };
+    for (const [name, arguments_] of Object.entries(calls)) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
+      assert.equal((response?.result as Record<string, unknown>).isError, false, name);
+    }
+    const planList = await server.handle({ id: 8, method: "tools/call", params: { name: "craft_orchestration_plan_list", arguments: {} } });
+    const planId = String((((planList?.result as Record<string, unknown>).structuredContent as Record<string, unknown>).plans as Record<string, unknown>[])[0].id);
+    assert.equal(((await server.handle({ id: 8, method: "tools/call", params: { name: "craft_orchestration_plan_get", arguments: { plan_id: planId } } }))?.result as Record<string, unknown>).isError, false);
+    const dispatch = await server.handle({ id: 8, method: "tools/call", params: { name: "craft_orchestration_dispatch",
+      arguments: { plan_id: planId, claimed_by: "host" } } });
+    const leaseId = String(((((dispatch?.result as Record<string, unknown>).structuredContent as Record<string, unknown>).leases as Record<string, unknown>[])[0]).lease_id);
+    assert.equal(((await server.handle({ id: 8, method: "tools/call", params: { name: "craft_orchestration_renew",
+      arguments: { plan_id: planId, lease_id: leaseId, claimed_by: "host" } } }))?.result as Record<string, unknown>).isError, false);
+    assert.equal(((await server.handle({ id: 8, method: "tools/call", params: { name: "craft_orchestration_submit",
+      arguments: { plan_id: planId, lease_id: leaseId, verdict: "passed" } } }))?.result as Record<string, unknown>).isError, false);
+    const workflowPlan = await server.handle({ id: 9, method: "tools/call", params: { name: "craft_workflow_plan",
+      arguments: { workflow_id: "workflow_a" } } });
+    assert.equal((workflowPlan?.result as Record<string, unknown>).isError, false);
+    const workflowRun = await server.handle({ id: 9, method: "tools/call", params: { name: "craft_workflow_run",
+      arguments: { workflow_id: "workflow_a", project_root: root } } });
+    const runId = String((((workflowRun?.result as Record<string, unknown>).structuredContent as Record<string, unknown>).id));
+    assert.equal(((await server.handle({ id: 9, method: "tools/call", params: { name: "craft_workflow_run_get",
+      arguments: { run_id: runId } } }))?.result as Record<string, unknown>).isError, false);
+    const skillRoot = join(root, "skills");
+    await mkdir(skillRoot);
+    await writeFile(join(skillRoot, "SKILL.md"), "---\nname: mcp-skill\ndescription: searchable\n---\nbody");
+    const added = await server.handle({ id: 10, method: "tools/call", params: {
+      name: "craft_source_add", arguments: { path: skillRoot, scan: false } } });
+    const sourceId = String(((added?.result as Record<string, unknown>).structuredContent as Record<string, unknown>).id);
+    await server.handle({ id: 10, method: "tools/call", params: {
+      name: "craft_source_scan", arguments: { source_id: sourceId } } });
+    const searched = await server.handle({ id: 11, method: "tools/call", params: {
+      name: "craft_capability_search", arguments: { query: "searchable" } } });
+    const capabilityId = String(((((searched?.result as Record<string, unknown>).structuredContent as Record<string, unknown>)
+      .capabilities as Record<string, unknown>[])[0]).id);
+    for (const [name, arguments_] of Object.entries({
+      craft_source_update: { source_id: sourceId, label: "Changed" },
+      craft_source_scan: { source_id: sourceId }, craft_capability_get: { asset_id: capabilityId },
+    })) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
+      assert.equal((response?.result as Record<string, unknown>).isError, false);
+    }
+    const listed = await server.handle({ id: 12, method: "tools/call", params: {
+      name: "craft_task_list", arguments: {} } });
+    const taskId = String(((((listed?.result as Record<string, unknown>).structuredContent as Record<string, unknown>)
+      .tasks as Record<string, unknown>[])[0]).id);
+    const call = async (name: string, arguments_: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
+      assert.equal((response?.result as Record<string, unknown>).isError, false, name);
+      return (response?.result as Record<string, unknown>).structuredContent as Record<string, unknown>;
+    };
+    const lifecycleRoute = await call("craft_default_route", { goal: "searchable safe route" });
+    await call("craft_default_route_resume", { task_id: (lifecycleRoute.task as Record<string, unknown>).id });
+    await call("craft_default_route_find", { query: "继续 searchable safe route" });
+    for (const stageId of ["baseline", "minimal_change", "verification"]) {
+      await call("craft_default_route_update", { route_id: lifecycleRoute.route_id, stage_id: stageId, summary: stageId });
+    }
+    await call("craft_default_route_update", { route_id: lifecycleRoute.route_id, stage_id: "review",
+      summary: "review", verdict: "passed", evidence_ids: ["evidence_a"] });
+    const repeatedLifecycleRoute = await call("craft_default_route", { goal: "searchable safe route" });
+    for (const stageId of ["baseline", "minimal_change", "verification"]) {
+      await call("craft_default_route_update", { route_id: repeatedLifecycleRoute.route_id, stage_id: stageId, summary: stageId });
+    }
+    await call("craft_default_route_update", { route_id: repeatedLifecycleRoute.route_id, stage_id: "review",
+      summary: "review", verdict: "passed", evidence_ids: ["evidence_a"] });
+    await call("craft_route_workflow_proposal_create", { route_id: lifecycleRoute.route_id, name: "MCP safe route",
+      workflow_id: "workflow_mcp_safe_route", steps: [{ id: "proof", type: "assertion", evaluator: "file_exists", path: "." }] });
+    const orchestrationTrial = await call("craft_orchestration_trial_start", { plan_id: "plan_trial_mcp",
+      trial_id: "orchestration_trial_mcp", task_id: taskId, goal: "Capture orchestration", nodes: [
+        { id: "node", role: "worker", objective: "work", profile_ids: ["profile_a"] },
+      ] });
+    const orchestrationTrialDispatch = await call("craft_orchestration_dispatch", {
+      plan_id: (orchestrationTrial.plan as Record<string, unknown>).id, claimed_by: "host",
+    });
+    await call("craft_orchestration_submit", { plan_id: (orchestrationTrial.plan as Record<string, unknown>).id,
+      lease_id: (orchestrationTrialDispatch.leases as Record<string, unknown>[])[0].lease_id,
+      verdict: "passed", costs: { tokens: 1 } });
+    await call("craft_orchestration_trial_finalize", {
+      plan_id: (orchestrationTrial.plan as Record<string, unknown>).id,
+    });
+    await call("craft_trial_get", { trial_id: (orchestrationTrial.trial as Record<string, unknown>).id });
+    const captured = await call("craft_workflow_trial_run", {
+      task_id: taskId, workflow_id: "workflow_a", project_root: root,
+    });
+    assert.equal((captured.outcome as Record<string, unknown>).verdict, "passed");
+    const harness = await call("craft_harness_configuration_save", { name: "H", dimensions: {} });
+    await call("craft_harness_configuration_get", { configuration_id: harness.id });
+    await call("craft_harness_configuration_list", {});
+    const candidate = await call("craft_workflow_transition", {
+      workflow_id: "workflow_a", target: "candidate", reason: "evaluate",
+    });
+    const trial = await call("craft_trial_start", { trial_id: "trial_mcp", task_id: taskId, case_id: "held",
+      subject_type: "workflow", subject_id: "workflow_a", subject_version: candidate.version,
+      harness_configuration_id: harness.id });
+    await call("craft_trial_trace_append", { trial_id: trial.id, event_type: "completed", data: { ok: true } });
+    await call("craft_outcome_record", { trial_id: trial.id, verdict: "passed", summary: "ok" });
+    await call("craft_trial_get", { trial_id: trial.id });
+    await call("craft_trial_list", {});
+    const evaluation = await call("craft_evaluation_run_record", { run_id: "eval_mcp", suite_id: "suite_a",
+      split: "held_out", subject_type: "workflow", subject_id: "workflow_a",
+      subject_version: candidate.version, trial_ids: [trial.id] });
+    await call("craft_evaluation_run_get", { run_id: evaluation.id });
+    await call("craft_evaluation_run_list", {});
+    await call("craft_evaluation_run_aggregate", { run_id: evaluation.id });
+    const comparisonTrial = await call("craft_trial_start", { trial_id: "trial_mcp_comparison",
+      task_id: taskId, case_id: "held", subject_type: "workflow", subject_id: "workflow_a",
+      subject_version: candidate.version });
+    await call("craft_outcome_record", { trial_id: comparisonTrial.id, verdict: "passed", summary: "ok" });
+    const comparisonEvaluation = await call("craft_evaluation_run_record", { run_id: "eval_mcp_comparison",
+      suite_id: "suite_a", split: "held_out", subject_type: "workflow", subject_id: "workflow_a",
+      subject_version: candidate.version, trial_ids: [comparisonTrial.id] });
+    const comparison = await call("craft_evaluation_compare", { comparison_id: "comparison_mcp",
+      baseline_run_id: evaluation.id, candidate_run_id: comparisonEvaluation.id });
+    await call("craft_evaluation_comparison_get", { comparison_id: comparison.id });
+    await call("craft_evaluation_comparison_list", {});
+    const grader = await call("craft_grader_save", { name: "Program", grader_type: "program" });
+    await call("craft_grader_get", { grader_id: grader.id });
+    await call("craft_grader_list", {});
+    const grade = await call("craft_grade_record", { trial_id: trial.id, grader_id: grader.id,
+      grader_version: grader.version, verdict: "passed", summary: "passed" });
+    await call("craft_grade_get", { grade_id: grade.id });
+    await call("craft_grade_list", {});
+    const policy = await call("craft_signoff_policy_save", { name: "Policy",
+      requirements: [{ grader_type: "program" }] });
+    await call("craft_signoff_policy_get", { policy_id: policy.id });
+    await call("craft_signoff_policy_list", {});
+    const signoff = await call("craft_signoff_evaluate", { policy_id: policy.id,
+      evaluation_run_id: evaluation.id, grade_ids: [grade.id] });
+    await call("craft_signoff_get", { signoff_id: signoff.id });
+    await call("craft_signoff_list", {});
+    const verified = await call("craft_workflow_transition", { workflow_id: "workflow_a", target: "verified",
+      reason: "passed", signoff_id: signoff.id });
+    await call("craft_workflow_transition", { workflow_id: "workflow_a", target: "deprecated", reason: "replace" });
+    await call("craft_workflow_rollback", { workflow_id: "workflow_a", target_version: verified.version,
+      reason: "restore" });
+    const defaultRoute = await call("craft_default_route", { title: "Run verified", goal: "W" });
+    await call("craft_default_route_execute", { route_id: defaultRoute.route_id, project_root: root });
+    const projectPolicy = await call("craft_project_policy_save", { project_id: "mcp-project", name: "Strict MCP" });
+    await call("craft_project_policy_get", { policy_id: projectPolicy.id });
+    await call("craft_project_policy_list", {});
+    const adapter = await call("craft_host_adapter_save", { host_adapter_id: "adapter_mcp", name: "MCP host",
+      host: "generic", allowed_operations: ["complete_stage"] });
+    await call("craft_host_adapter_get", { host_adapter_id: adapter.id });
+    await call("craft_host_adapter_list", {});
+    const strictRoute = await call("craft_default_route", { goal: "mcp governed route", project_id: "mcp-project",
+      mode: "safe_incremental_development" });
+    const strictDispatch = await call("craft_host_adapter_dispatch", { host_adapter_id: adapter.id, route_id: strictRoute.route_id });
+    const strictDiff = await call("craft_route_receipt_record", { route_id: strictRoute.route_id, stage_id: "baseline",
+      kind: "git_diff", status: "passed", command: "git diff --check", summary: "clean" });
+    const strictTest = await call("craft_route_receipt_record", { route_id: strictRoute.route_id, stage_id: "baseline",
+      kind: "focused_test", status: "passed", command: "pnpm test", summary: "passed" });
+    await call("craft_default_route_update", { route_id: strictRoute.route_id, stage_id: "baseline", summary: "done",
+      receipt_ids: [(strictDiff.receipt as Record<string, unknown>).id, (strictTest.receipt as Record<string, unknown>).id] });
+    await call("craft_host_adapter_report", { dispatch_id: (strictDispatch.dispatch as Record<string, unknown>).id, status: "completed", summary: "done" });
+    for (const [name, arguments_] of Object.entries({
+      craft_task_checkpoint: { task_id: taskId, summary: "checkpoint" },
+      craft_feedback_record: { task_id: taskId, corrected: "correction" },
+      craft_source_remove: { source_id: sourceId },
+    })) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
+      assert.equal((response?.result as Record<string, unknown>).isError, false);
+    }
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("MCP exposes the controlled host adapter, promotion gate, and adaptive harness controls", async () => {
+  const root = join(tmpdir(), `craft-mcp-runtime-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true });
+  await writeFile(join(root, "ok.txt"), "ok");
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  const server = new McpServer(new CraftService(store));
+  const call = async (name: string, arguments_: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
+    assert.equal((response?.result as Record<string, unknown>).isError, false, name);
+    return (response?.result as Record<string, unknown>).structuredContent as Record<string, unknown>;
+  };
+  try {
+    const task = await call("craft_task_open", { title: "Runtime", goal: "Runtime" });
+    const taskId = String((task.task as Record<string, unknown>).id);
+    const policy = await call("craft_runtime_policy_save", { name: "P", allowed_effects: ["read_only"] });
+    await call("craft_runtime_policy_get", { runtime_policy_id: policy.id }); await call("craft_runtime_policy_list", {});
+    const run = await call("craft_runtime_run_start", { run_id: "run", task_id: taskId, policy_id: policy.id,
+      environment: { image: "test" }, operations: [{ operation_id: "op", kind: "agent", effect: "read_only", objective: "read" }] });
+    await call("craft_runtime_run_get", { run_id: "run" });
+    const dispatched = await call("craft_runtime_dispatch", { run_id: "run", claimed_by: "host" });
+    const operation = (dispatched.operations as Record<string, unknown>[])[0];
+    await call("craft_runtime_operation_get", { operation_id: "op" });
+    await call("craft_runtime_operation_submit", { operation_id: "op", lease_id: operation.lease_id,
+      claimed_by: "host", verdict: "passed" });
+    await call("craft_runtime_run_resume", { run_id: "run" });
+    await call("craft_runtime_promotion_eligibility", { run_id: "run", policy_id: policy.id, environment: { image: "test" } });
+    const runtimeAdapter = await call("craft_runtime_adapter_save", { name: "MCP Adapter", host: "generic",
+      allowed_kinds: ["agent"], allowed_effects: ["read_only"], supports_evidence_receipts: true });
+    await call("craft_runtime_adapter_get", { runtime_adapter_id: runtimeAdapter.id });
+    await call("craft_runtime_adapter_list", {});
+    await call("craft_runtime_run_start", { run_id: "adapter-run", task_id: taskId, policy_id: policy.id, environment: {},
+      operations: [{ operation_id: "adapter-op", kind: "agent", effect: "read_only", objective: "adapter" }] });
+    const adapterDispatch = await call("craft_runtime_adapter_dispatch", { runtime_adapter_id: runtimeAdapter.id, run_id: "adapter-run" });
+    await call("craft_runtime_adapter_report", { runtime_adapter_id: runtimeAdapter.id, operation_id: "adapter-op",
+      lease_id: (adapterDispatch.operations as Record<string, unknown>[])[0].lease_id, verdict: "passed", summary: "reported" });
+
+    const approvalPolicy = await call("craft_runtime_policy_save", { name: "Approval", allowed_effects: ["local_write"],
+      require_approval_for: ["local_write"] });
+    await call("craft_runtime_run_start", { run_id: "approval-run", task_id: taskId, policy_id: approvalPolicy.id,
+      environment: {}, operations: [{ operation_id: "approval-op", kind: "agent", effect: "local_write", objective: "write" }] });
+    await call("craft_runtime_dispatch", { run_id: "approval-run", claimed_by: "host" });
+    await call("craft_runtime_operation_decision", { operation_id: "approval-op", decision: "approve", actor: "human" });
+
+    const suite = await call("craft_eval_suite_save", { name: "Suite", cases: [{ case_id: "held", split: "held_out" }] });
+    const workflow = await call("craft_workflow_save", { workflow_id: "eval-workflow", name: "Eval", steps: [
+      { id: "proof", type: "assertion", evaluator: "file_exists", path: "ok.txt" },
+    ] });
+    const evaluation = await call("craft_evaluation_runner_run", { task_id: taskId, suite_id: suite.id, split: "held_out", project_root: root,
+      subjects: [{ label: "left", subject_type: "workflow", subject_id: workflow.id, subject_version: workflow.version },
+        { label: "right", subject_type: "workflow", subject_id: workflow.id, subject_version: workflow.version }] });
+    const driverPolicy = await call("craft_runtime_policy_save", { name: "Driver", allowed_effects: ["read_only"],
+      trusted_hosts: ["driver"], path_allowlist: ["ok.txt"] });
+    await call("craft_runtime_run_start", { run_id: "driver-run", task_id: taskId, policy_id: driverPolicy.id, environment: {}, operations: [{
+      operation_id: "driver-op", kind: "workflow", effect: "read_only", objective: "proof", execution: {
+        workflow_id: workflow.id, workflow_version: workflow.version, project_root: root, inputs: {},
+      },
+    }] });
+    await call("craft_runtime_driver_tick", { run_id: "driver-run", driver_id: "driver" });
+    await call("craft_runtime_lease_recover", { run_id: "driver-run" });
+    const grader = await call("craft_grader_save", { name: "Program", grader_type: "program", rules: { minimum_pass_rate: 1 } });
+    const evaluationRun = (evaluation.evaluation_runs as Record<string, unknown>[])[0];
+    await call("craft_evaluation_program_grade", { evaluation_run_id: evaluationRun.id, grader_id: grader.id, grader_version: grader.version });
+    const comparison = (evaluation.comparisons as Record<string, unknown>[])[0];
+    await call("craft_evaluation_promotion_assess", { comparison_id: comparison.id, min_trials: 1,
+      max_duration_regression_ratio: 1, cost_metric: "tokens" });
+    const harness = await call("craft_harness_select", { task_id: taskId, risk: "high", budget: {} });
+    const ir = await call("craft_agent_ir_compile", { task_id: taskId, harness_id: (harness.harness as Record<string, unknown>).id,
+      goal: "inspect", operations: [{ id: "inspect", kind: "agent", effect: "read_only", objective: "inspect" }] });
+    await call("craft_agent_ir_lower", { ir_id: ir.id, policy_id: policy.id, environment: {} });
+    await call("craft_experience_mine", { subject_type: "workflow", subject_id: workflow.id, subject_version: workflow.version });
+    await call("craft_experience_shadow_experiment_create", { task_id: taskId, mining_candidate_id: "missing" });
+    for (const value of [1, 1, 3, 3]) await call("craft_operational_signal_record", { subject_type: "workflow",
+      subject_id: workflow.id, metric: "latency", value });
+    await call("craft_operational_drift_evaluate", { subject_type: "workflow", subject_id: workflow.id, metric: "latency",
+      direction: "lower", threshold: 0.5, window_size: 2 });
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("MCP runs bounded experience shadow evaluation without granting publication", async () => {
+  const root = join(tmpdir(), `craft-mcp-shadow-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true }); await writeFile(join(root, "ok.txt"), "ok");
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
+  const server = new McpServer(service);
+  try {
+    const task = service.taskOpen({ title: "Shadow", goal: "Shadow" }).task as Record<string, unknown>;
+    const suite = service.evaluationSuiteSave({ name: "Held", cases: [{ case_id: "one", split: "held_out" }, { case_id: "two", split: "held_out" }] });
+    const baseline = service.workflowSave({ workflow_id: "baseline", name: "Baseline", steps: [{ id: "ok", type: "assertion", evaluator: "file_exists", path: "ok.txt" }] });
+    const candidate = service.workflowSave({ workflow_id: "candidate", name: "Candidate", steps: [{ id: "ok", type: "assertion", evaluator: "file_exists", path: "ok.txt" }] });
+    const evidence = service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "ok" });
+    for (const trialId of ["one", "two"]) {
+      service.trialStart({ trial_id: trialId, task_id: task.id, subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version });
+      service.outcomeRecord({ trial_id: trialId, verdict: "passed", summary: "passed", evidence_ids: [evidence.id] });
+    }
+    const mined = service.experienceMine({ subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version });
+    const experiment = service.experienceShadowExperimentCreate({ task_id: task.id,
+      mining_candidate_id: ((mined.candidates as Record<string, unknown>[])[0]).id });
+    const policy = service.signoffPolicySave({ name: "Policy", requirements: [] });
+    const response = await server.handle({ id: 1, method: "tools/call", params: { name: "craft_experience_shadow_experiment_evaluate", arguments: {
+      experiment_id: (experiment.experiment as Record<string, unknown>).id, suite_id: suite.id, suite_version: suite.version, project_root: root,
+      baseline_workflow_id: baseline.id, baseline_workflow_version: baseline.version,
+      candidate_workflow_id: candidate.id, candidate_workflow_version: candidate.version,
+      signoff_policy_id: policy.id, signoff_policy_version: policy.version, min_trials: 2,
+    } } });
+    const body = (response?.result as Record<string, unknown>).structuredContent as Record<string, unknown>;
+    assert.equal((response?.result as Record<string, unknown>).isError, false);
+    assert.equal(body.status, "signoff_ready"); assert.equal(body.publication_allowed, false);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("MCP stdio buffers an eager Host request, serializes responses, and closes its runtime", async () => {
+  const input = new PassThrough(); const output: string[] = []; let closed = false; let mode = "";
+  const serving = serveMcpStdio({ mode: "core", input, write: (line) => output.push(line), start: async (selected) => {
+    mode = selected;
+    return { server: { handle: async (request) => request === "bad" ? undefined : { jsonrpc: "2.0", id: 1, result: { ok: true } } }, close: () => { closed = true; } };
+  } });
+  input.end('{"jsonrpc":"2.0","id":1,"method":"ping"}\n"bad"\n{\n');
+  await serving;
+  assert.equal(mode, "core"); assert.equal(closed, true); assert.equal(output.length, 2);
+  assert.deepEqual(JSON.parse(output[0]), { jsonrpc: "2.0", id: 1, result: { ok: true } });
+  assert.equal((JSON.parse(output[1]) as { error: { code: number } }).error.code, -32700);
+});
+
+test("MCP stdio starts and stops its background learning runtime with the server lifetime", async () => {
+  const input = new PassThrough(); let runtimeClosed = false, workerStopped = false, startedWithServer = false;
+  const serving = serveMcpStdio({ mode: "component-context-daily", input, write: () => undefined,
+    start: async () => ({ server: { handle: async () => undefined }, close: () => { runtimeClosed = true; } }),
+    afterStart: server => { startedWithServer = typeof server.handle === "function"; return async () => { await Promise.resolve(); workerStopped = true; }; },
+  });
+  input.end(); await serving;
+  assert.equal(startedWithServer, true); assert.equal(workerStopped, true); assert.equal(runtimeClosed, true);
+});
+
+test("MCP stdio closes the runtime when background startup fails", async () => {
+  const input = new PassThrough(); let runtimeClosed = false;
+  await assert.rejects(serveMcpStdio({ mode: "component-context-daily", input, write: () => undefined,
+    start: async () => ({ server: { handle: async () => undefined }, close: () => { runtimeClosed = true; } }),
+    afterStart: () => { throw new Error("background startup failed"); },
+  }), /background startup failed/u);
+  assert.equal(runtimeClosed, true);
+});
+
+test("Context MCP keeps background read polls out of Trace storage and MCP stdout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-context-learning-loop-"));
+  try {
+    const child = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("../bin/craft-mcp.ts", import.meta.url)), "--product", "context"], {
+      env: { ...process.env, CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "1" }, stdio: ["pipe", "pipe", "pipe"],
+    });
+    let output = "", stderr = "";
+    child.stdout.setEncoding("utf8").on("data", chunk => { output += chunk; });
+    child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25" } })}\n`);
+    child.stdin.end();
+    const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+      child.once("error", reject); child.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    assert.equal(exit.code, 0, stderr);
+    const lines = output.trim().split("\n");
+    assert.equal(lines.length, 1);
+    assert.equal(JSON.parse(lines[0]!).result.serverInfo.version, CRAFT_RELEASE_VERSION);
+    const store = await new CraftStore(craftPaths(root)).open();
+    try {
+      const readPolls = new Set(["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list", "craft_knowledge_source_list"]);
+      assert.equal(store.list("trace_event", 10_000, event => readPolls.has(String(event.operation_id))).length, 0);
+      assert.equal(store.list("telemetry_event", 10_000, event => readPolls.has(String(event.operation))).length, 0);
+    } finally { store.close(); }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("stdio MCP runs bounded Trace retention maintenance without a Host tool invocation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-trace-retention-"));
+  const child = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("../bin/craft-mcp.ts", import.meta.url)), "--product", "context"], {
+    env: { ...process.env, CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "0", CRAFT_TRACE_RETENTION_INTERVAL_MS: "1000" },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let output = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { output += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  let processClosed = false;
+  const exited = new Promise<{ code: number | null }>((resolve, reject) => {
+    child.once("error", reject); child.once("close", code => { processClosed = true; resolve({ code }); });
+  });
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25" } })}\n`);
+  try {
+    let maintenance: JsonObject | null = null;
+    for (let attempt = 0; attempt < 120 && !maintenance; attempt += 1) {
+      const probe = await new CraftStore(craftPaths(root)).open();
+      try { maintenance = probe.find("maintenance_component", "trace_retention"); }
+      finally { probe.close(); }
+      if (!maintenance) await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.ok(["running", "healthy"].includes(String(maintenance?.status)), stderr);
+    child.stdin.end();
+    const exit = await exited;
+    assert.equal(exit.code, 0, stderr);
+    assert.equal(JSON.parse(output.trim()).result.serverInfo.version, CRAFT_RELEASE_VERSION);
+  } finally {
+    if (!child.stdin.destroyed) child.stdin.end();
+    if (!processClosed) child.kill("SIGTERM");
+    await Promise.race([exited.catch(() => undefined), new Promise(resolve => setTimeout(resolve, 3_000))]);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP stdio waits for a Host request that arrives after startup", async () => {
+  const input = new PassThrough(); const output: string[] = [];
+  const serving = serveMcpStdio({ mode: "core", input, write: (line) => output.push(line), start: async () => ({
+    server: { handle: async () => ({ jsonrpc: "2.0", id: 2, result: {} }) }, close: () => undefined,
+  }) });
+  await Promise.resolve(); input.end('{"jsonrpc":"2.0","id":2,"method":"ping"}\n'); await serving;
+  assert.equal((JSON.parse(output[0]) as { id: number }).id, 2);
+});
+
+test("MCP stdio ignores notification responses", async () => {
+  const input = new PassThrough(); const output: string[] = [];
+  const serving = serveMcpStdio({ mode: "core", input, write: (line) => output.push(line), start: async () => ({
+    server: { handle: async (request) => (request as JsonObject).id === undefined ? undefined : { jsonrpc: "2.0", id: 3, result: {} } }, close: () => undefined,
+  }) });
+  input.end('{"jsonrpc":"2.0","method":"notifications/initialized"}\n{"jsonrpc":"2.0","id":3,"method":"ping"}\n');
+  await serving;
+  assert.equal(output.length, 1);
+  assert.equal((JSON.parse(output[0]) as { id: number }).id, 3);
+});
+
+test("MCP stdio default runtime accepts buffered initialization", async () => {
+  const root = join(tmpdir(), `craft-mcp-stdio-${process.pid}-${Date.now()}`); const input = new PassThrough(); const output: string[] = [];
+  const original = process.env.CRAFT_DATA_DIR; process.env.CRAFT_DATA_DIR = root;
+  try {
+    const serving = serveMcpStdio({ mode: "full", input, write: (line) => output.push(line) });
+    input.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}\n');
+    await serving;
+    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, CRAFT_RELEASE_VERSION);
+  } finally { if (original === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = original; await rm(root, { recursive: true, force: true }); }
+});
+
+test("MCP tool surfaces partition the full tool list and fail closed on unknown names", async () => {
+  assert.equal(surfaceToolNames("full").length, TOOLS.length);
+  assert.deepEqual(surfaceToolNames("core").sort(), CORE_TOOLS.map((tool) => tool.name).sort());
+
+  const domains = DOMAIN_SURFACE_NAMES;
+  const seen = new Set<string>(surfaceToolNames("core"));
+  for (const name of domains) {
+    const names = surfaceToolNames(name);
+    assert(names.length > 0, `${name} surface must not be empty`);
+    for (const tool of names) { assert(!seen.has(tool), `${tool} belongs to more than one surface`); seen.add(tool); }
+  }
+  assert.equal(seen.size, TOOLS.length, "core plus every domain surface must cover each tool exactly once");
+
+  assert(surfaceToolNames("governance").includes("craft_capability_connector_register"));
+  assert(surfaceToolNames("execution").includes("craft_docker_sandbox_execute"));
+  assert(surfaceToolNames("evaluation").includes("craft_eval_campaign_create"));
+  assert(surfaceToolNames("workspace").includes("craft_workspace_transaction_begin"));
+  assert.equal(domainSurfaceOf("craft_agent_eval_lab_create"), "evaluation");
+  assert.equal(domainSurfaceOf("not_a_craft_tool"), "workflow");
+  assert.throws(() => surfaceToolNames("no-such-surface"), /Unknown Craft MCP surface: no-such-surface/);
+});
+
+test("MCP server mounts one domain surface and rejects tools outside it", async () => {
+  const root = join(tmpdir(), `craft-mcp-surface-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true });
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const server = new McpServer(new CraftService(store), "knowledge");
+    const knowledge = surfaceToolNames("knowledge");
+    assert.equal(server.mode, "knowledge");
+    assert.equal(server.tools.length, knowledge.length);
+    const listed = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    assert.equal((listed?.result as { tools: unknown[] }).tools.length, knowledge.length);
+    const outside = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_source_add", arguments: {} } });
+    assert.equal((outside?.error as { code: number }).code, -32602);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("stdio initialization failure closes its reader instead of leaving clients waiting forever", async () => {
+  const input = new PassThrough();
+  await assert.rejects(serveMcpStdio({ mode: "core", input, write: () => assert.fail("no response before initialization"), start: async () => { throw new Error("fixture startup failure"); } }), /fixture startup failure/);
+  assert.equal(input.isPaused(), true); input.destroy();
+});
+
+test("MCP rejects invalid Context response options before dispatch and retains capture diagnostics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-response-options-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const server = new McpServer(new CraftService(store));
+    let dispatched = 0;
+    server.handlers.craft_context_open = () => { dispatched++; return {}; };
+    for (const args of [{ response_detail: "invalid" }, { response_detail: "full" },
+      { get response_detail(): string { throw "invalid option accessor"; } }]) {
+      const response = await server.handle({ id: 1, method: "tools/call", params: { name: "craft_context_open", arguments: args } });
+      assert.equal((response!.error as JsonObject).code, -32602);
+    }
+    assert.equal(dispatched, 0);
+    server.handlers.craft_info = () => { throw "read failure"; };
+    const failure = await server.handle({ id: 2, method: "tools/call", params: { name: "craft_info" } });
+    assert.equal((failure!.result as JsonObject).isError, true);
+    assert.equal(((failure!.result as JsonObject).content as JsonObject[])[0]!.text, "read failure");
+    const capture = mock.method(server.componentTrace, "capture", async () => ({ ok: false, error: "capture failure", correlation: null, telemetry_error: "JournalUnavailable" }));
+    try {
+      const response = await server.handle({ id: 3, method: "tools/call", params: { name: "craft_task_open" } });
+      assert.equal((response!.result as JsonObject).isError, true);
+      assert.equal((response!.result as JsonObject).telemetry_error, "JournalUnavailable");
+    } finally { capture.mock.restore(); }
+    const empty = mock.method(server.componentTrace, "capture", async () => ({ ok: true, correlation: null, telemetry_error: "JournalUnavailable" }));
+    try {
+      const response = await server.handle({ id: 4, method: "tools/call", params: { name: "craft_task_open" } });
+      assert.equal((response!.result as JsonObject).isError, false);
+      assert.equal(((response!.result as JsonObject).structuredContent as JsonObject).telemetry_error, "JournalUnavailable");
+    } finally { empty.mock.restore(); }
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Trace retention child reports a safe terminal error for an unusable data root", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-retention-child-failure-"));
+  const blocker = join(root, "private-path-do-not-report");
+  await writeFile(blocker, "not a directory");
+  const child = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("../bin/craft-mcp.ts", import.meta.url)), "--trace-retention-worker"], {
+    env: { ...process.env, CRAFT_DATA_DIR: blocker }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { output += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  try {
+    const code = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+    assert.equal(code, 1);
+    assert.equal(output, "");
+    assert.match(stderr, /Craft Trace retention worker failed\./u);
+    assert.equal(stderr.includes(blocker), false);
+  } finally { child.kill(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("MCP journal failures redact diagnostics and trace hook denials still retain evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-mcp-journal-failure-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = new CraftService(store);
+  const messages: string[] = [];
+  const stderr = mock.method(process.stderr, "write", (chunk: string) => { messages.push(String(chunk)); return true; });
+  try {
+    const server = new McpServer(service);
+    server.operationJournal.onError(new TypeError("sensitive error body"));
+    server.operationJournal.onError(Object.assign(new Error("secret"), { name: "unsafe name\nsecret" }));
+    server.operationJournal.onError("sensitive raw diagnostic");
+    assert.deepEqual(messages, ["Craft operation journal failed (TypeError).\n", "Craft operation journal failed (Error).\n", "Craft operation journal failed (Error).\n"]);
+    Object.defineProperty(service, "hookPlane", { value: new HookPlane([{ name: "deny-trace", phase: "tool_before", order: 1,
+      run: async () => ({ kind: "denied", reason: "not permitted" }) }]), configurable: true });
+    const denied = new McpServer(service);
+    const capture = denied.componentTrace.capture.bind(denied.componentTrace);
+    const telemetry = mock.method(denied.componentTrace, "capture", async (args: Parameters<typeof capture>[0]) => ({ ...await capture(args), telemetry_error: "JournalUnavailable" }));
+    const response = await denied.handle({ id: 1, method: "tools/call", params: { name: "craft_trace_retention_sweep", arguments: {} } });
+    telemetry.mock.restore();
+    const result = response!.result as JsonObject;
+    assert.equal(result.isError, true);
+    assert.equal((result.structuredContent as JsonObject).denied, true);
+    assert.ok((result.structuredContent as JsonObject).trace_correlation);
+    const readDenial = await denied.handle({ id: 3, method: "tools/call", params: { name: "craft_info", arguments: {} } });
+    assert.equal(((readDenial!.result as JsonObject).structuredContent as JsonObject).denied, true);
+    const flush = mock.method(server.operationJournal, "flush", async () => { throw new Error("unexpected journal flush failure"); });
+    try { await assert.rejects(server.handle({ id: 2, method: "tools/call", params: { name: "craft_info", arguments: {} } }), /unexpected journal flush failure/); }
+    finally { flush.mock.restore(); }
+  } finally { stderr.mock.restore(); store.close(); await rm(root, { recursive: true, force: true }); }
+});

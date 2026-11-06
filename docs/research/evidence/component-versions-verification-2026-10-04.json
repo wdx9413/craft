@@ -1,0 +1,34 @@
+{
+  "related_tests": {
+    "passed": 105,
+    "failed": 0,
+    "full_suite": false
+  },
+  "new_modules_coverage": {
+    "lines": 100,
+    "branches": 100,
+    "functions": 100,
+    "modules": [
+      "procedure-configuration.ts",
+      "procedure-graph.ts",
+      "component-assets.ts",
+      "procedure-graph-progress.ts",
+      "procedure-work-items.ts",
+      "asset-revisions.js"
+    ]
+  },
+  "typecheck": "passed",
+  "core_build": "passed",
+  "layering": {
+    "modules": 378,
+    "violations": 0
+  },
+  "installed_protocol_calls": 95,
+  "real_host_invocation_verified": false,
+  "model_effect_proven": false,
+  "active_session_reloaded": false,
+  "end_receipts": [
+    "context_resolution_70b0236ade5b4437864810191cc4442a",
+    "context_resolution_16804e5b0b694dea9b80eee40a184980"
+  ]
+}

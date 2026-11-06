@@ -1,0 +1,27 @@
+$ node --experimental-strip-types scripts/release/prepare-typescript-compiler.ts && esbuild bin/craft-mcp.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-mcp.cjs && esbuild bin/craft-mcp-full.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-mcp-full.cjs && esbuild bin/craft-mcp-http.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-mcp-http.cjs && esbuild bin/craft-codex-hook.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-codex-hook.cjs && esbuild bin/craft-parser-worker.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=esm --target=node23 --outfile=dist/plugin/craft-parser-worker.js && esbuild deploy/experience-learning/worker.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=esm --target=node23 --outfile=dist/plugin/craft-experience-learning-worker.js
+(node:76413) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+  dist/plugin/craft-mcp.cjs  4.5mb ⚠️
+
+⚡ Done in 98ms
+
+  dist/plugin/craft-mcp-full.cjs  4.5mb ⚠️
+
+⚡ Done in 80ms
+
+  dist/plugin/craft-mcp-http.cjs  4.5mb ⚠️
+
+⚡ Done in 77ms
+
+  dist/plugin/craft-codex-hook.cjs  4.7mb ⚠️
+
+⚡ Done in 84ms
+
+  dist/plugin/craft-parser-worker.js  5.2kb
+
+⚡ Done in 8ms
+
+  dist/plugin/craft-experience-learning-worker.js  333.5kb
+
+⚡ Done in 17ms

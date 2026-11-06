@@ -1,0 +1,134 @@
+{
+  "date": "2026-10-05",
+  "head": "9ada1c7a92dfc3847837b063081176696ca9f463",
+  "source_manifest_digest": "sha256:4fc0aafd03db9ee1cf4511e4d28fad7d355dc233551e77be354e9cf876c61e4f",
+  "scope": "current core and four capabilities plus WIP; UI excluded",
+  "implementation_modified": false,
+  "typecheck": {
+    "command": "node node_modules/typescript/bin/tsc --noEmit",
+    "exit_code": 0
+  },
+  "layer_audit": {
+    "command": "node --experimental-strip-types scripts/ci/audit-layering.ts",
+    "modules": 400,
+    "violations": 0,
+    "limitation": "bare workspace package imports are not resolved"
+  },
+  "surface_audit": {
+    "tools": 1034,
+    "domain_rules": 8,
+    "result": "clean"
+  },
+  "targeted_tests": {
+    "command": "node --experimental-strip-types --test tests/layer-graph.test.ts tests/coverage-inventory.test.ts tests/common-base-boundaries.test.ts tests/common-packages.test.ts tests/context-spec-regressions.test.ts tests/context-aggregation-policy.test.ts tests/procedure-runtime-graph.test.ts tests/component-asset-revisions.test.ts",
+    "tests": 48,
+    "passed": 48,
+    "failed": 0,
+    "skipped": 0,
+    "log_sha256": "9cbb7bc17a3a5a8f068c705ce7921d478b89254b4cd7a3454ee24cee6e116876"
+  },
+  "fresh_package_build": {
+    "command": "node --experimental-strip-types scripts/release/build-common-packages.ts",
+    "packages": 7,
+    "exit_code": 0
+  },
+  "fresh_package_tests": {
+    "command": "node --experimental-strip-types --test tests/common-packages.test.ts",
+    "tests": 6,
+    "passed": 6,
+    "note": "repeated subset; not 54 unique tests"
+  },
+  "coverage_inventory": {
+    "status": "incomplete",
+    "production": 366,
+    "managed": 167,
+    "missing": 199,
+    "coverage_proven": false,
+    "native_coverage": "separate_required"
+  },
+  "gate_probes": {
+    "common_inventory": {
+      "status": "complete",
+      "production": [],
+      "managed": [],
+      "missing": [],
+      "coverage_proven": false,
+      "native_coverage": "separate_required"
+    },
+    "glob_inventory": {
+      "status": "incomplete",
+      "production": [
+        "core/new.ts"
+      ],
+      "managed": [],
+      "missing": [
+        "core/new.ts"
+      ],
+      "coverage_proven": false,
+      "native_coverage": "separate_required"
+    },
+    "no_answer_case": {
+      "status": "rejected",
+      "reason": "Expected retrieval IDs must exist in the case scope"
+    }
+  },
+  "qualification_probe": {
+    "mismatched_qualification_verdict": "eligible",
+    "verification_environment": "different-environment",
+    "qualification_environment": "env",
+    "declared_guardrails": [
+      "cost",
+      "safety"
+    ],
+    "submitted_guardrails": {},
+    "evidence": {
+      "confidence": "bounded",
+      "id": "unrelated",
+      "version": 1,
+      "created_at": "2026-10-04T17:23:45.088Z",
+      "updated_at": "2026-10-04T17:23:45.088Z"
+    },
+    "conclusion": "eligible",
+    "guardrails_passed": true,
+    "mechanism_passed": true
+  },
+  "late_evidence_probe": {
+    "reported": "fixture_passed",
+    "verified": null,
+    "late_evidence_error": "Evaluation Contract stages cannot move backwards"
+  },
+  "codebase": {
+    "workspace_id": "repository_8e75ba4730c8d23271f3f71f",
+    "index_id": "repository_index_dad2991de89977fed1ef3028",
+    "checkpoint_id": "workspace_checkpoint_e0e954f1c7b44a76b299b93d4afa3a73",
+    "query_receipt_id": "codebase_receipt_54c8a960686244e7f7d7",
+    "selected_files": 500,
+    "omitted_files": 241,
+    "analysis": "basic/partial",
+    "protocol_process_verified": false
+  },
+  "not_verified": [
+    "full suite",
+    "full coverage gate suite",
+    "production deployment",
+    "real IdP",
+    "current artifact in real Host task",
+    "model effect improvement",
+    "physical power loss or disk failure"
+  ],
+  "documentation": {
+    "internal_links": 802,
+    "documents": 237,
+    "adr_records": 19,
+    "check": "clean",
+    "new_file_whitespace": "passed",
+    "source_manifest_rechecked": 425,
+    "html_preview": "generated; browser launch unavailable; not visually verified",
+    "implementation_diff": "no source-manifest changes during final document synthesis"
+  },
+  "closing_craft_receipts": {
+    "knowledge": "context_resolution_8bfc46c926da44bd8bae71b7dc083b2d",
+    "memory": "context_resolution_42b1c225961946e2b37fef4d2796c07e",
+    "experience_observations": 0
+  }
+}

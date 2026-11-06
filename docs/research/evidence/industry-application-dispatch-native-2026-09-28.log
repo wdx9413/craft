@@ -1,0 +1,71 @@
+(node:80848) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80848) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ all neutral action bindings use the supplied application and preserve caller arguments (9.6435ms)
+✔ constructing MCP transports cannot install or replace internal action handlers (19.338709ms)
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (20.801958ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (14.621291ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (26.419125ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (21.652333ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (13.36175ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (28.87725ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (19.694625ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.92325ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (14.054208ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (18.902541ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (22.948584ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (284.644292ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (20.931ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1602.704542ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2305.929084ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (46.138791ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (260.471542ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (12.137833ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (25.857334ms)
+✔ the tier classifier never lets the loop approve its own work by default (0.550375ms)
+✔ the mount gate is a plain membership check over the mounted tiers (0.04475ms)
+✔ an unrecognised verb fails closed to governed rather than opening the loop (0.030333ms)
+✔ forbidden syntax wins over a knowledge-looking name (0.02175ms)
+✔ a non-craft name keeps its own terminal segment for classification (0.024833ms)
+✔ authorizedTools projects the catalog down to the mounted tiers (0.078292ms)
+✔ a canonical tool becomes the model-facing chat tool with the same parameters (0.12075ms)
+✔ a schema without required fields or with an unknown type still converts (0.057458ms)
+✔ a real catalog enum is carried into the model-facing schema (0.098ms)
+✔ a tool that declares no properties still becomes a callable function (0.066375ms)
+✔ the internal catalog only exposes read and candidate tools by default (2.717417ms)
+✔ loop-only actions are unioned in without shadowing a canonical tool (0.598792ms)
+✔ the projection is narrowed to the actions the service can actually route (0.096666ms)
+✔ the internal host's loop-only exports are exactly the workspace pair (0.028666ms)
+✔ MCP negotiates protocols, lists tools, dispatches every handler, and reports errors (231.28125ms)
+✔ MCP exposes the 0.9.7 controlled host adapter, promotion gate, and adaptive harness controls (92.5435ms)
+✔ MCP runs bounded experience shadow evaluation without granting publication (40.787167ms)
+✔ MCP stdio buffers an eager Host request, serializes responses, and closes its runtime (1.256834ms)
+✔ MCP stdio waits for a Host request that arrives after startup (0.2505ms)
+✔ MCP stdio ignores notification responses (0.179375ms)
+✔ MCP stdio default runtime accepts buffered initialization (17.274125ms)
+✔ MCP tool surfaces partition the full tool list and fail closed on unknown names (2.9395ms)
+✔ MCP server mounts one domain surface and rejects tools outside it (11.076458ms)
+ℹ tests 44
+ℹ suites 0
+ℹ pass 44
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5934.460292
+ℹ start of coverage report
+ℹ --------------------------------------------------------------------------
+ℹ file                      | line % | branch % | funcs % | uncovered lines
+ℹ --------------------------------------------------------------------------
+ℹ core                      |        |          |         | 
+ℹ  application              |        |          |         | 
+ℹ   actions                 |        |          |         | 
+ℹ    action-handlers.ts     | 100.00 |   100.00 |  100.00 | 
+ℹ    evaluation-handlers.ts | 100.00 |   100.00 |  100.00 | 
+ℹ    runtime-handlers.ts    | 100.00 |   100.00 |  100.00 | 
+ℹ    work-handlers.ts       | 100.00 |   100.00 |  100.00 | 
+ℹ    workspace-handlers.ts  | 100.00 |   100.00 |  100.00 | 
+ℹ --------------------------------------------------------------------------
+ℹ all files                 | 100.00 |   100.00 |  100.00 | 
+ℹ --------------------------------------------------------------------------
+ℹ end of coverage report

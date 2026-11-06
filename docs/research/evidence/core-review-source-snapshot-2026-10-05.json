@@ -1,0 +1,4891 @@
+{
+  "head": "9ada1c7a92dfc3847837b063081176696ca9f463",
+  "scope": "core,capability,common,adapters,bin TypeScript excluding dist/node_modules/declarations; includes core files with historical workbench names but no UI assets",
+  "files": 376,
+  "lines": 47709,
+  "top_lines": [
+    {
+      "file": "core/application/craft-service.ts",
+      "lines": 4785,
+      "imports": 57,
+      "json_object": 2107,
+      "casts": 327,
+      "long_lines": 241
+    },
+    {
+      "file": "core/mcp/tool-catalog.ts",
+      "lines": 1272,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 50,
+      "long_lines": 396
+    },
+    {
+      "file": "core/application/service-foundation.ts",
+      "lines": 676,
+      "imports": 196,
+      "json_object": 6,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/actions/action-handlers.ts",
+      "lines": 649,
+      "imports": 8,
+      "json_object": 3,
+      "casts": 0,
+      "long_lines": 50
+    },
+    {
+      "file": "common/craft-common-base/src/capability-protocol.ts",
+      "lines": 594,
+      "imports": 1,
+      "json_object": 2,
+      "casts": 12,
+      "long_lines": 0
+    },
+    {
+      "file": "core/cli.ts",
+      "lines": 495,
+      "imports": 19,
+      "json_object": 29,
+      "casts": 36,
+      "long_lines": 23
+    },
+    {
+      "file": "core/action-gate.ts",
+      "lines": 428,
+      "imports": 4,
+      "json_object": 15,
+      "casts": 12,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-eval/suite.ts",
+      "lines": 427,
+      "imports": 15,
+      "json_object": 0,
+      "casts": 42,
+      "long_lines": 1
+    },
+    {
+      "file": "core/context-resolution.ts",
+      "lines": 418,
+      "imports": 12,
+      "json_object": 36,
+      "casts": 15,
+      "long_lines": 31
+    },
+    {
+      "file": "core/interfaces/workbench-server.ts",
+      "lines": 411,
+      "imports": 11,
+      "json_object": 5,
+      "casts": 8,
+      "long_lines": 59
+    },
+    {
+      "file": "core/internal-host-driver.ts",
+      "lines": 378,
+      "imports": 15,
+      "json_object": 20,
+      "casts": 15,
+      "long_lines": 23
+    },
+    {
+      "file": "core/catalog.ts",
+      "lines": 371,
+      "imports": 7,
+      "json_object": 39,
+      "casts": 9,
+      "long_lines": 6
+    },
+    {
+      "file": "core/model-gateway.ts",
+      "lines": 367,
+      "imports": 4,
+      "json_object": 22,
+      "casts": 17,
+      "long_lines": 12
+    },
+    {
+      "file": "common/craft-common-store-local/src/content-store.ts",
+      "lines": 361,
+      "imports": 5,
+      "json_object": 0,
+      "casts": 5,
+      "long_lines": 5
+    },
+    {
+      "file": "capability/engineering-quality-profile.ts",
+      "lines": 356,
+      "imports": 5,
+      "json_object": 36,
+      "casts": 6,
+      "long_lines": 13
+    }
+  ],
+  "top_imports": [
+    {
+      "file": "core/application/service-foundation.ts",
+      "lines": 676,
+      "imports": 196,
+      "json_object": 6,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/craft-service.ts",
+      "lines": 4785,
+      "imports": 57,
+      "json_object": 2107,
+      "casts": 327,
+      "long_lines": 241
+    },
+    {
+      "file": "core/cli.ts",
+      "lines": 495,
+      "imports": 19,
+      "json_object": 29,
+      "casts": 36,
+      "long_lines": 23
+    },
+    {
+      "file": "core/application/use-cases/kernel-delegates.ts",
+      "lines": 298,
+      "imports": 18,
+      "json_object": 378,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/interfaces/mcp-server.ts",
+      "lines": 249,
+      "imports": 17,
+      "json_object": 22,
+      "casts": 15,
+      "long_lines": 4
+    }
+  ],
+  "inventory": {
+    "status": "incomplete",
+    "production": 366,
+    "managed": 167,
+    "missing": 199,
+    "coverage_proven": false,
+    "native_coverage": "separate_required"
+  },
+  "metrics": [
+    {
+      "file": "core/control-plane.ts",
+      "lines": 189,
+      "imports": 4,
+      "json_object": 41,
+      "casts": 16,
+      "long_lines": 0
+    },
+    {
+      "file": "core/eval-suite.ts",
+      "lines": 327,
+      "imports": 3,
+      "json_object": 17,
+      "casts": 17,
+      "long_lines": 0
+    },
+    {
+      "file": "core/task-run.ts",
+      "lines": 104,
+      "imports": 4,
+      "json_object": 24,
+      "casts": 5,
+      "long_lines": 10
+    },
+    {
+      "file": "core/validation.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/generic-driver.ts",
+      "lines": 113,
+      "imports": 10,
+      "json_object": 6,
+      "casts": 1,
+      "long_lines": 1
+    },
+    {
+      "file": "core/trigger.ts",
+      "lines": 107,
+      "imports": 3,
+      "json_object": 7,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/legacy-knowledge-migration.ts",
+      "lines": 276,
+      "imports": 5,
+      "json_object": 40,
+      "casts": 9,
+      "long_lines": 22
+    },
+    {
+      "file": "core/capability-access.ts",
+      "lines": 204,
+      "imports": 6,
+      "json_object": 25,
+      "casts": 10,
+      "long_lines": 7
+    },
+    {
+      "file": "core/generic-adapter-runtime.ts",
+      "lines": 210,
+      "imports": 7,
+      "json_object": 56,
+      "casts": 11,
+      "long_lines": 23
+    },
+    {
+      "file": "core/retrieval-port.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/capability-base.ts",
+      "lines": 239,
+      "imports": 3,
+      "json_object": 15,
+      "casts": 11,
+      "long_lines": 0
+    },
+    {
+      "file": "core/runtime-readiness.ts",
+      "lines": 47,
+      "imports": 5,
+      "json_object": 8,
+      "casts": 3,
+      "long_lines": 6
+    },
+    {
+      "file": "core/local-runtime-service.ts",
+      "lines": 43,
+      "imports": 4,
+      "json_object": 12,
+      "casts": 1,
+      "long_lines": 2
+    },
+    {
+      "file": "core/decision-context-gate.ts",
+      "lines": 75,
+      "imports": 4,
+      "json_object": 8,
+      "casts": 4,
+      "long_lines": 1
+    },
+    {
+      "file": "core/execution-policy.ts",
+      "lines": 31,
+      "imports": 1,
+      "json_object": 2,
+      "casts": 0,
+      "long_lines": 1
+    },
+    {
+      "file": "core/object-rail.ts",
+      "lines": 259,
+      "imports": 2,
+      "json_object": 15,
+      "casts": 18,
+      "long_lines": 0
+    },
+    {
+      "file": "core/supply-chain.ts",
+      "lines": 69,
+      "imports": 4,
+      "json_object": 9,
+      "casts": 3,
+      "long_lines": 2
+    },
+    {
+      "file": "core/untrusted-parser.ts",
+      "lines": 143,
+      "imports": 3,
+      "json_object": 15,
+      "casts": 6,
+      "long_lines": 0
+    },
+    {
+      "file": "core/federation.ts",
+      "lines": 75,
+      "imports": 4,
+      "json_object": 14,
+      "casts": 1,
+      "long_lines": 11
+    },
+    {
+      "file": "core/mcp-registry.ts",
+      "lines": 37,
+      "imports": 5,
+      "json_object": 16,
+      "casts": 7,
+      "long_lines": 8
+    },
+    {
+      "file": "core/object-model.ts",
+      "lines": 279,
+      "imports": 3,
+      "json_object": 30,
+      "casts": 20,
+      "long_lines": 0
+    },
+    {
+      "file": "core/component-history-migration.ts",
+      "lines": 71,
+      "imports": 2,
+      "json_object": 8,
+      "casts": 1,
+      "long_lines": 9
+    },
+    {
+      "file": "core/action-gate.ts",
+      "lines": 428,
+      "imports": 4,
+      "json_object": 15,
+      "casts": 12,
+      "long_lines": 0
+    },
+    {
+      "file": "core/eval-campaign.ts",
+      "lines": 49,
+      "imports": 5,
+      "json_object": 14,
+      "casts": 3,
+      "long_lines": 15
+    },
+    {
+      "file": "core/usage.ts",
+      "lines": 61,
+      "imports": 1,
+      "json_object": 6,
+      "casts": 2,
+      "long_lines": 3
+    },
+    {
+      "file": "core/mcp-stdio.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/federated-delegation.ts",
+      "lines": 146,
+      "imports": 4,
+      "json_object": 19,
+      "casts": 1,
+      "long_lines": 15
+    },
+    {
+      "file": "core/delivery-evaluation.ts",
+      "lines": 51,
+      "imports": 4,
+      "json_object": 12,
+      "casts": 2,
+      "long_lines": 19
+    },
+    {
+      "file": "core/workspace-observer.ts",
+      "lines": 33,
+      "imports": 5,
+      "json_object": 7,
+      "casts": 2,
+      "long_lines": 7
+    },
+    {
+      "file": "core/parser-process.ts",
+      "lines": 95,
+      "imports": 6,
+      "json_object": 12,
+      "casts": 6,
+      "long_lines": 0
+    },
+    {
+      "file": "core/memory-maintenance.ts",
+      "lines": 142,
+      "imports": 5,
+      "json_object": 11,
+      "casts": 3,
+      "long_lines": 4
+    },
+    {
+      "file": "core/hub-sync.ts",
+      "lines": 68,
+      "imports": 4,
+      "json_object": 15,
+      "casts": 5,
+      "long_lines": 9
+    },
+    {
+      "file": "core/a2a-transport.ts",
+      "lines": 24,
+      "imports": 4,
+      "json_object": 10,
+      "casts": 9,
+      "long_lines": 6
+    },
+    {
+      "file": "core/codex-driver.ts",
+      "lines": 82,
+      "imports": 9,
+      "json_object": 14,
+      "casts": 6,
+      "long_lines": 13
+    },
+    {
+      "file": "core/a2a-discovery.ts",
+      "lines": 20,
+      "imports": 4,
+      "json_object": 7,
+      "casts": 1,
+      "long_lines": 4
+    },
+    {
+      "file": "core/capability-canary.ts",
+      "lines": 69,
+      "imports": 4,
+      "json_object": 10,
+      "casts": 2,
+      "long_lines": 6
+    },
+    {
+      "file": "core/evaluation-operations.ts",
+      "lines": 112,
+      "imports": 5,
+      "json_object": 10,
+      "casts": 4,
+      "long_lines": 3
+    },
+    {
+      "file": "core/harness-topology.ts",
+      "lines": 65,
+      "imports": 4,
+      "json_object": 11,
+      "casts": 0,
+      "long_lines": 9
+    },
+    {
+      "file": "core/lineage.ts",
+      "lines": 105,
+      "imports": 3,
+      "json_object": 14,
+      "casts": 7,
+      "long_lines": 0
+    },
+    {
+      "file": "core/stateful-compute.ts",
+      "lines": 88,
+      "imports": 4,
+      "json_object": 17,
+      "casts": 0,
+      "long_lines": 27
+    },
+    {
+      "file": "core/capability-kit-runtime.ts",
+      "lines": 209,
+      "imports": 5,
+      "json_object": 32,
+      "casts": 9,
+      "long_lines": 10
+    },
+    {
+      "file": "core/host-driver.ts",
+      "lines": 52,
+      "imports": 4,
+      "json_object": 5,
+      "casts": 0,
+      "long_lines": 1
+    },
+    {
+      "file": "core/adaptive-harness.ts",
+      "lines": 28,
+      "imports": 4,
+      "json_object": 3,
+      "casts": 1,
+      "long_lines": 3
+    },
+    {
+      "file": "core/verified-work-loop.ts",
+      "lines": 92,
+      "imports": 5,
+      "json_object": 11,
+      "casts": 2,
+      "long_lines": 12
+    },
+    {
+      "file": "core/supply-chain-attestation.ts",
+      "lines": 59,
+      "imports": 5,
+      "json_object": 9,
+      "casts": 0,
+      "long_lines": 7
+    },
+    {
+      "file": "core/mcp-forward-compat.ts",
+      "lines": 186,
+      "imports": 3,
+      "json_object": 17,
+      "casts": 11,
+      "long_lines": 0
+    },
+    {
+      "file": "core/workspace.ts",
+      "lines": 171,
+      "imports": 5,
+      "json_object": 20,
+      "casts": 7,
+      "long_lines": 0
+    },
+    {
+      "file": "core/autonomous-runtime.ts",
+      "lines": 135,
+      "imports": 5,
+      "json_object": 27,
+      "casts": 8,
+      "long_lines": 4
+    },
+    {
+      "file": "core/agent-eval-lab.ts",
+      "lines": 58,
+      "imports": 4,
+      "json_object": 11,
+      "casts": 2,
+      "long_lines": 8
+    },
+    {
+      "file": "core/runtime-driver.ts",
+      "lines": 324,
+      "imports": 5,
+      "json_object": 20,
+      "casts": 14,
+      "long_lines": 0
+    },
+    {
+      "file": "core/workflow.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/work-delivery.ts",
+      "lines": 27,
+      "imports": 4,
+      "json_object": 5,
+      "casts": 0,
+      "long_lines": 3
+    },
+    {
+      "file": "core/eval-cases.ts",
+      "lines": 237,
+      "imports": 2,
+      "json_object": 2,
+      "casts": 9,
+      "long_lines": 0
+    },
+    {
+      "file": "core/workflow-dag.ts",
+      "lines": 125,
+      "imports": 4,
+      "json_object": 30,
+      "casts": 6,
+      "long_lines": 17
+    },
+    {
+      "file": "core/host-activation-manifest.ts",
+      "lines": 110,
+      "imports": 5,
+      "json_object": 16,
+      "casts": 6,
+      "long_lines": 0
+    },
+    {
+      "file": "core/workflow-registry.ts",
+      "lines": 213,
+      "imports": 6,
+      "json_object": 8,
+      "casts": 6,
+      "long_lines": 0
+    },
+    {
+      "file": "core/failure-attribution.ts",
+      "lines": 223,
+      "imports": 1,
+      "json_object": 7,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/knowledge-index.ts",
+      "lines": 286,
+      "imports": 6,
+      "json_object": 0,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/receipt.ts",
+      "lines": 348,
+      "imports": 3,
+      "json_object": 17,
+      "casts": 14,
+      "long_lines": 0
+    },
+    {
+      "file": "core/compaction.ts",
+      "lines": 222,
+      "imports": 2,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "core/contracts.ts",
+      "lines": 113,
+      "imports": 4,
+      "json_object": 16,
+      "casts": 0,
+      "long_lines": 6
+    },
+    {
+      "file": "core/managed-run.ts",
+      "lines": 80,
+      "imports": 4,
+      "json_object": 15,
+      "casts": 0,
+      "long_lines": 14
+    },
+    {
+      "file": "core/retrieval-evaluation.ts",
+      "lines": 55,
+      "imports": 5,
+      "json_object": 5,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/context-retrieval-capture.ts",
+      "lines": 280,
+      "imports": 5,
+      "json_object": 4,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "core/capability-lifecycle.ts",
+      "lines": 81,
+      "imports": 5,
+      "json_object": 16,
+      "casts": 1,
+      "long_lines": 6
+    },
+    {
+      "file": "core/runtime-assurance.ts",
+      "lines": 146,
+      "imports": 6,
+      "json_object": 20,
+      "casts": 5,
+      "long_lines": 2
+    },
+    {
+      "file": "core/execution-fabric.ts",
+      "lines": 54,
+      "imports": 4,
+      "json_object": 9,
+      "casts": 2,
+      "long_lines": 2
+    },
+    {
+      "file": "core/settings.ts",
+      "lines": 170,
+      "imports": 6,
+      "json_object": 0,
+      "casts": 10,
+      "long_lines": 1
+    },
+    {
+      "file": "core/hydration.ts",
+      "lines": 140,
+      "imports": 4,
+      "json_object": 21,
+      "casts": 6,
+      "long_lines": 0
+    },
+    {
+      "file": "core/host-session-events.ts",
+      "lines": 73,
+      "imports": 5,
+      "json_object": 11,
+      "casts": 2,
+      "long_lines": 8
+    },
+    {
+      "file": "core/capability-protocol.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/context-plane.ts",
+      "lines": 44,
+      "imports": 5,
+      "json_object": 7,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/oidc-jwks.ts",
+      "lines": 85,
+      "imports": 3,
+      "json_object": 0,
+      "casts": 8,
+      "long_lines": 1
+    },
+    {
+      "file": "core/distribution-and-first-run.ts",
+      "lines": 250,
+      "imports": 6,
+      "json_object": 13,
+      "casts": 4,
+      "long_lines": 1
+    },
+    {
+      "file": "core/hooked-effect-kernel.ts",
+      "lines": 119,
+      "imports": 3,
+      "json_object": 29,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "core/autonomy-ladder.ts",
+      "lines": 50,
+      "imports": 4,
+      "json_object": 10,
+      "casts": 1,
+      "long_lines": 6
+    },
+    {
+      "file": "core/object-hatching.ts",
+      "lines": 215,
+      "imports": 3,
+      "json_object": 19,
+      "casts": 9,
+      "long_lines": 0
+    },
+    {
+      "file": "core/assured-pilot.ts",
+      "lines": 147,
+      "imports": 4,
+      "json_object": 46,
+      "casts": 22,
+      "long_lines": 15
+    },
+    {
+      "file": "core/json-schema.ts",
+      "lines": 21,
+      "imports": 2,
+      "json_object": 2,
+      "casts": 8,
+      "long_lines": 10
+    },
+    {
+      "file": "core/context-working-set.ts",
+      "lines": 59,
+      "imports": 5,
+      "json_object": 11,
+      "casts": 8,
+      "long_lines": 4
+    },
+    {
+      "file": "core/context-projection.ts",
+      "lines": 196,
+      "imports": 5,
+      "json_object": 8,
+      "casts": 4,
+      "long_lines": 1
+    },
+    {
+      "file": "core/acceptance-worker.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/runtime-proof.ts",
+      "lines": 63,
+      "imports": 2,
+      "json_object": 13,
+      "casts": 2,
+      "long_lines": 4
+    },
+    {
+      "file": "core/trace-archive-storage.ts",
+      "lines": 118,
+      "imports": 6,
+      "json_object": 12,
+      "casts": 0,
+      "long_lines": 2
+    },
+    {
+      "file": "core/capability-connector.ts",
+      "lines": 252,
+      "imports": 4,
+      "json_object": 29,
+      "casts": 4,
+      "long_lines": 0
+    },
+    {
+      "file": "core/context-resolution.ts",
+      "lines": 418,
+      "imports": 12,
+      "json_object": 36,
+      "casts": 15,
+      "long_lines": 31
+    },
+    {
+      "file": "core/assets.ts",
+      "lines": 217,
+      "imports": 3,
+      "json_object": 4,
+      "casts": 7,
+      "long_lines": 0
+    },
+    {
+      "file": "core/activation-proof.ts",
+      "lines": 68,
+      "imports": 4,
+      "json_object": 5,
+      "casts": 0,
+      "long_lines": 1
+    },
+    {
+      "file": "core/remote-interop.ts",
+      "lines": 51,
+      "imports": 5,
+      "json_object": 10,
+      "casts": 0,
+      "long_lines": 5
+    },
+    {
+      "file": "core/docker-sandbox.ts",
+      "lines": 142,
+      "imports": 6,
+      "json_object": 13,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/materialization.ts",
+      "lines": 81,
+      "imports": 6,
+      "json_object": 12,
+      "casts": 3,
+      "long_lines": 17
+    },
+    {
+      "file": "core/knowledge-auto-review.ts",
+      "lines": 339,
+      "imports": 5,
+      "json_object": 26,
+      "casts": 11,
+      "long_lines": 10
+    },
+    {
+      "file": "core/mcp.ts",
+      "lines": 8,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/cli.ts",
+      "lines": 495,
+      "imports": 19,
+      "json_object": 29,
+      "casts": 36,
+      "long_lines": 23
+    },
+    {
+      "file": "core/memory-consolidation.ts",
+      "lines": 93,
+      "imports": 5,
+      "json_object": 11,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/verification-sensor.ts",
+      "lines": 235,
+      "imports": 3,
+      "json_object": 8,
+      "casts": 17,
+      "long_lines": 0
+    },
+    {
+      "file": "core/a2a-v1-adapter.ts",
+      "lines": 77,
+      "imports": 5,
+      "json_object": 11,
+      "casts": 9,
+      "long_lines": 14
+    },
+    {
+      "file": "core/authorization.ts",
+      "lines": 249,
+      "imports": 3,
+      "json_object": 17,
+      "casts": 6,
+      "long_lines": 0
+    },
+    {
+      "file": "core/capability-intake.ts",
+      "lines": 66,
+      "imports": 4,
+      "json_object": 21,
+      "casts": 4,
+      "long_lines": 8
+    },
+    {
+      "file": "core/verified-autonomous-work.ts",
+      "lines": 115,
+      "imports": 4,
+      "json_object": 25,
+      "casts": 1,
+      "long_lines": 16
+    },
+    {
+      "file": "core/mcp-http.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/scope-identity.ts",
+      "lines": 142,
+      "imports": 7,
+      "json_object": 16,
+      "casts": 10,
+      "long_lines": 3
+    },
+    {
+      "file": "core/windows-desktop-automation.ts",
+      "lines": 171,
+      "imports": 3,
+      "json_object": 15,
+      "casts": 3,
+      "long_lines": 5
+    },
+    {
+      "file": "core/sandbox.ts",
+      "lines": 129,
+      "imports": 4,
+      "json_object": 13,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/model-gateway.ts",
+      "lines": 367,
+      "imports": 4,
+      "json_object": 22,
+      "casts": 17,
+      "long_lines": 12
+    },
+    {
+      "file": "core/runtime-contracts.ts",
+      "lines": 115,
+      "imports": 2,
+      "json_object": 11,
+      "casts": 11,
+      "long_lines": 1
+    },
+    {
+      "file": "core/trust-profile.ts",
+      "lines": 99,
+      "imports": 4,
+      "json_object": 13,
+      "casts": 1,
+      "long_lines": 1
+    },
+    {
+      "file": "core/codex-hook-bridge.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/internal-tool-authorization.ts",
+      "lines": 168,
+      "imports": 2,
+      "json_object": 0,
+      "casts": 3,
+      "long_lines": 3
+    },
+    {
+      "file": "core/decision-surface.ts",
+      "lines": 277,
+      "imports": 3,
+      "json_object": 19,
+      "casts": 7,
+      "long_lines": 0
+    },
+    {
+      "file": "core/component-trace.ts",
+      "lines": 102,
+      "imports": 4,
+      "json_object": 8,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "core/orchestration.ts",
+      "lines": 147,
+      "imports": 3,
+      "json_object": 9,
+      "casts": 7,
+      "long_lines": 0
+    },
+    {
+      "file": "core/runtime-truth.ts",
+      "lines": 195,
+      "imports": 5,
+      "json_object": 13,
+      "casts": 4,
+      "long_lines": 2
+    },
+    {
+      "file": "core/browser.ts",
+      "lines": 37,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/workbench.ts",
+      "lines": 334,
+      "imports": 4,
+      "json_object": 28,
+      "casts": 12,
+      "long_lines": 3
+    },
+    {
+      "file": "core/tool-plane.ts",
+      "lines": 221,
+      "imports": 1,
+      "json_object": 5,
+      "casts": 7,
+      "long_lines": 0
+    },
+    {
+      "file": "core/browser-driving.ts",
+      "lines": 262,
+      "imports": 3,
+      "json_object": 17,
+      "casts": 7,
+      "long_lines": 0
+    },
+    {
+      "file": "core/skill-publisher.ts",
+      "lines": 66,
+      "imports": 3,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/campaign-runner.ts",
+      "lines": 68,
+      "imports": 5,
+      "json_object": 17,
+      "casts": 5,
+      "long_lines": 9
+    },
+    {
+      "file": "core/state-workspace.ts",
+      "lines": 64,
+      "imports": 6,
+      "json_object": 5,
+      "casts": 5,
+      "long_lines": 5
+    },
+    {
+      "file": "core/evaluation-contract.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/host-protocol.ts",
+      "lines": 37,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/host-bridge.ts",
+      "lines": 71,
+      "imports": 5,
+      "json_object": 9,
+      "casts": 0,
+      "long_lines": 4
+    },
+    {
+      "file": "core/changeset.ts",
+      "lines": 122,
+      "imports": 5,
+      "json_object": 16,
+      "casts": 10,
+      "long_lines": 0
+    },
+    {
+      "file": "core/release-catalog.ts",
+      "lines": 52,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 1
+    },
+    {
+      "file": "core/honest-claims.ts",
+      "lines": 171,
+      "imports": 3,
+      "json_object": 11,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/delivery-loop.ts",
+      "lines": 36,
+      "imports": 5,
+      "json_object": 7,
+      "casts": 1,
+      "long_lines": 3
+    },
+    {
+      "file": "core/subscription-drift.ts",
+      "lines": 277,
+      "imports": 3,
+      "json_object": 16,
+      "casts": 11,
+      "long_lines": 0
+    },
+    {
+      "file": "core/a2a-delegation.ts",
+      "lines": 117,
+      "imports": 4,
+      "json_object": 15,
+      "casts": 0,
+      "long_lines": 10
+    },
+    {
+      "file": "core/content-migration.ts",
+      "lines": 212,
+      "imports": 5,
+      "json_object": 7,
+      "casts": 2,
+      "long_lines": 1
+    },
+    {
+      "file": "core/project-bundle.ts",
+      "lines": 35,
+      "imports": 5,
+      "json_object": 5,
+      "casts": 0,
+      "long_lines": 2
+    },
+    {
+      "file": "core/retrieval-terms.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/hook-plane.ts",
+      "lines": 100,
+      "imports": 5,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/trajectory.ts",
+      "lines": 84,
+      "imports": 3,
+      "json_object": 8,
+      "casts": 2,
+      "long_lines": 1
+    },
+    {
+      "file": "core/workbench-server.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/host-registry.ts",
+      "lines": 154,
+      "imports": 2,
+      "json_object": 3,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/trace-archive-store.ts",
+      "lines": 166,
+      "imports": 6,
+      "json_object": 10,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/memory-governance.ts",
+      "lines": 156,
+      "imports": 5,
+      "json_object": 32,
+      "casts": 15,
+      "long_lines": 22
+    },
+    {
+      "file": "core/long-task-worker.ts",
+      "lines": 48,
+      "imports": 4,
+      "json_object": 16,
+      "casts": 1,
+      "long_lines": 14
+    },
+    {
+      "file": "core/turn-cognitive-runtime.ts",
+      "lines": 216,
+      "imports": 5,
+      "json_object": 43,
+      "casts": 13,
+      "long_lines": 18
+    },
+    {
+      "file": "core/isolated.ts",
+      "lines": 53,
+      "imports": 5,
+      "json_object": 5,
+      "casts": 1,
+      "long_lines": 3
+    },
+    {
+      "file": "core/continual-harness.ts",
+      "lines": 127,
+      "imports": 4,
+      "json_object": 25,
+      "casts": 1,
+      "long_lines": 32
+    },
+    {
+      "file": "core/trace-review.ts",
+      "lines": 78,
+      "imports": 2,
+      "json_object": 8,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/security.ts",
+      "lines": 186,
+      "imports": 4,
+      "json_object": 23,
+      "casts": 9,
+      "long_lines": 0
+    },
+    {
+      "file": "core/release-qualification.ts",
+      "lines": 62,
+      "imports": 4,
+      "json_object": 14,
+      "casts": 2,
+      "long_lines": 24
+    },
+    {
+      "file": "core/platform-execution.ts",
+      "lines": 61,
+      "imports": 5,
+      "json_object": 17,
+      "casts": 3,
+      "long_lines": 11
+    },
+    {
+      "file": "core/declaration-consistency.ts",
+      "lines": 254,
+      "imports": 1,
+      "json_object": 9,
+      "casts": 13,
+      "long_lines": 0
+    },
+    {
+      "file": "core/claude-driver.ts",
+      "lines": 67,
+      "imports": 9,
+      "json_object": 13,
+      "casts": 4,
+      "long_lines": 16
+    },
+    {
+      "file": "core/data-space.ts",
+      "lines": 12,
+      "imports": 2,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "core/guided-work.ts",
+      "lines": 50,
+      "imports": 4,
+      "json_object": 11,
+      "casts": 1,
+      "long_lines": 7
+    },
+    {
+      "file": "core/human-touchpoints.ts",
+      "lines": 180,
+      "imports": 3,
+      "json_object": 8,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/runtime-truth-kernel.ts",
+      "lines": 91,
+      "imports": 5,
+      "json_object": 19,
+      "casts": 10,
+      "long_lines": 4
+    },
+    {
+      "file": "core/outcome-observer.ts",
+      "lines": 37,
+      "imports": 5,
+      "json_object": 6,
+      "casts": 1,
+      "long_lines": 9
+    },
+    {
+      "file": "core/autonomy.ts",
+      "lines": 107,
+      "imports": 4,
+      "json_object": 17,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/remote-runtime.ts",
+      "lines": 137,
+      "imports": 5,
+      "json_object": 12,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/windows-desktop-vision.ts",
+      "lines": 157,
+      "imports": 3,
+      "json_object": 14,
+      "casts": 1,
+      "long_lines": 6
+    },
+    {
+      "file": "core/evaluation.ts",
+      "lines": 102,
+      "imports": 1,
+      "json_object": 25,
+      "casts": 7,
+      "long_lines": 0
+    },
+    {
+      "file": "core/web-operation.ts",
+      "lines": 80,
+      "imports": 3,
+      "json_object": 9,
+      "casts": 0,
+      "long_lines": 1
+    },
+    {
+      "file": "core/runtime-execution-attempt.ts",
+      "lines": 166,
+      "imports": 4,
+      "json_object": 24,
+      "casts": 3,
+      "long_lines": 3
+    },
+    {
+      "file": "core/runtime-model-probe.ts",
+      "lines": 43,
+      "imports": 3,
+      "json_object": 4,
+      "casts": 0,
+      "long_lines": 2
+    },
+    {
+      "file": "core/verification-plane.ts",
+      "lines": 110,
+      "imports": 4,
+      "json_object": 12,
+      "casts": 4,
+      "long_lines": 11
+    },
+    {
+      "file": "core/enterprise-access.ts",
+      "lines": 119,
+      "imports": 4,
+      "json_object": 16,
+      "casts": 1,
+      "long_lines": 17
+    },
+    {
+      "file": "core/runtime-acceptance.ts",
+      "lines": 82,
+      "imports": 5,
+      "json_object": 9,
+      "casts": 4,
+      "long_lines": 14
+    },
+    {
+      "file": "core/transaction.ts",
+      "lines": 62,
+      "imports": 4,
+      "json_object": 10,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "core/host-run.ts",
+      "lines": 36,
+      "imports": 6,
+      "json_object": 17,
+      "casts": 1,
+      "long_lines": 11
+    },
+    {
+      "file": "core/capability-catalog.ts",
+      "lines": 55,
+      "imports": 5,
+      "json_object": 0,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/model-independence.ts",
+      "lines": 127,
+      "imports": 1,
+      "json_object": 2,
+      "casts": 5,
+      "long_lines": 0
+    },
+    {
+      "file": "core/graph-compiler.ts",
+      "lines": 34,
+      "imports": 3,
+      "json_object": 8,
+      "casts": 2,
+      "long_lines": 2
+    },
+    {
+      "file": "core/maintenance.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/task-state.ts",
+      "lines": 23,
+      "imports": 2,
+      "json_object": 8,
+      "casts": 2,
+      "long_lines": 6
+    },
+    {
+      "file": "core/supervisor.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/workbench-experience.ts",
+      "lines": 40,
+      "imports": 4,
+      "json_object": 11,
+      "casts": 0,
+      "long_lines": 12
+    },
+    {
+      "file": "core/execution-safety.ts",
+      "lines": 44,
+      "imports": 6,
+      "json_object": 14,
+      "casts": 5,
+      "long_lines": 9
+    },
+    {
+      "file": "core/uncertainty-policy.ts",
+      "lines": 64,
+      "imports": 4,
+      "json_object": 7,
+      "casts": 3,
+      "long_lines": 17
+    },
+    {
+      "file": "core/certification.ts",
+      "lines": 59,
+      "imports": 4,
+      "json_object": 6,
+      "casts": 3,
+      "long_lines": 18
+    },
+    {
+      "file": "core/component-readiness.ts",
+      "lines": 171,
+      "imports": 2,
+      "json_object": 9,
+      "casts": 1,
+      "long_lines": 2
+    },
+    {
+      "file": "core/knowledge-memory-bundle.ts",
+      "lines": 354,
+      "imports": 8,
+      "json_object": 32,
+      "casts": 12,
+      "long_lines": 10
+    },
+    {
+      "file": "core/agent-loop.ts",
+      "lines": 174,
+      "imports": 2,
+      "json_object": 5,
+      "casts": 4,
+      "long_lines": 0
+    },
+    {
+      "file": "core/subscription-authorization.ts",
+      "lines": 278,
+      "imports": 3,
+      "json_object": 19,
+      "casts": 7,
+      "long_lines": 0
+    },
+    {
+      "file": "core/domain-evaluator.ts",
+      "lines": 26,
+      "imports": 5,
+      "json_object": 6,
+      "casts": 1,
+      "long_lines": 2
+    },
+    {
+      "file": "core/work-runtime-mode.ts",
+      "lines": 42,
+      "imports": 4,
+      "json_object": 7,
+      "casts": 1,
+      "long_lines": 5
+    },
+    {
+      "file": "core/runtime-completion.ts",
+      "lines": 161,
+      "imports": 7,
+      "json_object": 51,
+      "casts": 3,
+      "long_lines": 18
+    },
+    {
+      "file": "core/org-sync.ts",
+      "lines": 13,
+      "imports": 5,
+      "json_object": 5,
+      "casts": 0,
+      "long_lines": 2
+    },
+    {
+      "file": "core/version.ts",
+      "lines": 5,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/durable-action-loop.ts",
+      "lines": 171,
+      "imports": 5,
+      "json_object": 27,
+      "casts": 4,
+      "long_lines": 24
+    },
+    {
+      "file": "core/config.ts",
+      "lines": 220,
+      "imports": 6,
+      "json_object": 3,
+      "casts": 4,
+      "long_lines": 0
+    },
+    {
+      "file": "core/home.ts",
+      "lines": 107,
+      "imports": 2,
+      "json_object": 25,
+      "casts": 8,
+      "long_lines": 12
+    },
+    {
+      "file": "core/recovery.ts",
+      "lines": 122,
+      "imports": 4,
+      "json_object": 14,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/work-coordinator.ts",
+      "lines": 56,
+      "imports": 5,
+      "json_object": 16,
+      "casts": 3,
+      "long_lines": 9
+    },
+    {
+      "file": "core/replay-runner.ts",
+      "lines": 51,
+      "imports": 5,
+      "json_object": 11,
+      "casts": 2,
+      "long_lines": 2
+    },
+    {
+      "file": "core/scope-policy.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/cost-ledger.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/feedback-learning.ts",
+      "lines": 28,
+      "imports": 5,
+      "json_object": 5,
+      "casts": 1,
+      "long_lines": 2
+    },
+    {
+      "file": "core/semantic.ts",
+      "lines": 103,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 5,
+      "long_lines": 0
+    },
+    {
+      "file": "core/subagent-execution.ts",
+      "lines": 156,
+      "imports": 4,
+      "json_object": 10,
+      "casts": 5,
+      "long_lines": 0
+    },
+    {
+      "file": "core/eval-campaign-report.ts",
+      "lines": 42,
+      "imports": 4,
+      "json_object": 9,
+      "casts": 0,
+      "long_lines": 7
+    },
+    {
+      "file": "core/egress.ts",
+      "lines": 114,
+      "imports": 7,
+      "json_object": 4,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/speculative.ts",
+      "lines": 131,
+      "imports": 4,
+      "json_object": 17,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/script-run.ts",
+      "lines": 54,
+      "imports": 3,
+      "json_object": 10,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/hooks.ts",
+      "lines": 154,
+      "imports": 2,
+      "json_object": 10,
+      "casts": 4,
+      "long_lines": 0
+    },
+    {
+      "file": "core/maintenance-scheduler.ts",
+      "lines": 28,
+      "imports": 4,
+      "json_object": 4,
+      "casts": 1,
+      "long_lines": 1
+    },
+    {
+      "file": "core/task-control.ts",
+      "lines": 95,
+      "imports": 6,
+      "json_object": 19,
+      "casts": 4,
+      "long_lines": 6
+    },
+    {
+      "file": "core/state-view.ts",
+      "lines": 145,
+      "imports": 2,
+      "json_object": 10,
+      "casts": 6,
+      "long_lines": 0
+    },
+    {
+      "file": "core/workbench-command.ts",
+      "lines": 52,
+      "imports": 4,
+      "json_object": 11,
+      "casts": 1,
+      "long_lines": 1
+    },
+    {
+      "file": "core/service.ts",
+      "lines": 7,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/handoff-manifest.ts",
+      "lines": 20,
+      "imports": 5,
+      "json_object": 5,
+      "casts": 0,
+      "long_lines": 2
+    },
+    {
+      "file": "core/prepared-state.ts",
+      "lines": 244,
+      "imports": 3,
+      "json_object": 9,
+      "casts": 4,
+      "long_lines": 0
+    },
+    {
+      "file": "core/token-budget.ts",
+      "lines": 135,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/metrics.ts",
+      "lines": 116,
+      "imports": 1,
+      "json_object": 4,
+      "casts": 5,
+      "long_lines": 0
+    },
+    {
+      "file": "core/os-security.ts",
+      "lines": 37,
+      "imports": 5,
+      "json_object": 6,
+      "casts": 1,
+      "long_lines": 3
+    },
+    {
+      "file": "core/trajectory-abstraction.ts",
+      "lines": 260,
+      "imports": 4,
+      "json_object": 12,
+      "casts": 7,
+      "long_lines": 1
+    },
+    {
+      "file": "core/governance-pinning.ts",
+      "lines": 288,
+      "imports": 4,
+      "json_object": 22,
+      "casts": 16,
+      "long_lines": 0
+    },
+    {
+      "file": "core/task-benchmark.ts",
+      "lines": 109,
+      "imports": 5,
+      "json_object": 23,
+      "casts": 2,
+      "long_lines": 27
+    },
+    {
+      "file": "core/work-session.ts",
+      "lines": 58,
+      "imports": 5,
+      "json_object": 20,
+      "casts": 5,
+      "long_lines": 14
+    },
+    {
+      "file": "core/attention.ts",
+      "lines": 67,
+      "imports": 3,
+      "json_object": 10,
+      "casts": 0,
+      "long_lines": 11
+    },
+    {
+      "file": "core/adjudication-queue.ts",
+      "lines": 200,
+      "imports": 3,
+      "json_object": 12,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "core/trace-kernel.ts",
+      "lines": 201,
+      "imports": 7,
+      "json_object": 41,
+      "casts": 17,
+      "long_lines": 27
+    },
+    {
+      "file": "core/internal-host-driver.ts",
+      "lines": 378,
+      "imports": 15,
+      "json_object": 20,
+      "casts": 15,
+      "long_lines": 23
+    },
+    {
+      "file": "core/digest.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/effects.ts",
+      "lines": 260,
+      "imports": 4,
+      "json_object": 35,
+      "casts": 8,
+      "long_lines": 0
+    },
+    {
+      "file": "core/platform-operations.ts",
+      "lines": 43,
+      "imports": 5,
+      "json_object": 9,
+      "casts": 2,
+      "long_lines": 3
+    },
+    {
+      "file": "core/managed-write.ts",
+      "lines": 77,
+      "imports": 6,
+      "json_object": 19,
+      "casts": 4,
+      "long_lines": 10
+    },
+    {
+      "file": "core/catalog.ts",
+      "lines": 371,
+      "imports": 7,
+      "json_object": 39,
+      "casts": 9,
+      "long_lines": 6
+    },
+    {
+      "file": "core/mcp-tasks.ts",
+      "lines": 88,
+      "imports": 2,
+      "json_object": 16,
+      "casts": 3,
+      "long_lines": 4
+    },
+    {
+      "file": "core/intent-compiler.ts",
+      "lines": 124,
+      "imports": 4,
+      "json_object": 12,
+      "casts": 3,
+      "long_lines": 3
+    },
+    {
+      "file": "core/remote-mcp-access.ts",
+      "lines": 117,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/domains/index.ts",
+      "lines": 9,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 5,
+      "long_lines": 0
+    },
+    {
+      "file": "core/mcp/tool-catalog.ts",
+      "lines": 1272,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 50,
+      "long_lines": 396
+    },
+    {
+      "file": "core/mcp/tool-schema.ts",
+      "lines": 137,
+      "imports": 1,
+      "json_object": 5,
+      "casts": 1,
+      "long_lines": 8
+    },
+    {
+      "file": "core/mcp/canonical-tools.ts",
+      "lines": 7,
+      "imports": 2,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/acceptance-worker.ts",
+      "lines": 85,
+      "imports": 7,
+      "json_object": 28,
+      "casts": 15,
+      "long_lines": 14
+    },
+    {
+      "file": "core/application/control-authority.ts",
+      "lines": 70,
+      "imports": 3,
+      "json_object": 3,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/craft-service.ts",
+      "lines": 4785,
+      "imports": 57,
+      "json_object": 2107,
+      "casts": 327,
+      "long_lines": 241
+    },
+    {
+      "file": "core/application/maintenance.ts",
+      "lines": 125,
+      "imports": 8,
+      "json_object": 20,
+      "casts": 14,
+      "long_lines": 12
+    },
+    {
+      "file": "core/application/procedure-invocation.ts",
+      "lines": 308,
+      "imports": 10,
+      "json_object": 46,
+      "casts": 32,
+      "long_lines": 18
+    },
+    {
+      "file": "core/application/index.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/procedure-graph-progress.ts",
+      "lines": 115,
+      "imports": 4,
+      "json_object": 24,
+      "casts": 28,
+      "long_lines": 11
+    },
+    {
+      "file": "core/application/service-foundation.ts",
+      "lines": 676,
+      "imports": 196,
+      "json_object": 6,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/procedure-work-items.ts",
+      "lines": 48,
+      "imports": 3,
+      "json_object": 9,
+      "casts": 9,
+      "long_lines": 1
+    },
+    {
+      "file": "core/application/engineering-evaluation-runner.ts",
+      "lines": 226,
+      "imports": 10,
+      "json_object": 23,
+      "casts": 16,
+      "long_lines": 21
+    },
+    {
+      "file": "core/application/coordinators/runtime-coordinator.ts",
+      "lines": 29,
+      "imports": 6,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/coordinators/cognitive-workbench.ts",
+      "lines": 38,
+      "imports": 3,
+      "json_object": 9,
+      "casts": 0,
+      "long_lines": 2
+    },
+    {
+      "file": "core/application/coordinators/workflow-design.ts",
+      "lines": 58,
+      "imports": 3,
+      "json_object": 9,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/coordinators/context-usage.ts",
+      "lines": 53,
+      "imports": 2,
+      "json_object": 12,
+      "casts": 5,
+      "long_lines": 3
+    },
+    {
+      "file": "core/application/coordinators/evaluation-coordinator.ts",
+      "lines": 38,
+      "imports": 10,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/coordinators/forge-dispatch.ts",
+      "lines": 167,
+      "imports": 2,
+      "json_object": 18,
+      "casts": 7,
+      "long_lines": 3
+    },
+    {
+      "file": "core/application/coordinators/workspace-coordinator.ts",
+      "lines": 35,
+      "imports": 10,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/coordinators/component-assets.ts",
+      "lines": 138,
+      "imports": 5,
+      "json_object": 25,
+      "casts": 8,
+      "long_lines": 18
+    },
+    {
+      "file": "core/application/coordinators/work-coordinator.ts",
+      "lines": 27,
+      "imports": 7,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/coordinators/work-control.ts",
+      "lines": 86,
+      "imports": 2,
+      "json_object": 25,
+      "casts": 6,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/coordinators/cognitive-write.ts",
+      "lines": 72,
+      "imports": 5,
+      "json_object": 14,
+      "casts": 5,
+      "long_lines": 3
+    },
+    {
+      "file": "core/application/use-cases/legacy-knowledge-migration.ts",
+      "lines": 52,
+      "imports": 2,
+      "json_object": 12,
+      "casts": 4,
+      "long_lines": 9
+    },
+    {
+      "file": "core/application/use-cases/durable-experience.ts",
+      "lines": 31,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/decision-context-gate.ts",
+      "lines": 7,
+      "imports": 2,
+      "json_object": 1,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/workbench-workflow-input.ts",
+      "lines": 8,
+      "imports": 1,
+      "json_object": 4,
+      "casts": 1,
+      "long_lines": 1
+    },
+    {
+      "file": "core/application/use-cases/knowledge-relation.ts",
+      "lines": 9,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/repository-context.ts",
+      "lines": 98,
+      "imports": 5,
+      "json_object": 17,
+      "casts": 9,
+      "long_lines": 6
+    },
+    {
+      "file": "core/application/use-cases/capability-lifecycle.ts",
+      "lines": 12,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/remote-interop.ts",
+      "lines": 7,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/knowledge-auto-review.ts",
+      "lines": 13,
+      "imports": 2,
+      "json_object": 1,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/memory-consolidation.ts",
+      "lines": 8,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/runtime-learning.ts",
+      "lines": 11,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/platform.ts",
+      "lines": 8,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/codebase.ts",
+      "lines": 61,
+      "imports": 4,
+      "json_object": 27,
+      "casts": 1,
+      "long_lines": 1
+    },
+    {
+      "file": "core/application/use-cases/host-session.ts",
+      "lines": 11,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/index.ts",
+      "lines": 3,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/turn-cognitive.ts",
+      "lines": 16,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/trace.ts",
+      "lines": 18,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/kernel-delegates.ts",
+      "lines": 298,
+      "imports": 18,
+      "json_object": 378,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/adapter-runtime.ts",
+      "lines": 83,
+      "imports": 3,
+      "json_object": 56,
+      "casts": 10,
+      "long_lines": 5
+    },
+    {
+      "file": "core/application/use-cases/knowledge-memory.ts",
+      "lines": 40,
+      "imports": 2,
+      "json_object": 5,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/use-cases/quality-profile.ts",
+      "lines": 55,
+      "imports": 3,
+      "json_object": 36,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/actions/action-handlers.ts",
+      "lines": 649,
+      "imports": 8,
+      "json_object": 3,
+      "casts": 0,
+      "long_lines": 50
+    },
+    {
+      "file": "core/application/actions/work-handlers.ts",
+      "lines": 18,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 7
+    },
+    {
+      "file": "core/application/actions/evaluation-handlers.ts",
+      "lines": 10,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 3
+    },
+    {
+      "file": "core/application/actions/workspace-handlers.ts",
+      "lines": 15,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/application/actions/runtime-handlers.ts",
+      "lines": 21,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/infrastructure/store-migrations.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/infrastructure/content-store.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/infrastructure/store-schema.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/infrastructure/index.ts",
+      "lines": 3,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/infrastructure/paths.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/infrastructure/store.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/interfaces/mcp-stdio.ts",
+      "lines": 46,
+      "imports": 4,
+      "json_object": 3,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/interfaces/mcp-server.ts",
+      "lines": 249,
+      "imports": 17,
+      "json_object": 22,
+      "casts": 15,
+      "long_lines": 4
+    },
+    {
+      "file": "core/interfaces/mcp-http.ts",
+      "lines": 64,
+      "imports": 5,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 3
+    },
+    {
+      "file": "core/interfaces/codex-hook-bridge.ts",
+      "lines": 264,
+      "imports": 7,
+      "json_object": 22,
+      "casts": 20,
+      "long_lines": 4
+    },
+    {
+      "file": "core/interfaces/workbench-server.ts",
+      "lines": 411,
+      "imports": 11,
+      "json_object": 5,
+      "casts": 8,
+      "long_lines": 59
+    },
+    {
+      "file": "core/interfaces/canonical-tools.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/interfaces/supervisor.ts",
+      "lines": 180,
+      "imports": 9,
+      "json_object": 17,
+      "casts": 15,
+      "long_lines": 10
+    },
+    {
+      "file": "core/interfaces/index.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/interfaces/mcp/work-handlers.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/interfaces/mcp/evaluation-handlers.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/interfaces/mcp/surface-registry.ts",
+      "lines": 134,
+      "imports": 6,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 3
+    },
+    {
+      "file": "core/interfaces/mcp/workspace-handlers.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/interfaces/mcp/runtime-handlers.ts",
+      "lines": 1,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "core/interfaces/mcp/product-launch.ts",
+      "lines": 57,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/verified-evaluation-receipt.ts",
+      "lines": 73,
+      "imports": 2,
+      "json_object": 3,
+      "casts": 2,
+      "long_lines": 5
+    },
+    {
+      "file": "capability/engineering-quality-profile.ts",
+      "lines": 356,
+      "imports": 5,
+      "json_object": 36,
+      "casts": 6,
+      "long_lines": 13
+    },
+    {
+      "file": "capability/control-session.ts",
+      "lines": 190,
+      "imports": 3,
+      "json_object": 17,
+      "casts": 11,
+      "long_lines": 2
+    },
+    {
+      "file": "capability/engineering-evaluation-runner.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-memory/memory-signals.ts",
+      "lines": 320,
+      "imports": 4,
+      "json_object": 7,
+      "casts": 10,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-memory/capability.ts",
+      "lines": 55,
+      "imports": 6,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-memory/memory-ledger.ts",
+      "lines": 181,
+      "imports": 6,
+      "json_object": 13,
+      "casts": 3,
+      "long_lines": 6
+    },
+    {
+      "file": "capability/craft-memory/memory-signals-kernel.ts",
+      "lines": 54,
+      "imports": 3,
+      "json_object": 9,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-memory/ownership.ts",
+      "lines": 82,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-eval/model.ts",
+      "lines": 66,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-eval/cases.ts",
+      "lines": 50,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-eval/recurrence.ts",
+      "lines": 52,
+      "imports": 5,
+      "json_object": 0,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-eval/abstraction.ts",
+      "lines": 43,
+      "imports": 2,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-eval/suite.ts",
+      "lines": 427,
+      "imports": 15,
+      "json_object": 0,
+      "casts": 42,
+      "long_lines": 1
+    },
+    {
+      "file": "capability/craft-eval/run.ts",
+      "lines": 74,
+      "imports": 5,
+      "json_object": 0,
+      "casts": 4,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-experience/workflow-evolution.ts",
+      "lines": 115,
+      "imports": 5,
+      "json_object": 18,
+      "casts": 7,
+      "long_lines": 23
+    },
+    {
+      "file": "capability/craft-experience/procedure-automation.ts",
+      "lines": 323,
+      "imports": 5,
+      "json_object": 40,
+      "casts": 5,
+      "long_lines": 7
+    },
+    {
+      "file": "capability/craft-experience/procedure-composition.ts",
+      "lines": 209,
+      "imports": 5,
+      "json_object": 22,
+      "casts": 31,
+      "long_lines": 6
+    },
+    {
+      "file": "capability/craft-experience/contribution.ts",
+      "lines": 108,
+      "imports": 4,
+      "json_object": 5,
+      "casts": 0,
+      "long_lines": 1
+    },
+    {
+      "file": "capability/craft-experience/capability.ts",
+      "lines": 80,
+      "imports": 10,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-experience/experience-ledger.ts",
+      "lines": 95,
+      "imports": 4,
+      "json_object": 18,
+      "casts": 5,
+      "long_lines": 15
+    },
+    {
+      "file": "capability/craft-experience/procedure-configuration.ts",
+      "lines": 42,
+      "imports": 7,
+      "json_object": 7,
+      "casts": 5,
+      "long_lines": 6
+    },
+    {
+      "file": "capability/craft-experience/evaluation-model-profile.ts",
+      "lines": 108,
+      "imports": 4,
+      "json_object": 13,
+      "casts": 2,
+      "long_lines": 8
+    },
+    {
+      "file": "capability/craft-experience/procedure-projection.ts",
+      "lines": 262,
+      "imports": 8,
+      "json_object": 33,
+      "casts": 29,
+      "long_lines": 12
+    },
+    {
+      "file": "capability/craft-experience/procedure-definition.ts",
+      "lines": 108,
+      "imports": 5,
+      "json_object": 4,
+      "casts": 3,
+      "long_lines": 2
+    },
+    {
+      "file": "capability/craft-experience/procedure-graph.ts",
+      "lines": 77,
+      "imports": 3,
+      "json_object": 6,
+      "casts": 12,
+      "long_lines": 7
+    },
+    {
+      "file": "capability/craft-experience/ownership.ts",
+      "lines": 42,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 2
+    },
+    {
+      "file": "capability/craft-codebase/capability.ts",
+      "lines": 23,
+      "imports": 5,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 1
+    },
+    {
+      "file": "capability/craft-codebase/basic-analysis.ts",
+      "lines": 30,
+      "imports": 3,
+      "json_object": 5,
+      "casts": 1,
+      "long_lines": 4
+    },
+    {
+      "file": "capability/craft-codebase/codebase-index.ts",
+      "lines": 283,
+      "imports": 6,
+      "json_object": 54,
+      "casts": 15,
+      "long_lines": 31
+    },
+    {
+      "file": "capability/craft-codebase/lsp-adapter.ts",
+      "lines": 57,
+      "imports": 2,
+      "json_object": 17,
+      "casts": 12,
+      "long_lines": 2
+    },
+    {
+      "file": "capability/craft-codebase/typescript-analysis.ts",
+      "lines": 86,
+      "imports": 4,
+      "json_object": 4,
+      "casts": 0,
+      "long_lines": 1
+    },
+    {
+      "file": "capability/craft-codebase/repository-files.ts",
+      "lines": 54,
+      "imports": 4,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 3
+    },
+    {
+      "file": "capability/craft-codebase/ownership.ts",
+      "lines": 10,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-knowledge/project-brain.ts",
+      "lines": 85,
+      "imports": 4,
+      "json_object": 21,
+      "casts": 0,
+      "long_lines": 11
+    },
+    {
+      "file": "capability/craft-knowledge/knowledge-workbench.ts",
+      "lines": 58,
+      "imports": 1,
+      "json_object": 6,
+      "casts": 1,
+      "long_lines": 3
+    },
+    {
+      "file": "capability/craft-knowledge/knowledge-relation.ts",
+      "lines": 180,
+      "imports": 4,
+      "json_object": 30,
+      "casts": 16,
+      "long_lines": 2
+    },
+    {
+      "file": "capability/craft-knowledge/contribution.ts",
+      "lines": 135,
+      "imports": 5,
+      "json_object": 7,
+      "casts": 2,
+      "long_lines": 2
+    },
+    {
+      "file": "capability/craft-knowledge/knowledge-bound-launch.ts",
+      "lines": 83,
+      "imports": 4,
+      "json_object": 8,
+      "casts": 1,
+      "long_lines": 2
+    },
+    {
+      "file": "capability/craft-knowledge/knowledge-source-registry.ts",
+      "lines": 232,
+      "imports": 8,
+      "json_object": 21,
+      "casts": 10,
+      "long_lines": 18
+    },
+    {
+      "file": "capability/craft-knowledge/capability.ts",
+      "lines": 96,
+      "imports": 13,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "capability/craft-knowledge/project-knowledge.ts",
+      "lines": 62,
+      "imports": 5,
+      "json_object": 7,
+      "casts": 2,
+      "long_lines": 12
+    },
+    {
+      "file": "capability/craft-knowledge/local-candidate-import.ts",
+      "lines": 25,
+      "imports": 5,
+      "json_object": 5,
+      "casts": 1,
+      "long_lines": 5
+    },
+    {
+      "file": "capability/craft-knowledge/ownership.ts",
+      "lines": 90,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 4,
+      "long_lines": 1
+    },
+    {
+      "file": "capability/craft-knowledge/wiki-candidate-governance.ts",
+      "lines": 110,
+      "imports": 4,
+      "json_object": 16,
+      "casts": 2,
+      "long_lines": 18
+    },
+    {
+      "file": "common/craft-common-base/src/validation.ts",
+      "lines": 153,
+      "imports": 2,
+      "json_object": 5,
+      "casts": 9,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-base/src/retrieval-port.ts",
+      "lines": 154,
+      "imports": 4,
+      "json_object": 9,
+      "casts": 2,
+      "long_lines": 8
+    },
+    {
+      "file": "common/craft-common-base/src/workflow.ts",
+      "lines": 175,
+      "imports": 4,
+      "json_object": 15,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-base/src/capability-protocol.ts",
+      "lines": 594,
+      "imports": 1,
+      "json_object": 2,
+      "casts": 12,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-base/src/retrieval-terms.ts",
+      "lines": 8,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-base/src/index.ts",
+      "lines": 9,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-base/src/scope-policy.ts",
+      "lines": 135,
+      "imports": 2,
+      "json_object": 7,
+      "casts": 9,
+      "long_lines": 2
+    },
+    {
+      "file": "common/craft-common-base/src/model-compat.ts",
+      "lines": 32,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-base/src/digest.ts",
+      "lines": 132,
+      "imports": 2,
+      "json_object": 4,
+      "casts": 7,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-base/src/bm25.ts",
+      "lines": 94,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-store-local/src/store-migrations.ts",
+      "lines": 272,
+      "imports": 5,
+      "json_object": 0,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-store-local/src/content-store.ts",
+      "lines": 361,
+      "imports": 5,
+      "json_object": 0,
+      "casts": 5,
+      "long_lines": 5
+    },
+    {
+      "file": "common/craft-common-store-local/src/store-schema.ts",
+      "lines": 2,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-store-local/src/index.ts",
+      "lines": 4,
+      "imports": 0,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-store-local/src/paths.ts",
+      "lines": 123,
+      "imports": 5,
+      "json_object": 0,
+      "casts": 2,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-store-local/src/store.ts",
+      "lines": 324,
+      "imports": 6,
+      "json_object": 29,
+      "casts": 15,
+      "long_lines": 1
+    },
+    {
+      "file": "common/craft-common-log/src/evaluation-contract.ts",
+      "lines": 75,
+      "imports": 2,
+      "json_object": 9,
+      "casts": 4,
+      "long_lines": 1
+    },
+    {
+      "file": "common/craft-common-log/src/otlp.ts",
+      "lines": 105,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 3,
+      "long_lines": 0
+    },
+    {
+      "file": "common/craft-common-log/src/index.ts",
+      "lines": 111,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 1
+    },
+    {
+      "file": "common/craft-common-log/src/cost-ledger.ts",
+      "lines": 60,
+      "imports": 5,
+      "json_object": 9,
+      "casts": 0,
+      "long_lines": 2
+    },
+    {
+      "file": "common/craft-common-log/src/store-sink.ts",
+      "lines": 24,
+      "imports": 2,
+      "json_object": 2,
+      "casts": 4,
+      "long_lines": 0
+    },
+    {
+      "file": "adapters/browser-cdp-cli.ts",
+      "lines": 22,
+      "imports": 2,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "adapters/browser-control.ts",
+      "lines": 140,
+      "imports": 4,
+      "json_object": 0,
+      "casts": 7,
+      "long_lines": 1
+    },
+    {
+      "file": "adapters/cdp-session.ts",
+      "lines": 77,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "adapters/windows-vision-cli.ts",
+      "lines": 86,
+      "imports": 6,
+      "json_object": 0,
+      "casts": 4,
+      "long_lines": 7
+    },
+    {
+      "file": "adapters/browser-cdp.ts",
+      "lines": 88,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 4,
+      "long_lines": 5
+    },
+    {
+      "file": "adapters/deepseek-harness/mcp-client.ts",
+      "lines": 45,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "adapters/deepseek-harness/index.ts",
+      "lines": 7,
+      "imports": 2,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "adapters/deepseek-harness/adapter-tools.ts",
+      "lines": 36,
+      "imports": 3,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 2
+    },
+    {
+      "file": "bin/craft-parser-worker.ts",
+      "lines": 16,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "bin/craft-mcp.ts",
+      "lines": 18,
+      "imports": 2,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "bin/craft-mcp-http.ts",
+      "lines": 15,
+      "imports": 2,
+      "json_object": 0,
+      "casts": 1,
+      "long_lines": 0
+    },
+    {
+      "file": "bin/craft-mcp-full.ts",
+      "lines": 4,
+      "imports": 1,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    },
+    {
+      "file": "bin/craft-codex-hook.ts",
+      "lines": 21,
+      "imports": 3,
+      "json_object": 0,
+      "casts": 0,
+      "long_lines": 0
+    }
+  ],
+  "source_manifest": [
+    {
+      "path": "adapters/browser-cdp-cli.ts",
+      "sha256": "9a52c688184bc8a75c604c2b871a4c0f4da04551f2b9648edd992ece3616cee9"
+    },
+    {
+      "path": "adapters/browser-cdp.ts",
+      "sha256": "0043e27b5f13c8b60387d1abccf97ab9ab194f490e28fdb2819456ffe8ccbd37"
+    },
+    {
+      "path": "adapters/browser-control.ts",
+      "sha256": "37721fa85a7fe351dedecdf07f6f21b895cc4c9835c8217bca40234e5ad697c2"
+    },
+    {
+      "path": "adapters/cdp-session.ts",
+      "sha256": "d709c479d2e26d1264e30e40bb5ed5c2f5340b62769617933e73ada7db28e054"
+    },
+    {
+      "path": "adapters/deepseek-harness/adapter-tools.ts",
+      "sha256": "46d09370651c5b2d37125f7fbfb7070d0ec368d7902d18034d426b43fc1d8fa6"
+    },
+    {
+      "path": "adapters/deepseek-harness/index.ts",
+      "sha256": "e215ee785d67ccdce6952cd740099830cf52b4baad987fce908886cc7b088efe"
+    },
+    {
+      "path": "adapters/deepseek-harness/mcp-client.ts",
+      "sha256": "4db7aecb5a2bc483277898bec53715987f286f7e9b4a651696df351ef3e0042e"
+    },
+    {
+      "path": "adapters/deepseek-harness/package.json",
+      "sha256": "2ba5954824ed8adc1685f2827159c2ef980e69a85e38a73bad2b65c17a138a6b"
+    },
+    {
+      "path": "adapters/deepseek-harness/tsconfig.json",
+      "sha256": "82b629d8f7bb15c849a612821720cf71471db1d6884c2e424be8bcb77e54ca1b"
+    },
+    {
+      "path": "adapters/deepseek-harness/types.d.ts",
+      "sha256": "372ae1b3b1dcd6fa1f734553afcf09e8bbff5e8b6ffe7a3790d4f07960d9a930"
+    },
+    {
+      "path": "adapters/trae-work/mcp-core.json",
+      "sha256": "3634af29f8bddd4e05b3acbbba62e95d5640c2415953c51336bd03314fa9ce56"
+    },
+    {
+      "path": "adapters/trae-work/mcp-full.json",
+      "sha256": "dc4b2d6f223ca25e8d0bc0916a2c1b24f76b4ba7f3c264f892cfe5ffbedbc5f0"
+    },
+    {
+      "path": "adapters/trae-work/mcp.json",
+      "sha256": "3634af29f8bddd4e05b3acbbba62e95d5640c2415953c51336bd03314fa9ce56"
+    },
+    {
+      "path": "adapters/windows-vision-cli.ts",
+      "sha256": "f470edd4d5c3c6bf1c587c2703560de8f3d95add70524b245a25f719a4d22b70"
+    },
+    {
+      "path": "adapters/workbuddy-connector/connector-meta.json",
+      "sha256": "fee9dbdf4e551d7a228c87cc2893ffb24fdb99cdb695f760438e37c4ea3fe419"
+    },
+    {
+      "path": "adapters/workbuddy-connector/mcp.json",
+      "sha256": "1100e72cdc3c306d1202ca90efd7232cc9b974188e81fc46ea6350688cd4effe"
+    },
+    {
+      "path": "adapters/workbuddy-expert/.codebuddy-plugin/plugin.json",
+      "sha256": "ede57e98d2983111a870433a0c85b404b5a3c8bf08039dd7bc764efc373e694f"
+    },
+    {
+      "path": "adapters/workbuddy-expert/.mcp.json",
+      "sha256": "7d15db3c8f989e5ebf6a2a777118712c300db2451e4fee407b9c002f5d5e1af4"
+    },
+    {
+      "path": "bin/craft-codex-hook.ts",
+      "sha256": "8b0ee2327081b78ae5be021c7e3776e7fe5465cc3ea984f87a23ada20a002786"
+    },
+    {
+      "path": "bin/craft-mcp-full.ts",
+      "sha256": "2c56886a4bc64876e525f757dd05ed5dac4184020094a092b7b1cef1b7ac39d0"
+    },
+    {
+      "path": "bin/craft-mcp-http.ts",
+      "sha256": "daa46b13e232a11b13759b88425275e2eaa6ce8c34b65099f0744649eab57b9f"
+    },
+    {
+      "path": "bin/craft-mcp.ts",
+      "sha256": "4bd1916f5fc724b4ff5f60f7a9b7c72e16bda8df01636c208e661dfc97cb9d19"
+    },
+    {
+      "path": "bin/craft-parser-worker.ts",
+      "sha256": "65df5485e07a2b8ee34899575305833b8678b6c1665c6a93a40f730b244089f9"
+    },
+    {
+      "path": "capability/control-session.ts",
+      "sha256": "fcb7d4ddadb1b197c821f228ed070cf3b1c28f26746147df71a79811231f6bda"
+    },
+    {
+      "path": "capability/craft-codebase/basic-analysis.ts",
+      "sha256": "51a12a9b73586959735dd86bcfd615a51102c9d4e4afccd19b1e5c3d9460e6f7"
+    },
+    {
+      "path": "capability/craft-codebase/capability.ts",
+      "sha256": "38bdf164e5f4a0ecdc7c4a27eb02f5092b37d398f38c359dca0401497659304f"
+    },
+    {
+      "path": "capability/craft-codebase/codebase-index.ts",
+      "sha256": "3cc54e96b75bb38aae6bd4304f7cb5ac117a01ffa6807477c457218b740305a1"
+    },
+    {
+      "path": "capability/craft-codebase/lsp-adapter.ts",
+      "sha256": "b9000ecad69c4ceac4158d38f39885db409a3ade948b699899ffa936c4500048"
+    },
+    {
+      "path": "capability/craft-codebase/ownership.ts",
+      "sha256": "067fa477e4f9fa4badf9ed9e6df4bbc1058430a458870bc90be49defbe0ee496"
+    },
+    {
+      "path": "capability/craft-codebase/package.json",
+      "sha256": "c89354ad80554110a9a8c0c8f72449933daa4d91ba786fc140145cb159c553c6"
+    },
+    {
+      "path": "capability/craft-codebase/repository-files.ts",
+      "sha256": "10a7a27c4b6f98c09ac88e2a03373c6f25d3883a548730a3eed84bdf229b0275"
+    },
+    {
+      "path": "capability/craft-codebase/tsconfig.json",
+      "sha256": "14cdb7ac3c6ea92c2a92e0110b5f52d900cf247dcf9a64a45918227c867cd272"
+    },
+    {
+      "path": "capability/craft-codebase/typescript-analysis.ts",
+      "sha256": "34c890bc555cf226f916f5698c3be7e500cd468e3a69c06bc3c71321f1fefad1"
+    },
+    {
+      "path": "capability/craft-eval/abstraction.ts",
+      "sha256": "23d904c7ee5c693a07a7045609719fe6c865503361d6e4e4e115ad66af8def86"
+    },
+    {
+      "path": "capability/craft-eval/cases.ts",
+      "sha256": "9c081d43cec2e4763084ccff857bcb995b6349299840c541fa9dbc8905621a81"
+    },
+    {
+      "path": "capability/craft-eval/model.ts",
+      "sha256": "0d952e6685857b2ab4a9f3dd14bb70fdf86f3aa2280562b3bf3500230a7f0cd2"
+    },
+    {
+      "path": "capability/craft-eval/recurrence.ts",
+      "sha256": "5c2d16780543455c6a4f82a8cba2d06f18bad56816afb6f373f0bddead7954a5"
+    },
+    {
+      "path": "capability/craft-eval/run.ts",
+      "sha256": "a35e4244ae32ffec57da8da55dfceeea838a5b38848b23adb12d11b4bba01d3a"
+    },
+    {
+      "path": "capability/craft-eval/suite.ts",
+      "sha256": "543b9e107ce3e79bd5dce6cdd6103369a03336604d7545b73912f82d01fd3403"
+    },
+    {
+      "path": "capability/craft-experience/capability.ts",
+      "sha256": "b05be0b941e3cc0576c433fc03adb2394999b6f4b54eaf45bcc29480dd069a9d"
+    },
+    {
+      "path": "capability/craft-experience/contribution.ts",
+      "sha256": "3f18aac59aaa958c7e47f2d53225a3511c826e90f26e13406b7646b12b06faed"
+    },
+    {
+      "path": "capability/craft-experience/evaluation-model-profile.ts",
+      "sha256": "72408a83b05bd3648389addca3cb392222db174b9251678d5e9a756683056465"
+    },
+    {
+      "path": "capability/craft-experience/experience-ledger.ts",
+      "sha256": "18a6ddf086353be4ec916916ed5f76d22744fa19966943272481cc9c680acfa1"
+    },
+    {
+      "path": "capability/craft-experience/ownership.ts",
+      "sha256": "73d22bb9f0029288c7264724f68d639d7662e3c1b3e78d81d64731e7b43828e9"
+    },
+    {
+      "path": "capability/craft-experience/package.json",
+      "sha256": "c83d49ff18687a4377cb5bf54994692ff0e1e2d378ba5a57de062a38eac942e5"
+    },
+    {
+      "path": "capability/craft-experience/procedure-automation.ts",
+      "sha256": "76a443fa60a25d5b2898a93c660732b2126555a68f40ba5449ba5f37cda4455f"
+    },
+    {
+      "path": "capability/craft-experience/procedure-composition.ts",
+      "sha256": "eae5b6c7353636a91bda45ae1793125b636e555976101a7e62605ccc2712b5d0"
+    },
+    {
+      "path": "capability/craft-experience/procedure-configuration.ts",
+      "sha256": "0f8278dde405c0a004ff3457ae0f2519b690a7f3f174f3a7caf28d604727648e"
+    },
+    {
+      "path": "capability/craft-experience/procedure-definition.ts",
+      "sha256": "cf58df8b5f4e22bd39cec8d5ec15522ead50c7919837f901ea8fe3505d2058df"
+    },
+    {
+      "path": "capability/craft-experience/procedure-graph.ts",
+      "sha256": "0a287a1a32af9df274a2a000ab675a0fddbacaa992db9a618cae45a8fb72229c"
+    },
+    {
+      "path": "capability/craft-experience/procedure-projection.ts",
+      "sha256": "88f049b1dcd1346923ae27d726b2c512f56b1a061788bbc82e3b2a326dda3c08"
+    },
+    {
+      "path": "capability/craft-experience/tsconfig.json",
+      "sha256": "ed11a02a5f7d909f98ad3e72dc4e208b1ed223641c46085feb00b35d11d8e3c6"
+    },
+    {
+      "path": "capability/craft-experience/workflow-evolution.ts",
+      "sha256": "cfc65690b3cbd10ba4946f222a60e8574ff49f491053b22c3dc5f98e4b08acb9"
+    },
+    {
+      "path": "capability/craft-knowledge/capability.ts",
+      "sha256": "0fe877e6af9d0186ab601977e3602585a89216fc45ace23b8bbbc260729b9fcd"
+    },
+    {
+      "path": "capability/craft-knowledge/contribution.ts",
+      "sha256": "92a6aa99e92fdbf12db1ab61e7ecf876b4d718b08e4672ac6da191fb455a1e2d"
+    },
+    {
+      "path": "capability/craft-knowledge/knowledge-bound-launch.ts",
+      "sha256": "2114fb41fba0521079b01ec322b4ff0ffffc131e9494bab5b0eca7fdfcf0adfc"
+    },
+    {
+      "path": "capability/craft-knowledge/knowledge-relation.ts",
+      "sha256": "dbc5dc23e3739c8364d135b684dcd53ac9c06165586995195e934d74c87e0393"
+    },
+    {
+      "path": "capability/craft-knowledge/knowledge-source-registry.ts",
+      "sha256": "4c38a753ff8248a44e3d19a21325c4fe0a50ca3e665f0d62f05b1762cc58a145"
+    },
+    {
+      "path": "capability/craft-knowledge/knowledge-workbench.ts",
+      "sha256": "4007722f691ffea86ca048a3fde5c4976e2c6dbdfa56627d3afc252de836b3e9"
+    },
+    {
+      "path": "capability/craft-knowledge/local-candidate-import.ts",
+      "sha256": "45fd6a146daafbdb711962ecc65fdbd9083ce3ad936d9e18d59c7f19263ba387"
+    },
+    {
+      "path": "capability/craft-knowledge/ownership.ts",
+      "sha256": "2e3dbbf6aa70a91065141b1fd89c8b9b326a5e13ef4a46fe9a62bfcbc775e9b3"
+    },
+    {
+      "path": "capability/craft-knowledge/package.json",
+      "sha256": "c5930a57122f785699f29b17229a002d7edb1d6212beed66db464fb13f029bab"
+    },
+    {
+      "path": "capability/craft-knowledge/project-brain.ts",
+      "sha256": "c2dd4ed33461720df31ea1ebe11c34073a32f6feb5cc7b7a2085f5cdd287cb36"
+    },
+    {
+      "path": "capability/craft-knowledge/project-knowledge.ts",
+      "sha256": "88d14bfa7cfc7b1ecfb1945292a4767601595aa764a9e3b41a98db31968c6ee0"
+    },
+    {
+      "path": "capability/craft-knowledge/tsconfig.json",
+      "sha256": "ed11a02a5f7d909f98ad3e72dc4e208b1ed223641c46085feb00b35d11d8e3c6"
+    },
+    {
+      "path": "capability/craft-knowledge/wiki-candidate-governance.ts",
+      "sha256": "90d691c3db6c9c008b419e20c9c8946122e9329e767c12111ef278e4eb06b6fc"
+    },
+    {
+      "path": "capability/craft-memory/capability.ts",
+      "sha256": "3c52bb67e772849cee17a0a866addf4c8834dc938c15c07578bbc1dc24d516fa"
+    },
+    {
+      "path": "capability/craft-memory/memory-ledger.ts",
+      "sha256": "421eebde5a71898bb61571cd4f1f1b66a1996a353815d3f1abe724c243e129e9"
+    },
+    {
+      "path": "capability/craft-memory/memory-signals-kernel.ts",
+      "sha256": "be8176b589bf1f074fe73d437ea1c71f3f1ecbaad02cc067fcc4e39a4c0ad518"
+    },
+    {
+      "path": "capability/craft-memory/memory-signals.ts",
+      "sha256": "1a88e6afa85ec507f187fdfb6e3ba383b753a3b66ca33d9c820bbf42db7239ee"
+    },
+    {
+      "path": "capability/craft-memory/ownership.ts",
+      "sha256": "5192fadbc74a353a5c2d4d3f379fabe0d0cf9e0c617935b9a1a546fdba344253"
+    },
+    {
+      "path": "capability/craft-memory/package.json",
+      "sha256": "8c60d2639435f03ddc6b7943e8c9d0aafdb264603c116bc088e00729a0b5f8be"
+    },
+    {
+      "path": "capability/craft-memory/tsconfig.json",
+      "sha256": "ed11a02a5f7d909f98ad3e72dc4e208b1ed223641c46085feb00b35d11d8e3c6"
+    },
+    {
+      "path": "capability/engineering-evaluation-runner.ts",
+      "sha256": "6897e26294a6c81d84ff8a6c5a6dac36e6b5425b8dacbf3ed0432eaeeeaff7c0"
+    },
+    {
+      "path": "capability/engineering-quality-profile.ts",
+      "sha256": "adac2142d4c53917cfeb8edae2178b67baf1cb6628addd1e594519ee97d03225"
+    },
+    {
+      "path": "capability/verified-evaluation-receipt.ts",
+      "sha256": "4935ac0b32349b546146b3e6cf08a14c96bbc6a02478ab4484cdcc46522167a1"
+    },
+    {
+      "path": "common/craft-common-base/package.json",
+      "sha256": "79592c5b1f65eecfef10cc926ff0660077dae174ab2004736eb9b3832306a6ad"
+    },
+    {
+      "path": "common/craft-common-base/src/bm25.ts",
+      "sha256": "62643a378ac4d577f2cd6fcabe44faf847ab1a477f6212a4a7e29a6a5d03abdf"
+    },
+    {
+      "path": "common/craft-common-base/src/capability-protocol.ts",
+      "sha256": "0cfeac86a4a62d991c04dcc47fa471ad178e618d55698e09a0ee280fa23f8328"
+    },
+    {
+      "path": "common/craft-common-base/src/digest.ts",
+      "sha256": "5dda786056a7cd7c5e5bc72665c8cb7e422d0a2fd72015738a89edeb2b3cbc52"
+    },
+    {
+      "path": "common/craft-common-base/src/index.ts",
+      "sha256": "d2c2a127524f33bbdff07c30d8492e4bcf0fec647b28acca1e6e7fa8e27c9550"
+    },
+    {
+      "path": "common/craft-common-base/src/model-compat.ts",
+      "sha256": "ad0c724c8773857f12654c1dd064b44b0aa18649808470125aea2d99dceb49a3"
+    },
+    {
+      "path": "common/craft-common-base/src/retrieval-port.ts",
+      "sha256": "6ca399758ccb0971b6f6c65900a85f5098b7ce889d48da0b14ef375d44492487"
+    },
+    {
+      "path": "common/craft-common-base/src/retrieval-terms.ts",
+      "sha256": "f005d2dc3ab7862076dde1bec8f11d6d70860c7eb282e67352bba2069f4dbeda"
+    },
+    {
+      "path": "common/craft-common-base/src/scope-policy.ts",
+      "sha256": "46108dac497d6c711da43cc63b872cc4cf1d138e26993f72c44cd1fae1fb7553"
+    },
+    {
+      "path": "common/craft-common-base/src/validation.ts",
+      "sha256": "1438d30fd54b12b0c59a7c3c1d33ea6381382a8e8fd1974cc1869a89efd3511b"
+    },
+    {
+      "path": "common/craft-common-base/src/workflow.ts",
+      "sha256": "4c728196c390b1a05280ea0133b56d5dff1708106025e7775a37df1bd7eba125"
+    },
+    {
+      "path": "common/craft-common-log/package.json",
+      "sha256": "81e0dbf953e6499126aa85b14f701df99a37eba5860b1b216dcc20aa7a3f43f4"
+    },
+    {
+      "path": "common/craft-common-log/src/cost-ledger.ts",
+      "sha256": "739b7389492fa59c3742ef72659705a2720c8b20fc20de7d9dfe845311a0cab8"
+    },
+    {
+      "path": "common/craft-common-log/src/evaluation-contract.ts",
+      "sha256": "677418e47226f4e20b43bf4cb2f96077566c2c39a62b014046c5129abbfe61cd"
+    },
+    {
+      "path": "common/craft-common-log/src/index.ts",
+      "sha256": "8807b1fdbd2c17a6e9b194bc6781e58389d547acc1edcb181589e289206b0c9a"
+    },
+    {
+      "path": "common/craft-common-log/src/otlp.ts",
+      "sha256": "aa20220297d50005ed4f8858284f38377b568c319e15994d0c93fdeab45542b1"
+    },
+    {
+      "path": "common/craft-common-log/src/store-sink.ts",
+      "sha256": "c0a3fe6591ad637e2b351f3f233effa9ffb0caa0eac4f257d66327178a76bc56"
+    },
+    {
+      "path": "common/craft-common-store-local/package.json",
+      "sha256": "281e34b71235347eb9809a92cafec24f24f547221ebd63f7bd8c2d471772f175"
+    },
+    {
+      "path": "common/craft-common-store-local/src/content-store.ts",
+      "sha256": "138851adca3a0dad051ca685858e58f84ab5a0939fe05ae1450b5b5ced0417ab"
+    },
+    {
+      "path": "common/craft-common-store-local/src/index.ts",
+      "sha256": "91338bed90eeca1101d5ff5a9a7647f3fac028d659b13ec2cb1e481532f631e9"
+    },
+    {
+      "path": "common/craft-common-store-local/src/paths.ts",
+      "sha256": "1b11266c5ccd1fa383dcc9274a12c5a34f1d3f8899ccc5a2758d5a2e8b7458ab"
+    },
+    {
+      "path": "common/craft-common-store-local/src/store-migrations.ts",
+      "sha256": "6d806fbd5b40fed5b5d58a8abdb31954765eb98a370267166565a176d057e671"
+    },
+    {
+      "path": "common/craft-common-store-local/src/store-schema.ts",
+      "sha256": "462c178aab7059809d5bcb5aefa3769d2f396365a7dfdf28b691cfc289a2e602"
+    },
+    {
+      "path": "common/craft-common-store-local/src/store.ts",
+      "sha256": "9f1a1238c8fb2ad25abc0303b84ade37cdba61ad197af0f2bbd601ffeb9507e7"
+    },
+    {
+      "path": "core/a2a-delegation.ts",
+      "sha256": "abb25a00e031a0fcc28704db27e8db7e0a764a86dd47fbeb75693a1fba2c5e2a"
+    },
+    {
+      "path": "core/a2a-discovery.ts",
+      "sha256": "45a07d848258b2e62bd6114154cb189edf0fd46e3a4aeaa401ce6e6ab8cb14f9"
+    },
+    {
+      "path": "core/a2a-transport.ts",
+      "sha256": "367ccf1d129ece0db8407e75aa55c9952f05385840247c6af8ed5cf28b65597d"
+    },
+    {
+      "path": "core/a2a-v1-adapter.ts",
+      "sha256": "0055f8978719353b4f985233a179815d8321ba67470fe012bfb58816de94a2ec"
+    },
+    {
+      "path": "core/acceptance-worker.ts",
+      "sha256": "61456a0fc188530a78ba7f71af25bc79eb78276372b59705af6ef5a86f5a7cab"
+    },
+    {
+      "path": "core/action-gate.ts",
+      "sha256": "edc8c825353859fa36ad05015058986c33714a6e467e4ce10671605add04572f"
+    },
+    {
+      "path": "core/activation-proof.ts",
+      "sha256": "460442b4c5fedfe0024e80c4635f2db6e5a6267b675a4beca99570e2020dd89f"
+    },
+    {
+      "path": "core/adaptive-harness.ts",
+      "sha256": "5b1255e011a41c2864370bb6dee0f28b39d7ddd819c944e0fa7ea6bf2f5bfcf6"
+    },
+    {
+      "path": "core/adjudication-queue.ts",
+      "sha256": "4178e354cfc4df153b7fd6fbe252f9f2bbc35481e43ed8c3aa797113cc00d79e"
+    },
+    {
+      "path": "core/agent-eval-lab.ts",
+      "sha256": "fb7b626437166e493722064163e8a80649eb8803d53f7ece7c003dc5e97f2b1f"
+    },
+    {
+      "path": "core/agent-loop.ts",
+      "sha256": "c1e4887b9739b126abaa1eb2639a68f4501f3080bee29007e4a622863353ae18"
+    },
+    {
+      "path": "core/application/acceptance-worker.ts",
+      "sha256": "085edbfaf70a7b37b64fcf8282d6bb2b12e135c364fbf46258fd8bc861f29a9b"
+    },
+    {
+      "path": "core/application/actions/action-handlers.ts",
+      "sha256": "8c113569a2f9e0037a582680afa2615d4ba1a30b74a4cb5f74b629eb124187bc"
+    },
+    {
+      "path": "core/application/actions/evaluation-handlers.ts",
+      "sha256": "a802671f3b0cc6662b46737ed8e3ae470b47338c5775a9200f46d2d4599937a7"
+    },
+    {
+      "path": "core/application/actions/handler-types.d.ts",
+      "sha256": "bf753c6d29238bfd0a838b5d41a846039e55b1f8c81eadc1469e004c35b1d1e8"
+    },
+    {
+      "path": "core/application/actions/runtime-handlers.ts",
+      "sha256": "0ac5a1fac12bfd769b379c8dbecd83836f117fc6fa477600d2fee11693dce222"
+    },
+    {
+      "path": "core/application/actions/work-handlers.ts",
+      "sha256": "1e40828c3e998ea601519e5f1b81b2185cba6b02308743b8897f002a6733a4c0"
+    },
+    {
+      "path": "core/application/actions/workspace-handlers.ts",
+      "sha256": "2b1340d23dd03c78ade8cb5e36880dd96648b3c09df4edd4e82a496b857c2732"
+    },
+    {
+      "path": "core/application/control-authority.ts",
+      "sha256": "2858b52c554b4e2ec0751bc0195e71758be7ecd0b1e0ad4ecb2d96771ae90c05"
+    },
+    {
+      "path": "core/application/coordinators/cognitive-workbench.ts",
+      "sha256": "f0684aebdb4b3371bf5501d614b4b9f4cfd17c49557b20af7aa00dea2d95b2fc"
+    },
+    {
+      "path": "core/application/coordinators/cognitive-write.ts",
+      "sha256": "a4ec48e3b0f7f915005b41081b61a3f6decd11a38932cd4b2fe349fac71ca1d2"
+    },
+    {
+      "path": "core/application/coordinators/component-assets.ts",
+      "sha256": "25a594c8d96bcbe228a26e4a9d07016f10ffe307b25b8dc5e8c1377665a4ee5f"
+    },
+    {
+      "path": "core/application/coordinators/context-usage.ts",
+      "sha256": "d177cf88bc87bfc6f3bbb55c36e6339778e9e6fa150dc0a286b357a176a63ca4"
+    },
+    {
+      "path": "core/application/coordinators/evaluation-coordinator.ts",
+      "sha256": "bb99806bd78a7c1dfe86ae964d25a24ab1d5e3b78f57212a93e16c5211f836e7"
+    },
+    {
+      "path": "core/application/coordinators/forge-dispatch.ts",
+      "sha256": "d2cd9c74d3d8d299bd15e653dea52a4d2ac328d88891a96e5ad7970cdc9e2a60"
+    },
+    {
+      "path": "core/application/coordinators/runtime-coordinator.ts",
+      "sha256": "9675de3dc78022e8f48d79ea424639f67ca7aea43f39d808674b3dc1aae82940"
+    },
+    {
+      "path": "core/application/coordinators/work-control.ts",
+      "sha256": "33826cfc6c9944dc79d1b90cd8da0641d5852102fd238bd19d56d97a04e01112"
+    },
+    {
+      "path": "core/application/coordinators/work-coordinator.ts",
+      "sha256": "b9c30115984c3f68952dddc237013766d7c6e0764d3db27d839252fee18e5379"
+    },
+    {
+      "path": "core/application/coordinators/workflow-design.ts",
+      "sha256": "91ea5210f434012046c8f1c2fa0f75ec9c363b409517b8ffaf061ffc9a0c3f9e"
+    },
+    {
+      "path": "core/application/coordinators/workspace-coordinator.ts",
+      "sha256": "2e984849aca283434ea3319a6558ab87cea5f2f828e3118eda75fdfecd12b89e"
+    },
+    {
+      "path": "core/application/craft-service.ts",
+      "sha256": "01f7f4dc57956b4a17bd7afd5e360b5903371308dfd8d633358d07ac9b4c6efb"
+    },
+    {
+      "path": "core/application/engineering-evaluation-runner.ts",
+      "sha256": "444cd990a1c48ccdcf88bab71a08f87251f61aff0d3a969147cab284c97e6755"
+    },
+    {
+      "path": "core/application/index.ts",
+      "sha256": "c438d248ae945011bf6632d71bf1d8fa52308d62457ecd55ad58b0bdcd56d21a"
+    },
+    {
+      "path": "core/application/maintenance.ts",
+      "sha256": "909de9f7b24f2132bec9fa50211278bd19aaf9783faaa52c659af821e8f8ad25"
+    },
+    {
+      "path": "core/application/procedure-graph-progress.ts",
+      "sha256": "07647c2618dd2c9e7bface7c87689d8dbd47c4396ab081f011be3b18855a8a54"
+    },
+    {
+      "path": "core/application/procedure-invocation.ts",
+      "sha256": "bcf40f291ae7f66d5729184c2bfaa1b75ed67f8314ed498c230c17761f759065"
+    },
+    {
+      "path": "core/application/procedure-work-items.ts",
+      "sha256": "ef618ef4d0a9209ac212d60c77771069186776ce357430b05ba9aef33b6c9519"
+    },
+    {
+      "path": "core/application/service-foundation.ts",
+      "sha256": "cb0aaae3384e98857d02757101ab9b5cf061666f3ed09bb10474db16eebeb776"
+    },
+    {
+      "path": "core/application/use-cases/adapter-runtime.ts",
+      "sha256": "90683b5b44da0aac5b4e5b578b51a0c70c7a69bf0d52639ef82726d17847f7fc"
+    },
+    {
+      "path": "core/application/use-cases/capability-lifecycle.ts",
+      "sha256": "102c25583410c71b40538003f220bb5f33906a326dcb892732ccf817201b4819"
+    },
+    {
+      "path": "core/application/use-cases/codebase.ts",
+      "sha256": "a138449b4992c579d178d6d51d1c6a00ee6888851b5b28dbf0b35216e68f60c4"
+    },
+    {
+      "path": "core/application/use-cases/decision-context-gate.ts",
+      "sha256": "9a96caa60dc038ae153b292f4a3756abe4cde8f5062fb68a1221dfe6c8a501c2"
+    },
+    {
+      "path": "core/application/use-cases/durable-experience.ts",
+      "sha256": "5ff8ba603b1a25874abe6c367b0d247727e5252d16d489f6f46e2630bf939ba1"
+    },
+    {
+      "path": "core/application/use-cases/host-session.ts",
+      "sha256": "50aceb3b8dc15d7a5905786b7bfbab85b21e554da74b153938344ba9a73c76d2"
+    },
+    {
+      "path": "core/application/use-cases/index.ts",
+      "sha256": "cc90b274cfb07a13807e68396dafd4e1a6faa8de43fbd1301bb5c57880fdd9bf"
+    },
+    {
+      "path": "core/application/use-cases/kernel-delegates.ts",
+      "sha256": "76a9d0f5464fcfe734dfa53d62fa0b34a0166331592c606d5053066ebad7eb18"
+    },
+    {
+      "path": "core/application/use-cases/knowledge-auto-review.ts",
+      "sha256": "3a9ab2d0125d53955140e3beacd786e65d77b18282b1f1feaf2f7f2690f53f7f"
+    },
+    {
+      "path": "core/application/use-cases/knowledge-memory.ts",
+      "sha256": "7614eb465b557295d3dde5e01eb0bf7c969c119501bab867f99fd3b2224a47a3"
+    },
+    {
+      "path": "core/application/use-cases/knowledge-relation.ts",
+      "sha256": "fd3b3b9d79be5ec0ba21f1605d28aa145c1bcbcb588556f9bf6fadf918dfbdd4"
+    },
+    {
+      "path": "core/application/use-cases/legacy-knowledge-migration.ts",
+      "sha256": "6d89cf7fa44f573b98371e813e36e0a2459706b0e8a0172e4a9e1b3641d18747"
+    },
+    {
+      "path": "core/application/use-cases/memory-consolidation.ts",
+      "sha256": "fd0b25f1ef2be8089ab7604c966ab2d230cc37ac9ce01e232af7b49302acf537"
+    },
+    {
+      "path": "core/application/use-cases/platform.ts",
+      "sha256": "2ceac06cc56e5b3352220a5d6f36d41a2b1b6882f423c1980028ab7facb0c4f8"
+    },
+    {
+      "path": "core/application/use-cases/quality-profile.ts",
+      "sha256": "365490e62d7967d75f9a652d60362669f04a604be2df087803240372a67895bc"
+    },
+    {
+      "path": "core/application/use-cases/remote-interop.ts",
+      "sha256": "12edb5472e6d2e404d884351489b127eee7e6cc7a763ab1d75b72a6a160b126a"
+    },
+    {
+      "path": "core/application/use-cases/repository-context.ts",
+      "sha256": "0afa2f526447871495b498bbe9d2d02c2db09c674ab221bc464618c8f270463c"
+    },
+    {
+      "path": "core/application/use-cases/runtime-learning.ts",
+      "sha256": "48bb1fc68fdcd70aa1f1981f987200ffd34a55351f5d491f00d5d89bca891a00"
+    },
+    {
+      "path": "core/application/use-cases/trace.ts",
+      "sha256": "de2675e57c83978679eed53d22d4e3fa81c38ca7051d63405573c5ff440d2d3a"
+    },
+    {
+      "path": "core/application/use-cases/turn-cognitive.ts",
+      "sha256": "a7a7e8f047ee41e3806168948306f8b06f5d0e308b62888779350f58773940dd"
+    },
+    {
+      "path": "core/application/use-cases/workbench-workflow-input.ts",
+      "sha256": "6a783c14c18ac488c5aa98124cef394a583c6b35d86da158a63869fdddc9e121"
+    },
+    {
+      "path": "core/assets.ts",
+      "sha256": "bf06c83ff5d3090d2ec89a303e700161ea966e0a93d48e8d7f0ab52184c1b3f9"
+    },
+    {
+      "path": "core/assured-pilot.ts",
+      "sha256": "92ed04e7b57b871fab920cb53ab6005b5d46539a2e38262c1dd241989e2d556d"
+    },
+    {
+      "path": "core/attention.ts",
+      "sha256": "d6258b0b098c243da2627a5c511c5fc1b798007e71dd50aad42a6ab4c4c3d4f2"
+    },
+    {
+      "path": "core/authorization.ts",
+      "sha256": "e208c693a35241e2b3e2714401d25ac6783e55b8d1f7589558f580e22a68bfb1"
+    },
+    {
+      "path": "core/autonomous-runtime.ts",
+      "sha256": "6e77e037c0067d11be6b5e75a5d636d63c85738ea911033384f21fc33ce125da"
+    },
+    {
+      "path": "core/autonomy-ladder.ts",
+      "sha256": "c9449a1d39ee8b606a0251fa3f2f2eb1190e1970ebd812f6e185b7dd055a70e7"
+    },
+    {
+      "path": "core/autonomy.ts",
+      "sha256": "7b992e8f99699c8d6bf592342f319d5c0915292aa363634a8d331c5a2cd59fc6"
+    },
+    {
+      "path": "core/browser-driving.ts",
+      "sha256": "2cbbdfca979f134dd04a11b3023bf559e0f0e66e17e7e3e1fbce3f8cdcb26fa0"
+    },
+    {
+      "path": "core/browser.ts",
+      "sha256": "f589ad2b01bc0202daf36cef1215337690f89dff6ba2fc99ca68ae1610817280"
+    },
+    {
+      "path": "core/campaign-runner.ts",
+      "sha256": "97a05fb6a904669402e2e9b005e62110fcecc271cd9aad17ff18be33ab61e5a6"
+    },
+    {
+      "path": "core/capability-access.ts",
+      "sha256": "c419eb8817f2e44c8d45552098078552ee379c624f978145c295d557c85899c1"
+    },
+    {
+      "path": "core/capability-base.ts",
+      "sha256": "6aa8e8068b6e48fefc5d81fcb7ae3395e5b4602df438f60600cf9a5c32c7b5ad"
+    },
+    {
+      "path": "core/capability-canary.ts",
+      "sha256": "63fcafb370c55b0d80c6dc754127f0e24a940033e01994e89dd890d37c9985d7"
+    },
+    {
+      "path": "core/capability-catalog.ts",
+      "sha256": "ae7f70677ef3c00768fef29415ebf4396bdb0de6f8f1a06a20f1e8a3a51d543a"
+    },
+    {
+      "path": "core/capability-connector.ts",
+      "sha256": "9f1369f625166a1d9ed215e77342732299a7c184a606ef193cee034a20a85427"
+    },
+    {
+      "path": "core/capability-intake.ts",
+      "sha256": "31513936ebe39a686daa5ed804a82a409df1601cc2fa2e8858cd484e71277c9d"
+    },
+    {
+      "path": "core/capability-kit-runtime.ts",
+      "sha256": "90b9ccf635a725dd17d88713a352979c0b403662e3a893668813010cad92f67a"
+    },
+    {
+      "path": "core/capability-lifecycle.ts",
+      "sha256": "fa6f5384c604f5b4f4e5fdf75a8033259676f50e5c67e4b93bc5091e4e698b92"
+    },
+    {
+      "path": "core/capability-protocol.ts",
+      "sha256": "04c292dc832f3578be3c6a7b45c424767fcbb933cb99fc36d69d548daba7ed44"
+    },
+    {
+      "path": "core/catalog.ts",
+      "sha256": "00384657c810f5e15222dc8573045e1d5da7603beac51ec9d2a6549a31b4e59d"
+    },
+    {
+      "path": "core/certification.ts",
+      "sha256": "765dd0d0003f7bfca9d3b0a08adc7c4acdd48d224fdaa6a2cd19379d19ec494f"
+    },
+    {
+      "path": "core/changeset.ts",
+      "sha256": "bde5b2dc0c01384e9f3a7d689331fc7a67dae7a7b77a7b71f3d7c9d7877b1533"
+    },
+    {
+      "path": "core/claude-driver.ts",
+      "sha256": "a501f7526b2bd3d7b59dbbb21cff55f3ffe48f566e2e3c6e9f1b88a6716676ae"
+    },
+    {
+      "path": "core/cli.ts",
+      "sha256": "1508c1527d3c0af60c64ce00487bb1bb498c08f0e0ba721608a4f9c6b1ec2e1f"
+    },
+    {
+      "path": "core/codex-driver.ts",
+      "sha256": "968616664344eae97bb121d9b22ae5a6757ff84ff0214cdcc64fc99c8825b814"
+    },
+    {
+      "path": "core/codex-hook-bridge.ts",
+      "sha256": "b97318301311002f20b6ca1671189963052275f9b2c984a51af2251625173f5f"
+    },
+    {
+      "path": "core/compaction.ts",
+      "sha256": "850bb38f6e4491cb7ef7e3d5d9a727f3125b56051da54edbedeb79331d79dfac"
+    },
+    {
+      "path": "core/component-history-migration.ts",
+      "sha256": "65f48ea647286ba4445c79b0f544fe1f440bd2b9e481bb670d1ed6e27bd76469"
+    },
+    {
+      "path": "core/component-readiness.ts",
+      "sha256": "4811a09fbe032117e6061bb38ce3d16cf3a2293a9d60929028245d228097ae8d"
+    },
+    {
+      "path": "core/component-trace.ts",
+      "sha256": "680c7061cb1cbadcf5d6cff175c04eb0ea187af86939bbbc48996c03a68787d0"
+    },
+    {
+      "path": "core/config.ts",
+      "sha256": "99581d32e37ce77479a5b1efc654c76a0d9aa4730b6c6604e12420dc875db33a"
+    },
+    {
+      "path": "core/content-migration.ts",
+      "sha256": "f27f79c355b2ac87e5fa18a24b3d9deb53474d97dad53a7afbb53d9868c51ba7"
+    },
+    {
+      "path": "core/context-plane.ts",
+      "sha256": "f978c1131147e2e0290a3b884ef760306000324415e7546a84bdf1ad74b9e648"
+    },
+    {
+      "path": "core/context-projection.ts",
+      "sha256": "0025b00b004341f09cf5cfde809023dfdbe8c5371691684d98f9fc7c287f0779"
+    },
+    {
+      "path": "core/context-resolution.ts",
+      "sha256": "5707f67231bb15ee66a8093a00db3dc415f3768c74b4ece2352fb376ff1a0d27"
+    },
+    {
+      "path": "core/context-retrieval-capture.ts",
+      "sha256": "912db77ff2fab94f28c6dbfbde3fcafc2471d9a9e498d8b2641b572a662bbd16"
+    },
+    {
+      "path": "core/context-working-set.ts",
+      "sha256": "356aeadd5d2039e1baeb74e458c87414c795717bd1edf2f1059d6c45a7af57ac"
+    },
+    {
+      "path": "core/continual-harness.ts",
+      "sha256": "2223c16e6cfeca97d568aba6e2b1dce5eeedf2dfabc07f6f6a5ab6fd073a3390"
+    },
+    {
+      "path": "core/contracts.ts",
+      "sha256": "f66b6afad55a8a73d325555850d60a47069819f3cc59f55237e0257610ef4003"
+    },
+    {
+      "path": "core/control-plane.ts",
+      "sha256": "bf1d502e1584d81cd49dda99db00cc752b5df833ec021332ec5db26f8b8a088b"
+    },
+    {
+      "path": "core/cost-ledger.ts",
+      "sha256": "517bdc2566b27ea0a78417eeb8908438c74332ba26b35d467361768eb57e0984"
+    },
+    {
+      "path": "core/data-space.ts",
+      "sha256": "29b7ccc49a12357e7ea28a27369b431c679cb90cc02245778c55bc0ee54c63c0"
+    },
+    {
+      "path": "core/decision-context-gate.ts",
+      "sha256": "1304f43a199b4dc7a2b121b609edaf90dc0d77f4ff7e2f4b4a6e70492576ff27"
+    },
+    {
+      "path": "core/decision-surface.ts",
+      "sha256": "3f2c8fb96a8ce5cea464d2cb9ae7fc9f7f736eb69e3c6bef774a3c076baab01f"
+    },
+    {
+      "path": "core/declaration-consistency.ts",
+      "sha256": "012e61002ed1e3ed51701950c172860519f0aeffbaff5018c579f1118dea8de1"
+    },
+    {
+      "path": "core/delivery-evaluation.ts",
+      "sha256": "f0b43e881ee727b69d50f29c56246d725cfc6fe2a8484d9dbde16088fe62fb1c"
+    },
+    {
+      "path": "core/delivery-loop.ts",
+      "sha256": "b90a5caa81e19786a047194c9e0f7896cb59cf3034aec06d0051976373617a21"
+    },
+    {
+      "path": "core/digest.ts",
+      "sha256": "3e4ea97b8fa8f48ed03fecd695110fc5ab8eea86d5b45fc0c1e017cf1f5d947b"
+    },
+    {
+      "path": "core/distribution-and-first-run.ts",
+      "sha256": "641863d42aa0e66e4c5c716f4ac69975b39c2cd87d4ec4e34c67f5940585cb5d"
+    },
+    {
+      "path": "core/docker-sandbox.ts",
+      "sha256": "fc10d7fadd24473e27666b25dcb9e66374a394d8600f51e2830bf2061782d27a"
+    },
+    {
+      "path": "core/domain-evaluator.ts",
+      "sha256": "48884fc7792a242e00db89c3d795b5dcb48968df636a33d026f734a5e9454719"
+    },
+    {
+      "path": "core/domains/index.ts",
+      "sha256": "86afd3357caeaf20d6bde11b0b853f6790c8ded2cebee80480be85cfc0ca7a17"
+    },
+    {
+      "path": "core/durable-action-loop.ts",
+      "sha256": "64b3da91d3c07e9328799116dfdfbd65bfeb9e3281955fce4a904f5481b23a0b"
+    },
+    {
+      "path": "core/effects.ts",
+      "sha256": "e3bbffe73c34c83821467276e33337d51b787ba8e5d4b0406f1ea40f7821f027"
+    },
+    {
+      "path": "core/egress.ts",
+      "sha256": "3d40b0f5262d9e4d7eb74132b813d66be09873ceabc5a404be7a2f1803c4ab75"
+    },
+    {
+      "path": "core/enterprise-access.ts",
+      "sha256": "51876c6b94f2251f534b0b52ad7cfd6016e4962e5dc57548394f75c9bc1b5719"
+    },
+    {
+      "path": "core/eval-campaign-report.ts",
+      "sha256": "721dce750d902a33af3f6d6671b22dadefb43ace8e6814fe41cd6589584db184"
+    },
+    {
+      "path": "core/eval-campaign.ts",
+      "sha256": "266473fe31c9635dfcc8fe7b0638d873398124fec18dd18460dffd678182d01c"
+    },
+    {
+      "path": "core/eval-cases.ts",
+      "sha256": "2bd9d3f14ee69cdb0a4d70f2f9c65737d078e05e68a1a951382399e87e964cd2"
+    },
+    {
+      "path": "core/eval-suite.ts",
+      "sha256": "76c37ce663bf4b529c947d89a802790b9f9eb69de5b01ef95f8db15e19d0408f"
+    },
+    {
+      "path": "core/evaluation-contract.ts",
+      "sha256": "62648ab81667e9e3d317962d63722edfff46c39131090bac3e49da2d4c8c620d"
+    },
+    {
+      "path": "core/evaluation-operations.ts",
+      "sha256": "fc3d10606f9ddacd8ad4cde0c3ef554327e929ea7f8be236ed7f8b99540f1081"
+    },
+    {
+      "path": "core/evaluation.ts",
+      "sha256": "c7736d89a37c926a00988bb3448b66d19a1e9de2a51454161978983a4fe3aaea"
+    },
+    {
+      "path": "core/execution-fabric.ts",
+      "sha256": "4b41fde4d7caee05a6fc73fd87243a1434eed29a94812e715c2ea8994eb3c06c"
+    },
+    {
+      "path": "core/execution-policy.ts",
+      "sha256": "39d945ceb28e2b8b351f955b542445537169238f8006cdedafc9cf2664688dbd"
+    },
+    {
+      "path": "core/execution-safety.ts",
+      "sha256": "eb6310530f4ecf4f257cea03d0a968932bc4b3d0eddc1f82c7de02c5cbfe2a6d"
+    },
+    {
+      "path": "core/failure-attribution.ts",
+      "sha256": "aea5297ecc0906924518235963385d4ab1bd3f94f9fe323773ce19ebd1276978"
+    },
+    {
+      "path": "core/federated-delegation.ts",
+      "sha256": "26f29b18176214fc065302e28359cb3250c2681bcc74a99e690879f6c74bced8"
+    },
+    {
+      "path": "core/federation.ts",
+      "sha256": "c87c168488d98bf2316044383c193cbe8a88d0c4c4f28d25219e4764801f7dec"
+    },
+    {
+      "path": "core/feedback-learning.ts",
+      "sha256": "79632cad7da2b9e8c2ffb1883c900a9e3e53386035b70f1c54bae26136a6180e"
+    },
+    {
+      "path": "core/generic-adapter-runtime.ts",
+      "sha256": "0d1eac930d69ceb7521ec6043f0e2fc392b7f49f65f38fecff1445f06f02d98c"
+    },
+    {
+      "path": "core/generic-driver.ts",
+      "sha256": "6b09054e96d0a6f61be16f295870229320ea4392126c037eb0242f755a353130"
+    },
+    {
+      "path": "core/governance-pinning.ts",
+      "sha256": "701ddcbd8ecbb9804f7ad1483ccccbd0ae3431aa30c64814854ef71bbff58144"
+    },
+    {
+      "path": "core/graph-compiler.ts",
+      "sha256": "9e0c802d5ef2232d34642d90c8189e53a0be9c56eded8c1faea07b720ce7d3ac"
+    },
+    {
+      "path": "core/guided-work.ts",
+      "sha256": "2d782574f1b2056409746a05eb757118947758ba6b3a1ce1773541f7c62e33a7"
+    },
+    {
+      "path": "core/handoff-manifest.ts",
+      "sha256": "61f9157da871aeb8b8b83f55847f11b9f6ede9bb7564813cf0713c22a0a15ebf"
+    },
+    {
+      "path": "core/harness-topology.ts",
+      "sha256": "a608bcc41e3f692b3614143460ddb2d9bf2938de54d8bd9c6226424e90df3831"
+    },
+    {
+      "path": "core/home.ts",
+      "sha256": "b291fd1849b0a2e5071c38bdb9d1e010ee82c5afd6782cef9edf5fb57044507c"
+    },
+    {
+      "path": "core/honest-claims.ts",
+      "sha256": "8dc0c44e6e7bc605ce338d6258f603b8d17b914c116726cda1f9e209b2f1ffd2"
+    },
+    {
+      "path": "core/hook-plane.ts",
+      "sha256": "ca8b3b1025275f53cb6d83e3ac0b37ac8cc6a3e6e4867ce8bb3fdb06cfba205b"
+    },
+    {
+      "path": "core/hooked-effect-kernel.ts",
+      "sha256": "e56665b3b17b890cf426c1c92b1eb9daeb79a93a2e208d87a40a6737a642bc62"
+    },
+    {
+      "path": "core/hooks.ts",
+      "sha256": "e4401ebfbe7a94ff8312b485cd07b0fc53180b746c62d1fb7367500d60402b60"
+    },
+    {
+      "path": "core/host-activation-manifest.ts",
+      "sha256": "caf5aaa742a34823184e66e9bd4093e1e23d6936e3337dd2aee92d2e484e81ea"
+    },
+    {
+      "path": "core/host-bridge.ts",
+      "sha256": "240aaceb17868dfc29b3a149cab46569668cba11f24145d79fac0a9a093be68a"
+    },
+    {
+      "path": "core/host-driver.ts",
+      "sha256": "26c48f5a843b7ecc29e578fa46649abdc809473bac432c056a7059c06241fee8"
+    },
+    {
+      "path": "core/host-protocol.ts",
+      "sha256": "2db54d09e7110934f624f2f54fbf4e6edb0c6a78dfa5c5f6245b93bf18a9e006"
+    },
+    {
+      "path": "core/host-registry.ts",
+      "sha256": "f3b99f2847727c51bb64bbc5b637373ad5bc86bb6db80c0cd8386c0947f86647"
+    },
+    {
+      "path": "core/host-run.ts",
+      "sha256": "43f3a60fdddadac5e7233a42cd8d6ec394c37acf2b355e435a04ca1f7fe1dce0"
+    },
+    {
+      "path": "core/host-session-events.ts",
+      "sha256": "80bad632f5b69dffbc53ea43815f7d3546f2c7e05a65c126a5a0b9fec85cc829"
+    },
+    {
+      "path": "core/hub-sync.ts",
+      "sha256": "f4ca392b778c0e569d0bbbd0051c2d650d4e4fb1149291d8775428eb2a279e63"
+    },
+    {
+      "path": "core/human-touchpoints.ts",
+      "sha256": "8ca500b75bde0d2f483e71661a69c1c9e4e1468041efded7e62d49aceeb0b860"
+    },
+    {
+      "path": "core/hydration.ts",
+      "sha256": "b490f8a66f8028012fd6a5cb02038cf321fed1a8af9349152cbb583fe14694f3"
+    },
+    {
+      "path": "core/infrastructure/content-store.ts",
+      "sha256": "5d0ea745dd5f713e80451482b7a986b5dc9ea35e440018752a1f3cb820a1cbac"
+    },
+    {
+      "path": "core/infrastructure/index.ts",
+      "sha256": "0d98b85a39ea32af5207653ef3bed1550c4640794311c3e95172db287b20014c"
+    },
+    {
+      "path": "core/infrastructure/paths.ts",
+      "sha256": "081770040041ef44d014438486748082da21f486f6d14ae38171a792e40c1b67"
+    },
+    {
+      "path": "core/infrastructure/store-migrations.ts",
+      "sha256": "acece4cf27eaa7178958a3d3aba39ca2ff2a67972e8843c6f0520089dbf1249a"
+    },
+    {
+      "path": "core/infrastructure/store-schema.ts",
+      "sha256": "c6e2af6fefd4200e9361e09d72f5062c77f23c8c08b3d1f19c48c94b613aa57e"
+    },
+    {
+      "path": "core/infrastructure/store.ts",
+      "sha256": "4e478423abf0237de0627b99f359ebc8e5554fef68ce8b998f7599e590c9e409"
+    },
+    {
+      "path": "core/intent-compiler.ts",
+      "sha256": "6c7f907b174fce22dabdd9bf219dd10e27133582c6f3458db27b769f8436edd9"
+    },
+    {
+      "path": "core/interfaces/canonical-tools.ts",
+      "sha256": "6bd28643586e93f1ae62f4c354d5db0a26dad3ce16ac469ea39872a9baa0b40f"
+    },
+    {
+      "path": "core/interfaces/codex-hook-bridge.ts",
+      "sha256": "a81a80bc2a520d145d9a315d9265166eed667b04ac66d31ba716043fe5f6becb"
+    },
+    {
+      "path": "core/interfaces/index.ts",
+      "sha256": "28415edb0e605c39c947a33c8e6eafd8ded8d6ff8605ff1a9031b9d2bfbdcd44"
+    },
+    {
+      "path": "core/interfaces/mcp/evaluation-handlers.ts",
+      "sha256": "09bb4204c7f7df701859c165caef94e6828710911cddbdc17067b991b2c42686"
+    },
+    {
+      "path": "core/interfaces/mcp/handler-types.d.ts",
+      "sha256": "74b2fb84f8b599b162d4a1c58775ac58692fd886b67615129d844c91dd2528aa"
+    },
+    {
+      "path": "core/interfaces/mcp/product-launch.ts",
+      "sha256": "e3aa5ebc6581bc9e45f6b82d277682505b74fb244399f110f21a920370a52cd4"
+    },
+    {
+      "path": "core/interfaces/mcp/runtime-handlers.ts",
+      "sha256": "9f17990ee621c0f4b96dd66b13fcf0b0c8ce8b2a299d03e99b884525ce9ba0ae"
+    },
+    {
+      "path": "core/interfaces/mcp/surface-registry.ts",
+      "sha256": "d8c027fb927b402da7d5c7f4240ce41aa8634fbf4c6e87a3abd4200360258d6e"
+    },
+    {
+      "path": "core/interfaces/mcp/work-handlers.ts",
+      "sha256": "06429f683746f911b8e0c93db55feafa28829530e93b6ea2beea3728bf969b0b"
+    },
+    {
+      "path": "core/interfaces/mcp/workspace-handlers.ts",
+      "sha256": "07cffdc4fae23f7451335455cf2caa287750559825f0e2ac8b3aace7032b3c01"
+    },
+    {
+      "path": "core/interfaces/mcp-http.ts",
+      "sha256": "d0bf456ac71541a34bc7b64f402b3c73ec0263a38f0265b54e1581b3078d72ba"
+    },
+    {
+      "path": "core/interfaces/mcp-server.ts",
+      "sha256": "a0ea029a3bbf82a14f41a6e4f7a9c6568dddcc14cb3f98ceae4c4affa491dfee"
+    },
+    {
+      "path": "core/interfaces/mcp-stdio.ts",
+      "sha256": "58a31e8d5ce08544e5ca88e9615b0fa2a279ff5d231a643ad55211c04992d247"
+    },
+    {
+      "path": "core/interfaces/supervisor.ts",
+      "sha256": "1c633f5eab8fc2e8baf54649216b8a9ccd787c8e5ce4fc454ff6141f99d20ead"
+    },
+    {
+      "path": "core/interfaces/workbench-server.ts",
+      "sha256": "568201a52fec696c4d796e2bc37fe98300b62a39a4020c5ceda0cb065fecc9a1"
+    },
+    {
+      "path": "core/internal-host-driver.ts",
+      "sha256": "cbe4d463cf6e4b971ae7ee997dc541a53af459d7558af9cce5ca3a273fc20733"
+    },
+    {
+      "path": "core/internal-tool-authorization.ts",
+      "sha256": "f02de900bd605e8843cb29c3d1820f331f55f470f6bed3677584d9c7834e5b0d"
+    },
+    {
+      "path": "core/isolated.ts",
+      "sha256": "ef49a2ce4451c70188ff586ba4100e688666bb0b01a7887be19f48ed28938c6f"
+    },
+    {
+      "path": "core/json-schema.ts",
+      "sha256": "cadcc54acfa17ddf7bfaa6673dd6d2bee38706d4e40c891f949565fbc342d3db"
+    },
+    {
+      "path": "core/knowledge-auto-review.ts",
+      "sha256": "7a06d13b5306bad1de7a6fd48ef0b4ecef23d5c3af0a600cccfc01fb4e589a7a"
+    },
+    {
+      "path": "core/knowledge-index.ts",
+      "sha256": "6decd47eac2ae2c588204fec909c3b57ca43e477c846b4f76a4bb8ecafe38e4e"
+    },
+    {
+      "path": "core/knowledge-memory-bundle.ts",
+      "sha256": "03950ddea443c88765792a79daf83152369b6dbc644ad7a9f3d169a95b5243ef"
+    },
+    {
+      "path": "core/legacy-knowledge-migration.ts",
+      "sha256": "7104ecd182026e2df07f7798b3d6043b7039817eb9e7300e0cbaa1e9123064f5"
+    },
+    {
+      "path": "core/lineage.ts",
+      "sha256": "118b1858e6f64271f36d3e5cf836bb92811057fbac44669e0cdff41e323a0d40"
+    },
+    {
+      "path": "core/local-runtime-service.ts",
+      "sha256": "a46ef407f31d019b6c09d65d5f40489ee49fdf257a068431afeccf565b8e7737"
+    },
+    {
+      "path": "core/long-task-worker.ts",
+      "sha256": "2be0ef8698f8a55addf635cda0f3a7896dcb1c80d8cb2a312854109ec34e0225"
+    },
+    {
+      "path": "core/maintenance-scheduler.ts",
+      "sha256": "85ea834f9cfc89d1e663e9fa08815a073faa75ba3229699ab7cc47e7bb5361b0"
+    },
+    {
+      "path": "core/maintenance.ts",
+      "sha256": "7d7dd57fe33f6433ca056dec4335785b67a221611926ef2d5ca52855ff4f6bd6"
+    },
+    {
+      "path": "core/managed-run.ts",
+      "sha256": "1b1a6a30e7e640277de8f8d93c81d4f5eb58919e74d09401c289e453c158b04c"
+    },
+    {
+      "path": "core/managed-write.ts",
+      "sha256": "068e8fd043f6422effcdf35bdcd4abc4b54f34e3d9c500550c76d7e49561042a"
+    },
+    {
+      "path": "core/materialization.ts",
+      "sha256": "2a3862e8e1d4d2fdcacc3403f08f79316250fe5e131abdce3fafb4709b2c9739"
+    },
+    {
+      "path": "core/mcp/canonical-tools.ts",
+      "sha256": "186516f5e07574fa2e3f4b3f81ceeedf562dcb0709a533934a2ef046304b36c1"
+    },
+    {
+      "path": "core/mcp/tool-catalog.ts",
+      "sha256": "2ea52e85fb9e1b3fd8bf2f25d1f51d5126e334a5b0e8d3d763445a733770f6f6"
+    },
+    {
+      "path": "core/mcp/tool-schema.ts",
+      "sha256": "530bdc5995f360bc76815ff73b337dddfacafebda5d25cb9cc6a53efe8332c5f"
+    },
+    {
+      "path": "core/mcp-forward-compat.ts",
+      "sha256": "3ef0ff189cbb575a3dea5910d3bab6212cb3b4f5fdef244735621885fbe2a578"
+    },
+    {
+      "path": "core/mcp-http.ts",
+      "sha256": "27c48a960cef9d95567fe7c67571234066a1f4f5c0ef9e4600c1e3a924bf92f3"
+    },
+    {
+      "path": "core/mcp-registry.ts",
+      "sha256": "19cc772bc25dabcef0117e1da3cc1c40390bbac3664f85113561b201681113ad"
+    },
+    {
+      "path": "core/mcp-stdio.ts",
+      "sha256": "63677acb189b6a7c824f2c9fa5185880e64b3c9bf382f8e49d6a98a6d927e48e"
+    },
+    {
+      "path": "core/mcp-tasks.ts",
+      "sha256": "649c18608c093a0e7e0789cc90ac24b0b5e0f717134dc45bf0c843d470c3e1b3"
+    },
+    {
+      "path": "core/mcp.ts",
+      "sha256": "b7dbae74b1b3937d60f3aa9fb4269874772525e591c3e3306a635c4552a1bdbf"
+    },
+    {
+      "path": "core/memory-consolidation.ts",
+      "sha256": "1605f64800676f9d1ca85e93c5fce756fc53341a81b358e4d428400488c31105"
+    },
+    {
+      "path": "core/memory-governance.ts",
+      "sha256": "e5a5c449d3c7c9fd1f048a7a5cf67996f22c8895951cc555b0f1a73462e0850e"
+    },
+    {
+      "path": "core/memory-maintenance.ts",
+      "sha256": "a1c19ad1a020eaaab5cf6842145189a05539245b1e06c489013e5c2d0a29f22f"
+    },
+    {
+      "path": "core/metrics.ts",
+      "sha256": "c0e0801dbebc6631bb7e8fd7fd84815cb75b1d0a82fca308c12767cdb96a5015"
+    },
+    {
+      "path": "core/model-gateway.ts",
+      "sha256": "b1d9820a5c9dd26977a131b0595ccefd25a7c237d22263cbfe5e34d134302313"
+    },
+    {
+      "path": "core/model-independence.ts",
+      "sha256": "865020c1f0d05f2036c35c368f500913945a3af99bb5067b37318485d6a347ce"
+    },
+    {
+      "path": "core/object-hatching.ts",
+      "sha256": "29707b43a1d0b25e64a8f1d5145ac4a3e704eeca8c57fd9a6bfc93973ad4b4eb"
+    },
+    {
+      "path": "core/object-model.ts",
+      "sha256": "188d6d417e18ad40b3742800c19fdc049bfb319564e0497b7785909f61c8b17f"
+    },
+    {
+      "path": "core/object-rail.ts",
+      "sha256": "b74239f69a0cbed927aa5d25bee72e379141d644dec64cb6ec9dd3f2215de616"
+    },
+    {
+      "path": "core/oidc-jwks.ts",
+      "sha256": "4e36a764211d45902420377dca3f180095e491353a00a300e5f79395fdc9ab3b"
+    },
+    {
+      "path": "core/orchestration.ts",
+      "sha256": "e3f5a8b3a9924902c70b43a43a810bcc9e85dc25db919717a9d6610fed1588a6"
+    },
+    {
+      "path": "core/org-sync.ts",
+      "sha256": "b5dc74e72bfc2653f4f1271e7f44a6e52a3647d8e8e5ec8642fce30da086d29c"
+    },
+    {
+      "path": "core/os-security.ts",
+      "sha256": "2f55810db75c87d918eb848599c6141193e3e0a6b2c156c432ec663fe85e5196"
+    },
+    {
+      "path": "core/outcome-observer.ts",
+      "sha256": "fdc04a7adc178c1e9542503dcf8d2905da735df13f7bdcb11daa4a6718fca4ef"
+    },
+    {
+      "path": "core/parser-process.ts",
+      "sha256": "6e4f70e8902de461f7e02480359ec662ac92b763595980646896ead850825483"
+    },
+    {
+      "path": "core/platform-execution.ts",
+      "sha256": "7b7379b89cc56040728420023ff8a264c87d3b3bf3df69e6112dd90594dcc504"
+    },
+    {
+      "path": "core/platform-operations.ts",
+      "sha256": "d0db912deecab4ee22105e168103e25eaf43eef0c9a3c0cca5d5afc397355ef2"
+    },
+    {
+      "path": "core/prepared-state.ts",
+      "sha256": "c7d04ea13484d1b70a1241a338dfc2438fcb0bc81ec5a8ea3ed764a9de89b494"
+    },
+    {
+      "path": "core/project-bundle.ts",
+      "sha256": "b6ddafe0ea21a4c639c63a900f70a38bd6d7c5495d2cb87042c2204bb32e567f"
+    },
+    {
+      "path": "core/receipt.ts",
+      "sha256": "6b1e6a74e25dce94abd2105078c0aab268d473303abd900ee7baa88c42b59387"
+    },
+    {
+      "path": "core/recovery.ts",
+      "sha256": "5c5f4584b9c51c42c581571a91b4c2af544af26b0e0c54b938acd934eddedc72"
+    },
+    {
+      "path": "core/release-catalog.ts",
+      "sha256": "3191732b885988988d48bd441d36815b2ca94d6292a48f7f51ffe29902d54b9c"
+    },
+    {
+      "path": "core/release-qualification.ts",
+      "sha256": "0dc7a9bfba144ca5ead37dc7c1200dfa517c1730f6810911afd3b5b1d70b6f5c"
+    },
+    {
+      "path": "core/remote-interop.ts",
+      "sha256": "40d95a1bf165f247b9a2a03b81151357a4f3f20c7814828e93b4f0466f6b25b0"
+    },
+    {
+      "path": "core/remote-mcp-access.ts",
+      "sha256": "ee443528de21ef523e3162be483197a04e15bf3adbe7f4adcc632ef0fe6e1b1a"
+    },
+    {
+      "path": "core/remote-runtime.ts",
+      "sha256": "3915ab73ca0eb39065080e2b848adb5218f17d4d6dddc53129ca6cc6854d0150"
+    },
+    {
+      "path": "core/replay-runner.ts",
+      "sha256": "12c5020b4ea201be19af02df7c805d81884ad3dc4c64cdcde995dd35e6731cba"
+    },
+    {
+      "path": "core/retrieval-evaluation.ts",
+      "sha256": "55212ab219151f99b46ff93e09476714dc4874cf5ee12a53fe509e6c979665ed"
+    },
+    {
+      "path": "core/retrieval-port.ts",
+      "sha256": "1d7f633d56255b8c7a934d035ea289a8543b2f7523d3b01ca21883b8c5a4f615"
+    },
+    {
+      "path": "core/retrieval-terms.ts",
+      "sha256": "c4b87f45f03a26a243fa6aee2059c253dc6db0a3ec1843d35ca92e584b6cc44a"
+    },
+    {
+      "path": "core/runtime-acceptance.ts",
+      "sha256": "b96b4eb1ecde7c0e53b8ad843527952ca8dc7019f62863465edd7cbb055dc133"
+    },
+    {
+      "path": "core/runtime-assurance.ts",
+      "sha256": "76598d65390e7b90ba7bec7ef3cee0712db1d0f7c3f346c728dc4959f22b8207"
+    },
+    {
+      "path": "core/runtime-completion.ts",
+      "sha256": "5e2dd2bfb3d47405fab91318550ee1820dd6999e08c4bb67c18d34f4a489c0d8"
+    },
+    {
+      "path": "core/runtime-contracts.ts",
+      "sha256": "07c8c716386d9edea3f54bb22ede9abfc275167e5816ce7755cd861b5cbdd7cb"
+    },
+    {
+      "path": "core/runtime-driver.ts",
+      "sha256": "fb16004ee461dda7dab0ad6bfbc6f35baa39bab0b20eaf1a9f07d197140eee92"
+    },
+    {
+      "path": "core/runtime-execution-attempt.ts",
+      "sha256": "67d2097050f1c5985df653f8acadd06bc136e3bb44ebef83c28f3f1d9e57c538"
+    },
+    {
+      "path": "core/runtime-model-probe.ts",
+      "sha256": "6672a2864451f723b8e432597e5cdc2ecc66a12de2ef78b35a451d1f0fd34aee"
+    },
+    {
+      "path": "core/runtime-proof.ts",
+      "sha256": "d73661f8b928d819bbb7e9f71c8d2818d0c8c9791e54d2cb5dd1ca0368dff426"
+    },
+    {
+      "path": "core/runtime-readiness.ts",
+      "sha256": "f5575942e81bd7d281bfbec17f110df4dd545fe50bd44dbd99bf95cde35ab08e"
+    },
+    {
+      "path": "core/runtime-truth-kernel.ts",
+      "sha256": "7d259a378edb440dede9e377567feb173135b453092491ce63b43bf032f29ac9"
+    },
+    {
+      "path": "core/runtime-truth.ts",
+      "sha256": "e70964c31860b5900912e83817e94f5541575004a1e95bebf26f67f87fe21cbb"
+    },
+    {
+      "path": "core/sandbox.ts",
+      "sha256": "ab5163147dfe99ec69ac1e05b2c773fe7cf477e966f59122edc8914f9257915f"
+    },
+    {
+      "path": "core/scope-identity.ts",
+      "sha256": "61c64c863999b47b6ee42853dbfbb37dab5fc2735c45b337f2c963479ee78882"
+    },
+    {
+      "path": "core/scope-policy.ts",
+      "sha256": "be79b34f78bb318be11302a7336117d2f44204600ad727e20dc83e91e9f40d71"
+    },
+    {
+      "path": "core/script-run.ts",
+      "sha256": "60f57e4d0c0eeec67283fcdf151ba0a58a42921927816bd28e7092eefc5cc831"
+    },
+    {
+      "path": "core/security.ts",
+      "sha256": "5cfa2bec43318251696e2c25907e43d62b879eabb8d766db73a0fa846dab6e80"
+    },
+    {
+      "path": "core/semantic.ts",
+      "sha256": "a53e0f67dc817813b9a452edeec687ffa7ad05fbe59d91efecc7afab949f1750"
+    },
+    {
+      "path": "core/service.ts",
+      "sha256": "fabf87c0004c40229dbbbc9fb5be559b191f50e9b6790e56d2f4fe930cc61aa5"
+    },
+    {
+      "path": "core/settings.ts",
+      "sha256": "d3685dd12fd39fabc99ca4eef17d4df30a573c9d38aa17f12fa500999540c0ba"
+    },
+    {
+      "path": "core/skill-publisher.ts",
+      "sha256": "0490556713879743342599f553a24e212853b1c054d83a33e513262d14663a86"
+    },
+    {
+      "path": "core/speculative.ts",
+      "sha256": "d4f45704b673c95c97a8f9a60fb13bcbd0c1238a2ddd92cb909512898c84cb9a"
+    },
+    {
+      "path": "core/state-view.ts",
+      "sha256": "5a415ae3e1050a56848f49e56bbd45ae01b9dde3a211e2d079269b103be229fe"
+    },
+    {
+      "path": "core/state-workspace.ts",
+      "sha256": "bbc19ed00e8b242d2f2c14e63a6a6a1d40598b2ae6a9f164c7615418c9fc5c2e"
+    },
+    {
+      "path": "core/stateful-compute.ts",
+      "sha256": "f8f4f248af1c233dd5ab915e7733908fe54858491329232c40a41be967a08385"
+    },
+    {
+      "path": "core/subagent-execution.ts",
+      "sha256": "a83bb0206b1035adb910f6320a3452fb68d38d8acb0e12ab338e1830dbee1f3e"
+    },
+    {
+      "path": "core/subscription-authorization.ts",
+      "sha256": "ee85dffdede170117e5d342aaa87ad480b2af08cc0e1f2fbb6eb718c5e74158b"
+    },
+    {
+      "path": "core/subscription-drift.ts",
+      "sha256": "d525e75d4bb615ddb2c7ff56acbe20b08398c7d3e0992512954ae6bac3ffefc3"
+    },
+    {
+      "path": "core/supervisor.ts",
+      "sha256": "ea2ae3be3374aa0b43b850cbc09c47005e8470e8195e09a8b56ef6367d7b6a6d"
+    },
+    {
+      "path": "core/supply-chain-attestation.ts",
+      "sha256": "418eab87e08aabab8cf1c39b1c2f508353c5172e20fdd19a15dcbf82c9fa0351"
+    },
+    {
+      "path": "core/supply-chain.ts",
+      "sha256": "7e5c2536fffbbd3eef306d45087383af5dace8a8d8a1ba346658b23ea9193a01"
+    },
+    {
+      "path": "core/task-benchmark.ts",
+      "sha256": "6d1beff65bfd96239fd2da1255ba66a23cc903adbccacf399ea320857346c87d"
+    },
+    {
+      "path": "core/task-control.ts",
+      "sha256": "34adfb651bf517118335b791eacacca448c605ee03c8e9c9c178b9874400a0eb"
+    },
+    {
+      "path": "core/task-run.ts",
+      "sha256": "19b82cecb71c223c775548be70d6ab3015ee0b102dea31e1b2690a03a8ad3342"
+    },
+    {
+      "path": "core/task-state.ts",
+      "sha256": "6782f8200537793e0ee994b5d92bf6f3df320f535e33add1f74c51bb132267a5"
+    },
+    {
+      "path": "core/token-budget.ts",
+      "sha256": "15df2a4a3605fb3bd7d16ce48a0a61055428c85d76d388c1f970587405ecab12"
+    },
+    {
+      "path": "core/tool-plane.ts",
+      "sha256": "0a6df651d7ee14659b43298e6f990e08e791e806f3835d142c24f469ab15de79"
+    },
+    {
+      "path": "core/trace-archive-storage.ts",
+      "sha256": "150103490e4b789239a4b434fa8b98d5fff440c0a7bd55b610a26cf460c88570"
+    },
+    {
+      "path": "core/trace-archive-store.ts",
+      "sha256": "48d7eb5dd6715069dcb807ea1de15231a8fa98438c1c410f49d606fe3b9045f2"
+    },
+    {
+      "path": "core/trace-kernel.ts",
+      "sha256": "c1f17a514d2329e6217ba9b6f78b64b57be876ed69ba381f9de1e18ab8db18d5"
+    },
+    {
+      "path": "core/trace-review.ts",
+      "sha256": "33b5a1646fcceeb9d171717b1d8f1342fd63ee3b2875e3a928ef223122811047"
+    },
+    {
+      "path": "core/trajectory-abstraction.ts",
+      "sha256": "85c3656461177223f6783394b4a29544f1c170d2e576ce47c4414a6aa9c5923a"
+    },
+    {
+      "path": "core/trajectory.ts",
+      "sha256": "a05df733356bbc04a5708147ca8fd35af30989cdc76ab26aa0aa986428c9e2e1"
+    },
+    {
+      "path": "core/transaction.ts",
+      "sha256": "7da1e93f46fbd431fa3a4d15f36f7ff844de8dcf986126d1e0823436fee75886"
+    },
+    {
+      "path": "core/trigger.ts",
+      "sha256": "d507882e909968c3b2d3ff5b35fb0a597ef97c45a48dc236e9856143fcbb4034"
+    },
+    {
+      "path": "core/trust-profile.ts",
+      "sha256": "eb79c4d5b4bd14a98cada9d78e38fbc527fca1b650568af662013ca52b5d6cf4"
+    },
+    {
+      "path": "core/turn-cognitive-runtime.ts",
+      "sha256": "6ea405f3d773ea9e03c19220d6d2ee6e453a7308992f1f1f8b4646d842aa5d5f"
+    },
+    {
+      "path": "core/uncertainty-policy.ts",
+      "sha256": "390673cc9634faf70d35814f26870e23b78550ef56f3182cf845d870ace999da"
+    },
+    {
+      "path": "core/untrusted-parser.ts",
+      "sha256": "3b6dab0c3334c572f67e0e9774028ec88e696151ed9907162b877f0f53f5a214"
+    },
+    {
+      "path": "core/usage.ts",
+      "sha256": "3fb03a04e3f7eab60a85d8c7af6bd7a127127a2d966504df3b6627e1f6cec3b3"
+    },
+    {
+      "path": "core/validation.ts",
+      "sha256": "ad52890e1ca8f1643c266245e91c8d2187762205a46a8f533ddc7110f04a1c90"
+    },
+    {
+      "path": "core/verification-plane.ts",
+      "sha256": "626ca0cb18f26d19648fe41459391ec19ab0d55a6dd1498dd602c3af86af6686"
+    },
+    {
+      "path": "core/verification-sensor.ts",
+      "sha256": "de19226a724904c345cc4c10685db3dc3265e42c578133ed5a07dfaef75c3c6f"
+    },
+    {
+      "path": "core/verified-autonomous-work.ts",
+      "sha256": "ab1ab7bdc44f6a88d172ce64904da32eb7c42c04c02eff2234245ff62079db60"
+    },
+    {
+      "path": "core/verified-work-loop.ts",
+      "sha256": "c34e1ed2de262580c39bbb8fa0970bac61fc9e3c1bc5d0ea05e92b2e146c80f3"
+    },
+    {
+      "path": "core/version.ts",
+      "sha256": "03994414afd9a248d43d2a35fb829e599b04e592edc98afceca8e42ae8370b97"
+    },
+    {
+      "path": "core/web-operation.ts",
+      "sha256": "c29d442bcc198a023b0824883c4873fd9b1e68e607a6aad45320add09ef8cd20"
+    },
+    {
+      "path": "core/windows-desktop-automation.ts",
+      "sha256": "f45a1c6e314d88401d5ce57de270aae44a623631f258ec0731b8d0e359e0a5fd"
+    },
+    {
+      "path": "core/windows-desktop-vision.ts",
+      "sha256": "8e41606454094ede042b550e40a13433a6025576ea042d4e3bf4ccd234ed2f2a"
+    },
+    {
+      "path": "core/work-coordinator.ts",
+      "sha256": "8dda7a299978289848dcd84a8adeddc6a98d982a437ad1d2ea716c9c2489e8e3"
+    },
+    {
+      "path": "core/work-delivery.ts",
+      "sha256": "56d54b672a1464c5553d5e4818cf405a8dc9afa1a20a09d966ef5a5dadd88248"
+    },
+    {
+      "path": "core/work-runtime-mode.ts",
+      "sha256": "47790fb1ddba730cc0d00df8e3e0de31318aaa2581d65975b066d9be0371fc96"
+    },
+    {
+      "path": "core/work-session.ts",
+      "sha256": "89a5e0c886d7eca4112bbb082569a829dd2681de472fad79931f0ce6fe574cad"
+    },
+    {
+      "path": "core/workbench-command.ts",
+      "sha256": "71eae0ec653c539d7c324560ee2fc6c6325f83320c0ff7561d90e63cda94f421"
+    },
+    {
+      "path": "core/workbench-experience.ts",
+      "sha256": "a5de4a355510d86e2632f156d9eef2f0249db53ed34aa593bb923adfc557aa0d"
+    },
+    {
+      "path": "core/workbench-server.ts",
+      "sha256": "6d5dc0c2066d32cddf2fd8f6529c2036f8b5cbd329b7af571b722825f0f34b91"
+    },
+    {
+      "path": "core/workbench.ts",
+      "sha256": "0dd529ac59dd5f481bb0680644c9191af1d1802475b5ea3ea02af54584d15d30"
+    },
+    {
+      "path": "core/workflow-dag.ts",
+      "sha256": "3a1ebfe01e1f86b570c5030b6290a85c5d3cf707c17981efdc11fb3a258b6ab0"
+    },
+    {
+      "path": "core/workflow-registry.ts",
+      "sha256": "447dc7ca4ea5c39879038cf5b7ee1d1866e83f35ba0bc13d3ccb9fbe1f9be137"
+    },
+    {
+      "path": "core/workflow.ts",
+      "sha256": "053d3886224f68863a1f6b1447a1e1499cb12dbb9a95961b50c00044a909cefc"
+    },
+    {
+      "path": "core/workspace-observer.ts",
+      "sha256": "ca4980580c3763247968977afd5ae23d27320ba6e1846172977f988228701514"
+    },
+    {
+      "path": "core/workspace.ts",
+      "sha256": "b6978b8c75b29e5bb259736340f5a1774a90c58b887265b56baa8a80d6b8f363"
+    },
+    {
+      "path": "deploy/components/acceptance.mjs",
+      "sha256": "e3231d9e40ff017cb2e74e37127acb690824bb212e82ec3a8c8dd599973a8d6f"
+    },
+    {
+      "path": "deploy/components/config.example.json",
+      "sha256": "0d13a20fdfbece4defd3c5b58a0c8ae416bce677312b1890064b465076a00684"
+    },
+    {
+      "path": "deploy/components/server.ts",
+      "sha256": "8ef95ea31bd5c4dca4ff9d5f72e8a01ef170cb3f4aeaf591434fb3987ed4f689"
+    },
+    {
+      "path": "scripts/ci/audit-layering.ts",
+      "sha256": "8513cb49ec3cc07d215b7d042aebed1f3d8b7820fdc2cb7e9be5af7524186e26"
+    },
+    {
+      "path": "scripts/ci/audit-surfaces.ts",
+      "sha256": "e41623f48a0684fb2c492708e204c931fddf0363edfbb84f2869a7f471d472b8"
+    },
+    {
+      "path": "scripts/ci/check-consistency-falsifiable.ts",
+      "sha256": "9270fe2b8b9ca7b3f1a249131640a1327de2eb5ad06577baee236a7144ef4800"
+    },
+    {
+      "path": "scripts/ci/check-doc-links.ts",
+      "sha256": "f9f4f717b5a93d0abbaad26760f94a5a256ee98896d8af791564533671758f2b"
+    },
+    {
+      "path": "scripts/ci/check-version.ts",
+      "sha256": "525e1aa0909e72ab6ef0343eedcb5b63625ca2a07cb3de94c07f77e22a7f748e"
+    },
+    {
+      "path": "scripts/ci/layer-graph.ts",
+      "sha256": "95936d4cadf688684a4d2bbb8e04ab64ac2533c30c150f135f1a46cb5befce81"
+    },
+    {
+      "path": "scripts/ci/lint.ts",
+      "sha256": "192f07e8dc66c51ddadf46ecf3b34c9d11e762216fe87fa38fa4f663e55ad381"
+    },
+    {
+      "path": "scripts/ci/root-design-documents.ts",
+      "sha256": "7f080f7cbed082d8b990f76df39baef5d30eab7e08f4eff817af19fda758602b"
+    },
+    {
+      "path": "scripts/ci/test.ts",
+      "sha256": "3331926cb06bd76ac4afa23566cc88c64653b652091753ababbc6db284247a11"
+    },
+    {
+      "path": "scripts/coverage/check-coverage-inventory.ts",
+      "sha256": "ae82d1e3398e3a1cc35d324482886927d9b6405b605f4427026e8c5e0a9a6de4"
+    },
+    {
+      "path": "scripts/coverage/coverage-gate-report.ts",
+      "sha256": "c29b1b578452fac2bb82a9a311ee5b09209bca2077f9fabb28661b8e509914eb"
+    },
+    {
+      "path": "scripts/coverage/coverage-gates.ts",
+      "sha256": "9a06f9464dbad3b871c4ce32df3b33b4c468e581aa38415ab68ed41234e4eaec"
+    },
+    {
+      "path": "scripts/coverage/coverage-inventory.ts",
+      "sha256": "ec67c173be7d935e5ef323d97b9a1c20ba1560128ab8c5ddb01717f4928035e5"
+    },
+    {
+      "path": "scripts/coverage/uncovered-ranges.ts",
+      "sha256": "7612001b614a606f91bdf52d6fc39d7f5880f9ae0af87e6aea8ffcdfe9357fed"
+    },
+    {
+      "path": "scripts/release/build-common-packages.ts",
+      "sha256": "b0e4ee3dce6802c5a918b16420952330df4a5e8a6aaad23ec45befce012f1b44"
+    },
+    {
+      "path": "scripts/release/check-plugin-package.ts",
+      "sha256": "56e12e669fcf5aa230228ad001aa355d3511ecd2f44a732510b46230c9c1012c"
+    },
+    {
+      "path": "scripts/release/check-plugin-version.ts",
+      "sha256": "3889eceb040a4151f95bd2be58b4f05510f49127d94992b7e11fb67321a2665c"
+    },
+    {
+      "path": "scripts/release/check-release-catalog.ts",
+      "sha256": "7dc425448fa1918d33c56a73950ed02b636cf9f73c904ae76c9123a10a8ea580"
+    },
+    {
+      "path": "scripts/release/generate-icon.ts",
+      "sha256": "3d43fca36ca7206d9a9b052063566084085f6de55a209af94a23069dbf2703d2"
+    },
+    {
+      "path": "scripts/release/pack-adapters.ts",
+      "sha256": "99341475b1b463eb4d3ef41022dfc357719a203f118c02edd46dba6bf9f61731"
+    },
+    {
+      "path": "scripts/release/pack-plugin.ts",
+      "sha256": "b81c2938f5df6b4141b5db00a4235b964b2448f76b3a510212436450616505f1"
+    },
+    {
+      "path": "scripts/release/runtime-artifact.ts",
+      "sha256": "0da66467ed160767fa72cec65a2c8e5d6f9fe4769bb7275b4dadd6e16b902524"
+    },
+    {
+      "path": "scripts/release/sync-release-catalog.ts",
+      "sha256": "9958fe800109c14781879642d3642ba5a53dac98dcc9fa4f68b8e6e6f7e56fef"
+    }
+  ],
+  "source_manifest_digest": "sha256:4fc0aafd03db9ee1cf4511e4d28fad7d355dc233551e77be354e9cf876c61e4f"
+}

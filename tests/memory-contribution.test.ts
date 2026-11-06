@@ -1,0 +1,319 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { CraftStore, type JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { MemoryContribution } from "../capability/craft-memory/contribution.ts";
+import { memoryCapability } from "../capability/craft-memory/capability.ts";
+import { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
+import { buildCapabilityRegistry, CORE_KERNELS, type ContextRequest } from "../common/craft-common-base/src/capability-protocol.ts";
+import { Bm25Index } from "../common/craft-common-base/src/bm25.ts";
+import { ContextResolutionKernel } from "../core/context-resolution.ts";
+import { payload } from "../core/digest.ts";
+const scope = { kind: "project", id: "p" };
+const request: ContextRequest = { query: "alpha", scope_kind: "project", scope_id: "p", max_items: 10, max_chars: 10000 };
+
+for (const [name, validity] of [
+  ["expired", { valid_until: "2021-01-01T00:00:00Z" }],
+  ["future", { effective_from: "2099-01-01T00:00:00Z" }],
+  ["valid", { valid_until: "2099-01-01T00:00:00Z" }],
+] as const) {
+  test(`Memory ${name} task preference preserves temporal scope precedence in SDK and Context`, async () => {
+    const f = await fixture();
+    try {
+      f.remember("project", { topic: "theme", effective_from: "2020-01-01T00:00:00Z" });
+      f.remember("task", { scope_kind: "task", scope_id: "t", topic: "theme", effective_from: "2020-01-01T00:00:00Z", ...validity });
+      const now = "2026-10-09T00:00:00Z";
+      const local = await f.reader.contribute({ ...request, now, scope_stack: [{ kind: "task", id: "t" }, scope] });
+      const expected = name === "valid" ? "task" : "project";
+      assert.deepEqual(local.items.map(item => item.memory_id), [expected]);
+      const shared = await new ContextResolutionKernel(f.store, [f.reader]).resolve({ query: "alpha", scope_kind: "task", scope_id: "t", project_scope_id: "p", now });
+      assert.deepEqual((shared.items as JsonObject[]).map(item => item.memory_id), [expected]);
+      const history = await f.reader.contribute({ ...request, now, history_view: true, candidate_mode: true, scope_stack: [{ kind: "task", id: "t" }, scope] });
+      assert.deepEqual(history.items.map(item => item.memory_id).sort(), ["project", "task"]);
+    } finally { await f.close(); }
+  });
+}
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "craft-memory-contribution-"));
+  const store = await new CraftStore(craftPaths(root)).open(), writer = await new CraftStore(craftPaths(root)).open();
+  const projectRoot = join(root, "project"); await mkdir(projectRoot);
+  store.create("scope_alias", "project-p", { scope, alias_kind: "path", alias: projectRoot, status: "active" });
+  const otherProjectRoot = join(root, "other-project"); await mkdir(otherProjectRoot);
+  store.create("scope_alias", "project-other", { scope: { kind: "project", id: "other" }, alias_kind: "path", alias: otherProjectRoot, status: "active" });
+  store.create("knowledge_source", "source", { status: "active", trust: "verified", scope });
+  const ledger = new MemoryLedgerKernel(store), reader = new MemoryContribution(store);
+  const remember = (id: string, extra: JsonObject = {}) => ledger.remember({ memory_id: id, source_id: "source", kind: "preference", scope_kind: "project", scope_id: "p", content: `alpha ${id}`, observed_at: "2020-01-01T00:00:00Z", ...extra }).memory as JsonObject;
+  return { store, writer, ledger, reader, remember, async close() { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
+}
+
+test("Memory registers a single standalone contribution and supports local or shared candidate reads", async () => {
+  const f = await fixture();
+  try {
+    const registry = buildCapabilityRegistry([memoryCapability], { [CORE_KERNELS.store]: f.store });
+    assert.deepEqual(registry.contributed.map(provider => provider.member), ["memory"]);
+    f.remember("a"); f.remember("b");
+    const local = await registry.contributed[0]!.contribute({ ...request, max_items: 1 });
+    assert.equal(local.items.length, 1); assert.equal(local.omitted_count, 1);
+    const all = await f.reader.contribute({ ...request, candidate_mode: true });
+    assert.equal(all.items.length, 2); assert.equal(all.diagnostics?.eligible_memory_count, 2);
+    assert.deepEqual(all.read_refs?.map(ref => ref.id).sort(), ["a", "b", "source"]);
+    assert.equal((await f.reader.contribute({ ...request, query: "unrelated", memory_ids: ["a", "b"] })).items.length, 2);
+    const noHits = await f.reader.contribute({ ...request, query: "unrelated" }); assert.equal(noHits.omitted_count, 0);
+    assert.equal((await f.reader.contribute({ ...request, query: "unrelated", memory_ids: ["a"] })).items[0]!.memory_id, "a");
+    const ref = { member: "memory", id: "b", version: 1 };
+    assert.equal((await f.reader.contribute({ ...request, query: "unrelated", required_refs: [ref] })).items[0]!.memory_id, "b");
+    await assert.rejects(f.reader.contribute({ ...request, memory_ids: ["missing"] }), /Required Memory/);
+    await assert.rejects(f.reader.contribute({ ...request, required_refs: [{ ...ref, version: 2 }] }), /Required Context/);
+    await assert.rejects(f.reader.contribute({ ...request, max_chars: 1, memory_ids: ["a"] }), /budget/);
+    const boundedCandidates = await f.reader.contribute({ ...request, candidate_mode: true, max_items: 1 });
+    assert.equal(boundedCandidates.items.length, 1); assert.equal(boundedCandidates.omitted_count, 1);
+    const boundedChars = await f.reader.contribute({ ...request, candidate_mode: true, max_chars: 1 });
+    assert.equal(boundedChars.items.length, 0); assert.equal(boundedChars.omitted_count, 2);
+  } finally { await f.close(); }
+});
+
+test("Memory candidate mode ranks locally and returns only the requested shortlist", async () => {
+  const f = await fixture();
+  try {
+    for (const id of ["a", "b", "c", "d"]) f.remember(id, { content: id === "d" ? "beta only" : `alpha ${id}` });
+    const shortlist = await f.reader.contribute({ ...request, query: "alpha", candidate_mode: true, max_items: 2 });
+    assert.deepEqual(shortlist.items.map(item => item.memory_id), ["a", "b"]);
+    assert.equal(shortlist.omitted_count, 1);
+  } finally { await f.close(); }
+});
+
+test("Memory candidate shortlist carries a query excerpt, while explicitly required Memory keeps its full body", async () => {
+  const f = await fixture();
+  try {
+    const body = `alpha current decision. ${"unrelated detail. ".repeat(80)}`;
+    f.remember("long", { content: body });
+    const selected = await f.reader.contribute({ ...request, query: "alpha", candidate_mode: true });
+    assert.equal(selected.items[0]!.content, "alpha current decision.");
+    assert(Number((selected.items[0]!.content_excerpt as JsonObject).source_chars) > 600);
+    const required = await f.reader.contribute({ ...request, query: "unrelated", candidate_mode: true, memory_ids: ["long"] });
+    assert(String(required.items[0]!.content).length > 600);
+    assert(String(required.items[0]!.content).includes("unrelated detail."));
+  } finally { await f.close(); }
+});
+
+test("Memory reuses a short-lived snapshot index and hydrates only selected bodies on a warm read", async t => {
+  const f = await fixture();
+  try {
+    f.remember("first", { content: "alpha firstunique" });
+    f.remember("second", { content: "alpha secondunique" });
+    f.remember("third", { content: "alpha thirdunique" });
+    const original = f.store.contentStore.readCompatSync;
+    const reads: string[] = [];
+    t.mock.method(f.store.contentStore, "readCompatSync", function(this: typeof f.store.contentStore, ref: Parameters<typeof original>[0]) {
+      reads.push(String((ref as JsonObject).record_id));
+      return original.call(this, ref);
+    });
+    const cold = await f.reader.contribute({ ...request, query: "alpha", max_items: 1, candidate_mode: true });
+    assert.equal(cold.diagnostics?.retrieval_index_cache_hit, false);
+    assert.equal(cold.diagnostics?.retrieval_body_load_count, 3);
+    assert.equal(reads.length, 3);
+    const warm = await f.reader.contribute({ ...request, query: "secondunique", max_items: 1, candidate_mode: true });
+    assert.equal(warm.diagnostics?.retrieval_index_cache_hit, true);
+    assert.equal(warm.diagnostics?.retrieval_body_load_count, 1);
+    assert.deepEqual((warm.items as JsonObject[]).map(item => item.memory_id), ["second"]);
+    assert.equal(reads.length, 4);
+
+    f.remember("fourth", { content: "alpha fourthunique" });
+    const refreshed = await f.reader.contribute({ ...request, query: "fourthunique", max_items: 1, candidate_mode: true });
+    assert.equal(refreshed.diagnostics?.retrieval_index_cache_hit, false);
+    assert.equal(refreshed.diagnostics?.retrieval_body_load_count, 4);
+    assert.deepEqual((refreshed.items as JsonObject[]).map(item => item.memory_id), ["fourth"]);
+  } finally { await f.close(); }
+});
+
+test("Memory snapshot index expires after its short TTL", async t => {
+  const f = await fixture();
+  try {
+    f.remember("expiring", { content: "alpha expiring" });
+    await f.reader.contribute({ ...request, candidate_mode: true });
+    const now = Date.now();
+    t.mock.method(Date, "now", () => now + 120_000);
+    const expired = await f.reader.contribute({ ...request, candidate_mode: true });
+    assert.equal(expired.diagnostics?.retrieval_index_cache_hit, false);
+    assert.equal(expired.diagnostics?.retrieval_body_load_count, 1);
+  } finally { await f.close(); }
+});
+
+test("Memory skips retaining a token index when the source corpus exceeds its memory cap", async () => {
+  const f = await fixture();
+  try {
+    f.remember("large", { content: "context ".repeat(33_000) });
+    const first = await f.reader.contribute({ ...request, query: "context", max_items: 1, candidate_mode: true });
+    const second = await f.reader.contribute({ ...request, query: "context", max_items: 1, candidate_mode: true });
+    assert.equal(first.diagnostics?.retrieval_index_cache_hit, false);
+    assert.equal(second.diagnostics?.retrieval_index_cache_hit, false);
+  } finally { await f.close(); }
+});
+
+test("Memory does not index legacy blank bodies", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("memory_ledger", "legacy-blank", { scope, source_id: "source", source_version: 1, kind: "preference",
+      content: " ", content_digest: "blank-digest", sensitivity: "internal", confidence: "bounded", status: "active" });
+    const result = await f.reader.contribute({ ...request, candidate_mode: true });
+    assert.equal(result.items.length, 0);
+    assert.equal(result.diagnostics?.retrieval_index_candidate_count, 1);
+  } finally { await f.close(); }
+});
+
+test("Memory snapshot index evicts its oldest entry at the bounded cache limit", async () => {
+  const f = await fixture();
+  try {
+    f.remember("base", { content: "alpha base" });
+    await f.reader.contribute({ ...request, candidate_mode: true });
+    for (let index = 0; index < 4; index++) {
+      f.remember(`added-${index}`, { content: `alpha added${index}` });
+      await f.reader.contribute({ ...request, candidate_mode: true });
+    }
+    f.store.database.prepare("DELETE FROM records WHERE kind='memory_ledger' AND id LIKE 'added-%'").run();
+    const baseSnapshot = await f.reader.contribute({ ...request, candidate_mode: true });
+    assert.equal(baseSnapshot.diagnostics?.retrieval_index_cache_hit, false);
+  } finally { await f.close(); }
+});
+
+test("Memory owns scope precedence, history, current authorization and exclusions before hydration", async t => {
+  const f = await fixture();
+  try {
+    const now = "2026-10-09T00:00:00.000Z";
+    f.remember("project", { topic: "theme", content: "alpha project", observed_at: "2020-01-01T00:00:00Z" });
+    f.remember("task", { scope_kind: "task", scope_id: "t", topic: "theme", content: "alpha task", observed_at: "2020-01-01T00:00:00Z" });
+    f.remember("future", { effective_from: "2099-01-01T00:00:00Z" });
+    f.remember("expired", { valid_until: "2021-01-01T00:00:00Z" });
+    f.remember("working", { kind: "working", working_note: true, valid_until: "2099-01-01T00:00:00Z" });
+    f.remember("private", { scope_envelope: { audience: { mode: "private", principal_ids: ["owner"] } } });
+    f.remember("restricted", { sensitivity: "restricted" });
+    f.remember("elsewhere", { scope_id: "other" });
+    const original = f.store.contentStore.readCompatSync;
+    t.mock.method(f.store.contentStore, "readCompatSync", function(this: typeof f.store.contentStore, ref: Parameters<typeof original>[0]) {
+      assert(!["private", "restricted", "elsewhere"].includes(String((ref as JsonObject).record_id))); return original.call(this, ref);
+    });
+    const selected = await f.reader.contribute({ ...request, now, candidate_mode: true, scope_stack: [{ kind: "task", id: "t" }, scope] });
+    assert.deepEqual(selected.items.map(item => item.memory_id), ["task"]);
+    assert(selected.diagnostics!.temporal_excluded instanceof Array);
+    t.mock.restoreAll();
+    const working = await f.reader.contribute({ ...request, now, candidate_mode: true, include_working_notes: true, allow_restricted: true, principal_id: "owner" });
+    assert(working.items.some(item => item.memory_id === "working")); assert(working.items.some(item => item.memory_id === "private")); assert(working.items.some(item => item.memory_id === "restricted"));
+    const project = f.store.get("memory_ledger", "project"); f.writer.save("memory_ledger", "project", { ...payload(project), status: "revoked" });
+    const history = await f.reader.contribute({ ...request, now, history_view: true, candidate_mode: true });
+    assert(history.items.filter(item => item.memory_id === "project").length === 2);
+    assert(history.items.every(item => item.execution_context === false));
+    const known = await f.reader.contribute({ ...request, now, known_at: now, as_of: "2020-01-02T00:00:00Z", candidate_mode: true });
+    assert(known.items.every(item => item.execution_context === false));
+    for (const extra of [{ now: "bad" }, { as_of: "bad" }, { known_at: "bad" }, { max_items: 0 }]) await assert.rejects(f.reader.contribute({ ...request, ...extra }));
+  } finally { await f.close(); }
+});
+
+for (const mutation of ["audience", "source", "delete"] as const) {
+  test(`standalone Memory contribution rechecks ${mutation} during ranking`, async t => {
+    const f = await fixture();
+    try {
+      f.remember("private", { scope_envelope: { audience: { mode: "private", principal_ids: ["owner"] } } });
+      const original = Bm25Index.prototype.score;
+      t.mock.method(Bm25Index.prototype, "score", function(this: Bm25Index, ...args: Parameters<typeof original>) {
+        if (mutation === "delete") f.writer.database.prepare("DELETE FROM records WHERE kind='memory_ledger' AND id='private'").run();
+        else {
+          const kind = mutation === "source" ? "knowledge_source" : "memory_ledger", id = mutation === "source" ? "source" : "private";
+          f.writer.save(kind, id, { ...payload(f.writer.get(kind, id)), ...(mutation === "source" ? { status: "revoked" } : { scope_envelope: { audience: { mode: "private", principal_ids: ["other"] } } }) });
+        }
+        return original.call(this, ...args);
+      });
+      await assert.rejects(f.reader.contribute({ ...request, principal_id: "owner" }), /changed during recall/);
+    } finally { await f.close(); }
+  });
+}
+
+test("Context replaces Memory through the contribution interface, never reading a Ledger fallback", async t => {
+  const f = await fixture();
+  try {
+    const item = { memory_id: "external", memory_version: 1, content: "alpha external", content_digest: "external", scope, source_id: "remote" };
+    const provider = { member: "memory" as const, async contribute(input: ContextRequest) { assert(input.candidate_mode); return { member: "memory" as const, items: [item], receipt_id: "remote", omitted_count: 0 }; } };
+    const original = f.store.listScoped.bind(f.store);
+    t.mock.method(f.store, "listScoped", (...args: Parameters<typeof original>) => { assert.notEqual(args[0], "memory_ledger"); return original(...args); });
+    const kernel = new ContextResolutionKernel(f.store, [provider]);
+    const result = await kernel.resolve({ ...request, memory_ids: ["external"] });
+    assert.equal((result.items as JsonObject[])[0]!.memory_id, "external"); assert.deepEqual(result.contributions, []);
+    assert.equal((result.receipt as JsonObject).total_items, 1);
+    const excluded = await kernel.resolve({ ...request, members: ["knowledge"] }); assert.deepEqual(excluded.items, []);
+    await assert.rejects(kernel.resolve({ ...request, members: ["knowledge"], memory_ids: ["external"] }), /excluded/);
+    const broken = new ContextResolutionKernel(f.store, [{ member: "memory", async contribute() { throw new Error("memory unavailable"); } }]);
+    await assert.rejects(broken.resolve({ ...request, allow_partial: true }), /memory unavailable/);
+  } finally { await f.close(); }
+});
+
+test("standalone Memory validates explicitly selected Sources before serving any candidates", async () => {
+  const f = await fixture();
+  try {
+    f.remember("a");
+    await assert.rejects(f.reader.contribute({ ...request, source_ids: ["missing"] }), /Requested Knowledge Source/);
+    for (const patch of [{ status: "revoked" }, { trust: "untrusted" }, { scope_envelope: { audience: { mode: "private", principal_ids: ["owner"] } } }]) {
+      const current = f.store.get("knowledge_source", "source");
+      f.store.save("knowledge_source", "source", { ...payload(current), status: "active", trust: "verified", scope_envelope: undefined, ...patch });
+      await assert.rejects(f.reader.contribute({ ...request, source_ids: ["source"] }), /Requested Knowledge Source/);
+    }
+    f.store.save("knowledge_source", "source", { status: "active", trust: "verified", scope });
+    assert.equal((await f.reader.contribute({ ...request, source_ids: ["source"] })).items.length, 1);
+  } finally { await f.close(); }
+});
+
+test("historical Memory receipts pin the Source of the returned version, not a newer binding", async () => {
+  const f = await fixture();
+  try {
+    const memory = f.remember("history");
+    f.store.create("knowledge_source", "new-source", { status: "active", trust: "verified", scope });
+    f.store.save("memory_ledger", "history", { ...payload(memory), source_id: "new-source" });
+    f.store.database.prepare("UPDATE records SET updated_at=? WHERE kind='memory_ledger' AND version=1").run("2020-01-01T00:00:00.000Z");
+    f.store.database.prepare("UPDATE records SET updated_at=? WHERE kind='memory_ledger' AND version=2").run("2022-01-01T00:00:00.000Z");
+    const result = await new ContextResolutionKernel(f.store).resolve({ ...request, as_of: "2021-01-01T00:00:00Z" });
+    const receipt = result.receipt as JsonObject;
+    assert.equal((result.items as JsonObject[])[0]!.source_id, "source");
+    assert.deepEqual((receipt.read_refs as JsonObject[]).map(ref => ref.id).sort(), ["history", "project-p", "source"]);
+    const { assertContextReadCurrent } = await import("../core/context-access-guard.ts");
+    f.writer.save("knowledge_source", "new-source", { status: "revoked", trust: "verified", scope });
+    assertContextReadCurrent(f.store, receipt);
+    f.writer.save("knowledge_source", "source", { status: "revoked", trust: "verified", scope });
+    assert.throws(() => assertContextReadCurrent(f.store, receipt), /changed during recall/);
+  } finally { await f.close(); }
+});
+
+
+test("verified feedback counts each matching revision once and ignores stale or malformed references", async () => {
+  const f = await fixture();
+  try {
+    const memory = f.remember("weighted", { observed_at: "2026-10-01T00:00:00Z" });
+    const context = { ...request, now: "2026-10-10T00:00:00Z", candidate_mode: true };
+    const baseline = (await f.reader.contribute(context)).items[0]!.ranking_weight;
+    assert(typeof baseline === "number");
+    const ref = { memory_id: memory.id, content_digest: memory.content_digest };
+    const evidence = f.store.create("evidence", "feedback-evidence", { source_type: "program", confidence: "confirmed", metadata: { context_receipt_id: "receipt", verdict: "passed" } });
+    const binding = { receipt_id: "receipt", usage_stage: "used", verified_evidence_refs: [{ id: evidence.id, version: evidence.version }] };
+    f.store.create("context_feedback", "legacy", { outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
+    assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, baseline);
+    f.store.create("context_feedback", "first", { ...binding, outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
+    const once = (await f.reader.contribute(context)).items[0]!.ranking_weight;
+    assert(typeof once === "number");
+    assert(once > baseline);
+    f.store.save("context_feedback", "first", { ...binding, outcome: "helpful", evidence_verified: true, memory_refs: [ref, ref] });
+    for (const [id, extra] of [["stale", { memory_refs: [{ ...ref, content_digest: "old" }] }], ["missing", {}], ["malformed", { memory_refs: [null, "invalid", {}] }], ["unverified", { memory_refs: [ref], evidence_verified: false }], ["unhelpful", { memory_refs: [ref], outcome: "unhelpful" }]] as const) {
+      f.store.create("context_feedback", id, { ...binding, outcome: "helpful", evidence_verified: true, ...extra });
+    }
+    assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, once);
+    f.store.create("context_feedback", "second", { ...binding, outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
+    assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, once);
+    const secondEvidence = f.store.create("evidence", "feedback-evidence-2", { source_type: "program", confidence: "confirmed", metadata: { context_receipt_id: "receipt-2", verdict: "passed" } });
+    f.store.create("context_feedback", "third", { receipt_id: "receipt-2", usage_stage: "used", verified_evidence_refs: [{ id: secondEvidence.id, version: secondEvidence.version }], outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
+    const twice = (await f.reader.contribute(context)).items[0]!.ranking_weight;
+    assert(typeof twice === "number" && twice > once);
+    f.store.save("evidence", String(evidence.id), { ...evidence, confidence: "rejected" });
+    assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, once);
+    f.store.save("evidence", String(secondEvidence.id), { ...secondEvidence, confidence: "rejected" });
+    assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, baseline);
+  } finally { await f.close(); }
+});

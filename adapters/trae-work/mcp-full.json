@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "craft": {
+      "command": "craft-mcp-full",
+      "args": [],
+      "env": {
+        "START_MCP_TIMEOUT_MS": "60000",
+        "RUN_MCP_TIMEOUT_MS": "60000"
+      }
+    }
+  }
+}

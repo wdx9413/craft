@@ -1,0 +1,19 @@
+{
+  "name": "craft-codebase",
+  "version": "0.12.44",
+  "description": "craft-codebase governed context and repository tools",
+  "author": {
+    "name": "wdx9413"
+  },
+  "skills": "./skills/",
+  "mcpServers": {
+    "craft-codebase": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs",
+        "--product",
+        "codebase"
+      ]
+    }
+  }
+}

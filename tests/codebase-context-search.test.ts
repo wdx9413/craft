@@ -1,0 +1,416 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { CODE_USAGE_BOOST, CodeSymbolSearchIndex, codeContextCandidates, codeQueryTerms, rankCodeSymbols } from "../capability/craft-codebase/context-search.ts";
+import { lspDeclarationKind } from "../capability/craft-codebase/symbol-kind.ts";
+import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
+
+const symbol = (id: string, name: string, path: string): JsonObject => ({ id, kind: "symbol", name, path, language: "typescript" });
+
+test("Codebase BM25 ranks exact names and camelCase natural-language matches deterministically", () => {
+  const nodes = [
+    symbol("a", "sessionStore", "src/common/session.ts"),
+    symbol("b", "storeSession", "src/features/auth.ts"),
+    symbol("c", "session", "src/session.ts"),
+    symbol("d", "unrelated", "src/cache.ts"),
+  ];
+  const exact = rankCodeSymbols(nodes, "session", 4);
+  assert.equal(exact[0]!.node.id, "c");
+  const natural = rankCodeSymbols(nodes, "session store", 4);
+  assert(natural.some(item => item.node.id === "a"));
+  assert.deepEqual(natural.map(item => item.node.id), rankCodeSymbols(nodes, "session store", 4).map(item => item.node.id));
+  assert.equal(rankCodeSymbols(nodes, "", 4).length, 0);
+  assert.throws(() => rankCodeSymbols(nodes, "session", 0), /positive integer/u);
+});
+
+test("Codebase favors a matching architecture type for object queries while action queries keep functions ahead", () => {
+  const scheduler = [
+    { ...symbol("type", "ConversationScheduler", "scheduler/conversation_scheduler.py"), declaration_kind: "class" },
+    { ...symbol("action", "start_multiple_conversations", "scheduler/conversation_scheduler.py"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(scheduler, "conversation scheduler for multi-turn simulation", 2)[0]!.node.id, "type");
+  assert.equal(rankCodeSymbols(scheduler, "start multiple conversations", 2)[0]!.node.id, "action");
+  assert.equal(rankCodeSymbols([
+    { ...symbol("manager", "UserManager", "src/user-manager.ts"), declaration_kind: "class" },
+    { ...symbol("method", "refreshSession", "src/user-manager.ts"), declaration_kind: "method" },
+    { ...symbol("unnamed-method", "", "src/user-manager.ts"), declaration_kind: "method", name: null },
+  ], "UserManager cache lifecycle", 2)[0]!.node.id, "manager");
+  assert.equal(rankCodeSymbols([
+    { ...symbol("manager", "UserManager", "src/user-manager.ts"), declaration_kind: "class" },
+    { ...symbol("method", "refreshSession", "src/user-manager.ts"), declaration_kind: "method" },
+    { ...symbol("unnamed-method", "", "src/user-manager.ts"), declaration_kind: "method", name: null },
+  ], "UserManager refreshSession", 2)[0]!.node.id, "method");
+  assert.equal(rankCodeSymbols([
+    { ...symbol("unrelated-type", "ConversationViewer", "ui/ConversationViewer.jsx"), declaration_kind: "class" },
+    { ...symbol("target", "normalizeRow", "ui/ConversationViewer.jsx"), declaration_kind: "function" },
+  ], "normalize a row for the conversation viewer", 2)[0]!.node.id, "target");
+});
+
+test("Codebase keeps declaration-body context weaker than explicit symbol names", () => {
+  const roleSymbols = [
+    { ...symbol("role-loader", "load_user_role_data", "service/http_server.py"), declaration_kind: "function" },
+    { ...symbol("cache-info", "get_cache_info", "service/http_server.py"), declaration_kind: "function" },
+    { ...symbol("unrelated", "unrelated", "other.py"), declaration_kind: "function" },
+  ];
+  const roleContext = new Map([
+    ["role-loader", "load user role data user role records"],
+    ["cache-info", Array(8).fill("cache user role records data query read get load").join(" ")],
+    ["unrelated", "unrelated"],
+  ]);
+  const byContext = new CodeSymbolSearchIndex(roleSymbols, roleContext).rank("load cached user role records", 3);
+  assert.equal(byContext[0]!.node.id, "role-loader");
+  // A body that merely mentions the query is reported as a context contribution.
+  const cacheInfo = byContext.find(item => item.node.id === "cache-info")!;
+  assert.ok(cacheInfo.context_boost > 0);
+  assert.equal(cacheInfo.usage_boost, 0);
+
+  const schedulerSymbols = [
+    { ...symbol("scheduler", "ConversationScheduler", "scheduler/conversation_scheduler.py"), declaration_kind: "class" },
+    { ...symbol("converter", "convert_file", "mock2dialogue.py"), declaration_kind: "function" },
+    { ...symbol("start", "start_multiple_conversations", "scheduler/conversation_scheduler.py"), declaration_kind: "method" },
+  ];
+  const schedulerContext = new Map([
+    ["scheduler", "ConversationScheduler scheduler conversation"],
+    ["converter", Array(8).fill("conversation dialogue simulation turn scheduler multi").join(" ")],
+    ["start", "start multiple conversations run conversation"],
+  ]);
+  assert.equal(new CodeSymbolSearchIndex(schedulerSymbols, schedulerContext)
+    .rank("conversation scheduler for multi-turn simulation", 3)[0]!.node.id, "scheduler");
+});
+
+test("Codebase ranks extraction and decoding functions for natural task queries", () => {
+  const wrapper = [
+    { ...symbol("decode", "decode_base64_json", "main_wrapper.py"), declaration_kind: "function" },
+    { ...symbol("extract", "extract_parameters", "main_wrapper.py"), declaration_kind: "function" },
+    { ...symbol("main", "main", "main_wrapper.py"), declaration_kind: "function" },
+    { ...symbol("parse", "parse_arguments", "main_wrapper.py"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(wrapper, "decode base64 JSON input", 4)[0]!.node.id, "decode");
+  assert.equal(rankCodeSymbols(wrapper, "extract simulation request parameters", 4)[0]!.node.id, "extract");
+});
+
+test("Codebase query normalization expands identifiers and common task-language variants", () => {
+  const terms = codeQueryTerms("TypeScript semantic checker analyzer");
+  assert(terms.includes("typescript") && terms.includes("type") && terms.includes("script"));
+  assert(terms.includes("check") && terms.includes("analyze"));
+  const gateTerms = codeQueryTerms("构造 gate 请求的默认参数");
+  assert(gateTerms.includes("default") && gateTerms.includes("request") && gateTerms.includes("parameters"));
+  assert(codeQueryTerms("delegate authentication checker constructor").includes("new"));
+  assert(codeQueryTerms("LSP relation collector").includes("collect"));
+  assert(codeQueryTerms("resolve definition by source offset").includes("find"));
+  const chineseTask = codeQueryTerms("Python 仓库增量重建怎么规划");
+  for (const term of ["repository", "workspace", "incremental", "rebuild", "build", "plan"]) assert(chineseTask.includes(term));
+  assert(codeQueryTerms("LSP 关系收集器").includes("collect"));
+  assert(codeQueryTerms("查找仓库代码上下文候选").includes("candidate"));
+  const conversationTask = codeQueryTerms("如何启动多组并发对话");
+  for (const term of ["start", "multiple", "concurrent", "conversation"]) assert(conversationTask.includes(term));
+  const simulationTask = codeQueryTerms("启动仿真任务的 HTTP 接口");
+  for (const term of ["start", "simulation", "task", "http", "endpoint"]) assert(simulationTask.includes(term));
+  const counterTask = codeQueryTerms("synchronize daily visit counters");
+  for (const term of ["sync", "today", "count"]) assert(counterTask.includes(term));
+  const callbackTask = codeQueryTerms("process experiment completion or failure callback and update metrics");
+  for (const term of ["complete", "fail", "call", "back", "metric"]) assert(callbackTask.includes(term));
+  assert(codeQueryTerms("page robot intention records").includes("list"));
+  assert(codeQueryTerms("combine remote flow definitions with locally persisted slot relations").includes("find"));
+  assert(codeQueryTerms("check whether a robot function is enabled").includes("ability"));
+  const userRoleCache = codeQueryTerms("load cached user role records");
+  for (const term of ["cache", "data", "query", "read"]) assert(userRoleCache.includes(term));
+  assert(codeQueryTerms("check whether a robot function is enabled").includes("open"));
+  assert.equal(rankCodeSymbols([
+    { ...symbol("conversation", "start_multiple_conversations", "scheduler/conversation_scheduler.py"), declaration_kind: "method" },
+    { ...symbol("distractor", "can_handle", "scheduler/tool_operation_processor.py"), declaration_kind: "method" },
+  ], "如何启动多组并发对话", 1)[0]!.node.id, "conversation");
+  assert.equal(rankCodeSymbols([
+    { ...symbol("simulation", "start_simulation", "service/http_server.py"), declaration_kind: "function" },
+    { ...symbol("distractor", "handle_data", "service/data.py"), declaration_kind: "function" },
+  ], "启动仿真任务的 HTTP 接口", 1)[0]!.node.id, "simulation");
+  const ranked = rankCodeSymbols([
+    { ...symbol("target", "analyzeTypeScript", "capability/craft-codebase/typescript-analysis.ts"), declaration_kind: "function" },
+    { ...symbol("distractor", "checker", "core/receipt.ts"), declaration_kind: "variable" },
+  ], "TypeScript semantic checker analyzer", 2);
+  assert.equal(ranked[0]!.node.id, "target");
+  const analyzer = rankCodeSymbols([
+    { ...symbol("function", "analyzeTypeScript", "src/typescript-analysis.ts"), declaration_kind: "function" },
+    { ...symbol("constant", "TYPESCRIPT_ANALYZER_VERSION", "src/typescript-analysis.ts"), declaration_kind: "variable" },
+  ], "analyzer", 2);
+  assert.equal(analyzer[0]!.node.id, "function");
+});
+
+test("Codebase maps Go business task wording to sync, callback, list, and ability symbols", () => {
+  const go = [
+    { ...symbol("sync-target", "(*VisitCountService).SyncVisitCount", "logic/visitlogic/visit_count_update.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("sync-distractor", "(*VisitCountService).GetUserLogVisitCountFromRedis", "logic/visitlogic/visit_count_search.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("callback-target", "(*ModelTrainingService).TrainExperimentCallBack", "logic/modellogic/model_training_callback_service.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("callback-distractor", "(*ModelTrainingService).UpdateTrainingMetrics", "logic/modellogic/model_training_callback_service.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("list-target", "(*OptimusTaskService).FindSlotList", "logic/optimus/optimus_slot_query.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("list-distractor", "(*OptimusTaskService).GetSlotRelations", "logic/optimus/optimus_slot_query.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("ability-target", "(*FuncService).IsRobotAbilityOpened", "logic/funclogic/robot_func.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("ability-distractor", "(*FuncService).IsRobotFunctionEnabled", "logic/funclogic/robot_func.go"), declaration_kind: "method", language: "go" },
+  ];
+  assert.equal(rankCodeSymbols(go, "synchronize daily visit counters from cache into database", 8)[0]!.node.id, "sync-target");
+  assert.equal(rankCodeSymbols(go, "process model experiment completion or failure callback and update training metrics", 8)[0]!.node.id, "callback-target");
+  assert.equal(rankCodeSymbols(go, "combine remote flow definitions with locally persisted slot relations", 8)[0]!.node.id, "list-target");
+  assert.equal(rankCodeSymbols(go, "check whether a robot function is enabled", 8)[0]!.node.id, "ability-target");
+});
+
+test("Codebase retrieval gives symbol names and paths priority over generic analyzer aliases", () => {
+  const nodes = [
+    { ...symbol("target", "planPythonIncremental", "capability/craft-codebase/python-incremental.ts"), declaration_kind: "function" },
+    ...Array.from({ length: 30 }, (_, index) => symbol(`generic-${index}`, "planWorkspace", `scripts/maintenance-${index}.ts`)),
+    symbol("analyzer", "analyzeTypeScript", "capability/craft-codebase/typescript-analysis.ts"),
+  ];
+  assert.equal(rankCodeSymbols(nodes, "Python 仓库增量重建怎么规划", 1)[0]!.node.id, "target");
+  assert.equal(rankCodeSymbols(nodes, "TypeScript semantic checker analyzer", 1)[0]!.node.id, "analyzer");
+  assert.equal(rankCodeSymbols([
+    { ...symbol("constructor", "NewDelegateAuthChecker", "middleware/authchecker/delegate_auth_checker.go"), declaration_kind: "function" },
+    { ...symbol("method", "(*DelegateAuthChecker).Check", "middleware/authchecker/delegate_auth_checker.go"), declaration_kind: "method" },
+  ], "delegate authentication checker constructor", 1)[0]!.node.id, "constructor");
+});
+
+test("Codebase ranks explicitly named methods and constructors ahead of related containers", () => {
+  const java = [
+    { ...symbol("class", "DataWorkflowServiceImpl", "src/DataWorkflowServiceImpl.java"), declaration_kind: "class" },
+    { ...symbol("method", "dataDetail", "src/DataWorkflowServiceImpl.java"), declaration_kind: "method" },
+    { ...symbol("interface", "DataWorkflowService", "src/DataWorkflowService.java"), declaration_kind: "interface" },
+  ];
+  assert.equal(rankCodeSymbols(java, "DataWorkflowServiceImpl dataDetail workflow detail lookup by key and version", 3)[0]!.node.id, "method");
+  assert.equal(rankCodeSymbols(java, "DataWorkflowServiceImpl dataDetail 工作流详情按 key 和版本查询", 3)[0]!.node.id, "method");
+  assert.equal(rankCodeSymbols(java, "DataWorkflowServiceImpl", 3)[0]!.node.id, "class");
+
+  const workspace = [
+    { ...symbol("handler", "createWorkspaceHandlers", "core/application/actions/workspace-handlers.ts"), declaration_kind: "function" },
+    { ...symbol("wrapper", "workspaceCheckpoint", "core/application/craft-service.ts"), declaration_kind: "method" },
+    { ...symbol("target", "checkpoint", "core/workspace.ts"), declaration_kind: "method" },
+  ];
+  assert.equal(rankCodeSymbols(workspace, "workspace create immutable checkpoint", 3)[0]!.node.id, "target");
+
+  const analyzer = [
+    { ...symbol("generic", "analyze", "capability/craft-codebase/analyzers/analyze-python.py"), declaration_kind: "function" },
+    { ...symbol("target", "analyzePythonCheckpoint", "capability/craft-codebase/python-analysis.ts"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(analyzer, "Python analyzer analyze checkpoint", 2)[0]!.node.id, "target");
+
+  const modulePath = [
+    { ...symbol("generic", "path", "capability/craft-knowledge/local-candidate-import.ts"), declaration_kind: "function" },
+    { ...symbol("target", "_module_path", "capability/craft-codebase/analyzers/analyze-python.py"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(modulePath, "Python import module path resolution", 2)[0]!.node.id, "target");
+
+  const go = [
+    { ...symbol("method", "(*DelegateAuthChecker).Check", "middleware/authchecker/delegate_auth_checker.go"), declaration_kind: "method" },
+    { ...symbol("constructor", "NewDelegateAuthChecker", "middleware/authchecker/delegate_auth_checker.go"), declaration_kind: "function" },
+    { ...symbol("distractor", "NewDelegateFileChecker", "logic/taskcenterlogic/filechecker/delegate_file_checker.go"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(go, "delegate authentication checker constructor", 3)[0]!.node.id, "constructor");
+});
+
+test("task verb matches disambiguate JavaScript functions from broader path and agent terms", () => {
+  const normalize = [
+    { ...symbol("group", "groupConversations", "eval_platform_frontend/src/pages/ConversationViewer.jsx"), declaration_kind: "function" },
+    symbol("state", "[conversations, setConversations]", "eval_platform_frontend/src/pages/ConversationViewer.jsx"),
+    { ...symbol("target", "normalizeRow", "eval_platform_frontend/src/pages/ConversationViewer.jsx"), declaration_kind: "function" },
+    { ...symbol("component", "ConversationViewer", "eval_platform_frontend/src/pages/ConversationViewer.jsx"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(normalize, "normalize a row for the conversation viewer", 4)[0]!.node.id, "target");
+
+  const dialogue = [
+    { ...symbol("user-agent", "StandardUserAgent", "scheduler/user_agent.py"), declaration_kind: "class" },
+    { ...symbol("parser", "_parse_user_agent_llm_json", "scheduler/user_agent.py"), declaration_kind: "function" },
+    { ...symbol("target", "buildSimulatedDialogue", "eval_platform_frontend/src/pages/ConversationViewer.jsx"), declaration_kind: "function" },
+  ];
+  const terms = codeQueryTerms("combine user and agent turns into simulated dialogue");
+  assert(terms.includes("build") && terms.includes("simulation") && terms.includes("conversation"));
+  assert.equal(rankCodeSymbols(dialogue, "combine user and agent turns into simulated dialogue", 3)[0]!.node.id, "target");
+});
+
+test("natural-language synonyms recover JavaScript app, token, and profile methods", () => {
+  const nodes = [
+    { ...symbol("app-id", "getPassportAppId", "kfp-home/src/store/userInfo.js"), declaration_kind: "function" },
+    { ...symbol("ticket", "getTokenByPassportSDK", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("init", "initTicket", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("bridge", "getTokenByBridge", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("profile", "getUserInfo", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("other", "getDriverInfo", "kfp-home/src/store/driverInfo.js"), declaration_kind: "method" },
+  ];
+
+  assert.equal(rankCodeSymbols(nodes, "determine passport application id from tenant in the current URL", 1)[0]!.node.id, "app-id");
+  assert.equal(rankCodeSymbols(nodes, "obtain a passport ticket using app id and role from URL parameters", 1)[0]!.node.id, "ticket");
+  assert.equal(rankCodeSymbols(nodes, "initialize the ticket from URL token or cookie", 1)[0]!.node.id, "init");
+  assert.equal(rankCodeSymbols(nodes, "fetch user token from the Didi bridge", 1)[0]!.node.id, "bridge");
+  assert.equal(rankCodeSymbols(nodes, "fetch the user profile and store uid role and phone", 1)[0]!.node.id, "profile");
+
+  const ticketFlow = [
+    { ...symbol("ticket", "getPassportTicket", "kfp-home/src/store/userInfo.js"), declaration_kind: "function" },
+    { ...symbol("login", "getUserTokenFromPassportLogin", "kfp-im/src/core/getUserToken.ts"), declaration_kind: "function" },
+    symbol("destructure", "{ source, token, ticket, passportAppId, passportRole, openid, oid, orderId, tenantId, countryCode, utcOffset }", "kfp-home/src/store/urlParams.js"),
+  ];
+  assert.equal(rankCodeSymbols(ticketFlow, "get the passport ticket from its cookie or load the Passport login script and receive a new ticket", 3)[0]!.node.id, "ticket");
+
+  const contextual = new CodeSymbolSearchIndex([
+    { ...symbol("bridge-wrapper", "getTokenByBridge", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("bridge-helper", "getUserInfo", "kfp-home/src/services/user.js"), declaration_kind: "method" },
+  ], new Map([
+    ["bridge-wrapper", "webviewUtil getUserInfo native bridge token"],
+    ["bridge-helper", "request user profile service"],
+  ]));
+  assert.equal(contextual.rank("fetch user token with webviewUtil getUserInfo from the Didi bridge", 2)[0]!.node.id, "bridge-wrapper");
+
+  const callerOnly = new CodeSymbolSearchIndex([
+    { ...symbol("caller-only", "invokeAgent", "internal/agent/runtime.go"), declaration_kind: "function" },
+  ], new Map([["caller-only", "formatAgentModel provider model identifier"]]));
+  assert.equal(callerOnly.rank("formatAgentModel", 1)[0]?.node.id, "caller-only",
+    "identifiers found only in a declaration body must still surface that declaration");
+});
+
+test("task retrieval favors core business terms over generic test and API names, with bilingual plural matching", () => {
+  const conversations = [
+    { ...symbol("target", "start_multiple_conversations", "scheduler/conversation_scheduler.py"), declaration_kind: "function" },
+    { ...symbol("test-a", "test_run_conversation_calls_start_and_end", "tests/test_conversation_scheduler.py"), declaration_kind: "function" },
+    { ...symbol("test-b", "test_start_conversation_stores_chat_session_id", "tests/test_gui_h5_channel_adapter.py"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(conversations, "如何启动多组并发对话", 3)[0]!.node.id, "target");
+  const simulation = [
+    { ...symbol("target", "start_simulation", "service/http_server.py"), declaration_kind: "function" },
+    { ...symbol("get-api", "api_get_simulation_task", "service/eval_platform_server.py"), declaration_kind: "function" },
+    { ...symbol("api", "api_start_sql_task", "service/sql_task_server.py"), declaration_kind: "function" },
+    { ...symbol("test", "test_start_simulation_task_api", "tests/test_simulation_api.py"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(simulation, "启动仿真任务的 HTTP 接口", 4)[0]!.node.id, "target");
+  assert.equal(rankCodeSymbols(simulation, "test simulation API", 3)[0]!.node.id, "test");
+  const execution = [
+    { ...symbol("target", "run_task", "service/http_server.py"), declaration_kind: "function" },
+    { ...symbol("distractor", "create_simulation_task", "service/eval_platform_core.py"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(execution, "execute a queued simulation task", 2)[0]!.node.id, "target");
+});
+
+test("Codebase symbol search preserves identifier fragments and context expansion adds graph neighbours", () => {
+  const nodes = [
+    symbol("caller", "buildRepositoryIndex", "src/build.ts"),
+    symbol("target", "ensureRepository", "src/repository.ts"),
+    symbol("other", "networkRequest", "src/network.ts"),
+  ];
+  const fragment = rankCodeSymbols(nodes, "ensureRepo", 5);
+  assert.equal(fragment[0]!.node.id, "target");
+  assert(rankCodeSymbols(nodes, "re", 5).some(item => item.node.id === "target"));
+  const result = codeContextCandidates({ nodes, edges: [{ id: "e", kind: "calls", from_node_id: "caller", to_node_id: "target" }] }, "repository", 3);
+  const selected = result.symbols as JsonObject[];
+  assert(selected.some(item => item.id === "caller" || item.id === "target"));
+  assert((result.repo_map as JsonObject).edges instanceof Array);
+  assert.equal(result.candidate_only, true);
+  const preindexed = codeContextCandidates({ nodes, edges: [{ id: "e", kind: "calls", from_node_id: "caller", to_node_id: "target" }] },
+    "repository", 3, new CodeSymbolSearchIndex(nodes));
+  assert.deepEqual(preindexed, result);
+});
+
+test("Codebase context retrieval handles file-only graphs and validates result bounds", () => {
+  const files = [{ id: "f", kind: "file", name: "main", path: "main.py", language: "python" }];
+  assert.deepEqual((codeContextCandidates({ nodes: files, edges: [] }, "missing", 1).symbols as unknown[]), []);
+  assert.deepEqual((codeContextCandidates({ nodes: files }, "代码", 1).query_aliases as string[]), ["code", "codebase"]);
+  const duplicateIds = [symbol("same", "session", "a.ts"), symbol("same", "target", "b.ts"), { name: "missing-id" }];
+  assert.equal(rankCodeSymbols(duplicateIds, "session", 5).length, 1);
+  const missingName = rankCodeSymbols([{ id: "missing-name", kind: "symbol", path: "src/session.ts", language: "typescript" }], "session", 1);
+  assert.equal(missingName[0]!.node.id, "missing-name");
+  assert.deepEqual(rankCodeSymbols([{ id: "missing-name", kind: "symbol", path: "src/session.ts", language: "typescript" }], "se", 1), []);
+  const tied = rankCodeSymbols([symbol("z", "session", "same.ts"), symbol("a", "session", "same.ts")], "session", 2);
+  assert.deepEqual(tied.map(item => item.node.id), ["a", "z"]);
+  assert.equal(rankCodeSymbols([symbol("short", "x", "x.ts")], "x", 1)[0]!.node.id, "short");
+  assert.throws(() => codeContextCandidates({ nodes: files, edges: [] }, "query", 0), /between 1 and 1000/u);
+});
+
+test("Codebase ranking tolerates partial adapter metadata and orders equal-score relations stably", () => {
+  const partialNodes = [
+    { name: "search", path: "missing-id.ts" },
+    { id: "duplicate", name: "search", path: "first.ts" },
+    { id: "duplicate", name: "search", path: "second.ts" },
+    { id: "nameless", path: "search.ts", kind: "symbol" },
+    { id: "pathless", name: "searchName", language: "ts" },
+  ] as JsonObject[];
+  const partial = rankCodeSymbols(partialNodes, "search", 10);
+  assert(partial.some(item => item.node.id === "nameless"));
+  assert(partial.some(item => item.node.id === "pathless"));
+  assert.equal(partial.filter(item => item.node.id === "duplicate").length, 1);
+
+  const nodes = [
+    symbol("seed-low", "searchHelper", "src/seed-low.ts"),
+    symbol("seed-high", "search", "src/seed-high.ts"),
+    symbol("neighbor-b", "unmatchedB", "same.ts"),
+    symbol("neighbor-a", "unmatchedA", "same.ts"),
+  ];
+  const edges = [
+    { from_node_id: "seed-low", to_node_id: "neighbor-a" },
+    { from_node_id: "seed-high", to_node_id: "neighbor-a" },
+    { from_node_id: "seed-high", to_node_id: "neighbor-b" },
+  ];
+  const result = codeContextCandidates({ nodes, edges }, "search", 4);
+  const selected = result.symbols as JsonObject[];
+  assert(selected.some(item => item.id === "neighbor-a" && item.selection_reason === "dependency_neighbour"));
+  assert(selected.some(item => item.id === "neighbor-b" && item.selection_reason === "dependency_neighbour"));
+});
+
+test("Codebase retrieval evaluation measures MRR and Recall@3 on a fixed bilingual query set", () => {
+  const corpus = [
+    symbol("login", "loginUser", "src/auth/login.ts"),
+    symbol("session", "refreshUserSession", "src/auth/session.ts"),
+    symbol("policy", "checkAccessPolicy", "src/access/policy.ts"),
+    symbol("receipt", "resolveContextReceipt", "src/context/receipt.ts"),
+    symbol("cache", "invalidateCache", "src/cache/invalidate.ts"),
+    symbol("incremental", "planPythonIncremental", "src/python-incremental.ts"),
+    symbol("analyzer", "analyzeTypeScript", "src/typescript-analysis.ts"),
+  ];
+  const cases = [
+    { query: "用户登录", relevant: "login" },
+    { query: "权限策略", relevant: "policy" },
+    { query: "context receipt", relevant: "receipt" },
+    { query: "cache invalidation", relevant: "cache" },
+    { query: "Python 仓库增量重建怎么规划", relevant: "incremental" },
+    { query: "TypeScript 语义检查器如何分析", relevant: "analyzer" },
+  ];
+  const ranks = cases.map(testCase => rankCodeSymbols(corpus, testCase.query, 5).findIndex(hit => hit.node.id === testCase.relevant) + 1);
+  const mrr = ranks.reduce((sum, rank) => sum + (rank ? 1 / rank : 0), 0) / ranks.length;
+  const recallAt3 = ranks.filter(rank => rank > 0 && rank <= 3).length / ranks.length;
+  assert.equal(mrr, 1);
+  assert.equal(recallAt3, 1);
+});
+
+test("LSP symbol kinds normalize valid declarations and reject missing or unsupported values", () => {
+  assert.equal(lspDeclarationKind(12), "function");
+  assert.equal(lspDeclarationKind(5), "class");
+  assert.equal(lspDeclarationKind(0), undefined);
+  assert.equal(lspDeclarationKind(27), undefined);
+  assert.equal(lspDeclarationKind("12"), undefined);
+});
+
+test("Codebase usage weight boosts or demotes an otherwise equal symbol", () => {
+  const nodes = [symbol("a", "session", "src/a.ts"), symbol("b", "session", "src/b.ts")];
+  const plain = new CodeSymbolSearchIndex(nodes);
+  assert.deepEqual(plain.rank("session", 2).map(item => item.node.id), ["a", "b"]);
+  const boosted = new CodeSymbolSearchIndex(nodes, undefined, undefined, new Map([["b", 2]]));
+  assert.equal(boosted.rank("session", 2)[0]!.node.id, "b");
+  assert.equal(boosted.rank("session", 2)[0]!.usage_boost, 2 * CODE_USAGE_BOOST);
+  const demoted = new CodeSymbolSearchIndex(nodes, undefined, undefined, new Map([["a", -2]]));
+  assert.equal(demoted.rank("session", 2)[0]!.node.id, "b");
+  assert.equal(demoted.rank("session", 2)[1]!.usage_boost, -2 * CODE_USAGE_BOOST);
+});
+
+test("Codebase prefers the language a query names without demoting any other symbol", () => {
+  // Identical names and equally unrelated paths, so only the language differs and
+  // the neutral query falls through to the path tie-break.
+  const nodes = [
+    { id: "ts", kind: "symbol", name: "build_python_data_flow", path: "src/a_analysis.ts", language: "typescript-javascript" },
+    { id: "py", kind: "symbol", name: "build_python_data_flow", path: "src/z_analysis.py", language: "python" },
+  ];
+  assert.deepEqual(rankCodeSymbols(nodes, "data flow", 2).map(item => item.node.id), ["ts", "py"], "no language word leaves the order alone");
+  assert.equal(rankCodeSymbols(nodes, "python data flow", 2)[0]!.node.id, "py");
+  assert.equal(rankCodeSymbols(nodes, "TypeScript data flow", 2)[0]!.node.id, "ts");
+  assert.equal(rankCodeSymbols(nodes, "ts data flow", 2)[0]!.node.id, "ts", "the short alias selects the same language");
+  // The prior never demotes: a language match elsewhere cannot displace a symbol
+  // the query actually names.
+  const named = [
+    { id: "exact", kind: "symbol", name: "pythonDataFlowBuilder", path: "src/b_exact.ts", language: "typescript-javascript" },
+    { id: "other", kind: "symbol", name: "unrelated", path: "src/a_other.py", language: "python" },
+  ];
+  assert.equal(rankCodeSymbols(named, "pythonDataFlowBuilder", 2)[0]!.node.id, "exact");
+  assert.equal(rankCodeSymbols(named, "pythonDataFlowBuilder python", 2)[0]!.node.id, "exact");
+  // A symbol with no language simply never matches the query's language.
+  assert.ok(rankCodeSymbols([{ id: "none", kind: "symbol", name: "pythonDataFlowBuilder", path: "src/a_a.ts" }], "python data flow", 1).length === 1);
+});

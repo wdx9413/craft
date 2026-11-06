@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "kind": "local_development_package",
+  "package": "craft-eval",
+  "version": "0.1.4",
+  "created_at": "2026-10-30T16:39:34.019167+00:00",
+  "sha256": "30a7dcd33cee45fe8254df6525f6e2b5106bac2aefbf1fd5d8d732b13ea2dbc7",
+  "source_repository": "craft-eval",
+  "source_git_head": "960da50a22d85eea9d50a6cddc53cac21a2ab3a2",
+  "source_has_uncommitted_changes": true,
+  "source_manifest": {
+    "package.json": "592002e0653ca2decd5969216b38041f047f16c9178d6050df8b94232bd1f00c",
+    "package-lock.json": "4a92e0d469047288ba30ca73af1e494f5b99014771e7c713df59060a8e39fc23",
+    "tsconfig.json": "87862fe760fbbc0557a226bb4cfd140e929019816a532d9b936addc94cb8631f",
+    "src/attribution.ts": "6b27ec5c7021104288020e990d17d7322fb6a9ceb5df03e83e17ca946a9581d6",
+    "src/audit.ts": "a4d5d561679002cc96bcdbd457d3d4f5790d1a3a0eb78518ab473959c01503fd",
+    "src/calibration.ts": "9324ee61d71552872dd3a2b2ac294efcfebc433f9683619eacf04bdcefd9ee60",
+    "src/cli.ts": "7f3f3b9fb8dbea78d4791d6202ea70f3c2ac97541f236632d2bb7c70e850dd44",
+    "src/command-guardian-entry.ts": "bb325dd8f0bf08f2fc931c9bbd503e90802fa18176fcebac10afd7761d2b04a7",
+    "src/command-guardian.ts": "209f2d33ce187c6e2e0d2734be1186967733473a7400f7fa63641d511f8bdd17",
+    "src/command-process.ts": "c4475b264dc28a267e3ec9008224c2efd125527803d67f7e10465d740a1ba837",
+    "src/contract.ts": "900a1cd038503e11a6b4467cfd3a8019dcf7239a15986f9b41f3bb2439600ee1",
+    "src/evaluation.ts": "3cbce04f69b7f226a2df2ac787f4c878a231c01ffddb46bd076d1144c40a57c3",
+    "src/experiment.ts": "a62c43b42feb23414a9402779bdfcb1599022ead5f4803cd1be3f442c1863939",
+    "src/http-mock.ts": "03862f7caa5a422bf43133740a5756f71851b585a3858d48a66ed5de7bea7712",
+    "src/index.ts": "7ba6bbf28e20a120937ae51766ef0710bfa5d09bd391c67bce179eb498883111",
+    "src/mcp-mock.ts": "45f6d90a077a675d9ad653123dc63c485eba826846f85994a72aaa4d6914ffe9",
+    "src/mutation.ts": "bb55a799007ff3cecf09526754ff6300c3dbe173cfcb5abb74f113674e457746",
+    "src/report-html.ts": "b46efcc83442571a200c0e498f2d064a1fad3511aa6a7281cf9a46d7248878e1",
+    "src/scenario.ts": "f85c58715f7f072a04a1c9f61537427054f3049e2ef4366a5a112c67c4dd6146",
+    "src/statistics.ts": "ac32d3e2ee0e1463fe23686e8e4d26afae66a78200b202ea4a88f9abedc35481",
+    "src/task-context.ts": "e6466df24734d9920ba2dc96aed1356b619b6e6d099999f6db939e5b90b017fd"
+  },
+  "compiled_sha256": {
+    "evaluation.js": "475b290325ad6a5a3cfaddbbfb0f9c4df6888aaf211cfed34ec466651619347a",
+    "command-process.js": "b14c561a72e751c6e2eda524da9411aade1cc9630aaff3b413b6f2f4f1d0763b",
+    "command-guardian.js": "c05ecde5e1d84d14d96944be110dbe84419e96d9276a850c5c52df9a9a748a6c",
+    "command-guardian-entry.js": "2b6ce56e818f457fde8476c6eeb69d48873504994898f4b439cc09f965b4d75f"
+  },
+  "registry_published": false,
+  "release_attestation": false
+}

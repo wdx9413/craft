@@ -1,0 +1,25 @@
+{
+  "name": "craft-dsh-plugin-host",
+  "version": "0.12.131",
+  "private": true,
+  "type": "module",
+  "description": "Cordis host bridge exposing DSH tool plugins to Craft over JSON-RPC stdio.",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "dsh-resolve-hook.mjs",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "*"
+  }
+}

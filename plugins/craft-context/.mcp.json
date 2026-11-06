@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "craft-context": {
+      "command": "node",
+      "args": [
+        "dist/plugin/craft-mcp.cjs",
+        "--product",
+        "context"
+      ],
+      "cwd": ".",
+      "env": {
+        "CRAFT_LEARNING_MODEL_HOST": "codex-cli"
+      }
+    }
+  }
+}

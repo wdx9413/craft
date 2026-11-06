@@ -1,0 +1,16 @@
+packages:
+  - adapters/deepseek-harness
+  - adapters/dsh-plugin-host
+  - common/craft-common-store-local
+  - common/craft-common-base
+  - common/craft-common-log
+  - capability/craft-knowledge
+  - capability/craft-memory
+  - capability/craft-experience
+  - capability/craft-codebase
+autoInstallPeers: false
+# Internal packages are built here and bundled into the distributable runtime.
+linkWorkspacePackages: true
+allowBuilds:
+  esbuild: true
+  tesseract.js: false

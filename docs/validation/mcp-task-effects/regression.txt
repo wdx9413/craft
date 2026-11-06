@@ -1,0 +1,45 @@
+(node:56674) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56674) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ packaged Knowledge task-effect routes return domain errors rather than module-loading failures (1175.772583ms)
+✔ bundled Knowledge routes prepare bounded context and re-read real controlled reports without granting software runs admission (1184.600416ms)
+✔ evaluation validation and shutdown refuse unsafe reservations before execution (15.503125ms)
+✔ a fresh manager observes unresolved records without overwriting another owner's state (9.531375ms)
+✔ terminal persistence failure never reports success or creates an unhandled rejection (174.98175ms)
+(node:56675) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56675) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ worker SIGKILL becomes unknown and an identical controlled operation never replays (499.441542ms)
+✔ Craft IPC disconnect aborts the worker, reaps commands and exits without an IPC error (305.260583ms)
+(node:56676) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ installed evaluation package executes in a worker and returns progress (599.121583ms)
+✔ installed evaluation worker completes when an adapter leaves inherited output pipes open (307.456333ms)
+(node:56677) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56677) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ task contracts require bounded deterministic outcomes and safety assertions (2.324958ms)
+✔ Knowledge authority requires exact adjudicated tasks and a controlled positive paired effect (704.33275ms)
+(node:56678) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56678) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ controlled worker preserves context input receipts from the installed evaluator package (462.240833ms)
+✔ evaluation API authenticates, freezes inputs, deduplicates, reports and cancels real workers (623.998208ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3167.652375
+ℹ start of coverage report
+ℹ --------------------------------------------------------------------------
+ℹ file                      | line % | branch % | funcs % | uncovered lines
+ℹ --------------------------------------------------------------------------
+ℹ core                      |        |          |         | 
+ℹ  workbench-evaluations.ts | 100.00 |    89.62 |  100.00 | 
+ℹ --------------------------------------------------------------------------
+ℹ all files                 | 100.00 |    89.62 |  100.00 | 
+ℹ --------------------------------------------------------------------------
+ℹ end of coverage report
