@@ -1,6 +1,6 @@
 # Craft 本地 npm 制品仓库规范
 
-状态：Craft-Eval `0.2.0`、Craft `0.15.0` 及其公共基础包和能力包 `0.15.0` 已发布到本机私服；Workbench `0.14.0` 已切换到固定依赖 Craft `0.15.0` 并从私服安装验证。本轮源码改动尚未推送远端。Context 回执审计已接入 Craft Workbench API 与页面。Tauri 桌面打包与跨机器／CI 安装仍需另行验收。本规范适用于三个独立仓库：`craft-eval`、`craft`、`craft-workbench`。
+状态（2026-11-07）：Craft-Eval `0.3.0`、Craft `0.16.0` 及其公共基础包和能力包 `0.16.0` 已发布到本机私服；Workbench `0.15.0` 已固定依赖 Craft `0.16.0`，从私服安装并通过本地运行时协议与 HTTP 集成评测。三个仓库的对应提交仍需推送远端 main。Tauri 桌面打包与跨机器／CI 安装仍需另行验收。本规范适用于三个独立仓库：`craft-eval`、`craft`、`craft-workbench`。
 
 ## 目标与边界
 
