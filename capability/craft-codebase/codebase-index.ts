@@ -119,6 +119,60 @@ export function relationAnalysisSummary(analyzer: string, diagnostics: unknown, 
     partial_reasons: [...partialReasons].sort(), ...(status === "not_analyzed" ? { next_action: "build_semantic_index" } : {}) };
 }
 
+/**
+ * Compact, content-free relation health for a workbench/agent view.
+ *
+ * `relation_analysis` answers "did the analyzer run and is it complete"; this
+ * answers "what exactly is missing and why". External references are reported
+ * separately from internal gaps so a large number does not automatically read
+ * as a defect: a checkpoint analysis cannot load a standard library.
+ */
+export function relationDiagnosticsSummary(diagnostics: unknown): JsonObject {
+  const records: Array<{ analyzer?: string; record: JsonObject }> = [];
+  const collect = (value: unknown, analyzer?: string): void => {
+    if (Array.isArray(value)) { for (const item of value) collect(item, analyzer); return; }
+    if (!value || typeof value !== "object") return;
+    const record = value as JsonObject;
+    records.push({ ...(analyzer ? { analyzer } : {}), record });
+    const label = typeof record.analyzer === "string" ? record.analyzer : analyzer;
+    collect(record.diagnostics, label); collect(record.languages, label);
+  };
+  collect(diagnostics);
+  const number = (record: JsonObject, key: string): number => typeof record[key] === "number" ? Number(record[key]) : 0;
+  const sum = (key: string): number => records.reduce((total, entry) => total + number(entry.record, key), 0);
+  const samples = (key: string): string[] => {
+    for (const entry of records) {
+      const value = entry.record[key];
+      if (Array.isArray(value) && value.length) return value.filter((item): item is string => typeof item === "string").slice(0, 20);
+    }
+    return [];
+  };
+  const degraded: JsonObject[] = [];
+  for (const entry of records) {
+    const value = entry.record.degraded_languages;
+    if (!Array.isArray(value)) continue;
+    for (const item of value) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const entryRecord = item as JsonObject;
+      degraded.push({ language: String(entryRecord.language ?? "unknown"), reason: String(entryRecord.reason ?? "unknown"),
+        ...(entryRecord.detail === undefined ? {} : { detail: String(entryRecord.detail) }) });
+    }
+  }
+  return {
+    unresolved_relations: sum("unresolved_relations"),
+    unresolved_type_references: sum("unresolved_type_references"), unresolved_heritage: sum("unresolved_heritage"),
+    unresolved_imports: sum("unresolved_imports"), unresolved_calls: sum("unresolved_calls"),
+    external_references: sum("external_references"), local_type_parameters: sum("local_type_parameters"),
+    computed_invocations: sum("computed_invocations"), inline_invocations: sum("inline_invocations"),
+    omitted_nodes: sum("omitted_nodes"), omitted_edges: sum("omitted_edges"),
+    budget_limited: records.some((entry) => entry.record.budget_limited === true),
+    unresolved_call_samples: samples("unresolved_call_samples"),
+    unresolved_type_reference_samples: samples("unresolved_type_reference_samples"),
+    degraded_languages: degraded.sort((left, right) => `${left.language}:${left.reason}`.localeCompare(`${right.language}:${right.reason}`)),
+    analyzers: [...new Set(records.map((entry) => entry.analyzer).filter((value): value is string => typeof value === "string"))].sort(),
+  };
+}
+
 function digest(content: string): string { return createHash("sha256").update(content).digest("hex"); }
 
 function safeChild(root: string, path: string): string {
@@ -220,11 +274,17 @@ export class CodebaseIndexKernel {
     const ordered = indexes.sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
     const readiness = activation?.status !== "active" ? "disabled" : ordered.length === 0 ? "index_required" : ordered[0]!.status === "ready" ? "ready" : "rebuild_required";
     const recent = ordered.slice(0, 25);
-    return { workspace_id: workspaceId, enabled: activation?.status === "active", activation, analyzer: ordered[0]?.analyzer ?? "typescript-checker", readiness,
-      indexes: recent.map(index => ({ id: index.id, workspace_id: index.workspace_id, checkpoint_id: index.checkpoint_id, status: index.status,
+    const base = { workspace_id: workspaceId, enabled: activation?.status === "active", activation, analyzer: ordered[0]?.analyzer ?? "typescript-checker", readiness,
+      indexes: recent.map((index) => ({ id: index.id, workspace_id: index.workspace_id, checkpoint_id: index.checkpoint_id, status: index.status,
         analyzer: index.analyzer, analyzer_version: index.analyzer_version, created_at: index.created_at, node_count: index.node_count,
         edge_count: index.edge_count, graph_storage: index.graph_storage, graph_digest: index.graph_digest,
-        relation_analysis: index.relation_analysis, stale_reason: index.stale_reason })), omitted_index_count: Math.max(0, ordered.length - recent.length) };
+        relation_analysis: index.relation_analysis,
+        stale_reason: index.stale_reason })), omitted_index_count: Math.max(0, ordered.length - recent.length) };
+    // Relation health belongs to the newest index only. Attaching the full
+    // breakdown to all 25 recent rows would break the bounded status payload,
+    // which is an explicit contract of this endpoint.
+    const newest = ordered[0];
+    return { ...base, relation_diagnostics: newest ? relationDiagnosticsSummary(newest.diagnostics) : {} };
   }
 
   build(args: JsonObject): JsonObject {

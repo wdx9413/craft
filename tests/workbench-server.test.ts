@@ -1259,3 +1259,14 @@ test("Workbench polls a local drop source into the inbox over HTTP (0 Token, asy
     assert.equal((JSON.parse(again.body).reports as Array<{ ingested: number }>)[0].ingested, 0);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test("Workbench exposes codebase relation health over HTTP and validates the workspace", async () => {
+  const f = await fixture();
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  // Token gate applies exactly like every other /api route.
+  assert.equal(app.handle({ method: "GET", path: "/api/workbench/codebase/status" }).status, 401);
+  // A missing workspace id is a client error, not an empty success.
+  assert.equal(app.handle({ method: "GET", path: "/api/workbench/codebase/status", token: "secret" }).status, 422);
+  // An unknown workspace is reported rather than silently returning zero counts.
+  assert.equal(app.handle({ method: "GET", path: "/api/workbench/codebase/status?workspace_id=missing", token: "secret" }).status, 422);
+});

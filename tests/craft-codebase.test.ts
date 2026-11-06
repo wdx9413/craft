@@ -142,6 +142,9 @@ test("craft-codebase is explicit, snapshot-pinned, content-free, and exposes str
     assert.throws(() => f.kernel.build({ workspace_id: f.workspace.id }), /not explicitly active/);
     const activation = active(f); assert.equal(f.kernel.activate({ workspace_id: f.workspace.id, actor: "tester" }).idempotent, true);
     const before = f.kernel.status({ workspace_id: f.workspace.id }); assert.equal(before.enabled, true); assert.equal(before.readiness, "index_required"); assert.equal((before.indexes as JsonObject[]).length, 0);
+    // Health breakdown is top-level (newest index) and absent per row, so the
+    // bounded status payload contract keeps holding with the new field present.
+    assert.deepEqual(before.relation_diagnostics, {});
     const built = f.kernel.build({ workspace_id: f.workspace.id }).index as JsonObject; assert.equal(built.status, "ready"); assert.equal(built.raw_content_stored, false); assert.equal((built.analysis as JsonObject).certainty, "partial"); assert(Number((built.analysis as JsonObject).unsupported_file_count) >= 1); assert.equal(f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: f.checkpoint.id }).idempotent, true);
     assert.equal(f.kernel.status({ workspace_id: f.workspace.id }).readiness, "ready");
     const found = f.kernel.findSymbol({ workspace_id: f.workspace.id, index_id: built.id, query: "TARGET" }); const target = (found.symbols as JsonObject[])[0];
@@ -1730,5 +1733,28 @@ test("explicit analyzer choices preserve the heuristic fallback without acceptin
     assert.equal(f.kernel.build({ workspace_id: f.workspace.id, analyzer: "heuristic", index_id: "explicit-heuristic" }).idempotent, true);
     f.service.workspaceCheckpoint({ workspace_id: f.workspace.id, checkpoint_id: "another-checkpoint", label: "same files new identity" });
     assert.throws(() => f.kernel.build({ workspace_id: f.workspace.id, analyzer: "heuristic", index_id: "explicit-heuristic" }), /idempotency conflict/);
+  } finally { await close(f); }
+});
+
+test("status reports relation health once, at the top level, without inflating rows", async () => {
+  const f = await fixture();
+  try {
+    active(f);
+    const built = f.kernel.build({ workspace_id: f.workspace.id }).index as JsonObject;
+    const status = f.kernel.status({ workspace_id: f.workspace.id });
+    const health = status.relation_diagnostics as JsonObject;
+    assert.ok(health, "a ready index must expose relation health");
+    for (const key of ["unresolved_relations", "external_references", "local_type_parameters",
+      "computed_invocations", "inline_invocations", "unresolved_call_samples", "degraded_languages"]) {
+      assert(key in health, `relation health is missing ${key}`);
+    }
+    assert.equal(typeof health.unresolved_relations, "number");
+    assert(Array.isArray(health.unresolved_call_samples));
+    assert(Array.isArray(health.degraded_languages));
+    // Rows stay content-free and small: the breakdown is not repeated per index.
+    const row = (status.indexes as JsonObject[]).find((item) => item.id === built.id)!;
+    assert.equal("relation_diagnostics" in row, false);
+    assert("relation_analysis" in row, "the completeness verdict still travels with each row");
+    assert(JSON.stringify(status).length < 10_000, "the bounded status payload contract holds");
   } finally { await close(f); }
 });

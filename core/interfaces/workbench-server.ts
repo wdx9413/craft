@@ -168,6 +168,11 @@ export class WorkbenchWebApp {
         task_id: queryValue(url, "task_id") ?? "" }));
       if (request.method === "GET" && path === "/api/project-brain") return json(200, this.service.projectBrainGet({ project_id: queryValue(url, "project_id") || "local", limit: queryValue(url, "limit") }));
       if (request.method === "GET" && path === "/api/workspaces") return json(200, this.service.workspaceList({}));
+      // Relation health for one indexed workspace: node/edge counts plus the
+      // external-vs-internal diagnostic breakdown the workbench renders.
+      if (request.method === "GET" && path === "/api/workbench/codebase/status") {
+        return json(200, this.service.codebaseStatus({ workspace_id: text(queryValue(url, "workspace_id"), "workspace_id") }));
+      }
       if (request.method === "POST" && path === "/api/workspaces/resolve-or-create") return json(200, this.service.workspaceResolveOrCreate(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/workspaces/backfill") return json(200, this.service.workspaceBackfill(bodyObject(request.body)));
       if (request.method === "GET" && path.startsWith("/api/workspaces/") && path.endsWith("/tasks")) return json(200, this.service.workspaceTasks({ workspace_id: decodeURIComponent(path.slice(16, -6)) }));
