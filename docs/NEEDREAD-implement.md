@@ -79,7 +79,7 @@ node --check workbench/app.js; node --check workbench/mod-pages.js; node --check
 | 评测面 | 当前结果 | 说明 |
 | --- | --- | --- |
 | memory / knowledge / workflow / datasec | 5 / 5 / 4 / 2 全过 | datasec 原为装配错误（默认规则刻意关闭凭据规则，用例却期望脱敏），已改为全规则集 |
-| self_evolution | 10 / 10 全过 | 新增轴：影子门禁不可绕过、回归非恒真、候选可观测、坏源隔离、同内容不同文件都入库、目录语义用过才存与常用才转正、项目名解析、合并图不丢跨文件 calls、选择器收纳大声明文件 |
+| self_evolution | 11 / 11 全过 | 影子门禁不可绕过、回归非恒真、候选可观测、坏源隔离、同内容不同文件都入库、目录语义用过才存与常用才转正、项目名解析、合并图不丢跨文件 calls、选择器收纳大声明文件、shell/PowerShell 定义与调用边 |
 | end_to_end / governance | INCL（无 `WORKBUDDY_API_KEY`） | 缺凭据是环境缺口，如实记 inconclusive，不再整体崩溃 |
 | eval:codebase-retrieval | `evaluation_pass=true` | MRR 0.917、recall@5 1.0、调用图与影响分析 precision/recall 全 1.0 |
 

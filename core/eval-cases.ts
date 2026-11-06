@@ -338,6 +338,13 @@ const SELF_EVOLUTION_CASES: GradedCase[] = [
     }),
     check: { kind: "equals", expected: "resolved" },
   },
+  {
+    case: defineEvalCase({
+      id: "self_evolution.shell_language_has_symbols_and_calls", axis: "self_evolution", evidence: "kernel", partition: "held_out", sanitized: true, approved_by: SUITE_REVIEWER,
+      description: "Shell and PowerShell files are analysed by a deterministic built-in analyser: definitions, source/Import-Module edges and resolved calls, without running the script.",
+    }),
+    check: { kind: "equals", expected: "indexed" },
+  },
 ];
 
 /** Every graded case, in a stable order. */

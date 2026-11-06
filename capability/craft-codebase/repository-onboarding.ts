@@ -2,6 +2,7 @@ import type { CraftStore, JsonObject } from "../../common/craft-common-store-loc
 import { payload, stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import { repositoryFiles, repositoryPolicyDigest, repositoryPolicySnapshot, repositoryPolicySnapshotCurrent, repositoryRoot } from "./repository-files.ts";
 import { basicAnalysis } from "./basic-analysis.ts";
+import { analyzeShell } from "./shell-analysis.ts";
 import { analyzeTypeScript, TYPESCRIPT_ANALYZER_VERSION, type TypeScriptFileUnit } from "./typescript-analysis.ts";
 import { planTypeScriptIncremental } from "./typescript-incremental.ts";
 import { planPythonIncremental, type PythonFileUnit } from "./python-incremental.ts";
@@ -289,6 +290,18 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
         } else degraded.push({ language: adapter.language, status: "unavailable", ...failure });
       }
       if (languageFiles.length > bounded.length) degraded.push({ language: adapter.language, status: "partial", reason: "document_limit", omitted_documents: languageFiles.length - bounded.length });
+    }
+    // Shell and PowerShell get a deterministic built-in analyzer instead of a
+    // language server: definitions plus source/Import-Module and call edges.
+    const shellFiles = adapterlessFiles.filter(file => ["sh", "bash", "ps1", "psm1"].includes(file.language));
+    if (shellFiles.length) {
+      try {
+        semanticAnalyses.push(analyzeShell(shellFiles));
+        shellFiles.forEach(file => adaptedPaths.add(file.path));
+      } catch (error) {
+        degraded.push({ language: "shell", status: "unavailable", reason: "analysis_failed",
+          detail: error instanceof Error ? error.message : String(error) });
+      }
     }
     for (const language of [...new Set(adapterlessFiles.filter(file => !adaptedPaths.has(file.path)).map(file => file.language))].sort()) {
       if (language === "go" && !configuredLanguages.has("go")) continue;

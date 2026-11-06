@@ -25,6 +25,7 @@ import { combineLanguageAnalyses } from "../../capability/craft-codebase/multi-l
 import { GRAPH_BUDGET } from "../../capability/craft-codebase/graph-budget.ts";
 import { REPOSITORY_SELECTION_LIMITS } from "../../capability/craft-codebase/repository-files.ts";
 import { analyzeTypeScript } from "../../capability/craft-codebase/typescript-analysis.ts";
+import { analyzeShell } from "../../capability/craft-codebase/shell-analysis.ts";
 import { evaluateVerificationCheck } from "../../core/verification-sensor.ts";
 import { pinConstraints, verifyPinIntact } from "../../core/governance-pinning.ts";
 import { ask, EVAL_MODEL, evaluationCredentialMissing } from "./model.ts";
@@ -672,6 +673,25 @@ if (inScope("self_evolution.codebase_selection_admits_augmented_class")) try {
   equals("self_evolution.codebase_selection_admits_augmented_class",
     admitted && resolved ? "resolved" : `bad:cap=${String(admitted)},edge=${String(resolved)}`, "resolved");
 } catch (error) { unobserved("self_evolution.codebase_selection_admits_augmented_class", (error as Error).message); }
+
+if (inScope("self_evolution.shell_language_has_symbols_and_calls")) try {
+  const hash = (content: string) => createHash("sha256").update(content).digest("hex");
+  const lib = { path: "scripts/lib.sh", content: "deploy() { echo deploy; }\n", digest: hash("deploy() { echo deploy; }\n"), language: "sh", file_version: "1" };
+  const main = { path: "scripts/main.sh", content: "source ./lib.sh\nmain() { deploy; }\nmain\n", digest: hash("source ./lib.sh\nmain() { deploy; }\nmain\n"), language: "sh", file_version: "1" };
+  const ps = { path: "adapters/tool.ps1", content: "function Invoke-Tool { param($x) }\nInvoke-Tool 1\n", digest: hash("function Invoke-Tool { param($x) }\nInvoke-Tool 1\n"), language: "ps1", file_version: "1" };
+  const analysis = analyzeShell([lib, main, ps]);
+  const nodes = analysis.nodes as Json[];
+  const edges = analysis.edges as Json[];
+  const ids = new Set(nodes.map((node) => String(node.id)));
+  const names = new Set(nodes.filter((node) => node.kind === "symbol").map((node) => String(node.name)));
+  const resolvedCalls = edges.filter((edge) => edge.kind === "calls" && ids.has(String(edge.from_node_id)) && ids.has(String(edge.to_node_id)));
+  const imported = edges.some((edge) => edge.kind === "imports");
+  const ok = names.has("deploy") && names.has("main") && names.has("Invoke-Tool")
+    && resolvedCalls.some((edge) => edge.to_node_id === nodes.find((node) => node.name === "deploy")?.id)
+    && imported
+    && edges.every((edge) => ids.has(String(edge.from_node_id)) && ids.has(String(edge.to_node_id)));
+  equals("self_evolution.shell_language_has_symbols_and_calls", ok ? "indexed" : "missing", "indexed");
+} catch (error) { unobserved("self_evolution.shell_language_has_symbols_and_calls", (error as Error).message); }
 
 // ----------------------------------------------------------------- report
 store.close();
