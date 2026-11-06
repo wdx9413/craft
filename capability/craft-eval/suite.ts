@@ -10,6 +10,7 @@
  * pass and never as a failure — and the report says so.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bm25Index, decideExperienceCapture } from "../../core/context-retrieval-capture.ts";
@@ -22,6 +23,8 @@ import { LocalDropAdapter, MessageListener } from "../../core/message-listener.t
 import { FileDirDescRegistry, PROMOTION_USE_THRESHOLD } from "../../core/file-dir-desc.ts";
 import { combineLanguageAnalyses } from "../../capability/craft-codebase/multi-language-analysis.ts";
 import { GRAPH_BUDGET } from "../../capability/craft-codebase/graph-budget.ts";
+import { REPOSITORY_SELECTION_LIMITS } from "../../capability/craft-codebase/repository-files.ts";
+import { analyzeTypeScript } from "../../capability/craft-codebase/typescript-analysis.ts";
 import { evaluateVerificationCheck } from "../../core/verification-sensor.ts";
 import { pinConstraints, verifyPinIntact } from "../../core/governance-pinning.ts";
 import { ask, EVAL_MODEL, evaluationCredentialMissing } from "./model.ts";
@@ -646,6 +649,29 @@ if (inScope("self_evolution.codebase_merge_keeps_cross_file_calls")) try {
   equals("self_evolution.codebase_merge_keeps_cross_file_calls",
     kept && Number(diagnostics.unresolved_endpoint_edges ?? 0) === 0 && budgetShared ? "kept" : "lost", "kept");
 } catch (error) { unobserved("self_evolution.codebase_merge_keeps_cross_file_calls", (error as Error).message); }
+
+if (inScope("self_evolution.codebase_selection_admits_augmented_class")) try {
+  // The declaration-bearing service file is larger than the OLD 512 KiB cap.
+  // If selection drops it, every `declare module` augmentation loses its base
+  // class and all `service.method()` calls become unresolvable.
+  const padding = "// filler to exceed the old 512 KiB per-file cap\n".repeat(16_000);
+  const service = `export class Service {}\n${padding}`;
+  const augmentation = 'declare module "./service.ts" { interface Service { read(a: string): number } }\n';
+  const caller = 'import { Service } from "./service";\nexport function createHandlers(s: Service) { return { r: (a: string) => s.read(a) }; }\n';
+  const sources = [
+    { path: "service.ts", content: service, digest: createHash("sha256").update(service).digest("hex"), language: "typescript" },
+    { path: "augment.ts", content: augmentation, digest: createHash("sha256").update(augmentation).digest("hex"), language: "typescript" },
+    { path: "caller.ts", content: caller, digest: createHash("sha256").update(caller).digest("hex"), language: "typescript" },
+  ];
+  const analysis = analyzeTypeScript(sources);
+  const target = (analysis.nodes as Json[]).find((node) => node.name === "read" && node.path === "augment.ts");
+  const callerNode = (analysis.nodes as Json[]).find((node) => node.name === "createHandlers");
+  const resolved = Boolean(target && callerNode && (analysis.edges as Json[]).some((edge) =>
+    edge.kind === "calls" && edge.from_node_id === callerNode.id && edge.to_node_id === target.id));
+  const admitted = REPOSITORY_SELECTION_LIMITS.maxFileBytes > 512 * 1024;
+  equals("self_evolution.codebase_selection_admits_augmented_class",
+    admitted && resolved ? "resolved" : `bad:cap=${String(admitted)},edge=${String(resolved)}`, "resolved");
+} catch (error) { unobserved("self_evolution.codebase_selection_admits_augmented_class", (error as Error).message); }
 
 // ----------------------------------------------------------------- report
 store.close();

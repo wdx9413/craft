@@ -6,7 +6,9 @@ import { homedir } from "node:os";
 
 export type RepositoryFile = { path: string; digest: string; content: string; language: string; file_version?: string };
 export type RepositoryContextFile = { path: string; digest: string; content: string; file_version?: string };
-export type RepositoryFiles = { root: string; state: "ready" | "disabled" | "not_repository"; files: RepositoryFile[]; context_files: RepositoryContextFile[]; context_files_omitted: number; omitted: number; omitted_by_language: Record<string, number> };
+export type RepositoryFiles = { root: string; state: "ready" | "disabled" | "not_repository"; files: RepositoryFile[]; context_files: RepositoryContextFile[]; context_files_omitted: number; omitted: number; omitted_by_language: Record<string, number>;
+  /** Why files were dropped, so a missing central class cannot silently degrade resolution. */
+  omitted_by_reason: Record<string, number> };
 export type RepositoryGitRunner = (root: string, args: string[], input?: string) => string;
 const LANGUAGE_EXTENSIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   "typescript-javascript": [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
@@ -23,9 +25,21 @@ const LANGUAGE_GROUPS: Readonly<Record<string, string>> = Object.freeze(Object.f
 ));
 const EXTENSIONS = new Set(Object.keys(LANGUAGE_GROUPS));
 const GENERATED = /(^|\/)(?:node_modules|vendor|dist|build|target|\.git|\.craft_data|\.next|venv|\.venv|virtualenv|__pycache__)(\/|$)/u;
-const MAX_FILES = 1200;
-const MAX_FILE_BYTES = 512 * 1024;
-const MAX_TOTAL_BYTES = 12 * 1024 * 1024;
+// Craft's own first-party TypeScript tree is 1111 files / 14.15 MiB with a
+// single 560 KiB outlier (core/application/craft-service.ts). The old 512 KiB
+// per-file cap dropped exactly that file, which declares CraftService itself:
+// every `declare module "../craft-service.ts" { interface CraftService }`
+// augmentation then had no base class, so ~107k relations (including all
+// `service.method()` calls) became unresolvable. The caps stay bounded but must
+// admit the largest first-party source and the whole first-party tree.
+export const REPOSITORY_SELECTION_LIMITS = Object.freeze({
+  maxFiles: 1500,
+  maxFileBytes: 1024 * 1024,
+  maxTotalBytes: 24 * 1024 * 1024,
+});
+const MAX_FILES = REPOSITORY_SELECTION_LIMITS.maxFiles;
+const MAX_FILE_BYTES = REPOSITORY_SELECTION_LIMITS.maxFileBytes;
+const MAX_TOTAL_BYTES = REPOSITORY_SELECTION_LIMITS.maxTotalBytes;
 const GO_CONTEXT_FILES = new Set(["go.mod", "go.sum", "go.work", "go.work.sum"]);
 const MAX_CONTEXT_FILE_BYTES = 512 * 1024;
 const MAX_CONTEXT_TOTAL_BYTES = 1024 * 1024;
@@ -137,7 +151,7 @@ export function repositoryFiles(root: string, _query = "", runGit: RepositoryGit
   if (config.enabled !== undefined && typeof config.enabled !== "boolean") throw new Error("enabled must be boolean");
   const excludes: unknown = config.exclude_paths ?? [];
   if (!Array.isArray(excludes) || excludes.some(p => typeof p !== "string" || !p || isAbsolute(p) || p.includes("\\") || p.split("/").includes(".."))) throw new Error("exclude_paths must contain repository-relative paths");
-  if (config.enabled === false || process.env.CRAFT_CODEBASE_AUTO_INDEX === "0") return { root, state: "disabled", files: [], context_files: [], context_files_omitted: 0, omitted: 0, omitted_by_language: {} };
+  if (config.enabled === false || process.env.CRAFT_CODEBASE_AUTO_INDEX === "0") return { root, state: "disabled", files: [], context_files: [], context_files_omitted: 0, omitted: 0, omitted_by_language: {}, omitted_by_reason: {} };
   const paths = [...new Set(runGit(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean))].sort();
   const symlinkPaths = new Set(paths.filter(path => {
     const extension = extname(path).toLowerCase();
@@ -169,19 +183,21 @@ export function repositoryFiles(root: string, _query = "", runGit: RepositoryGit
   // Keep the bounded source set stable across Hosts and repeated queries.
   const candidates = new Map<string, Array<{ path: string; absolute: string; size: number; extension: string; file_version: string }>>();
   const omitted_by_language: Record<string, number> = {};
-  const omit = (extension: string): void => {
+  const omitted_by_reason: Record<string, number> = {};
+  const omit = (extension: string, reason = "unspecified"): void => {
     const group = LANGUAGE_GROUPS[extension]!;
     omitted_by_language[group] = (omitted_by_language[group] ?? 0) + 1;
+    omitted_by_reason[reason] = (omitted_by_reason[reason] ?? 0) + 1;
   };
   for (const path of paths) {
     const extension = extname(path).toLowerCase();
     if (ignoredPaths.has(path) || !EXTENSIONS.has(extension) || GENERATED.test(path) || excludes.some(p => path === p || path.startsWith(`${String(p).replace(/\/$/u, "")}/`))) continue;
     const absolute = join(root, path);
-    if (!existsSync(absolute)) { if (symlinkPaths.has(path)) omit(extension); continue; }
+    if (!existsSync(absolute)) { if (symlinkPaths.has(path)) omit(extension, "symlink"); continue; }
     const stat = lstatSync(absolute);
     // Reject links, including a symlinked ancestor, before reading source bodies.
-    if (!stat.isFile() || hasSymlinkPath(root, path)) { omit(extension); continue; }
-    if (stat.size > MAX_FILE_BYTES) { omit(extension); continue; }
+    if (!stat.isFile() || hasSymlinkPath(root, path)) { omit(extension, "symlink"); continue; }
+    if (stat.size > MAX_FILE_BYTES) { omit(extension, "too_large"); continue; }
     const group = LANGUAGE_GROUPS[extension]!;
     const queue = candidates.get(group) ?? [];
     queue.push({ path, absolute, size: stat.size, extension, file_version: fileVersion(stat) });
@@ -205,21 +221,27 @@ export function repositoryFiles(root: string, _query = "", runGit: RepositoryGit
       progressed = true;
       const candidate = queue[cursor]!;
       cursors.set(group, cursor + 1);
-      if (bytes + candidate.size > MAX_TOTAL_BYTES) { omit(candidate.extension); continue; }
+      if (bytes + candidate.size > MAX_TOTAL_BYTES) { omit(candidate.extension, "total_budget"); continue; }
       const content = readFileSync(candidate.absolute, "utf8");
-      if (content.includes("\0")) { omit(candidate.extension); continue; }
+      if (content.includes("\0")) { omit(candidate.extension, "binary"); continue; }
       bytes += candidate.size;
       files.push({ path: candidate.path, content, digest: createHash("sha256").update(content).digest("hex"), language: candidate.extension.slice(1), file_version: candidate.file_version });
     }
   }
   for (const [group, queue] of candidates) {
     const remaining = queue.length - cursors.get(group)!;
-    if (remaining > 0) omitted_by_language[group] = (omitted_by_language[group] ?? 0) + remaining;
+    if (remaining > 0) {
+      omitted_by_language[group] = (omitted_by_language[group] ?? 0) + remaining;
+      // Distinguish which limit stopped the selection: a byte budget needs a
+      // different remedy from a file-count budget.
+      const reason = bytes >= MAX_TOTAL_BYTES ? "total_budget" : "file_budget";
+      omitted_by_reason[reason] = (omitted_by_reason[reason] ?? 0) + remaining;
+    }
   }
   // Git paths are unique here; code-unit comparison is locale-independent
   // across Hosts and produces the same checkpoint set on every machine.
   files.sort((left, right) => left.path < right.path ? -1 : 1);
   const omitted = Object.values(omitted_by_language).reduce((sum, count) => sum + count, 0);
   // context files retain the already sorted Git path order from `paths`.
-  return { root, state: "ready", files, context_files, context_files_omitted, omitted, omitted_by_language };
+  return { root, state: "ready", files, context_files, context_files_omitted, omitted, omitted_by_language, omitted_by_reason };
 }

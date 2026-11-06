@@ -71,3 +71,21 @@ node --check workbench/app.js; node --check workbench/mod-pages.js; node --check
 - 桌面启动链路已静态核对：`.tools/start-craft-workbench.ps1` 优先拉起 release 下的 `craft-workbench-desktop.exe`（已构建）、单实例互斥、`-Browser` 才走浏览器降级；`.vbs` 以隐藏窗口调 ps1；桌面 `.lnk` 指向该 exe。真实“双击→应用窗口→宿主 CLI 实跑”的最终人工冒烟仍未在本轮执行。
 - macOS/Linux 三模式真实跨平台未在本轮冒烟。消息监听已落地本地/挂载云目录适配器（`LocalDropAdapter`，纯工程 0 Token、`message_seen` 持久去重）；真实 POP3/IMAP/WebSocket 网络监听器仍为后续扩展——`ImapAdapter` 已留协议位并在无配置时诚实报错，网络拉取可在其后端接入而不改动监听框架。
 - 完整 `test:ts`（365 文件全量）耗时过长，本轮按风险运行相关模块测试；公共基础能力改动已另跑 typecheck + layering + surfaces + docs + consistency。
+
+## craft-eval 持续评测闭环
+
+每批改动都以 `pnpm eval`（`capability/craft-eval/suite.ts`）作为验收面，评测本身出问题也修：
+
+| 评测面 | 当前结果 | 说明 |
+| --- | --- | --- |
+| memory / knowledge / workflow / datasec | 5 / 5 / 4 / 2 全过 | datasec 原为装配错误（默认规则刻意关闭凭据规则，用例却期望脱敏），已改为全规则集 |
+| self_evolution | 10 / 10 全过 | 新增轴：影子门禁不可绕过、回归非恒真、候选可观测、坏源隔离、同内容不同文件都入库、目录语义用过才存与常用才转正、项目名解析、合并图不丢跨文件 calls、选择器收纳大声明文件 |
+| end_to_end / governance | INCL（无 `WORKBUDDY_API_KEY`） | 缺凭据是环境缺口，如实记 inconclusive，不再整体崩溃 |
+| eval:codebase-retrieval | `evaluation_pass=true` | MRR 0.917、recall@5 1.0、调用图与影响分析 precision/recall 全 1.0 |
+
+评测驱动的两次真实定位（先失败、再改代码，而不是改门槛）：
+
+1. `self_evolution.dir_desc_records_real_use` 首次 FAIL，暴露领航按「项目名」说话时 Coordinator 只匹配文件夹 basename 的缺口，于是新增项目名证据层级。
+2. `eval:codebase-retrieval` 三条 golden callers 长期缺失。逐层探针（analyzer → file-unit 合并 → 隔离端到端导入）证明分析与查询都正确，最终定位到 `repository-files.ts` 的 512 KiB 单文件上限丢弃了 `core/application/craft-service.ts`（560 KiB，声明 `CraftService` 本体），导致所有 `declare module` 增强失去基类、约 10.7 万条关系不可解析。修复：单文件上限 1 MiB、总量 24 MiB、文件数 1500，`omitted_by_reason` 记录遗漏原因，索引策略版本升到 14 使旧缓存失效。
+
+`capability/craft-codebase/graph-budget.ts` 是图预算的唯一来源（analyzer / importer / storage / 多语言 combiner 共用），此前四套各自为政曾静默截断跨文件关系边。

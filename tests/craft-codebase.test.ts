@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { codebaseCapability, CODEBASE_KERNELS } from "../capability/craft-codebase/capability.ts";
 import { CodebaseIndexKernel, contentAddressedShardIds, relationAnalysisSummary, controlFlowFallback, dataFlowFallback } from "../capability/craft-codebase/codebase-index.ts";
+import { GRAPH_BUDGET } from "../capability/craft-codebase/graph-budget.ts";
 import { queryCheckpointCallers, queryCheckpointDiagnostics } from "../capability/craft-codebase/lsp-diagnostics-query.ts";
 import { CODEBASE_OWNS } from "../capability/craft-codebase/ownership.ts";
 import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
@@ -244,14 +245,14 @@ test("analysis imports reject malformed and over-budget graph facts before publi
     };
 
     rejects("bad-format", analysis({ format: "other" }), /Unsupported analysis format/u);
-    rejects("oversized-bytes", analysis({ padding: "x".repeat(64 * 1024 * 1024) }), /64 MiB budget/u);
+    rejects("oversized-bytes", analysis({ padding: "x".repeat(GRAPH_BUDGET.maxImportBytes) }), /import graph byte budget/u);
     rejects("long-analyzer", analysis({ analyzer: "a".repeat(101) }), /Analyzer identity exceeds budget/u);
     rejects("long-analyzer-version", analysis({ analyzer_version: "v".repeat(101) }), /Analyzer identity exceeds budget/u);
     rejects("missing-nodes", analysis({ nodes: undefined }), /nodes\/edges exceed budget/u);
     rejects("empty-nodes", analysis({ nodes: [] }), /nodes\/edges exceed budget/u);
-    rejects("over-budget-nodes", analysis({ nodes: Array.from({ length: 60_001 }, () => ({})) }), /nodes\/edges exceed budget/u);
+    rejects("over-budget-nodes", analysis({ nodes: Array.from({ length: GRAPH_BUDGET.maxNodes + 1 }, () => ({})) }), /nodes\/edges exceed budget/u);
     rejects("missing-edges", analysis({ edges: undefined }), /nodes\/edges exceed budget/u);
-    rejects("over-budget-edges", analysis({ edges: Array.from({ length: 300_001 }, () => ({})) }), /nodes\/edges exceed budget/u);
+    rejects("over-budget-edges", analysis({ edges: Array.from({ length: GRAPH_BUDGET.maxEdges + 1 }, () => ({})) }), /nodes\/edges exceed budget/u);
     rejects("outside-path", analysis({ nodes: [node({ path: "src/missing.ts" })] }), /outside checkpoint/u);
     rejects("invalid-span", analysis({ nodes: [node({ span: { start_offset: -1, end_offset: 1 } })] }), /span is outside snapshot/u);
     rejects("wrong-source-digest", analysis({ nodes: [node({ source_digest: "wrong" })] }), /source digest mismatch/u);
@@ -1010,7 +1011,12 @@ test("craft-codebase is reachable only from full MCP and does not widen publishe
     f.store.save("codebase_index", String(relationSummaryIndex.id), { ...relationSummaryIndex,
       analysis: { ...(relationSummaryIndex.analysis as JsonObject), relation_analysis: undefined } });
     const legacyExplored = await full.handlers.craft_codebase_symbol_explore({ workspace_id: f.workspace.id, index_id: relationSummaryIndex.id, query: "target" });
-    assert.equal((legacyExplored.relation_analysis as JsonObject).status, "analyzed");
+    // The recomputed summary mirrors the diagnostics actually stored with the
+    // index. This fixture contains unresolved relations, so the honest status is
+    // "partial" rather than a green "analyzed" that hides them.
+    const legacyRelation = legacyExplored.relation_analysis as JsonObject;
+    assert.equal(legacyRelation.status, "partial");
+    assert((legacyRelation.relation_kinds as string[]).includes("calls"));
     f.store.save("codebase_index", String(relationSummaryIndex.id), relationSummaryIndex);
     const noMatch = await full.handlers.craft_codebase_symbol_explore({ workspace_id: f.workspace.id, index_id: (built.index as JsonObject).id, query: "zzzxqvunlikely" });
     assert.equal(noMatch.resolution, "not_found");
@@ -1605,11 +1611,11 @@ test("graph publication rejects duplicate, dangling, and over-budget data before
     const persist = (f.kernel as unknown as { persistIndex: (...args: unknown[]) => JsonObject }).persistIndex.bind(f.kernel);
     assert.throws(() => persist({}, "duplicate-nodes", 1, {}, [node, node], [], []), /duplicate nodes or dangling edges/u);
     assert.throws(() => persist({}, "dangling-edge", 1, {}, [node], [{ ...edge, to_node_id: "missing" }], []), /duplicate nodes or dangling edges/u);
-    assert.throws(() => persist({}, "node-budget", 1, {}, Array.from({ length: 60_001 }, (_, ordinal) => ({ ...node, id: `node_${ordinal}` })), [], []), /exceeds storage budget/u);
-    assert.throws(() => persist({}, "edge-budget", 1, {}, [node], Array.from({ length: 300_001 }, (_, ordinal) => ({ ...edge, id: `edge_${ordinal}` })), []), /exceeds storage budget/u);
+    assert.throws(() => persist({}, "node-budget", 1, {}, Array.from({ length: GRAPH_BUDGET.maxNodes + 1 }, (_, ordinal) => ({ ...node, id: `node_${ordinal}` })), [], []), /exceeds storage budget/u);
+    assert.throws(() => persist({}, "edge-budget", 1, {}, [node], Array.from({ length: GRAPH_BUDGET.maxEdges + 1 }, (_, ordinal) => ({ ...edge, id: `edge_${ordinal}` })), []), /exceeds storage budget/u);
     assert.throws(() => persist({}, "item-budget", 1, {}, [{ ...node, name: "x".repeat(1_000_010) }], [], []), /item exceeds shard budget/u);
     const largeName = "z".repeat(950_000);
-    const graphByteBudget = Array.from({ length: 142 }, (_, ordinal) => ({ ...node, id: `large_${ordinal}`, name: largeName }));
+    const graphByteBudget = Array.from({ length: Math.ceil(GRAPH_BUDGET.maxGraphBytes / 950_000) + 10 }, (_, ordinal) => ({ ...node, id: `large_${ordinal}`, name: largeName }));
     assert.throws(() => persist({}, "graph-byte-budget", 1, {}, graphByteBudget, [], []), /storage byte budget/u);
     const routeBudgetNodes = Array.from({ length: 40_000 }, (_, ordinal) => ({ ...node,
       id: `route_${ordinal}`, path: `src/${String(ordinal).padStart(5, "0")}-${"r".repeat(1_800)}` }));

@@ -331,6 +331,13 @@ const SELF_EVOLUTION_CASES: GradedCase[] = [
     }),
     check: { kind: "equals", expected: "kept" },
   },
+  {
+    case: defineEvalCase({
+      id: "self_evolution.codebase_selection_admits_augmented_class", axis: "self_evolution", evidence: "kernel", partition: "held_out", sanitized: true, approved_by: SUITE_REVIEWER,
+      description: "Source selection must admit a declaration-bearing file that exceeds the old 512 KiB cap, so a module augmentation of that class still resolves its method calls.",
+    }),
+    check: { kind: "equals", expected: "resolved" },
+  },
 ];
 
 /** Every graded case, in a stable order. */

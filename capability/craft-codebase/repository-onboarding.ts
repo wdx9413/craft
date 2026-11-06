@@ -35,7 +35,11 @@ export interface RepositoryOnboardingPort {
   analyzeJava?: typeof analyzeJavaCheckpoint;
   analyzeLsp?: (request: LspStdioRequest, timeoutMs: number) => JsonObject;
 }
-const REPOSITORY_INDEX_POLICY = 13;
+// 14: repository file selection admits files up to 1 MiB and 24 MiB total, so
+// core/application/craft-service.ts is no longer dropped. Older indexes were
+// built without it (breaking every `declare module` augmentation) and must be
+// rebuilt rather than reused.
+const REPOSITORY_INDEX_POLICY = 14;
 const SEMANTIC_RETRY_DELAY_MS = 5 * 60 * 1_000;
 
 function hasSemanticAdapterFailure(prior: JsonObject | null | undefined): boolean {
@@ -509,6 +513,8 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     if (!analysis) diagnostics.push(...degraded);
     const summary = { analyzer: details.analyzer, certainty: details.certainty, supported_file_count: details.supported_file_count, unsupported_file_count: details.unsupported_file_count,
       omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language, diagnostic_count: diagnostics.length, diagnostics: diagnostics.slice(0, 10) };
+      // A dropped file is a resolution hazard, not just a headcount. Surface why.
+      (summary as JsonObject).omitted_by_reason = selected.omitted_by_reason;
     service.store.transaction(() => {
       const current = service.store.get("workspace", workspaceId);
       if (current.version !== workspace.version || current.latest_checkpoint_id !== checkpointId)

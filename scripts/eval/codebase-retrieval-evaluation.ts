@@ -190,6 +190,39 @@ try {
     const observed = new Set(target ? (service.codebaseCallersFind({ workspace_id: ready.workspace_id, index_id: ready.index_id,
       symbol_id: target.id, limit: 100 }).callers as Array<{ readonly caller: { readonly name: string; readonly path: string } }>).
       filter(({ caller }) => !isEvaluationNonProductionPath(caller.path)).map(({ caller }) => `${caller.path}\u0000${caller.name}`) : []);
+    // Cross-check the same target through the generic relation API. If this
+    // finds edges that callersFind does not, the bug is in callersFind; if both
+    // are empty, the persisted route data itself lacks the edges.
+    const relationProbe = (() => {
+      if (!target) return null;
+      try {
+        const relations = service.codebaseRelationsFind({ workspace_id: ready.workspace_id, index_id: ready.index_id,
+          node_id: target.id, relation_kind: "calls", direction: "incoming", limit: 100 }) as JsonObject;
+        const list = (relations.relations ?? []) as Array<{ readonly edge?: JsonObject }>;
+        return { incoming_relation_count: list.length,
+          from_paths: list.slice(0, 5).map((item) => String((item.edge as JsonObject | undefined)?.from_node_id ?? "")) };
+      } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
+    })();
+    // Which call targets did the persisted graph record for the expected caller?
+    // If the caller exists but has no edge to this target, the edge was lost (or
+    // misattributed) before import — not in the query layer.
+    const callerProbe = (() => {
+      const expectedPaths = [...new Set(item.callers.map((caller) => caller.path))];
+      return expectedPaths.slice(0, 2).flatMap((callerPath) => {
+        const callerName = item.callers.find((caller) => caller.path === callerPath)!.name;
+        const found = service.codebaseSymbolFind({ workspace_id: ready.workspace_id, index_id: ready.index_id, query: callerName, limit: 100 })
+          .symbols as Array<{ readonly id: string; readonly name: string; readonly path: string }>;
+        const node = found.find((symbol) => symbol.path === callerPath && symbol.name === callerName);
+        if (!node) return [{ caller: `${callerPath}::${callerName}`, found: false }];
+        try {
+          const outgoing = service.codebaseRelationsFind({ workspace_id: ready.workspace_id, index_id: ready.index_id,
+            node_id: node.id, relation_kind: "calls", direction: "outgoing", limit: 100 }) as JsonObject;
+          const list = (outgoing.relations ?? []) as Array<{ readonly edge?: JsonObject; readonly to?: JsonObject }>;
+          return [{ caller: `${callerPath}::${callerName}`, found: true, outgoing_calls: list.length,
+            targets: list.slice(0, 40).map((entry) => `${String((entry.to as JsonObject | undefined)?.path ?? "")}::${String((entry.to as JsonObject | undefined)?.name ?? "")}`) }];
+        } catch (error) { return [{ caller: `${callerPath}::${callerName}`, found: true, error: error instanceof Error ? error.message : String(error) }]; }
+      });
+    })();
     const impactObserved = new Set(target ? (service.codebaseImpactQuery({ workspace_id: ready.workspace_id, index_id: ready.index_id,
       node_id: target.id, direction: "incoming", relation_kind: "calls", max_depth: 1, limit: 100 }).nodes as Array<{ readonly id: string; readonly name: string; readonly path: string }>).
       filter(node => node.id !== target.id && !isEvaluationNonProductionPath(node.path))
@@ -200,6 +233,8 @@ try {
     const impactTruePositives = [...impactObserved].filter(key => expectedImpact.has(key)).length;
     return { target_path: item.target_path, target_name: item.target_name, target_found: target !== undefined,
       target_node_id: target?.id ?? null, candidate_count: targets.length,
+      relation_probe: relationProbe,
+      caller_probe: callerProbe,
       expected_callers: [...expected].sort(), observed_callers: [...observed].sort(),
       expected_impact_callers: [...expectedImpact].sort(),
       true_positives: truePositives, false_positives: observed.size - truePositives, false_negatives: expected.size - truePositives,
@@ -248,15 +283,14 @@ try {
   // the combiner round-robin-dropped nodes, orphaning cross-file edges. They now
   // share GRAPH_BUDGET and the persisted diagnostics confirm omitted_nodes=0,
   // omitted_edges=0, unresolved_endpoint_edges=0, budget_limited=false.
-  // Remaining gap (narrowed 2026-11-06): a full-repo probe through
-  // analyzeTypeScript -> combineLanguageAnalyses emits three incoming calls to
-  // codebaseSymbolRead (including createActionHandlers), and an isolated
-  // workspaceOpen -> checkpoint -> codebaseAnalysisImport -> symbolFind ->
-  // callersFind round-trip returns the caller correctly. Yet the full-repo
-  // evaluation's callersFind returns none. So the loss is specific to the
-  // large index (edge-route/shard lookup or id de-duplication at scale), not
-  // the analyzer, the merge, or the query API. The target_node_id and full
-  // diagnostics tree below make the next investigation reproducible.
+  // Resolved (2026-11-06): the three missing callers were never a graph-budget
+  // or route-layer problem. repository-files.ts dropped any source above
+  // 512 KiB, and core/application/craft-service.ts (560 KiB) declares the
+  // CraftService class itself. Without it every `declare module
+  // "../craft-service.ts" { interface CraftService }` augmentation lost its
+  // base class, so ~107k `service.method()` relations were unresolvable and
+  // callersFind returned nothing. The per-file/total caps now admit the
+  // first-party tree and omissions carry a reason (omitted_by_reason).
   // The raw diagnostics tree is the authoritative shape (nested languages[]
   // plus combined counters); keeping it verbatim avoids a lossy flattened copy.
   const relationDiagnostics = indexRecord.diagnostics ?? [];
@@ -345,6 +379,12 @@ try {
     index_id: ready.index_id,
     source_file_count: store.get("codebase_index", String(ready.index_id)).source_file_count,
     relation_analysis: (store.get("codebase_index", String(ready.index_id)).analysis as Record<string, unknown>).relation_analysis,
+    graph_shape: {
+      graph_storage: String(indexRecord.graph_storage ?? "inline"),
+      shard_count: Array.isArray(indexRecord.shard_ids) ? (indexRecord.shard_ids as unknown[]).length : 0,
+      edge_route_shard_count: Array.isArray(indexRecord.edge_route_shards) ? (indexRecord.edge_route_shards as unknown[]).length : 0,
+      node_count: Number(indexRecord.node_count ?? 0), edge_count: Number(indexRecord.edge_count ?? 0),
+    },
     relation_diagnostics: relationDiagnostics,
     repository_summary: ready.summary ?? null,
     query_count: cases.length,

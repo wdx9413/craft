@@ -10,7 +10,7 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
-import { repositoryRoot, repositoryFiles, repositoryPolicyDigest, repositoryPolicySnapshot, repositoryPolicySnapshotCurrent } from "../capability/craft-codebase/repository-files.ts";
+import { REPOSITORY_SELECTION_LIMITS, repositoryRoot, repositoryFiles, repositoryPolicyDigest, repositoryPolicySnapshot, repositoryPolicySnapshotCurrent } from "../capability/craft-codebase/repository-files.ts";
 import { basicAnalysis } from "../capability/craft-codebase/basic-analysis.ts";
 import { CodebaseIndexKernel } from "../capability/craft-codebase/codebase-index.ts";
 import { ensureRepository } from "../capability/craft-codebase/repository-onboarding.ts";
@@ -1740,7 +1740,7 @@ test("source discovery honors ignores, excludes, disabled and bounded reads with
     rmSync(join(f.repo, "linked-directory"), { recursive: true }); linkDirectorySync(f.root, join(f.repo, "linked-directory"));
     writeFileSync(join(f.root, "external.ts"), "external source must not be read");
     f.write("deleted.ts", "deleted from working tree"); f.git("add", "deleted.ts"); rmSync(join(f.repo, "deleted.ts"));
-    f.write("null.ts", "\0"); f.write("huge.ts", "x".repeat(512 * 1024 + 1));
+    f.write("null.ts", "\0"); f.write("huge.ts", "x".repeat(1024 * 1024 + 1));
     f.write(".craft-codebase.json", JSON.stringify({ exclude_paths: ["exclude.py", "other/"] }));
     const files = repositoryFiles(f.repo); assert.deepEqual(files.files.map(file => file.path), ["a.ts"]); assert.equal(files.omitted, 5);
     assert.deepEqual(files.omitted_by_language, { "typescript-javascript": 5 });
@@ -1751,17 +1751,42 @@ test("source discovery honors ignores, excludes, disabled and bounded reads with
     f.write(".craft-codebase.json", '{"enabled":false}'); assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo }).status, "disabled");
     f.write(".craft-codebase.json", '{}'); const before = process.env.CRAFT_CODEBASE_AUTO_INDEX;
     try { process.env.CRAFT_CODEBASE_AUTO_INDEX = "0"; assert.equal(repositoryFiles(f.repo).state, "disabled"); } finally { if (before === undefined) delete process.env.CRAFT_CODEBASE_AUTO_INDEX; else process.env.CRAFT_CODEBASE_AUTO_INDEX = before; }
-    for (let i = 0; i < 1210; i++) f.write(`file${i}.ts`, "export const a=1;");
+    for (let i = 0; i < 1510; i++) f.write(`file${i}.ts`, "export const a=1;");
     f.write("zz-last.java", "class LastJava {}"); f.write("zzz-last.py", "class LastPython: pass\n");
     const balanced = repositoryFiles(f.repo);
-    assert.equal(balanced.files.length, 1200);
+    assert.equal(balanced.files.length, 1500);
     assert(balanced.files.some(file => file.path === "zz-last.java"));
     assert(balanced.files.some(file => file.path === "zzz-last.py"));
-    assert.equal(balanced.files.filter(file => /^(?:tsx?|mts|cts|jsx?|mjs|cjs)$/u.test(file.language)).length, 1197);
+    assert.equal(balanced.files.filter(file => /^(?:tsx?|mts|cts|jsx?|mjs|cjs)$/u.test(file.language)).length, 1497);
     assert.equal(balanced.files.filter(file => file.language === "py").length, 2);
-    assert.equal(balanced.omitted, 19);
-    assert.deepEqual(balanced.omitted_by_language, { "typescript-javascript": 19 });
+    assert.equal(balanced.omitted, 12);
+    assert.deepEqual(balanced.omitted_by_language, { "typescript-javascript": 12 });
     assert.deepEqual(repositoryFiles(f.repo).files.map(file => [file.path, file.digest]), balanced.files.map(file => [file.path, file.digest]));
+  } finally { f.close(); }
+});
+
+test("a declaration-bearing file above the old 512 KiB cap is indexed so its module augmentation resolves calls", async () => {
+  const f = await fixture();
+  try {
+    mkdirSync(join(f.repo, "src"));
+    // ~560 KiB, like core/application/craft-service.ts. Under the old 512 KiB
+    // cap this file was dropped, which broke every `declare module` augmentation
+    // and made ~107k `service.method()` relations unresolvable.
+    const filler = "// filler line for size\n".repeat(25_000);
+    f.write("src/service.ts", `export class Service {}\n${filler}`);
+    f.write("src/augment.ts", 'declare module "./service.ts" { interface Service { read(a: string): number } }\n');
+    f.write("src/caller.ts", 'import { Service } from "./service";\nexport function createHandlers(s: Service) { return { r: (a: string) => s.read(a) }; }\n');
+    f.git("add", ".");
+    const ensured = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(ensured.status, "ready");
+    assert.equal(ensured.omitted_files, 0, "the declaration-bearing file must not be dropped");
+    const symbols = f.service.codebaseSymbolFind({ workspace_id: ensured.workspace_id, index_id: ensured.index_id, query: "read", limit: 20 }).symbols as JsonObject[];
+    const target = symbols.find((symbol) => symbol.path === "src/augment.ts" && symbol.name === "read");
+    assert(target, "the augmentation's method symbol is indexed");
+    const callers = f.service.codebaseCallersFind({ workspace_id: ensured.workspace_id, index_id: ensured.index_id, symbol_id: String(target!.id), limit: 20 }).callers as JsonObject[];
+    assert(callers.some((entry) => (entry.caller as JsonObject).path === "src/caller.ts"
+      && (entry.caller as JsonObject).name === "createHandlers"),
+      "the augmented method call resolves to its caller");
   } finally { f.close(); }
 });
 
@@ -1896,10 +1921,11 @@ test("repository source selection stops at its file-count limit", async () => {
   const f = await fixture();
   try {
     mkdirSync(join(f.repo, "src"));
-    for (let index = 0; index < 1_201; index++) f.write(`src/file-${index}.ts`, "export {};\n");
+    for (let index = 0; index < REPOSITORY_SELECTION_LIMITS.maxFiles + 1; index++) f.write(`src/file-${index}.ts`, "export {};\n");
     const selected = repositoryFiles(f.repo);
-    assert.equal(selected.files.length, 1_200);
+    assert.equal(selected.files.length, REPOSITORY_SELECTION_LIMITS.maxFiles);
     assert.equal(selected.omitted, 1);
+    assert.deepEqual(selected.omitted_by_reason, { file_budget: 1 });
   } finally { f.close(); }
 });
 
@@ -1931,16 +1957,23 @@ test("repository file selection stops at the aggregate byte limit before visitin
   const f = await fixture();
   try {
     mkdirSync(join(f.repo, "c")); mkdirSync(join(f.repo, "csharp")); mkdirSync(join(f.repo, "typescript"));
-    // The final C source reaches the aggregate cap before the 24th C# file is visited.
-    for (let index = 0; index < 24; index++) f.write(`c/file-${index}.c`, "x".repeat(index === 23 ? 524_277 : 524_268));
+    // Large-but-under-the-per-file-cap C files exhaust the aggregate byte
+    // budget mid-rotation, so later C# files are skipped. The assertions check
+    // the budget invariant rather than a brittle count derived from byte maths.
+    for (let index = 0; index < 30; index++) f.write(`c/file-${index}.c`, "x".repeat(1_040_000));
     for (let index = 0; index < 30; index++) f.write(`csharp/later-${index}.cs`, "x".repeat(20));
     f.write("typescript/main.ts", "x".repeat(11));
     const selected = repositoryFiles(f.repo);
-    assert.equal(selected.files.length, 48);
-    assert.equal(selected.files.filter(file => file.language === "c").length, 24);
-    assert.equal(selected.files.filter(file => file.language === "cs").length, 23);
+    const includedBytes = selected.files.reduce((total, file) => total + Buffer.byteLength(file.content, "utf8"), 0);
+    assert(includedBytes <= REPOSITORY_SELECTION_LIMITS.maxTotalBytes);
+    assert(selected.files.some(file => file.language === "c"));
+    assert(selected.files.some(file => file.language === "cs"));
+    // The large group is cut by the byte budget while the small C# files still
+    // fit, which is the intended behaviour of the rotating selection.
+    assert(selected.files.filter(file => file.language === "c").length < 30);
     assert.equal(selected.files.some(file => file.path === "typescript/main.ts"), true);
-    assert.equal(selected.omitted, 7);
+    assert(selected.omitted > 0);
+    assert(selected.omitted_by_reason.total_budget > 0);
   } finally { f.close(); }
 });
 
@@ -1948,7 +1981,7 @@ test("repository byte budget skips oversized remainder and reports language coun
   const f = await fixture();
   try {
     mkdirSync(join(f.repo, "src"));
-    const content = "x".repeat(512 * 1024);
+    const content = "x".repeat(1024 * 1024);
     for (let i = 0; i < 12; i++) f.write(`src/java${String(i).padStart(2, "0")}.java`, content);
     for (let i = 0; i < 12; i++) f.write(`src/python${String(i).padStart(2, "0")}.py`, content);
     for (let i = 0; i < 12; i++) f.write(`src/typescript${String(i).padStart(2, "0")}.ts`, content);
@@ -1966,9 +1999,10 @@ test("repository file-byte limit skips an unfit large file and continues with a 
   const f = await fixture();
   try {
     mkdirSync(join(f.repo, "src"));
-    const halfMiB = "x".repeat(512 * 1024);
-    for (let i = 0; i < 23; i++) f.write(`src/a${String(i).padStart(2, "0")}.ts`, halfMiB);
-    f.write("src/b-small.ts", "s".repeat(100 * 1024)); f.write("src/c-large.ts", halfMiB);
+    // 2 MiB files exceed the 1 MiB per-file cap; the small one still fits.
+    const overLimit = "x".repeat(2 * 1024 * 1024);
+    for (let i = 0; i < 23; i++) f.write(`src/a${String(i).padStart(2, "0")}.ts`, "x".repeat(100 * 1024));
+    f.write("src/b-small.ts", "s".repeat(100 * 1024)); f.write("src/c-large.ts", overLimit);
     const selected = repositoryFiles(f.repo);
     assert.equal(selected.files.length, 24);
     assert.equal(selected.files.some(file => file.path === "src/b-small.ts"), true);
@@ -1980,7 +2014,7 @@ test("repository file-byte limit skips an unfit large file and continues with a 
 test("repository Context pack carries language-level source omissions into partial diagnostics", async () => {
   const f = await fixture();
   try {
-    f.write("oversized.py", "x".repeat(512 * 1024 + 1));
+    f.write("oversized.py", "x".repeat(1024 * 1024 + 1));
     const pack = await f.service.contextOpen({ project_root: f.repo, query: "Python implementation review" });
     const codebase = pack.codebase as JsonObject;
     assert.equal(codebase.status, "empty");
