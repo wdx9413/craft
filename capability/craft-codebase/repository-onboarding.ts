@@ -116,6 +116,8 @@ function typeScriptGraph(units: readonly TypeScriptFileUnit[], mode: string, rea
       unresolved_imports: sum("unresolved_imports"), unresolved_calls: sum("unresolved_calls"),
       local_type_parameters: sum("local_type_parameters"), computed_invocations: sum("computed_invocations"),
       inline_invocations: sum("inline_invocations"),
+      // Samples live per file; union them so the merged graph still reports them.
+      unresolved_call_samples: [...new Set(units.flatMap((unit) => unit.unresolved_call_samples ?? []))].sort().slice(0, 20),
       external_references: sum("external_references"), omitted_nodes: 0, omitted_edges: 0,
       budget_limited: units.some(unit => unit.budget_limited), selected_file_count: units.length, incremental_mode: mode, incremental_reason: reason } };
 }

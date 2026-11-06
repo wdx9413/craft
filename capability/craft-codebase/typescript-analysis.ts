@@ -22,6 +22,8 @@ export type TypeScriptFileUnit = JsonObject & {
   readonly local_type_parameters?: number;
   readonly computed_invocations?: number;
   readonly inline_invocations?: number;
+  /** Up to 8 unresolved call names from this file, kept so the merged graph still shows samples. */
+  readonly unresolved_call_samples?: string[];
   readonly budget_limited: boolean;
   readonly unit_digest: string;
 };
@@ -30,10 +32,10 @@ export type TypeScriptAnalysisOptions = { readonly include_paths?: readonly stri
   readonly max_graph_nodes?: number };
 // Include Craft's serialized graph schema so cached file units are rebuilt when
 // emitted symbol facts change even if the TypeScript compiler itself is unchanged.
-// v9: type-parameter references, runtime-computed callees and `!`-unwrapped
-// property calls are no longer counted as internal gaps, and standard-library
-// type names are recognised. Cached v8 units mix these together, so rebuild.
-export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v9`;
+// v10: each file unit carries its own unresolved-call samples, so the merged
+// graph can still report them (the workbench health page reads these). Cached
+// v9 units have no samples, so rebuild.
+export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v10`;
 export function typeScriptFileUnitDigest(unit: Omit<TypeScriptFileUnit, "unit_digest"> | TypeScriptFileUnit): string {
   return stableDigest({ path: unit.path, source_digest: unit.source_digest, analyzer_version: unit.analyzer_version,
     external_module: unit.external_module, nodes: unit.nodes, edges: unit.edges, unresolved_relations: unit.unresolved_relations,
@@ -41,6 +43,7 @@ export function typeScriptFileUnitDigest(unit: Omit<TypeScriptFileUnit, "unit_di
     unresolved_heritage: unit.unresolved_heritage ?? 0, unresolved_imports: unit.unresolved_imports ?? 0,
     unresolved_calls: unit.unresolved_calls ?? 0, local_type_parameters: unit.local_type_parameters ?? 0,
     computed_invocations: unit.computed_invocations ?? 0, inline_invocations: unit.inline_invocations ?? 0,
+    unresolved_call_samples: [...((unit.unresolved_call_samples as string[] | undefined) ?? [])].sort(),
     budget_limited: unit.budget_limited });
 }
 const parsed = new Map<string, ts.SourceFile>();
@@ -92,6 +95,7 @@ const BUILTIN_CALLABLES: ReadonlySet<string> = new Set([
   "BigInt64Array", "BigUint64Array", "URL", "URLSearchParams", "WebSocket", "EventSource", "Worker",
   "BroadcastChannel", "MessageChannel", "MessagePort", "TextEncoder", "TextDecoder", "addEventListener",
   "removeEventListener", "apply", "call", "bind", "super", "import",
+  "DOMException", "DatabaseSync", "localStorage", "sessionStorage", "performance", "structuredClone",
 ]);
 function isExternalModuleSpecifier(specifier: string): boolean {
   return !specifier.startsWith(".") && !specifier.startsWith("/");
@@ -264,14 +268,20 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
     if (getTypeScript().isParenthesizedExpression(target)) target = target.expression;
     return getTypeScript().isArrowFunction(target) || getTypeScript().isFunctionExpression(target);
   };
-  /** A callee whose target is only known at runtime: `a[b]`, `(a ?? b)`, `f()()`. */
+  /**
+   * A callee is namable only when it is an identifier or a property access,
+   * possibly behind parentheses or a non-null assertion. Everything else -
+   * `a[b]()`, `(a ?? b)()`, `(await x)()`, `(f as G)()`, `f()()` - has no name
+   * to resolve, so it is a runtime-computed call and never an internal gap.
+   */
   const isComputedCallee = (expression: ts.Expression): boolean => {
     let target: ts.Expression = expression;
-    if (getTypeScript().isParenthesizedExpression(target)) target = target.expression;
-    if (getTypeScript().isNonNullExpression(target)) target = target.expression;
-    return getTypeScript().isElementAccessExpression(target)
-      || getTypeScript().isBinaryExpression(target)
-      || getTypeScript().isCallExpression(target);
+    for (;;) {
+      if (getTypeScript().isParenthesizedExpression(target)) { target = target.expression; continue; }
+      if (getTypeScript().isNonNullExpression(target)) { target = target.expression; continue; }
+      break;
+    }
+    return !getTypeScript().isIdentifier(target) && !getTypeScript().isPropertyAccessExpression(target);
   };
   // Local names bound by an import from a bare package or `node:` module. A call
   // to one of these cannot be followed into the checkpoint, so it is external.
@@ -318,6 +328,15 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
   // dumping 100k entries into a report.
   const unresolvedCallSamples = new Set<string>();
   const unresolvedTypeSamples = new Set<string>();
+  // Per-file samples are carried on the file unit so the merged graph keeps
+  // them; a global-only set vanished whenever analysis ran per-file.
+  const callSamplesByPath = new Map<string, Set<string>>();
+  const rememberCallSample = (path: string, name: string): void => {
+    const set = callSamplesByPath.get(path) ?? new Set<string>();
+    if (set.size < 8) set.add(name.slice(0, 60));
+    callSamplesByPath.set(path, set);
+    if (unresolvedCallSamples.size < 20) unresolvedCallSamples.add(name.slice(0, 60));
+  };
   const external = (path: string): void => {
     externalReferences += 1;
     externalByPath.set(path, (externalByPath.get(path) ?? 0) + 1);
@@ -453,9 +472,9 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
         if (target) add("calls", callOwner(node, current), target, node.expression);
         else if (isInlineCallee(callee)) { inlineInvocations += 1; bump(inlineByPath, file.path); }
         else if (isComputedCallee(callee)
-          // `memory[name]` / `handlers[name]` and `(a ?? b)()` depend on runtime
-          // values; there is no static declaration to point at.
-          || getTypeScript().isPropertyAccessExpression(callee) && callee.name.getText() === "then") {
+          // `memory[name]()`, `(a ?? b)()`, `(await x)()` depend on runtime values;
+          // there is no static name to resolve.
+        ) {
           computedInvocations += 1;
           bump(computedByPath, file.path);
         }
@@ -484,10 +503,8 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
             return !symbol || declared.length === 0 || declared.every((declaration) => !sources.has(declaration.getSourceFile().fileName));
           })()) external(file.path);
         else {
-          if (unresolvedCallSamples.size < 20) {
-            unresolvedCallSamples.add(getTypeScript().isPropertyAccessExpression(node.expression)
-              ? node.expression.name.getText() : node.expression.getText().slice(0, 60));
-          }
+          rememberCallSample(file.path, getTypeScript().isPropertyAccessExpression(callee)
+            ? callee.name.getText() : callee.getText());
           unresolvedAs(file.path, "call");
         }
         const unitTarget = targets.unit.find(Boolean) ?? (signature?.declaration?.parent
@@ -506,6 +523,7 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
       unresolved_type_references: unresolvedKinds.type_reference, unresolved_heritage: unresolvedKinds.heritage,
       unresolved_imports: unresolvedKinds.import, unresolved_calls: unresolvedKinds.call,
       unresolved_call_samples: [...unresolvedCallSamples].sort(),
+        call_samples_by_path_count: callSamplesByPath.size,
       unresolved_type_reference_samples: [...unresolvedTypeSamples].sort(),
       // Standard-library and bare-package lookups the checkpoint never loaded.
       // They are counted here, not as unresolved internal relations.
@@ -525,6 +543,7 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
         unresolved_imports: kindCountsFor(path).import, unresolved_calls: kindCountsFor(path).call,
         local_type_parameters: localTypeByPath.get(path) ?? 0, computed_invocations: computedByPath.get(path) ?? 0,
         inline_invocations: inlineByPath.get(path) ?? 0,
+        unresolved_call_samples: [...(callSamplesByPath.get(path) ?? [])].sort(),
         budget_limited: unitBudgetLimited.has(path) };
       return { ...unit, unit_digest: typeScriptFileUnitDigest(unit) } satisfies TypeScriptFileUnit;
     });

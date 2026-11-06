@@ -103,4 +103,6 @@ node --check workbench/app.js; node --check workbench/mod-pages.js; node --check
 
 `local_type_parameters`（泛型参数 `T`/`K` 本地绑定）、`computed_invocations`（`a[b]()`、`(a ?? b)()` 等运行时调用）与 `inline_invocations`（`(() => …)()`）也单独计数；`!` 非空断言包裹的方法调用按普通属性调用解析。
 
-实测（craft 自身仓库，1131 个 TS 文件）：`unresolved_relations` 125,980 → **218**（类型引用 / 继承 / 导入均归零，仅剩 218 条同名歧义调用），`external_references` 124,863，`local_type_parameters` 112，`computed_invocations` 128，`inline_invocations` 47。评测 `evaluation_pass` 仍为 true 且 precision/recall 全 1.0，说明这不是靠放宽门槛。
+实测（craft 自身仓库，1131 个 TS 文件）：`unresolved_relations` 125,980 → **201**（类型引用 / 继承 / 导入均归零，仅剩 201 条同名歧义或跨文件构造调用），`external_references` 125,055，`local_type_parameters` 112，`computed_invocations` 144，`inline_invocations` 47。评测 `evaluation_pass` 仍为 true 且 precision/recall 全 1.0，说明这不是靠放宽门槛。
+
+工作台「关系健康」页读取 `GET /api/workbench/codebase/status` 的顶层 `relation_diagnostics`：既然按文件单元增量合并，样本也必须随单元携带（v10 起 `TypeScriptFileUnit` 带 `unresolved_call_samples`），否则页面在实际路径上永远看不到样本。健康摘要只挂最新索引，避免把 25 行索引的状态载荷撑破。
