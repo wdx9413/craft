@@ -1,3 +1,18 @@
+## 0.14.0
+
+- Project data inventory and migration are bounded, preflight-bound and recoverable; legacy aliases with ambiguous ownership are diagnosed instead of selected by insertion order.
+- Craft and its internal packages are published as immutable artifacts to the local authenticated npm registry; Workbench consumes a pinned Craft package with a verified integrity lock.
+- Release checks cover Craft project gates, Workbench runtime integration, Craft-Eval suites, migration identity regressions, package backup and restore.
+- Local deterministic checks do not establish real user benefit, cross-machine installation, CI access or desktop packaging.
+
+## 0.13.0
+
+- Data inventory streams only current records, keeps statements live during iteration, and marks per-kind limits as potentially truncated; export no longer implies pagination or completeness.
+- Typed project-data migration can adopt only targets that exactly match the frozen payload and receipt; restore removes only records created by that migration. Project identity diagnosis now reports conflicting legacy aliases instead of selecting one by order.
+- Harden storage backup traversal and clarify Context/MCP export bounds.
+- Workbench now consumes immutable Craft packages from the authenticated local npm registry, with integrity-pinned dependencies; craft-eval suites cover the installed Workbench runtime.
+- Validate Craft 7/7, Workbench 2/2 on the installed runtime, and craft-eval 23/23. These local gates do not establish real-task benefit or cross-platform desktop release.
+
 ## 0.12.132
 
 - Context 新增只读 `craft_context_directory_resolve`，复用 CLI 和 Workbench 的目录语义登记数据，支持描述找目录与路径查含义。

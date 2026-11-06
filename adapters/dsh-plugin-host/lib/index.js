@@ -25,7 +25,7 @@ export function apply(ctx) {
   }
 
   const server = new Server(
-    { name: "craft-dsh-plugin-host", version: "0.12.131" },
+    { name: "craft-dsh-plugin-host", version: "0.14.0" },
     { capabilities: { tools: {} } },
   );
 

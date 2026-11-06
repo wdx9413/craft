@@ -409,7 +409,10 @@
         "tests/scope-identity.test.ts",
         "tests/knowledge-scope.test.ts",
         "tests/component-integration.test.ts",
-        "tests/repository-context.test.ts"
+        "tests/repository-context.test.ts",
+        "tests/project-data-inventory.test.ts",
+        "tests/project-registry-migration.test.ts",
+        "tests/project-data-migration.test.ts"
       ],
       "branches": true
     },

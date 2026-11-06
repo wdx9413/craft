@@ -34,14 +34,14 @@ export function projectDataInventory(store: CraftStore, identity: JsonObject, ar
     const ownerId = `CASE WHEN ${hasScope} THEN CASE WHEN json_type(r.payload_json,'$.scope')='object' THEN json_extract(r.payload_json,'$.scope.id') ELSE ${textId} END
       WHEN json_extract(r.payload_json,'$.scope_kind') IS NOT NULL THEN json_extract(r.payload_json,'$.scope_id')
       WHEN json_type(r.payload_json,'$.project_scope_id')='text' THEN json_extract(r.payload_json,'$.project_scope_id') ELSE json_extract(r.payload_json,'$.project_id') END`;
-    const rows = database.prepare(`SELECT r.kind,r.id,r.version,length(CAST(r.payload_json AS BLOB)) bytes,
+    const statement = database.prepare(`SELECT r.kind,r.id,r.version,length(CAST(r.payload_json AS BLOB)) bytes,
       CASE WHEN length(CAST(r.payload_json AS BLOB))<=1048576 THEN r.payload_json END snapshot
-      FROM records r JOIN (SELECT kind,id,MAX(version) version FROM records GROUP BY kind,id) latest
-      ON latest.kind=r.kind AND latest.id=r.id AND latest.version=r.version
-      WHERE r.kind NOT IN ('scope_alias','project_identity','project_registry_migration')
+      FROM records r WHERE r.kind NOT IN ('scope_alias','project_identity','project_registry_migration')
       AND ${ownerKind}='project' AND ${ownerId} IN (${ids.map(() => "?").join(",")})
-      AND (r.kind>? OR (r.kind=? AND r.id>?)) ORDER BY r.kind,r.id LIMIT ?`)
-      .iterate(...ids, after[0], after[0], after[1], Number(limit) + 1);
+      AND (r.kind>? OR (r.kind=? AND r.id>?))
+      AND r.version=(SELECT MAX(latest.version) FROM records latest WHERE latest.kind=r.kind AND latest.id=r.id)
+      ORDER BY r.kind,r.id LIMIT ?`);
+    const rows = statement.iterate(...ids, after[0], after[0], after[1], Number(limit) + 1);
     const records: JsonObject[] = [];
     let more = false;
     // Stream metadata so a full page cannot retain 100 one-MiB JSON bodies.
@@ -56,6 +56,8 @@ export function projectDataInventory(store: CraftStore, identity: JsonObject, ar
         binding: domains.length > 1 ? "ambiguous_partition_pointer" : domains.length ? "published_partition_pointer" : "central_record",
         disposition: payload === null ? "metadata_exceeds_inventory_budget" : domain === "unclassified" ? "requires_typed_recipe" : domain === "codebase" ? "reindex_required" : "requires_business_provenance_review" });
     }
+    // Keep the prepared statement alive while its iterator is consumed.
+    statement.columns();
     const last = records.at(-1);
     return { schema: "craft.project-data-inventory.v1", migration_id: migration.id, migration_digest: binding,
       project_root: identity.local_path_alias, legacy_scope_ids: ids, canonical_scope: identity.canonical_scope,

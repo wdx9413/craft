@@ -136,6 +136,12 @@ export class KnowledgeMemoryBundleKernel {
     const procedures = this.store.list("experience_procedure", limit, (item) => proposalIds.has(String(item.proposal_id)) || item.scope === target);
     const procedureIds = new Set(procedures.map((item) => String(item.id)));
     const procedureGates = this.store.list("experience_procedure_gate", limit, (item) => procedureIds.has(String(item.procedure_id)));
+    // Each list is independently bounded; a full page may conceal further
+    // records or dependencies. A cursor is metadata only, not pagination.
+    const boundedGroups: Record<string, JsonObject[]> = { claims, memories, supports, revisions, documents, fragments, evidence, sources,
+      aliases, identities, memoryCandidates, usageSignals, workflowObservations, experienceObservations, patterns, interventions,
+      workflowRequests, workflowProposals, procedures, procedureGates };
+    const limitReached = Object.entries(boundedGroups).filter(([, entries]) => entries.length >= limit).map(([name]) => name);
     // A Skill export is a device-local, disabled artifact.  The procedure and its
     // Markdown body are portable; copying an absolute artifact path would not be.
     // Receivers may explicitly export their own draft after the procedure is routed.
@@ -165,7 +171,8 @@ export class KnowledgeMemoryBundleKernel {
     const cursor = args.cursor === undefined ? null : text(args.cursor, "cursor");
     const exportId = args.export_id === undefined ? `craft_export_${randomUUID().replaceAll("-", "")}` : text(args.export_id, "export_id");
     const identity = { format: FORMAT, schema_version: SCHEMA, scope, device_id: deviceId, export_id: exportId, cursor, records };
-    return { bundle: { ...identity, exported_at: args.exported_at === undefined ? new Date().toISOString() : text(args.exported_at, "exported_at"), digest: stableDigest(identity) }, record_count: records.length };
+    return { bundle: { ...identity, exported_at: args.exported_at === undefined ? new Date().toISOString() : text(args.exported_at, "exported_at"), digest: stableDigest(identity) }, record_count: records.length,
+      completeness: "unverified", potentially_truncated_groups: limitReached, pagination_supported: false };
   }
 
   verify(args: JsonObject): JsonObject {

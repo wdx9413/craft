@@ -214,9 +214,20 @@ export function projectDataMigration(store: CraftStore, identity: JsonObject, ar
     if (checked.plan.plan_digest !== args.expected_digest) throw new Error("Data migration changed before publication; run preflight again");
     const after: JsonObject[] = [];
     for (const item of built.items) {
-      if (store.find(item.target.kind, item.target.id)) throw new Error("Migration target already exists without this receipt");
-      const saved = store.create(item.target.kind, item.target.id, item.next);
-      after.push({ ...item.target, digest: stableDigest(saved) });
+      const existing = store.find(item.target.kind, item.target.id, undefined, false);
+      if (existing) {
+        const frozen = (built.plan.records as Array<{ target: Ref }>).find(record => key(record.target) === key(item.target))!;
+        const ref = { ...item.target, digest: stableDigest(existing), reused: true };
+        try {
+          assertTargets(store, { after: [ref], records: [frozen], canonical_scope: built.plan.canonical_scope });
+        } catch {
+          throw new Error("Migration target already exists without this receipt and does not match the frozen payload");
+        }
+        after.push(ref);
+      } else {
+        const saved = store.create(item.target.kind, item.target.id, item.next);
+        after.push({ ...item.target, digest: stableDigest(saved) });
+      }
     }
     const fence = store.database.prepare("SELECT COALESCE(MAX(rowid),0) value FROM records").get()!.value;
     const migration = store.create("project_data_migration", id, { ...built.plan, state: "applied", after, publication_fence: Number(fence) });
@@ -256,7 +267,7 @@ function restore(store: CraftStore, identity: JsonObject, args: JsonObject, id: 
     assertReceipt(migration, args.expected_digest as string);
     if (migration.project_root !== identity.local_path_alias || migration.registry_migration_id !== args.migration_id || stableDigest(migration.canonical_scope) !== stableDigest(identity.canonical_scope)) throw new Error("Data migration belongs to another project or registry");
     if (migration.state === "restored") {
-      if ((migration.after as Ref[]).some(ref => store.find(ref.kind, ref.id, undefined, false) !== null)) throw new Error("Restored migration target has been recreated; automatic reuse refused");
+      if ((migration.after as Array<Ref & { reused?: boolean }>).some(ref => !ref.reused && store.find(ref.kind, ref.id, undefined, false) !== null)) throw new Error("Restored migration target has been recreated; automatic reuse refused");
       return { migration, idempotent: true };
     }
     if (stableDigest(store.get("project_registry_migration", String(args.migration_id))) !== migration.registry_digest) throw new Error("Registry changed after data migration");
@@ -271,7 +282,8 @@ function restore(store: CraftStore, identity: JsonObject, args: JsonObject, id: 
       throw new Error("Subsequent publication requires dependency review; automatic restore refused");
     }
     // Also detect unscoped references to new identities, without reading all shard bodies.
-    for (const ref of migration.after as Ref[]) {
+    for (const ref of migration.after as Array<Ref & { reused?: boolean }>) {
+      if (ref.reused) continue;
       const used = database.prepare("SELECT kind,id FROM records WHERE instr(payload_json,?)>0").iterate(ref.id);
       for (const raw of used) {
         const row = raw as { kind: string; id: string };
@@ -279,7 +291,7 @@ function restore(store: CraftStore, identity: JsonObject, args: JsonObject, id: 
         throw new Error("Migration target has acquired a reference; automatic restore refused");
       }
     }
-    for (const ref of [...migration.after as Ref[]].reverse()) store.remove(ref.kind, ref.id);
+    for (const ref of [...migration.after as Array<Ref & { reused?: boolean }>].reverse()) if (!ref.reused) store.remove(ref.kind, ref.id);
     const restored = store.save("project_data_migration", id, { ...payload(migration), state: "restored", content_files_retained_for_audit: true });
     return { migration: restored, idempotent: false };
   });

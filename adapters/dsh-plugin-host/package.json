@@ -1,6 +1,6 @@
 {
   "name": "craft-dsh-plugin-host",
-  "version": "0.12.132",
+  "version": "0.14.0",
   "private": true,
   "type": "module",
   "description": "Cordis host bridge exposing DSH tool plugins to Craft over JSON-RPC stdio.",

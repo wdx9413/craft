@@ -31,6 +31,20 @@ async function fixture(legacy = "legacy") {
     close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
+test("inventory keeps its SQLite statement alive during streaming", async t => {
+  const gc = (globalThis as typeof globalThis & { gc?: () => void }).gc;
+  if (!gc) { t.skip("run with --expose-gc"); return; }
+  const f = await fixture();
+  const original = JSON.parse;
+  try {
+    f.header("legacy_note", "one", { scope: "project:legacy" });
+    f.header("legacy_note", "two", { scope: "project:legacy" });
+    JSON.parse = ((...args: Parameters<typeof JSON.parse>) => { const value = original(...args); gc(); return value; }) as typeof JSON.parse;
+    const page = f.kernel.resolveProject({ ...f.args, limit: 10 });
+    assert.equal((page.records as JsonObject[]).length, 2);
+  } finally { JSON.parse = original; await f.close(); }
+});
+
 test("inventory pages published old-scope pointers without reading bodies, taking a writer or changing data", async () => {
   const f = await fixture();
   const peer = new DatabaseSync(f.store.paths.databaseFile);

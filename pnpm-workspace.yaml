@@ -14,3 +14,8 @@ linkWorkspacePackages: true
 allowBuilds:
   esbuild: true
   tesseract.js: false
+
+# Internal Craft Eval package is published to the authenticated local registry.
+# Exempt only its exact version from pnpm's default release-age delay.
+minimumReleaseAgeExclude:
+  - craft-eval@0.1.5

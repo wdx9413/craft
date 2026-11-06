@@ -56,6 +56,23 @@ async function fixture() {
     close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
+test("overlapping migrations reuse verified targets and restore only their own records", async () => {
+  const f = await fixture();
+  try {
+    const first = f.preflight([f.refs[0]]);
+    f.apply(first);
+    const second = f.preflight([f.refs[1]]);
+    const applied = f.apply(second).migration as JsonObject;
+    const after = applied.after as Array<Ref & { reused?: boolean }>;
+    assert.ok(after.some(item => item.reused));
+    assert.ok(after.some(item => !item.reused));
+    f.restore(second);
+    for (const ref of after) assert.equal(f.store.find(ref.kind, ref.id) !== null, !!ref.reused);
+    assert.equal(f.restore(second).idempotent, true);
+    assert.throws(() => f.restore(first), /Subsequent publication|acquired a reference/);
+  } finally { await f.close(); }
+});
+
 test("typed project migration freezes full bodies without a writer and imports candidates with remapped provenance", async () => {
   const f = await fixture(), peer = new DatabaseSync(f.store.paths.databaseFile);
   try {

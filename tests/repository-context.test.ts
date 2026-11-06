@@ -1759,8 +1759,10 @@ test("source discovery honors ignores, excludes, disabled and bounded reads with
     assert(balanced.files.some(file => file.path === "zzz-last.py"));
     assert.equal(balanced.files.filter(file => /^(?:tsx?|mts|cts|jsx?|mjs|cjs)$/u.test(file.language)).length, 1497);
     assert.equal(balanced.files.filter(file => file.language === "py").length, 2);
-    assert.equal(balanced.omitted, 12);
-    assert.deepEqual(balanced.omitted_by_language, { "typescript-javascript": 12 });
+    // Includes the bounded file-budget omissions as well as the links, binary
+    // and over-sized files already present in this repository fixture.
+    assert.equal(balanced.omitted, 19);
+    assert.deepEqual(balanced.omitted_by_language, { "typescript-javascript": 19 });
     assert.deepEqual(repositoryFiles(f.repo).files.map(file => [file.path, file.digest]), balanced.files.map(file => [file.path, file.digest]));
   } finally { f.close(); }
 });

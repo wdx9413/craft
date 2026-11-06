@@ -12,6 +12,26 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
 
+test("explicit child scope does not inherit parent or sibling scopes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-explicit-child-"));
+  const child = join(root, "child"), sibling = join(root, "sibling");
+  await mkdir(child); await mkdir(sibling);
+  execFileSync("git", ["-C", child, "init", "-q"]);
+  execFileSync("git", ["-C", sibling, "init", "-q"]);
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const kernel = new ScopeIdentityKernel(store);
+    const parentScope = (kernel.resolveProject({ project_root: root }).identity as JsonObject).canonical_scope as { kind: "project"; id: string };
+    const childScope = (kernel.resolveProject({ project_root: child }).identity as JsonObject).canonical_scope as { kind: "project"; id: string };
+    const siblingScope = (kernel.resolveProject({ project_root: sibling }).identity as JsonObject).canonical_scope as { kind: "project"; id: string };
+    const parent = kernel.resolveStack(parentScope, { project_root: root });
+    const selected = kernel.resolveStack(childScope, { project_root: child });
+    assert.deepEqual(parent.attempted_scopes, [parentScope]);
+    assert.deepEqual(selected.attempted_scopes, [childScope]);
+    assert(!selected.attempted_scopes.some(scope => scope.id === siblingScope.id));
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("project identity binds real roots and does not merge identical remotes", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-scope-identity-"));
   try {
@@ -82,6 +102,36 @@ test("legacy path bindings require explicit migration before creating a new proj
     assert.throws(() => kernel.resolveProject({ project_root: root, action: "force" }), /Unknown/);
     const id = (projectIdentityFromRoot(root).canonical_scope as JsonObject).id;
     assert.equal(store.find("project_identity", String(id)), null);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("registry migration rejects an old identity shared by different or unavailable paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-shared-identity-"));
+  const first = join(root, "first"), second = join(root, "second");
+  await mkdir(first); await mkdir(second);
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const kernel = new ScopeIdentityKernel(store);
+    for (const path of [first, second]) kernel.bindAlias({ scope_kind: "project", scope_id: "project:shared", alias_kind: "path", alias: realpathSync(path) });
+    let plan = kernel.resolveProject({ project_root: first, action: "plan_registry_migration" });
+    assert.equal(plan.status, "ambiguous");
+    assert.equal((plan.conflicting_alias_refs as JsonObject[]).length, 1);
+    assert.throws(() => kernel.resolveProject({ project_root: first, action: "apply_registry_migration", expected_digest: plan.plan_digest, legacy_scope_id: "project:shared" }), /ambiguous/);
+    await rm(second, { recursive: true });
+    plan = kernel.resolveProject({ project_root: first, action: "plan_registry_migration" });
+    assert.equal(plan.status, "ambiguous");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("project diagnosis and scope stack handle malformed and unregistered inputs explicitly", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-scope-empty-diagnosis-"));
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const kernel = new ScopeIdentityKernel(store);
+    assert.equal(kernel.diagnoseProject({ canonical_scope: { kind: "project", id: "p" }, local_path_alias: null }).status, "current");
+    const empty = kernel.resolveStack({ kind: "unregistered", id: "p" } as unknown as { kind: "project"; id: string });
+    assert.deepEqual(empty.attempted_scopes, []);
+    assert.deepEqual(empty.canonical_scope, { kind: "unregistered", id: "p" });
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

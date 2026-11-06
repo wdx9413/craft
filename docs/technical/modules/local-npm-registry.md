@@ -1,6 +1,6 @@
 # Craft 本地 npm 制品仓库规范
 
-状态：目标设计及隔离验证记录。当前 Craft 和 Workbench 尚未按本文切换正式依赖；不要把示例版本当作已发布版本。本规范适用于一台开发机上的三个独立仓库：`craft-eval`、`craft`、`craft-workbench`。
+状态：本轮固定版本为 Craft `0.14.0`、Workbench `0.13.0`、Craft-Eval `0.1.5`。这些版本在完成冻结安装、备份恢复和 Craft-Eval 项目评测后进入远端 `main`；Tauri 桌面打包与跨机器／CI 安装另行验收。本规范适用于三个独立仓库：`craft-eval`、`craft`、`craft-workbench`。
 
 ## 目标与边界
 
@@ -19,17 +19,35 @@ craft      → 发布固定版本 ├→ 本机 npm 兼容制品仓库 → 安�
 
 ## 当前事实与验证范围
 
-当前 Workbench 的 `package.json` 通过 `file:vendor/craft-0.12.131.tgz` 安装 Craft，`pnpm-workspace.yaml` 用本地 tar 覆盖 8 个内部依赖；Craft 包中的 `craft-eval` 仍是 `file:vendor/craft-eval-0.1.5.tgz`。这些是现状，不是目标依赖。
+本机持久仓库在 `~/.craft_data/package-registry/`，使用 Verdaccio `6.11.1`，仅监听 `127.0.0.1:4874`。端口 `4873` 已被未能核实归属的进程占用，因此本机实例使用 `4874`。认证配置和 bcrypt 密码文件权限为 `600`，未改全局 npm 源；未登录不能读取内部包，普通认证用户也不能撤销已发布版本。公共依赖仅经只读上游镜像 `https://registry.npmmirror.com/` 获取。当前服务需手动在前台启动，不安装登录自启项。
 
-隔离实验使用 Verdaccio 6.11.1、Node 23.11.0 和仅监听本机的临时仓库：先发布 8 个现有内部依赖，再把测试主包的 Eval 依赖替换为固定版本并重新打包为测试版本。干净目录安装成功，Workbench 运行时解析和 Craft CLI `--help` 通过。测试服务已停止。实验未覆盖正式发布、权限配置、自动启动、断网恢复、远端 CI 或桌面安装包。
+本机当前版本组为 `craft-eval@0.1.5`、`craft@0.14.0`、三个 `craft-common-* @0.14.0` 和四个 `@craft/capability-* @0.14.0`。旧的 `craft@0.13.0` 及其组件仍保留在私服中作回退。Workbench 固定依赖 `craft@0.14.0`，Craft 固定依赖 `craft-eval@0.1.5`；Craft 和 Workbench 锁文件中的外部包完整性值逐项与私服读回一致。旧 Workbench `vendor/*.tgz` 仍由 Git 跟踪，作为回滚副本，不再是活动依赖。
 
-Verdaccio 在该环境中建议使用 Node 24 或更高版本。隔离仓库使用匿名发布以便测试，**正式仓库不得照搬该权限**。31 MiB 主包的上传请求超过默认限制，实验将 `max_body_size` 调整为 `100mb` 才成功；实际限制应覆盖包及协议开销。
+验收记录（2026-11-07）：Workbench 本机冻结安装通过，读回 `Craft runtime 0.14.0: protocol 1`；Workbench 自测 `185/185`，Craft-Eval 对 Workbench 的项目套件 `2/2`、对 Craft 的项目套件 `7/7`，Craft-Eval 单测 `128/128`。评测生成器行／分支／函数覆盖为 `100%`。Craft 身份与迁移重点回归 `164` 项通过、`1` 项因未启用 GC 被跳过；`core/scope-identity.ts`、`core/project-data-inventory.ts` 和 `core/project-data-migration.ts` 的行／分支／函数覆盖均为 `100%`。Craft 发布目录检查、类型检查、分层／接口／文档／一致性审计和 CLI smoke 通过。Craft-Eval 报告位于 `/private/tmp/craft-eval-craft-0.14.0-final-20261107/` 与 `/private/tmp/craft-eval-workbench-0.13.0-final-20261107/`。Workbench 首次受限沙箱运行因 loopback 权限失败，正常本机权限复跑通过。这些确定性检查不证明真实用户收益。
+
+持久仓库按版本组保留独立备份；每次发布后须在隔离 storage 恢复，并逐包核对摘要。匿名私有包读取仍应被拒绝。服务自动启动、跨机器安装、远端 CI、离线构建和 Tauri 桌面打包未验证，因此这些不属于本轮已证明能力。旧 vendor 包暂不删除。部署应选择受支持且维护中的 Node 版本，并在目标机器重新验证 Verdaccio、认证、恢复与桌面构建；本次使用的 Node 版本不代表跨版本兼容。
+
+### 当前本机操作
+
+```bash
+# 在终端前台启动本机服务；退出终端即停止，不配置系统自启
+umask 077
+node "$HOME/.craft_data/package-registry/app/node_modules/verdaccio/bin/verdaccio" \
+  --config "$HOME/.craft_data/package-registry/conf/config.yaml"
+
+# 另一个终端检查服务并按锁文件安装
+curl --noproxy '*' http://127.0.0.1:4874/-/ping
+NPM_CONFIG_USERCONFIG="$HOME/.craft_data/package-registry/conf/npmrc" \
+  CI=true pnpm install --frozen-lockfile --registry http://127.0.0.1:4874/
+```
+
+凭据只在 `~/.craft_data/package-registry/conf/npmrc` 与 `htpasswd` 中保存，不复制到仓库或命令参数。其他机器应在自己的 `~/.craft_data/` 初始化认证仓库并导入通过摘要校验的包；本机 `127.0.0.1` 不可供远程机器或 CI 使用。
 
 ## 本机仓库部署参考
 
 以下是首次部署时的参考步骤，不是现成的 Craft 安装命令。示例使用固定版本 Verdaccio 6.11.1；部署前先确认当前系统、Node 和依赖兼容。Node、npm 和安装源应由使用者自行安装并校验。
 
-1. 确认 `node --version`、`npm --version`，检查 `127.0.0.1:4873` 未被其他服务占用。不要终止未知服务或覆盖已有仓库。
+1. 确认 `node --version`、`npm --version`，检查选定的回环端口未被其他服务占用。不要终止未知服务或覆盖已有仓库；端口冲突时选用新的本地端口并同步本机配置。
 2. 在 `~/.craft_data/package-registry/` 下创建权限受限的服务目录、存储目录和配置。将 Verdaccio 安装在该目录或由机器的受控包管理器安装；记录准确版本。示例配置如下，其中上游地址须按所在网络替换：
 
    ```yaml
@@ -39,24 +57,56 @@ Verdaccio 在该环境中建议使用 Node 24 或更高版本。隔离仓库使�
    auth:
      htpasswd:
        file: ./htpasswd
+       max_users: -1
+       algorithm: bcrypt
+       rounds: 10
    uplinks:
      npmjs:
        url: https://registry.npmjs.org/
    packages:
-     '@craft/*':
+     '@craft/capability-codebase':
        access: $authenticated
        publish: $authenticated
-       unpublish: $authenticated
-     'craft*':
+       unpublish:
+     '@craft/capability-experience':
        access: $authenticated
        publish: $authenticated
-       unpublish: $authenticated
+       unpublish:
+     '@craft/capability-knowledge':
+       access: $authenticated
+       publish: $authenticated
+       unpublish:
+     '@craft/capability-memory':
+       access: $authenticated
+       publish: $authenticated
+       unpublish:
+     'craft':
+       access: $authenticated
+       publish: $authenticated
+       unpublish:
+     'craft-eval':
+       access: $authenticated
+       publish: $authenticated
+       unpublish:
+     'craft-common-store-local':
+       access: $authenticated
+       publish: $authenticated
+       unpublish:
+     'craft-common-base':
+       access: $authenticated
+       publish: $authenticated
+       unpublish:
+     'craft-common-log':
+       access: $authenticated
+       publish: $authenticated
+       unpublish:
      '**':
        access: $all
+       publish:
        proxy: npmjs
    ```
 
-   `craft*` 是过渡规则，覆盖当前无作用域的 `craft`、`craft-eval` 和 `craft-common-*`；它不应代理上游同名包。最终应使用统一且不冲突的作用域，并校验规则不会捕获无关包。正式权限、账户注册策略和网络边界须在部署环境验证；令牌只保存在权限受限的本机配置或密钥管理器中，不写进仓库、日志或命令记录。
+   内部包逐个列名且禁止撤销；不要使用宽泛前缀匹配，也不要允许已认证用户向任意公共包名发布。正式权限和网络边界须在部署环境验证；令牌只保存在权限受限的本机配置或密钥管理器中，不写进仓库、日志或命令记录。
 3. 使用明确配置路径启动服务，验证本机健康检查和认证；再以普通、未认证身份验证不可发布内部包。需要自动启动时，使用系统服务管理器，并验证重启后存储仍可读取。服务停止、凭据失效和端口冲突要有明确错误，不能悄悄回落到公共仓库同名包。
 4. 先备份持久化存储和元数据，再验证在隔离目录恢复。服务升级前再次备份；回滚服务版本前先核对存储格式兼容性。不要删除唯一的制品副本。
 

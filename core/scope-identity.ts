@@ -102,11 +102,14 @@ export class ScopeIdentityKernel {
       const resolved = this.resolveProject({ project_root: root });
       // Keep the historical scope as a documented, excluded alias. No business data is exposed.
       const binding = this.bindAlias({ scope_kind: "project", scope_id: canonical.id, alias_kind: "legacy", alias: legacyId });
+      const resolvedAlias = resolved.alias as JsonObject, legacyAlias = binding.alias as JsonObject;
       const refs = [...before.map(item => ({ kind: item.kind, id: item.record.id })),
         ...(!existed ? [{ kind: "project_identity", id: canonical.id }] : []),
-        ...[resolved.alias as JsonObject, binding.alias as JsonObject].filter(row => !before.some(item => item.record.id === row.id)).map(row => ({ kind: "scope_alias", id: row.id }))];
+        { kind: "scope_alias", id: resolvedAlias.id }, { kind: "scope_alias", id: legacyAlias.id }];
       const after = refs.map(ref => ({ ...ref, version: this.store.get(ref.kind, String(ref.id)).version }));
-      const migration = this.store.save("project_registry_migration", id, { ...this.store.get("project_registry_migration", id), state: "applied", after, created: refs.filter(ref => !before.some(item => item.kind === ref.kind && item.record.id === ref.id) && (ref.kind !== "scope_alias" || !aliasExisted.has(ref.id))) });
+      const created = [...(!existed ? [{ kind: "project_identity", id: canonical.id }] : []),
+        ...[resolvedAlias, legacyAlias].filter(alias => !aliasExisted.has(String(alias.id))).map(alias => ({ kind: "scope_alias", id: alias.id }))];
+      const migration = this.store.save("project_registry_migration", id, { ...this.store.get("project_registry_migration", id), state: "applied", after, created });
       return { migration, identity: resolved.identity, registry_migrated: true, data_migrated: false };
     });
   }
@@ -157,13 +160,16 @@ export class ScopeIdentityKernel {
         ...aliases.map(row => String((row.scope as JsonObject | undefined)?.id ?? "")),
         ...identities.map(row => String(row.id)),
       ].filter(id => id && id !== canonical.id))].sort();
-      const truncated = aliases.length > 100 || identities.length > 100;
+      const otherAliases = legacyScopes.length ? this.store.list("scope_alias", 101, row => row.status === "active" && row.alias_kind === "path"
+        && legacyScopes.includes(String((row.scope as JsonObject | undefined)?.id ?? "")) && !matchesPath(row.alias), false) : [];
+      const truncated = aliases.length > 100 || identities.length > 100 || otherAliases.length > 100;
       return {
         truncated,
-        status: truncated ? "inventory_incomplete" : legacyScopes.length > 1 ? "ambiguous" : legacyScopes.length ? "migration_required" : "current",
+        status: truncated ? "inventory_incomplete" : legacyScopes.length > 1 || otherAliases.length ? "ambiguous" : legacyScopes.length ? "migration_required" : "current",
         canonical_scope: canonical, project_root: identity.local_path_alias,
         legacy_scope_ids: legacyScopes,
         alias_refs: aliases.slice(0, 100).map(row => ({ id: row.id, version: row.version, scope: row.scope })),
+        conflicting_alias_refs: otherAliases.slice(0, 100).map(row => ({ id: row.id, version: row.version, scope: row.scope })),
         identity_refs: identities.slice(0, 100).map(row => ({ id: row.id, version: row.version })),
         migration_performed: false,
         recovery: legacyScopes.length ? "Back up the data directory and inventory legacy scoped records before migrating. Alias binding alone does not migrate data." : null,

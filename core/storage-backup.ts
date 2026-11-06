@@ -18,7 +18,7 @@ async function files(root: string, directory = root): Promise<string[]> {
   for (const name of (await readdir(directory)).sort()) {
     const path = join(directory, name), info = await lstat(path);
     if (info.isSymbolicLink()) throw new Error("Storage backup rejects symbolic links");
-    if (info.isDirectory()) result.push(...await files(root, path));
+    if (info.isDirectory()) for (const item of await files(root, path)) result.push(item);
     else if (info.isFile()) result.push(relative(root, path).split(sep).join("/"));
     else throw new Error("Storage backup requires regular files");
   }

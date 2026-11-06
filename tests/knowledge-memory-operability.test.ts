@@ -528,6 +528,10 @@ test("portable Knowledge/Memory bundles preserve content but merge only addition
       content: "Use the smallest relevant test command first.", confidence: "confirmed", evidence_ids: [evidence.id] });
 
     const exported = source.service.knowledgeMemoryBundleExport({ scope_kind: "project", scope_id: "p", exported_at: "2026-09-20T00:00:00.000Z" });
+    assert.equal(exported.completeness, "unverified");
+    assert.equal(exported.pagination_supported, false);
+    const limited = source.service.knowledgeMemoryBundleExport({ scope_kind: "project", scope_id: "p", limit: 1 });
+    assert((limited.potentially_truncated_groups as string[]).includes("claims"));
     const bundle = exported.bundle as JsonObject;
     assert.equal(source.service.knowledgeMemoryBundleVerify({ bundle }).valid, true);
     const plan = target.service.knowledgeMemoryBundleImportPlan({ bundle });
