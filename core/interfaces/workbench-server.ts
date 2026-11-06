@@ -1,4 +1,5 @@
 import { WorkbenchEvaluations } from "./workbench-evaluations.ts";
+import { workbenchContextAuditRoute } from "./workbench-context-audit-route.ts";
 import { WorkbenchQueueRunner } from "./workbench-queue-runner.ts";
 import { text } from "../validation.ts";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -647,6 +648,11 @@ export class WorkbenchWebApp {
       if (!this.evaluations) return json(503, { error: "Evaluation service unavailable" });
       try {
         if (path === "/api/workbench/evaluations" && request.method === "POST") return json(202, { evaluation: await this.evaluations.submit(bodyObject(request.body)) });
+        const contextAudit = workbenchContextAuditRoute(request.method, path);
+        if (contextAudit?.kind === "audit") {
+          return json(200, await this.evaluations.auditContextReceipt(bodyObject(request.body)));
+        }
+        if (contextAudit?.kind === "report") return json(200, await this.evaluations.contextAuditReport(contextAudit.id));
         if (path === "/api/workbench/evaluations/knowledge-context" && request.method === "GET") {
           const runId = url.searchParams.get("retrieval_run_id");
           if (!runId || runId.length > 256 || /[\u0000-\u001f\u007f]/u.test(runId)) throw new Error("retrieval_run_id is invalid");
@@ -672,7 +678,11 @@ export class WorkbenchWebApp {
         if (request.method === "GET" && match[2] === "report") return json(200, await this.evaluations.report(id));
         if (request.method === "POST" && match[2] === "cancel") return json(200, { evaluation: this.evaluations.cancel(id) });
         return json(404, { error: "Not found" });
-      } catch (error) { if ((error as { code?: string }).code === "EVALUATION_NOT_FOUND") return json(404, { error: "Evaluation not found" }); return failure(error); }
+      } catch (error) {
+        if ((error as { code?: string }).code === "EVALUATION_NOT_FOUND") return json(404, { error: "Evaluation not found" });
+        if ((error as { code?: string }).code === "CONTEXT_AUDIT_NOT_FOUND") return json(404, { error: "Context audit not found" });
+        return failure(error);
+      }
     }
 
     const pilotDispatch = /^\/api\/workbench\/pilot-sessions\/([^/]+)\/dispatch$/u.exec(path);

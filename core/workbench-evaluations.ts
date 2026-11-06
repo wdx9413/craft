@@ -9,6 +9,7 @@ import { stableDigest } from "./digest.ts";
 import evaluationPackage from "craft-eval/package.json" with { type: "json" };
 import { evaluationEngineIdentity } from "./evaluation-engine-identity.ts";
 import { KnowledgeTaskEffects } from "./knowledge-task-effects.ts";
+import { WorkbenchContextAudits } from "./workbench-context-audit.ts";
 const evaluationVersion = evaluationPackage.version;
 
 const KIND = "workbench_evaluation";
@@ -36,11 +37,14 @@ async function configurationBytes(path: string): Promise<Buffer> {
 /** Controlled execution records are not automatic Knowledge or release approval. */
 export class WorkbenchEvaluations {
   readonly store: CraftStore;
+  readonly contextAudits: WorkbenchContextAudits;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; events: JsonObject[] }>();
   private closed = false;
-  constructor(store: CraftStore) { this.store = store; }
+  constructor(store: CraftStore) { this.store = store; this.contextAudits = new WorkbenchContextAudits(store); }
   knowledgeContext(runId: string): JsonObject { return new KnowledgeTaskEffects(this.store, this).context(runId); }
   assessKnowledgeEffect(runId: string, baselineId: string, candidateId: string): Promise<JsonObject> { return new KnowledgeTaskEffects(this.store, this).assess(runId, baselineId, candidateId); }
+  auditContextReceipt(args: JsonObject): ReturnType<WorkbenchContextAudits["audit"]> { return this.contextAudits.audit(args); }
+  contextAuditReport(id: string): ReturnType<WorkbenchContextAudits["report"]> { return this.contextAudits.report(id); }
 
   get(id: string): JsonObject {
     const record = this.store.find(KIND, id);

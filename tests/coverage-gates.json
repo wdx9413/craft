@@ -115,9 +115,30 @@
         "tests/workbench-evaluation-concurrency.test.ts",
         "tests/bundled-knowledge-task-effects.test.ts",
         "tests/workbench-evaluations.test.ts",
+        "tests/workbench-context-audit.test.ts",
         "tests/knowledge-task-effects.test.ts",
         "tests/evaluation-process.test.ts",
         "tests/evaluation-process-crash.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "workbench-context-receipt-audit",
+      "include": [
+        "core/workbench-context-audit.ts"
+      ],
+      "tests": [
+        "tests/workbench-context-audit.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "workbench-context-audit-routing",
+      "include": [
+        "core/interfaces/workbench-context-audit-route.ts"
+      ],
+      "tests": [
+        "tests/workbench-context-audit-route.test.ts"
       ],
       "branches": true
     },

@@ -8,6 +8,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { WorkbenchWebApp } from "../core/workbench-server.ts";
 import { WorkbenchEvaluations } from "../core/interfaces/workbench-evaluations.ts";
+import { EvaluationOutcomeUnknownError } from "../core/evaluation-process.ts";
 import { prepareTaskInput } from "craft-eval";
 
 // A real evaluation spawns a host process and runs craft-eval; a fixed 2s poll
@@ -42,7 +43,7 @@ test("controlled worker preserves context input receipts from the installed eval
     const report = result.report as { results: Array<{ input_receipt: unknown; verdict: string }> };
     assert.equal(report.results[0]!.verdict, "passed");
     assert.deepEqual(report.results[0]!.input_receipt, prepareTaskInput(prompt, context).receipt);
-    assert.equal(evaluations.get(id).evaluator_version, "0.1.5");
+    assert.equal(evaluations.get(id).evaluator_version, "0.2.0");
     const engine = evaluations.get(id).execution_engine as { kind: string; sha256: string };
     assert.equal(engine.kind, "claude"); assert.match(engine.sha256, /^[a-f0-9]{64}$/u);
     const frozenSubject = join(String(evaluations.get(id).report_root), "subject.json");
@@ -55,6 +56,61 @@ test("controlled worker preserves context input receipts from the installed eval
     const saved = JSON.parse(await readFile(path, "utf8")); saved.input_receipt.context_sha256 = "forged"; await writeFile(path, JSON.stringify(saved));
     await assert.rejects(evaluations.report(id), /changed after completion/);
   } finally { await evaluations.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Context receipt audit API authenticates, persists a bounded report and rejects changed retries", async () => {
+  const root = await mkdtemp(join(tmpdir(), "workbench-context-audit-api-"));
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  const evaluations = new WorkbenchEvaluations(store), service = new CraftService(store);
+  const origin = "http://localhost:4173", base = "/api/workbench/evaluations";
+  const app = new WorkbenchWebApp(service, "token", origin, { evaluations });
+  const call = async (method: string, path: string, body?: object, requestOrigin = origin) => app.handleAsync({ method, path, token: "token", origin: requestOrigin, body: body && JSON.stringify(body) });
+  try {
+    assert.equal((await app.handleAsync({ method: "POST", path: `${base}/context-audit` })).status, 401);
+    assert.equal((await call("POST", `${base}/context-audit`, {}, "https://example.com")).status, 403);
+    const pack = join(root, "pack.json"), expectations = join(root, "expectations.json");
+    const input = { operation_id: "context-audit-api", pack_path: pack, expectations_path: expectations };
+    await writeFile(pack, JSON.stringify({ asset_refs: [{ member: "memory", id: "memory-1" }], items: [{ id: "memory-1", content: "private memory body" }], pack_receipt: { partial: false, max_items: 1, max_chars: 500, total_items: 1, total_used_chars: 20 } }));
+    await writeFile(expectations, JSON.stringify({ schema: "craft-eval.context-audit.v1", case_id: "api", required_refs: [{ member: "memory", id: "memory-1" }], reference_only_members: ["memory"] }));
+    assert.equal((await call("POST", `${base}/context-audit`, { ...input, pack_path: "relative.json" })).status, 422);
+    const submitted = await call("POST", `${base}/context-audit`, input);
+    assert.equal(submitted.status, 200, submitted.body);
+    const body = JSON.parse(submitted.body);
+    assert.equal(body.audit.status, "failed", "reference-only violations must stay visible");
+    assert.equal(submitted.body.includes("private memory body"), false);
+    assert.equal((await call("GET", `${base}/context-audit/${body.audit.id}/report`)).status, 200);
+    assert.equal((await call("GET", `${base}/context-audit/${"a".repeat(64)}/report`)).status, 404);
+    assert.equal((await call("GET", `${base}/context-audit/not-an-id/report`)).status, 404);
+    await writeFile(expectations, JSON.stringify({ schema: "craft-eval.context-audit.v1", case_id: "api", required_refs: [{ member: "knowledge", id: "different" }] }));
+    assert.equal((await call("POST", `${base}/context-audit`, input)).status, 422);
+  } finally { await evaluations.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("controlled worker classifies unknown and non-Error failures without losing the terminal state", async () => {
+  for (const [operation, failure, expectedState, expectedError] of [
+    ["non-error", "simulated storage failure", "failed", "evaluation failed"],
+    ["unknown-error", new EvaluationOutcomeUnknownError(), "unknown", new EvaluationOutcomeUnknownError().message],
+  ] as const) {
+    const root = await mkdtemp(join(tmpdir(), `workbench-eval-${operation}-`));
+    const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+    const evaluations = new WorkbenchEvaluations(store);
+    try {
+      const workspace = join(root, "workspace"); await mkdir(workspace);
+      const suite = join(root, "suite.json"), subject = join(root, "subject.json"), runtime = join(root, "runtime.json");
+      await writeFile(suite, JSON.stringify({ schema: "craft-eval.eval.v1", suite_id: operation, subject_kind: "software", partition: "development", sanitized: true, cases: [{ id: "exit", argv: [process.execPath, "-e", "process.exit(0)"], checks: [{ id: "exit", kind: "exit_code", equals: 0 }] }] }));
+      await writeFile(subject, JSON.stringify({ kind: "software", id: operation, version: "1" }));
+      await writeFile(runtime, JSON.stringify(Object.fromEntries(["environment_digest", "budget_digest", "host_digest", "model_digest", "tools_digest"].map(key => [key, "test"]))));
+      const save = store.save.bind(store); let rejectCompletion = true;
+      store.save = ((kind: string, id: string, record: Record<string, unknown>) => {
+        if (kind === "workbench_evaluation" && record.state === "completed" && rejectCompletion) { rejectCompletion = false; throw failure; }
+        return save(kind, id, record);
+      }) as typeof store.save;
+      const created = await evaluations.submit({ operation_id: operation, workspace, suite, subject, runtime });
+      await waitSettled(evaluations, String(created.id));
+      assert.equal(evaluations.get(String(created.id)).state, expectedState);
+      assert.equal(evaluations.get(String(created.id)).error, expectedError);
+    } finally { await evaluations.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+  }
 });
 
 test("evaluation API authenticates, freezes inputs, deduplicates, reports and cancels real workers", async () => {
@@ -89,7 +145,7 @@ test("evaluation API authenticates, freezes inputs, deduplicates, reports and ca
     const report = await call("GET", `${base}/${id}/report`);
     assert.equal(report.status, 200, report.body); assert.equal(JSON.parse(report.body).report.passed, 1);
     const receipt = evaluations.get(id);
-    assert.equal(receipt.evaluator_version, "0.1.5");
+    assert.equal(receipt.evaluator_version, "0.2.0");
     assert.equal(receipt.node_version, process.versions.node);
     assert.equal(JSON.parse(report.body).integrity, "verified_against_controlled_run");
     const resultPath = join(String(receipt.run_directory), "results/exit-1.json");

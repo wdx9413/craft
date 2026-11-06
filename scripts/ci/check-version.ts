@@ -75,18 +75,15 @@ for (const path of ["adapters/workbuddy-expert/skills/craft-route/SKILL.md",
 }
 
 /**
- * The marketplace is a separate repository, so nothing above can see it. It
- * drifted for three releases (marketplace manifests 0.12.32, its README 0.12.31,
- * craft 0.12.30) precisely because agreement was maintained by hand.
- *
- * It is checked only when a sibling checkout exists, so this repository still
- * validates in isolation.
+ * The Marketplace and Craft Runtime have separate release cadences. Validate
+ * the Marketplace's own manifests against its release record without forcing
+ * its extension version to equal the npm Runtime package version.
  */
 const marketplaceRoot = resolve(root, "..", "craft-marketplace");
 if (existsSync(resolve(marketplaceRoot, "release.json"))) {
   const marketplaceVersion = (await jsonAt(marketplaceRoot, "release.json")).version;
-  if (marketplaceVersion !== packageVersion) {
-    throw new Error(`craft-marketplace/release.json version ${String(marketplaceVersion)} differs from craft package.json ${packageVersion}`);
+  if (typeof marketplaceVersion !== "string" || !/^\d+\.\d+\.\d+$/u.test(marketplaceVersion)) {
+    throw new Error("craft-marketplace/release.json must provide a semantic Marketplace version");
   }
 
   const marketplaceManifests = [
@@ -97,15 +94,15 @@ if (existsSync(resolve(marketplaceRoot, "release.json"))) {
   for (const path of marketplaceManifests) {
     if (!existsSync(resolve(marketplaceRoot, path))) continue;
     const manifestVersion = (await jsonAt(marketplaceRoot, path)).version;
-    if (manifestVersion !== packageVersion) {
-      throw new Error(`craft-marketplace/${path} version ${String(manifestVersion)} differs from craft package.json ${packageVersion}`);
+    if (manifestVersion !== marketplaceVersion) {
+      throw new Error(`craft-marketplace/${path} version ${String(manifestVersion)} differs from Marketplace release ${marketplaceVersion}`);
     }
   }
 
   const marketplaceReadme = await readFile(resolve(marketplaceRoot, "README.md"), "utf8");
   const versionLine = marketplaceReadme.split(/\r?\n/u).find((line) => /Craft version/u.test(line));
-  if (versionLine && !versionLine.includes(packageVersion)) {
-    throw new Error(`craft-marketplace/README.md must expose Craft version ${packageVersion}`);
+  if (versionLine && !versionLine.includes(marketplaceVersion)) {
+    throw new Error(`craft-marketplace/README.md must expose Marketplace version ${marketplaceVersion}`);
   }
 }
 
