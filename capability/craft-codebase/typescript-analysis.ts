@@ -13,6 +13,12 @@ export type TypeScriptFileUnit = JsonObject & {
   readonly nodes: JsonObject[];
   readonly edges: JsonObject[];
   readonly unresolved_relations: number;
+  /** Standard-library / bare-package lookups the checkpoint could not load. */
+  readonly external_references?: number;
+  readonly unresolved_type_references?: number;
+  readonly unresolved_heritage?: number;
+  readonly unresolved_imports?: number;
+  readonly unresolved_calls?: number;
   readonly budget_limited: boolean;
   readonly unit_digest: string;
 };
@@ -21,13 +27,16 @@ export type TypeScriptAnalysisOptions = { readonly include_paths?: readonly stri
   readonly max_graph_nodes?: number };
 // Include Craft's serialized graph schema so cached file units are rebuilt when
 // emitted symbol facts change even if the TypeScript compiler itself is unchanged.
-// v7: graph budgets are now shared with the importer via graph-budget.ts. Old
-// cached units (v5/v6) were built under smaller caps and are missing the tail
-// of the traversal, so they must be invalidated rather than reused.
-export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v7`;
+// v8: unresolved relations are split into internal gaps vs external references
+// (standard library / bare packages). Cached v7 units counted both together and
+// lack the breakdown, so they must be rebuilt.
+export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v8`;
 export function typeScriptFileUnitDigest(unit: Omit<TypeScriptFileUnit, "unit_digest"> | TypeScriptFileUnit): string {
   return stableDigest({ path: unit.path, source_digest: unit.source_digest, analyzer_version: unit.analyzer_version,
-    external_module: unit.external_module, nodes: unit.nodes, edges: unit.edges, unresolved_relations: unit.unresolved_relations, budget_limited: unit.budget_limited });
+    external_module: unit.external_module, nodes: unit.nodes, edges: unit.edges, unresolved_relations: unit.unresolved_relations,
+    external_references: unit.external_references ?? 0, unresolved_type_references: unit.unresolved_type_references ?? 0,
+    unresolved_heritage: unit.unresolved_heritage ?? 0, unresolved_imports: unit.unresolved_imports ?? 0,
+    unresolved_calls: unit.unresolved_calls ?? 0, budget_limited: unit.budget_limited });
 }
 const parsed = new Map<string, ts.SourceFile>();
 const programs = new Map<string, ts.Program>();
@@ -35,6 +44,50 @@ import { GRAPH_BUDGET } from "./graph-budget.ts";
 
 const DEFAULT_MAX_GRAPH_NODES = GRAPH_BUDGET.maxNodes;
 const MAX_GRAPH_EDGES = GRAPH_BUDGET.maxEdges;
+
+/**
+ * Names the compiler would resolve from a standard library that a checkpoint
+ * analysis deliberately does not load (`noLib: true`). A failed lookup for one
+ * of these is an external reference, not a missing internal relation: mixing
+ * the two made `unresolved_relations` look like ~126k broken internal edges
+ * when most were `Promise`/`Array`/`node:` imports.
+ */
+const BUILTIN_TYPE_GLOBALS: ReadonlySet<string> = new Set([
+  "Promise", "PromiseLike", "Array", "ReadonlyArray", "Record", "Partial", "Required", "Pick", "Omit",
+  "Exclude", "Extract", "NonNullable", "ReturnType", "Parameters", "ConstructorParameters", "InstanceType",
+  "ThisType", "Awaited", "Uppercase", "Lowercase", "Capitalize", "Uncapitalize", "PropertyKey",
+  "ThisParameterType", "OmitThisParameter", "NoInfer", "Date", "Error", "TypeError", "RangeError",
+  "SyntaxError", "ReferenceError", "EvalError", "URIError", "AggregateError", "Map", "ReadonlyMap",
+  "WeakMap", "Set", "ReadonlySet", "WeakSet", "WeakRef", "FinalizationRegistry", "JSON", "Math", "Object",
+  "Function", "String", "Number", "Boolean", "BigInt", "Symbol", "RegExp", "ArrayBuffer", "SharedArrayBuffer",
+  "DataView", "Uint8Array", "Uint8ClampedArray", "Uint16Array", "Uint32Array", "Int8Array", "Int16Array",
+  "Int32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array", "URL", "URLSearchParams",
+  "AbortController", "AbortSignal", "TextEncoder", "TextDecoder", "EventTarget", "Event", "Request",
+  "Response", "Headers", "FormData", "Blob", "File", "Buffer", "NodeJS", "Console", "Timer", "Timeout",
+  "Iterable", "IterableIterator", "Iterator", "AsyncIterable", "AsyncIterableIterator", "AsyncIterator",
+  "Generator", "AsyncGenerator", "GeneratorFunction", "AsyncGeneratorFunction",
+]);
+const BUILTIN_CALLABLES: ReadonlySet<string> = new Set([
+  "fetch", "setTimeout", "clearTimeout", "setInterval", "clearInterval", "setImmediate", "queueMicrotask",
+  "structuredClone", "atob", "btoa", "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent",
+  "decodeURIComponent", "encodeURI", "decodeURI", "require", "console", "process", "globalThis", "Buffer",
+  "Object", "Array", "String", "Number", "Boolean", "Symbol", "BigInt", "Date", "RegExp", "Error", "TypeError",
+  "RangeError", "Promise", "Map", "Set", "WeakMap", "WeakSet", "JSON", "Math", "Reflect", "Proxy",
+  "AbortController", "AggregateError", "ArrayBuffer", "SharedArrayBuffer", "DataView", "Int8Array", "Uint8Array",
+  "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array",
+  "BigInt64Array", "BigUint64Array", "URL", "URLSearchParams", "WebSocket", "EventSource", "Worker",
+  "BroadcastChannel", "MessageChannel", "MessagePort", "TextEncoder", "TextDecoder", "addEventListener",
+  "removeEventListener", "apply", "call", "bind", "super", "import",
+]);
+function isExternalModuleSpecifier(specifier: string): boolean {
+  return !specifier.startsWith(".") && !specifier.startsWith("/");
+}
+/** Root identifier of a (possibly qualified) type name: `NodeJS.ProcessEnv` -> `NodeJS`. */
+function rootTypeName(name: ts.EntityName): string {
+  let current = name;
+  while (getTypeScript().isQualifiedName(current)) current = current.left;
+  return current.getText();
+}
 let declarationKinds: Map<ts.SyntaxKind, string> | undefined;
 function declarationKindMap(): Map<ts.SyntaxKind, string> {
   return declarationKinds ??= new Map<ts.SyntaxKind, string>([
@@ -180,6 +233,48 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
   }
   const unresolvedByPath = new Map([...outputPaths].map(path => [path, 0]));
   const unresolved = (path: string): void => { unresolvedByPath.set(path, unresolvedByPath.get(path)! + 1); };
+  // Internal gaps and external references are different facts. A checkpoint
+  // analysis has no standard library and cannot follow `node:` packages, so
+  // those lookups are recorded as `external_references` instead of inflating
+  // `unresolved_relations` with things the analyzer was never able to see.
+  let externalReferences = 0;
+  // Inline invocations (`(() => ...)()`) have no symbol to resolve and are not a
+  // relation gap: there is no separate declaration to point at.
+  let inlineInvocations = 0;
+  const isInlineCallee = (expression: ts.Expression): boolean => {
+    let target: ts.Expression = expression;
+    if (getTypeScript().isParenthesizedExpression(target)) target = target.expression;
+    return getTypeScript().isArrowFunction(target) || getTypeScript().isFunctionExpression(target);
+  };
+  // Local names bound by an import from a bare package or `node:` module. A call
+  // to one of these cannot be followed into the checkpoint, so it is external.
+  const externalImportBindings = new Map<string, Set<string>>();
+  const rememberExternalBinding = (path: string, name: string | undefined): void => {
+    if (!name) return;
+    const set = externalImportBindings.get(path) ?? new Set<string>();
+    set.add(name);
+    externalImportBindings.set(path, set);
+  };
+  const unresolvedKinds = { type_reference: 0, heritage: 0, import: 0, call: 0 };
+  const externalByPath = new Map<string, number>();
+  const unresolvedKindsByPath = new Map<string, { type_reference: number; heritage: number; import: number; call: number }>();
+  const kindCountsFor = (path: string): { type_reference: number; heritage: number; import: number; call: number } => {
+    let counts = unresolvedKindsByPath.get(path);
+    if (!counts) { counts = { type_reference: 0, heritage: 0, import: 0, call: 0 }; unresolvedKindsByPath.set(path, counts); }
+    return counts;
+  };
+  const unresolvedAs = (path: string, kind: keyof typeof unresolvedKinds): void => {
+    unresolvedKinds[kind] += 1;
+    kindCountsFor(path)[kind] += 1;
+    unresolved(path);
+  };
+  // A bounded sample of unresolved call names makes the gap actionable without
+  // dumping 100k entries into a report.
+  const unresolvedCallSamples = new Set<string>();
+  const external = (path: string): void => {
+    externalReferences += 1;
+    externalByPath.set(path, (externalByPath.get(path) ?? 0) + 1);
+  };
   const resolveDeclarationTargets = (items: readonly ts.Declaration[]): { graph: string[]; unit: string[] } => {
     const graph = new Set<string>(), unit = new Set<string>();
     for (const declaration of items) {
@@ -190,10 +285,34 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
     }
     return { graph: [...graph], unit: [...unit] };
   };
-  const resolveTargets = (at: ts.Node): { graph: string[]; unit: string[] } => {
+  // When the compiler cannot pin a symbol to a declaration (common with
+  // `noLib` and interface-typed service objects), fall back to a name lookup
+  // that only resolves when exactly one declaration in this checkpoint carries
+  // the name. Ambiguity stays unresolved rather than inventing an edge.
+  // A narrow fallback for calls the checker could not pin to a declaration:
+  // resolve by name only when exactly one declaration in the whole checkpoint
+  // carries it. `codebaseSymbolRead` qualifies; `read` does not. Ambiguity stays
+  // unresolved rather than inventing an edge, and the fallback is only used for
+  // call expressions (never for type names such as `NodeJS.ProcessEnv`).
+  const uniqueDeclarationByName = new Map<string, string | null>();
+  for (const [node, id] of declarations) {
+    if (!getTypeScript().isIdentifier(node)) continue;
+    const name = node.getText();
+    const previous = uniqueDeclarationByName.get(name);
+    if (previous === undefined) uniqueDeclarationByName.set(name, id);
+    else if (previous !== id) uniqueDeclarationByName.set(name, null);
+  }
+  const fallbackByName = (atName: string): string | null => uniqueDeclarationByName.get(atName) ?? null;
+  const resolveTargets = (at: ts.Node, allowNameFallback = false): { graph: string[]; unit: string[] } => {
     let symbol = checker.getSymbolAtLocation(at);
     if (symbol && symbol.flags & getTypeScript().SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-    return resolveDeclarationTargets(symbol?.declarations ?? []);
+    const resolved = resolveDeclarationTargets(symbol?.declarations ?? []);
+    if (resolved.graph.length || resolved.unit.length) return resolved;
+    if (allowNameFallback) {
+      const fallback = fallbackByName(at.getText().split(".").pop() ?? at.getText());
+      if (fallback) return { graph: [fallback], unit: [fallback] };
+    }
+    return resolved;
   };
   const callOwner = (node: ts.Node, fallback: string, owners: Map<ts.Node, string> = declarations): string => {
     let parent = node.parent;
@@ -233,7 +352,10 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
         const targets = resolveTargets(node.typeName);
         for (const target of targets.graph) add("type_definition", current, target, node.typeName);
         for (const target of targets.unit) addUnit("type_definition", unitCurrent, target, node.typeName);
-        if (!targets.graph.length) unresolved(file.path);
+        if (!targets.graph.length) {
+          if (BUILTIN_TYPE_GLOBALS.has(rootTypeName(node.typeName))) external(file.path);
+          else unresolvedAs(file.path, "type_reference");
+        }
       }
       if (getTypeScript().isHeritageClause(node) && (node.token === getTypeScript().SyntaxKind.ImplementsKeyword || node.token === getTypeScript().SyntaxKind.ExtendsKeyword)) {
         const relation: "implements" | "extends" = node.token === getTypeScript().SyntaxKind.ImplementsKeyword ? "implements" : "extends";
@@ -241,7 +363,10 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
           const targets = resolveTargets(heritage.expression);
           for (const target of targets.graph) add(relation, current, target, heritage.expression);
           for (const target of targets.unit) addUnit(relation, unitCurrent, target, heritage.expression);
-          if (!targets.graph.length) unresolved(file.path);
+          if (!targets.graph.length) {
+            if (BUILTIN_TYPE_GLOBALS.has(heritage.expression.getText())) external(file.path);
+            else unresolvedAs(file.path, "heritage");
+          }
         }
       }
       if ((getTypeScript().isImportDeclaration(node) || getTypeScript().isExportDeclaration(node)) && node.moduleSpecifier && getTypeScript().isStringLiteral(node.moduleSpecifier)) {
@@ -250,20 +375,66 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
         if (target) {
           add("imports", fileNodes.get(source.fileName)!, target, node.moduleSpecifier);
           addUnit("imports", fileNodes.get(source.fileName)!, target, node.moduleSpecifier);
-        } else unresolved(file.path);
+        } else if (isExternalModuleSpecifier(node.moduleSpecifier.text)) {
+          external(file.path);
+          const clause = getTypeScript().isImportDeclaration(node) ? node.importClause : undefined;
+          rememberExternalBinding(file.path, clause?.name?.text);
+          const bindings = clause?.namedBindings;
+          if (bindings) {
+            if (getTypeScript().isNamespaceImport(bindings)) rememberExternalBinding(file.path, bindings.name.text);
+            else for (const element of bindings.elements) rememberExternalBinding(file.path, element.name.text);
+          }
+        }
+        else unresolvedAs(file.path, "import");
       }
       if (getTypeScript().isCallExpression(node) || getTypeScript().isNewExpression(node)) {
         const signature = checker.getResolvedSignature(node);
         let symbol = checker.getSymbolAtLocation(getTypeScript().isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression);
         if (symbol && symbol.flags & getTypeScript().SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-        const expressionType = checker.getTypeAtLocation(node.expression);
-        const callable = getTypeScript().isNewExpression(node) ? expressionType.getConstructSignatures() : expressionType.getCallSignatures();
-        const candidates = callable.length ? [signature?.declaration, ...(symbol?.declarations ?? [])].filter((value): value is ts.Declaration => value !== undefined) : [];
-        const targets = resolveDeclarationTargets(candidates);
+        // A symbol declaration is evidence even when the expression type has no
+        // call signature. With `noLib` a great many expressions degrade to
+        // `any`, so gating on `getCallSignatures().length` discarded resolvable
+        // internal calls and they were miscounted as unresolved relations.
+        const candidates = [signature?.declaration, ...(symbol?.declarations ?? [])]
+          .filter((value): value is ts.Declaration => value !== undefined);
+        const targets = candidates.length
+          ? resolveDeclarationTargets(candidates)
+          : resolveTargets(node.expression, true);
         let target = targets.graph.find(Boolean);
         if (!target && signature?.declaration?.parent) target = declarations.get(signature.declaration.parent) ?? declarationId(signature.declaration.parent);
         if (target) add("calls", callOwner(node, current), target, node.expression);
-        else unresolved(file.path);
+        else if (isInlineCallee(node.expression)) inlineInvocations += 1;
+        else if (BUILTIN_CALLABLES.has(getTypeScript().isPropertyAccessExpression(node.expression)
+          ? node.expression.name.getText() : node.expression.getText())) external(file.path);
+        else if (externalImportBindings.get(file.path)?.has(getTypeScript().isPropertyAccessExpression(node.expression)
+          ? node.expression.expression.getText() : node.expression.getText())) external(file.path);
+        else if (candidates.length > 0 && candidates.every((declaration) => !sources.has(declaration.getSourceFile().fileName)))
+          // Every declaration the checker found lives outside the checkpoint
+          // (a standard-library or package `.d.ts`). That is an external
+          // reference, not a broken internal call.
+          external(file.path);
+        else if (getTypeScript().isPropertyAccessExpression(node.expression)
+          // A method call on an `any` receiver cannot be resolved because the
+          // receiver's type was never loaded (noLib drops Map/Set/JSON/Promise
+          // and `node:` values). A concrete receiver with a missing method is a
+          // real internal gap, so only the `any` case is external.
+          && (checker.getTypeAtLocation(node.expression.expression).flags & getTypeScript().TypeFlags.Any) !== 0) external(file.path);
+        else if (getTypeScript().isPropertyAccessExpression(node.expression)
+          // Array/string/Map methods live on intrinsic or standard-library
+          // types whose declarations are outside the checkpoint.
+          && (() => {
+            const receiver = checker.getTypeAtLocation(node.expression.expression);
+            const symbol = receiver.getSymbol();
+            const declared = symbol?.declarations ?? [];
+            return !symbol || declared.length === 0 || declared.every((declaration) => !sources.has(declaration.getSourceFile().fileName));
+          })()) external(file.path);
+        else {
+          if (unresolvedCallSamples.size < 20) {
+            unresolvedCallSamples.add(getTypeScript().isPropertyAccessExpression(node.expression)
+              ? node.expression.name.getText() : node.expression.getText().slice(0, 60));
+          }
+          unresolvedAs(file.path, "call");
+        }
         const unitTarget = targets.unit.find(Boolean) ?? (signature?.declaration?.parent
           ? unitDeclarations.get(signature.declaration.parent) ?? declarations.get(signature.declaration.parent)
             ?? target : target);
@@ -276,13 +447,25 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
   const budgetLimited = omittedNodes > 0 || omittedEdges > 0;
   const unresolvedCount = [...unresolvedByPath.values()].reduce((sum, count) => sum + count, 0);
   const result: JsonObject = { format: "craft-static-analysis-v1", analyzer: "typescript-checker", analyzer_version: TYPESCRIPT_ANALYZER_VERSION, nodes, edges,
-    diagnostics: { unresolved_relations: unresolvedCount, omitted_nodes: omittedNodes, omitted_edges: omittedEdges, budget_limited: budgetLimited,
+    diagnostics: { unresolved_relations: unresolvedCount,
+      unresolved_type_references: unresolvedKinds.type_reference, unresolved_heritage: unresolvedKinds.heritage,
+      unresolved_imports: unresolvedKinds.import, unresolved_calls: unresolvedKinds.call,
+      unresolved_call_samples: [...unresolvedCallSamples].sort(),
+      // Standard-library and bare-package lookups the checkpoint never loaded.
+      // They are counted here, not as unresolved internal relations.
+      external_references: externalReferences,
+      inline_invocations: inlineInvocations,
+      omitted_nodes: omittedNodes, omitted_edges: omittedEdges, budget_limited: budgetLimited,
       parsed_file_count: files.length - host.reused, reused_file_count: host.reused, compiler_program_reused: Boolean(oldProgram), selected_file_count: outputPaths.size, external_resolution: false } };
   if (analysisOptions.include_file_units === true) {
     result.file_units = [...outputPaths].sort().map(path => {
       const unit = { path, source_digest: allFiles.get(path)!.digest, analyzer_version: TYPESCRIPT_ANALYZER_VERSION,
         external_module: getTypeScript().isExternalModule(sourceFiles.find(source => sources.get(source.fileName)?.path === path)!),
-        nodes: unitNodes.get(path)!, edges: unitEdges.get(path)!, unresolved_relations: unresolvedByPath.get(path)!, budget_limited: unitBudgetLimited.has(path) };
+        nodes: unitNodes.get(path)!, edges: unitEdges.get(path)!, unresolved_relations: unresolvedByPath.get(path)!,
+        external_references: externalByPath.get(path) ?? 0,
+        unresolved_type_references: kindCountsFor(path).type_reference, unresolved_heritage: kindCountsFor(path).heritage,
+        unresolved_imports: kindCountsFor(path).import, unresolved_calls: kindCountsFor(path).call,
+        budget_limited: unitBudgetLimited.has(path) };
       return { ...unit, unit_digest: typeScriptFileUnitDigest(unit) } satisfies TypeScriptFileUnit;
     });
   }

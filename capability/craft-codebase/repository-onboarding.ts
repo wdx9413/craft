@@ -108,8 +108,13 @@ function runConfiguredLsp(adapter: TrustedLspAdapter, files: readonly LspSourceF
 
 function typeScriptGraph(units: readonly TypeScriptFileUnit[], mode: string, reason: string): JsonObject {
   const nodes = units.flatMap(unit => unit.nodes), edges = units.flatMap(unit => unit.edges);
+  const sum = (field: "unresolved_relations" | "external_references" | "unresolved_type_references" | "unresolved_heritage" | "unresolved_imports" | "unresolved_calls"): number =>
+    units.reduce((total, unit) => total + Number(unit[field] ?? 0), 0);
   return { format: "craft-static-analysis-v1", analyzer: "typescript-checker", analyzer_version: TYPESCRIPT_ANALYZER_VERSION, nodes, edges,
-    diagnostics: { unresolved_relations: units.reduce((sum, unit) => sum + unit.unresolved_relations, 0), omitted_nodes: 0, omitted_edges: 0,
+    diagnostics: { unresolved_relations: sum("unresolved_relations"),
+      unresolved_type_references: sum("unresolved_type_references"), unresolved_heritage: sum("unresolved_heritage"),
+      unresolved_imports: sum("unresolved_imports"), unresolved_calls: sum("unresolved_calls"),
+      external_references: sum("external_references"), omitted_nodes: 0, omitted_edges: 0,
       budget_limited: units.some(unit => unit.budget_limited), selected_file_count: units.length, incremental_mode: mode, incremental_reason: reason } };
 }
 

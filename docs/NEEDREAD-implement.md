@@ -89,3 +89,16 @@ node --check workbench/app.js; node --check workbench/mod-pages.js; node --check
 2. `eval:codebase-retrieval` 三条 golden callers 长期缺失。逐层探针（analyzer → file-unit 合并 → 隔离端到端导入）证明分析与查询都正确，最终定位到 `repository-files.ts` 的 512 KiB 单文件上限丢弃了 `core/application/craft-service.ts`（560 KiB，声明 `CraftService` 本体），导致所有 `declare module` 增强失去基类、约 10.7 万条关系不可解析。修复：单文件上限 1 MiB、总量 24 MiB、文件数 1500，`omitted_by_reason` 记录遗漏原因，索引策略版本升到 14 使旧缓存失效。
 
 `capability/craft-codebase/graph-budget.ts` 是图预算的唯一来源（analyzer / importer / storage / 多语言 combiner 共用），此前四套各自为政曾静默截断跨文件关系边。
+
+### TS 关系诊断：区分外部引用与内部缺口
+
+`noLib` 的 checkpoint 分析无法加载标准库，也无法跟随 `node:` / 裸包，所以 `Promise`、`Map.get`、`readFileSync` 之类的查找失败以前全部计入 `unresolved_relations`，把「本来就不在索引范围内」与「内部关系真的丢了」混成一个约 12.6 万的数字。
+
+现在 `diagnostics` 分项报告：
+
+- `unresolved_relations` 只统计**内部**缺口（`unresolved_type_references` + `unresolved_heritage` + `unresolved_imports` + `unresolved_calls`）。
+- `external_references` 单独统计标准库 / 裸包 / `any` 接收者 / checkpoint 外声明 / 外部导入绑定。
+- `inline_invocations` 统计 `(() => …)()` 这类没有独立声明的立即调用。
+- `unresolved_call_samples` 给出不超过 20 个未解析调用名，便于定位。
+
+实测（craft 自身仓库，1131 个 TS 文件）：`unresolved_relations` 125,980 → **1,210**，`external_references` 124,079，`inline_invocations` 47。评测 `evaluation_pass` 仍为 true 且 precision/recall 全 1.0，说明这不是靠放宽门槛。

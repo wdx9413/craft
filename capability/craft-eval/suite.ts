@@ -693,6 +693,28 @@ if (inScope("self_evolution.shell_language_has_symbols_and_calls")) try {
   equals("self_evolution.shell_language_has_symbols_and_calls", ok ? "indexed" : "missing", "indexed");
 } catch (error) { unobserved("self_evolution.shell_language_has_symbols_and_calls", (error as Error).message); }
 
+if (inScope("self_evolution.unresolved_split_is_honest")) try {
+  const hash = (content: string) => createHash("sha256").update(content).digest("hex");
+  const source = [
+    'import { readFileSync } from "node:fs";',
+    'import { missing } from "./missing";',
+    'readFileSync("x");',
+    "const pending: Promise<void> = undefined as unknown as Promise<void>;",
+    "class Example implements MissingShape {}",
+    'fetch("https://example.invalid");',
+    "(() => 1)();",
+    "notDefined();",
+  ].join("\n");
+  const analysis = analyzeTypeScript([{ path: "main.ts", content: source, digest: hash(source), language: "typescript" }]);
+  const d = analysis.diagnostics as Json;
+  const internal = Number(d.unresolved_type_references) + Number(d.unresolved_heritage)
+    + Number(d.unresolved_imports) + Number(d.unresolved_calls);
+  const ok = Number(d.external_references) >= 4 && Number(d.inline_invocations) >= 1
+    && Number(d.unresolved_imports) === 1 && Number(d.unresolved_heritage) === 1
+    && Number(d.unresolved_calls) === 1 && Number(d.unresolved_relations) === internal;
+  equals("self_evolution.unresolved_split_is_honest", ok ? "split" : `bad:${JSON.stringify(d)}`, "split");
+} catch (error) { unobserved("self_evolution.unresolved_split_is_honest", (error as Error).message); }
+
 // ----------------------------------------------------------------- report
 store.close();
 rmSync(root, { recursive: true, force: true });

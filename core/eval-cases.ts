@@ -345,6 +345,13 @@ const SELF_EVOLUTION_CASES: GradedCase[] = [
     }),
     check: { kind: "equals", expected: "indexed" },
   },
+  {
+    case: defineEvalCase({
+      id: "self_evolution.unresolved_split_is_honest", axis: "self_evolution", evidence: "kernel", partition: "held_out", sanitized: true, approved_by: SUITE_REVIEWER,
+      description: "A checkpoint analysis reports standard-library/package lookups as external references and only genuine internal gaps as unresolved relations, never inflating the latter.",
+    }),
+    check: { kind: "equals", expected: "split" },
+  },
 ];
 
 /** Every graded case, in a stable order. */
