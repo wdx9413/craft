@@ -20,6 +20,8 @@ import { TokenVault } from "../craft-datasec/vault.ts";
 import { ModRegistry } from "../../core/mod-registry.ts";
 import { LocalDropAdapter, MessageListener } from "../../core/message-listener.ts";
 import { FileDirDescRegistry, PROMOTION_USE_THRESHOLD } from "../../core/file-dir-desc.ts";
+import { combineLanguageAnalyses } from "../../capability/craft-codebase/multi-language-analysis.ts";
+import { GRAPH_BUDGET } from "../../capability/craft-codebase/graph-budget.ts";
 import { evaluateVerificationCheck } from "../../core/verification-sensor.ts";
 import { pinConstraints, verifyPinIntact } from "../../core/governance-pinning.ts";
 import { ask, EVAL_MODEL, evaluationCredentialMissing } from "./model.ts";
@@ -618,6 +620,32 @@ if (inScope("self_evolution.coordinator_resolves_project_name")) try {
       resolution.root_path === dir && resolution.ambiguous !== true ? "bound" : `bad:${String(resolution.root_path)}`, "bound");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 } catch (error) { unobserved("self_evolution.coordinator_resolves_project_name", (error as Error).message); }
+
+if (inScope("self_evolution.codebase_merge_keeps_cross_file_calls")) try {
+  // A caller in file A references a symbol in file B. If the combiner's node
+  // cap is lower than the analyzer's, the target node is dropped and the edge
+  // becomes an orphan (silently lost). Feed enough decoy symbols before the
+  // target to exceed a small cap, then assert the cross-file call survives.
+  const node = (id: string, path: string, name: string) => ({ id, kind: "symbol", path, name });
+  const nodes = [
+    { id: "fA", kind: "file", path: "a.ts", name: "a.ts" },
+    { id: "fB", kind: "file", path: "b.ts", name: "b.ts" },
+    node("caller", "a.ts", "caller"),
+    ...Array.from({ length: 200 }, (_, n) => node(`decoy${n}`, "a.ts", `decoy${n}`)),
+    node("target", "b.ts", "target"),
+  ];
+  const analysis = { analyzer: "probe", analyzer_version: "1", nodes,
+    edges: [{ kind: "calls", from_node_id: "caller", to_node_id: "target",
+      source_span: { start_offset: 0, end_offset: 6 } }] };
+  const combined = combineLanguageAnalyses([analysis]) as Json;
+  const kept = ((combined?.edges ?? []) as Json[]).some((edge) => edge.from_node_id === "caller" && edge.to_node_id === "target");
+  const diagnostics = (combined?.diagnostics ?? {}) as Json;
+  // Also assert the shared budget is actually the one in force: a combiner
+  // capped below it would fail this case on a larger fixture.
+  const budgetShared = GRAPH_BUDGET.maxNodes >= 100_000 && GRAPH_BUDGET.maxEdges >= 400_000;
+  equals("self_evolution.codebase_merge_keeps_cross_file_calls",
+    kept && Number(diagnostics.unresolved_endpoint_edges ?? 0) === 0 && budgetShared ? "kept" : "lost", "kept");
+} catch (error) { unobserved("self_evolution.codebase_merge_keeps_cross_file_calls", (error as Error).message); }
 
 // ----------------------------------------------------------------- report
 store.close();

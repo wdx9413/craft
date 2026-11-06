@@ -335,7 +335,14 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
         const { file_units: _fileUnits, ...importableAnalysis } = tsAnalysis;
         semanticAnalyses.push(importableAnalysis);
       }
-      catch { degraded.push({ language: "typescript", status: "unavailable", reason: "analysis_failed" }); }
+      catch (error) {
+        // A swallowed exception turned an import-budget rejection into a silent
+        // `degraded` state: the evaluation then measured a partial graph and
+        // reported missing callers with no clue why. Keep the failure bounded
+        // but make its cause observable.
+        degraded.push({ language: "typescript", status: "unavailable", reason: "analysis_failed",
+          detail: error instanceof Error ? error.message : String(error) });
+      }
     }
     if (pythonFiles.length) {
       const cached = cachedPythonUnits;

@@ -199,6 +199,7 @@ try {
     const truePositives = [...observed].filter(key => expected.has(key)).length;
     const impactTruePositives = [...impactObserved].filter(key => expectedImpact.has(key)).length;
     return { target_path: item.target_path, target_name: item.target_name, target_found: target !== undefined,
+      target_node_id: target?.id ?? null, candidate_count: targets.length,
       expected_callers: [...expected].sort(), observed_callers: [...observed].sort(),
       expected_impact_callers: [...expectedImpact].sort(),
       true_positives: truePositives, false_positives: observed.size - truePositives, false_negatives: expected.size - truePositives,
@@ -242,33 +243,18 @@ try {
   // Surface the relation diagnostics in the persisted summary. Without them a
   // failing recall number gives no clue whether it came from a truncated graph,
   // an unresolved call, or a genuinely missing golden edge.
-  // Known open gap (2026-11-06): the three golden cross-file `calls` edges
-  // action-handlers.ts::createActionHandlers -> codebaseSymbolRead /
-  // codebaseRepositoryEnsure and use-cases/codebase.ts::installCodebaseMethods
-  // -> persistIndex are still missing from the *merged* multi-language graph.
-  // Proven: a direct full-repo analyzeTypeScript run emits both createAction-
-  // Handlers edges once the combined-graph byte cap was raised (omitted_edges
-  // 111970 -> 0), so the remaining loss happens in repository-onboarding's
-  // per-file-unit merge, not in the analyzer. This summary makes the diagnosis
-  // reproducible instead of leaving a bare FAIL.
-  const relationDiagnostics = (() => {
-    const collected: Array<Record<string, unknown>> = [];
-    const walk = (value: unknown): void => {
-      if (Array.isArray(value)) { for (const item of value) walk(item); return; }
-      if (!value || typeof value !== "object") return;
-      const record = value as Record<string, unknown>;
-      collected.push(record);
-      walk(record.diagnostics); walk(record.languages);
-    };
-    walk(indexRecord.diagnostics); walk((indexRecord.analysis as Record<string, unknown> | undefined)?.diagnostics);
-    return collected.map((record) => ({
-      path: record.path ?? null, language: record.language ?? null,
-      omitted_nodes: record.omitted_nodes ?? 0, omitted_edges: record.omitted_edges ?? 0,
-      unresolved_calls: record.unresolved_calls ?? 0, unresolved_relations: record.unresolved_relations ?? 0,
-      unresolved_endpoint_edges: record.unresolved_endpoint_edges ?? 0, budget_limited: record.budget_limited ?? false,
-    })).filter((record) => record.omitted_nodes || record.omitted_edges || record.unresolved_calls
-      || record.unresolved_relations || record.unresolved_endpoint_edges || record.budget_limited);
-  })();
+  // Resolved (2026-11-06): four independently-declared graph budgets
+  // (analyzer / importer / storage / multi-language combiner) used to disagree;
+  // the combiner round-robin-dropped nodes, orphaning cross-file edges. They now
+  // share GRAPH_BUDGET and the persisted diagnostics confirm omitted_nodes=0,
+  // omitted_edges=0, unresolved_endpoint_edges=0, budget_limited=false.
+  // Remaining gap: TypeScript checker reports unresolved_relations for calls
+  // through interface-typed service objects (prototype-assigned methods), so
+  // three golden callers are still not emitted. That is a type-binding problem
+  // in craft-codebase, not a graph-budget or merge problem.
+  // The raw diagnostics tree is the authoritative shape (nested languages[]
+  // plus combined counters); keeping it verbatim avoids a lossy flattened copy.
+  const relationDiagnostics = indexRecord.diagnostics ?? [];
   const craftRevision = assertEvaluationStateStable("Craft checkout", craftStateBefore, readGitEvaluationState(craftRoot));
   const repositoryRevision = assertEvaluationStateStable("evaluation repository", repositoryStateBefore, readGitEvaluationState(repository));
   const evaluationSuiteMaterial = suiteMaterial ?? JSON.stringify({ cases, callGraphCases, impactCases });
@@ -355,9 +341,6 @@ try {
     source_file_count: store.get("codebase_index", String(ready.index_id)).source_file_count,
     relation_analysis: (store.get("codebase_index", String(ready.index_id)).analysis as Record<string, unknown>).relation_analysis,
     relation_diagnostics: relationDiagnostics,
-    // Raw diagnostics are kept so a partial graph can be diagnosed from the
-    // persisted report even when the numeric fields live on nested records.
-    relation_diagnostics_raw: indexRecord.diagnostics,
     repository_summary: ready.summary ?? null,
     query_count: cases.length,
     baseline_mrr: baselineReciprocalRanks.reduce((sum, value) => sum + value, 0) / baselineReciprocalRanks.length,

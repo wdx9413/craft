@@ -19,6 +19,7 @@ import { linkDirectory } from "./symlink-support.ts";
 import { OpenAiCompatibleEmbeddingRetrievalPort, KeywordRetrievalPort } from "../core/retrieval-port.ts";
 import ts from "typescript";
 import { analyzeTypeScript, createCheckpointCompilerHost, exceedsTypeScriptFileUnitBudget } from "../capability/craft-codebase/typescript-analysis.ts";
+import { GRAPH_BUDGET } from "../capability/craft-codebase/graph-budget.ts";
 import { normalizeLspSymbols } from "../capability/craft-codebase/lsp-adapter.ts";
 import { runRetrievalEvaluation } from "../core/retrieval-evaluation.ts";
 import { CraftService } from "../core/service.ts";
@@ -708,12 +709,14 @@ test("compiler resolves imports, aliases and methods without matching comments, 
 });
 
 test("TypeScript file-unit caches remain complete when the combined graph reaches its budget", () => {
+  // A small, explicit node cap keeps this fixture fast while still exercising
+  // the bounded-graph contract (per-file units stay complete).
   const files = Array.from({ length: 61 }, (_, fileIndex) => {
     const declarations = Array.from({ length: 1_000 }, (_, index) => `export const value${fileIndex * 1_000 + index} = ${index};`).join("\n");
     const reference = fileIndex === 60 ? `const invokesOmitted = value60999;\n` : "";
     return source(`unit-${String(fileIndex).padStart(2, "0")}.ts`, `${reference}${declarations}`);
   });
-  const analysis = analyzeTypeScript(files, { include_file_units: true });
+  const analysis = analyzeTypeScript(files, { include_file_units: true, max_graph_nodes: 60_000 });
   const diagnostics = analysis.diagnostics as JsonObject;
   const units = analysis.file_units as JsonObject[];
   assert.equal(diagnostics.budget_limited, true);
@@ -735,7 +738,7 @@ test("TypeScript cache admission bounds per-file and aggregate unit bytes", () =
 
 test("an oversized TypeScript file unit is marked partial instead of entering the incremental cache", () => {
   const declarations = Array.from({ length: 70_000 }, (_, index) => `export const value${index} = ${index};`).join("\n");
-  const analysis = analyzeTypeScript([source("oversized-unit.ts", declarations)], { include_file_units: true });
+  const analysis = analyzeTypeScript([source("oversized-unit.ts", declarations)], { include_file_units: true, max_graph_nodes: 60_000 });
   const unit = (analysis.file_units as JsonObject[])[0]!;
   assert.equal((analysis.diagnostics as JsonObject).budget_limited, true);
   assert.equal(unit.budget_limited, true);
@@ -948,22 +951,22 @@ test("compiler returns an explicit bounded partial graph, handles incomplete dec
   const file = (path: string, content: string) => ({ path, content, digest: stableDigest([path, content]), language: "typescript" });
   const uncertain = analyzeTypeScript([file("main.ts", '/// <reference path="missing.ts" />\nexport default function () {}\n(() => 1)(); const object = { method: () => 2 }; object.method();')]);
   assert(Number((uncertain.diagnostics as JsonObject).unresolved_relations) > 0);
-  const many = Array.from({ length: 60_001 }, (_, n) => `const variable${n}=1;`).join("\n");
+  const many = Array.from({ length: GRAPH_BUDGET.maxNodes + 1 }, (_, n) => `const variable${n}=1;`).join("\n");
   const bounded = analyzeTypeScript([file("many.ts", many)]);
   const diagnostics = bounded.diagnostics as JsonObject;
   assert.equal(bounded.format, "craft-static-analysis-v1");
-  assert((bounded.nodes as JsonObject[]).length <= 60_000);
+  assert((bounded.nodes as JsonObject[]).length <= GRAPH_BUDGET.maxNodes);
   assert.equal(diagnostics.budget_limited, true);
   assert(Number(diagnostics.omitted_nodes) > 0);
   assert.equal((bounded.edges as JsonObject[]).every(edge => {
     const ids = new Set((bounded.nodes as JsonObject[]).map(node => node.id));
     return ids.has(String(edge.from_node_id)) && ids.has(String(edge.to_node_id));
   }), true);
-  const repeatedCalls = `export function target() {}\nexport function caller() { ${Array.from({ length: 305_000 }, () => "target();").join(" ")} }`;
+  const repeatedCalls = `export function target() {}\nexport function caller() { ${Array.from({ length: GRAPH_BUDGET.maxEdges + 1 }, () => "target();").join(" ")} }`;
   const boundedEdges = analyzeTypeScript([file("calls.ts", repeatedCalls)]);
   assert.equal((boundedEdges.diagnostics as JsonObject).budget_limited, true);
   assert(Number((boundedEdges.diagnostics as JsonObject).omitted_edges) > 0);
-  assert((boundedEdges.edges as JsonObject[]).length <= 300_000);
+  assert((boundedEdges.edges as JsonObject[]).length <= GRAPH_BUDGET.maxEdges);
   // The combined-graph byte cap is 64 MiB, so a 32 MiB filename no longer
   // trips the file-node reserve; assert the real per-unit guard instead (see
   // exceedsTypeScriptFileUnitBudget below) rather than allocating 64 MiB.
@@ -972,10 +975,10 @@ test("compiler returns an explicit bounded partial graph, handles incomplete dec
   assert.equal((analyzeTypeScript([file("new-cache.ts", "export {};")]).nodes as JsonObject[]).length, 1);
 });
 
-test("a checkpoint whose edges exceed 32 MiB keeps later files' cross-file calls", () => {
-  // Regression for the real Craft checkout: MAX_ANALYSIS_CHARS used to be
-  // 32 MiB while the importer accepted 64 MiB, so ~112k edges (including
-  // action-handlers -> codebaseSymbolRead) were silently omitted. Each file
+test("a checkpoint whose edges exceed the old 32 MiB keeps later files' cross-file calls", () => {
+  // Regression for the real Craft checkout: graph budgets used to be declared
+  // separately in the analyzer and the importer, so the analyzer emitted a
+  // graph the importer rejected and onboarding silently degraded. Each file
   // contributes many distinct calls; the final file's edge must survive.
   const file = (path: string, content: string) => ({ path, content, digest: stableDigest([path, content]), language: "typescript" });
   const files = Array.from({ length: 60 }, (_, index) => file(`src/bulk-${index}.ts`,
@@ -992,9 +995,11 @@ test("a checkpoint whose edges exceed 32 MiB keeps later files' cross-file calls
 });
 
 test("compiler reserves every checkpoint file node before declaration-heavy files exhaust graph limits", () => {
-  const files = Array.from({ length: 2_000 }, (_, fileIndex) => source(`src/file-${fileIndex}.ts`,
-    Array.from({ length: 31 }, (_, symbolIndex) => `export function fn${fileIndex}_${symbolIndex}() {}`).join("\n")));
-  const result = analyzeTypeScript(files);
+  const perFile = 31;
+  const fileCount = 2_000;
+  const files = Array.from({ length: fileCount }, (_, fileIndex) => source(`src/file-${fileIndex}.ts`,
+    Array.from({ length: perFile }, (_, symbolIndex) => `export function fn${fileIndex}_${symbolIndex}() {}`).join("\n")));
+  const result = analyzeTypeScript(files, { max_graph_nodes: 60_000 });
   const nodes = result.nodes as JsonObject[];
   const requiredFiles = nodes.filter(node => node.kind === "file");
   assert.equal(requiredFiles.length, files.length);

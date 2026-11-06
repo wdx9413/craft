@@ -324,6 +324,13 @@ const SELF_EVOLUTION_CASES: GradedCase[] = [
     }),
     check: { kind: "equals", expected: "bound" },
   },
+  {
+    case: defineEvalCase({
+      id: "self_evolution.codebase_merge_keeps_cross_file_calls", axis: "self_evolution", evidence: "kernel", partition: "held_out", sanitized: true, approved_by: SUITE_REVIEWER,
+      description: "The multi-language merge must not truncate nodes so aggressively that cross-file call edges lose their endpoints; budgets are shared across analyzer, importer and combiner.",
+    }),
+    check: { kind: "equals", expected: "kept" },
+  },
 ];
 
 /** Every graded case, in a stable order. */

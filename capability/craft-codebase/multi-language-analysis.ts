@@ -1,10 +1,13 @@
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { GRAPH_BUDGET } from "./graph-budget.ts";
 
-const MAX_NODES = 60_000;
-// Preserve large first-party repositories such as Craft (over 170k emitted
-// relations) while keeping graph publication behind explicit byte ceilings.
-const MAX_EDGES = 300_000;
-const MAX_CHARS = 64_000_000;
+const MAX_NODES = GRAPH_BUDGET.maxNodes;
+const MAX_EDGES = GRAPH_BUDGET.maxEdges;
+// The combined graph is serialized once more before import, so it must fit
+// within the same byte ceiling as the analyzer/importer. A smaller cap here
+// round-robin-truncated nodes, orphaning cross-file edges whose endpoints were
+// dropped (the caller/impact recall regression).
+const MAX_CHARS = GRAPH_BUDGET.maxImportBytes;
 
 /** Keep each language represented while producing one importable bounded graph. */
 export function combineLanguageAnalyses(analyses: readonly JsonObject[], diagnostics: readonly JsonObject[] = []): JsonObject | undefined {

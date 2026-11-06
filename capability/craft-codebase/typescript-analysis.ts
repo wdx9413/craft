@@ -16,25 +16,25 @@ export type TypeScriptFileUnit = JsonObject & {
   readonly budget_limited: boolean;
   readonly unit_digest: string;
 };
-export type TypeScriptAnalysisOptions = { readonly include_paths?: readonly string[]; readonly include_file_units?: boolean };
+export type TypeScriptAnalysisOptions = { readonly include_paths?: readonly string[]; readonly include_file_units?: boolean;
+  /** Test seam: exercise bounded-graph behaviour without allocating a huge fixture. */
+  readonly max_graph_nodes?: number };
 // Include Craft's serialized graph schema so cached file units are rebuilt when
 // emitted symbol facts change even if the TypeScript compiler itself is unchanged.
-// v6: the combined-graph byte/edge budgets were aligned with the importer. Old
-// cached file units (v5) were built under the 32 MiB cap and are missing the
-// tail of the traversal, so they must be invalidated rather than reused.
-export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v6`;
+// v7: graph budgets are now shared with the importer via graph-budget.ts. Old
+// cached units (v5/v6) were built under smaller caps and are missing the tail
+// of the traversal, so they must be invalidated rather than reused.
+export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v7`;
 export function typeScriptFileUnitDigest(unit: Omit<TypeScriptFileUnit, "unit_digest"> | TypeScriptFileUnit): string {
   return stableDigest({ path: unit.path, source_digest: unit.source_digest, analyzer_version: unit.analyzer_version,
     external_module: unit.external_module, nodes: unit.nodes, edges: unit.edges, unresolved_relations: unit.unresolved_relations, budget_limited: unit.budget_limited });
 }
 const parsed = new Map<string, ts.SourceFile>();
 const programs = new Map<string, ts.Program>();
-const MAX_GRAPH_NODES = 60_000;
-// The full Craft checkout emits ~196k relation edges (measured: 84k kept +
-// 112k omitted at the old 150k cap). Storage already accepts up to 300k, so a
-// lower analyzer cap truncated the tail of the traversal and lost cross-file
-// `calls` edges. Align the analyzer with the importer's cap.
-const MAX_GRAPH_EDGES = 300_000;
+import { GRAPH_BUDGET } from "./graph-budget.ts";
+
+const DEFAULT_MAX_GRAPH_NODES = GRAPH_BUDGET.maxNodes;
+const MAX_GRAPH_EDGES = GRAPH_BUDGET.maxEdges;
 let declarationKinds: Map<ts.SyntaxKind, string> | undefined;
 function declarationKindMap(): Map<ts.SyntaxKind, string> {
   return declarationKinds ??= new Map<ts.SyntaxKind, string>([
@@ -44,10 +44,8 @@ function declarationKindMap(): Map<ts.SyntaxKind, string> {
   [getTypeScript().SyntaxKind.EnumMember, "enum_member"], [getTypeScript().SyntaxKind.VariableDeclaration, "variable"], [getTypeScript().SyntaxKind.Parameter, "parameter"],
 ]);
 }
-// The 32 MiB cap was the real truncation: 196k edges average ~200 bytes, so
-// the byte budget was exhausted long before the edge-count budget. The
-// importer accepts 64 MiB; align so later files' `calls` edges survive.
-const MAX_ANALYSIS_CHARS = 64 * 1024 * 1024;
+// Shared with the importer so the analyzer never emits an unimportable graph.
+const MAX_ANALYSIS_CHARS = GRAPH_BUDGET.maxImportBytes;
 // Per-file facts are cached independently of the bounded combined graph. Keep
 // this cache bounded too, while allowing ordinary large repositories to reuse
 // unchanged units when the final importable graph reaches its separate cap.
@@ -96,6 +94,7 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
   const outputPaths = new Set(analysisOptions.include_paths ?? files.map(file => file.path));
   if ([...outputPaths].some(path => !allFiles.has(path))) throw new Error("TypeScript analysis include_paths must exist in the checkpoint");
   const nodes: JsonObject[] = [], edges: JsonObject[] = [], declarations = new Map<ts.Node, string>(), unitDeclarations = new Map<ts.Node, string>(), fileNodes = new Map<string, string>();
+  const MAX_GRAPH_NODES = analysisOptions.max_graph_nodes ?? DEFAULT_MAX_GRAPH_NODES;
   const unitNodes = new Map<string, JsonObject[]>(), unitEdges = new Map<string, JsonObject[]>(), unitChars = new Map<string, number>();
   const unitBudgetLimited = new Set<string>();
   let unitTotalChars = 0;

@@ -20,10 +20,12 @@ import { ProjectGraphStore } from "./project-graph-store.ts";
 const ANALYZER = "builtin-regex-static-v1";
 const SOURCE_EXTENSIONS = new Set(["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]);
 const MAX_RESULTS = 100;
-const MAX_GRAPH_NODES = 60_000;
-const MAX_GRAPH_EDGES = 300_000;
-const MAX_IMPORT_GRAPH_BYTES = 64 * 1024 * 1024;
-const MAX_GRAPH_BYTES = 128 * 1024 * 1024;
+import { GRAPH_BUDGET } from "./graph-budget.ts";
+
+const MAX_GRAPH_NODES = GRAPH_BUDGET.maxNodes;
+const MAX_GRAPH_EDGES = GRAPH_BUDGET.maxEdges;
+const MAX_IMPORT_GRAPH_BYTES = GRAPH_BUDGET.maxImportBytes;
+const MAX_GRAPH_BYTES = GRAPH_BUDGET.maxGraphBytes;
 const MAX_SHARD_BYTES = 1_000_000;
 const MAX_ROUTE_BYTES = 64 * 1024 * 1024;
 const MAX_ROUTE_SHARD_BYTES = 4 * 1024 * 1024;
@@ -269,7 +271,7 @@ export class CodebaseIndexKernel {
     if (checkpoint.workspace_id !== workspaceId || workspace.latest_checkpoint_id !== checkpointId) throw new Error("Analysis requires the latest workspace checkpoint");
     const input = args.analysis as JsonObject;
     if (!input || Array.isArray(input) || typeof input !== "object" || input.format !== "craft-static-analysis-v1") throw new Error("Unsupported analysis format");
-    if (Buffer.byteLength(JSON.stringify(input), "utf8") > MAX_IMPORT_GRAPH_BYTES) throw new Error("Analysis exceeds 64 MiB budget");
+    if (Buffer.byteLength(JSON.stringify(input), "utf8") > MAX_IMPORT_GRAPH_BYTES) throw new Error("Analysis exceeds import graph byte budget");
     const analyzer = text(input.analyzer, "analysis.analyzer"); const analyzerVersion = text(input.analyzer_version, "analysis.analyzer_version");
     if (analyzer.length > 100 || analyzerVersion.length > 100) throw new Error("Analyzer identity exceeds budget");
     if (!Array.isArray(input.nodes) || !input.nodes.length || input.nodes.length > MAX_GRAPH_NODES || !Array.isArray(input.edges) || input.edges.length > MAX_GRAPH_EDGES) throw new Error("Analysis nodes/edges exceed budget or are missing");
@@ -341,7 +343,9 @@ export class CodebaseIndexKernel {
     const analysis = { analyzer, analyzer_version: analyzerVersion, provenance: "adapter_reported", certainty: "partial", offset_encoding: "utf-16", supported_languages: [...new Set(nodes.map((node) => node.language))].sort(), supported_file_count: files.size, unsupported_file_count: entries.size - files.size, total_checkpoint_file_count: entries.size, scope_digest: stableDigest({ workspace_id: workspaceId, checkpoint_id: checkpointId, allowed_paths: workspace.include_paths }), allowed_paths: workspace.include_paths,
       relation_analysis: relationAnalysisSummary(analyzer, input.diagnostics, uniqueEdges) };
     const index = this.persistIndex(identity, indexId, files.size, analysis, nodes, uniqueEdges,
-      Array.isArray(input.diagnostics) ? input.diagnostics as JsonObject[] : [], publicationGuard(args.publication_guard));
+      Array.isArray(input.diagnostics) ? input.diagnostics as JsonObject[]
+        : input.diagnostics && typeof input.diagnostics === "object" ? [input.diagnostics as JsonObject] : [],
+      publicationGuard(args.publication_guard));
     return { index: this.indexStatus(index, workspace), idempotent: false };
   }
 
