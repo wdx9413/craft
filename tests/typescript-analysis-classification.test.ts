@@ -70,3 +70,37 @@ test("a non-null asserted method call resolves to the same target as the plain c
     && edge.from_node_id === go!.id && edge.to_node_id === launch!.id),
     "svc.launch!() must resolve like svc.launch()");
 });
+
+test("a destructured dynamic import resolves its call to the target module's declaration", () => {
+  const moduleFile = file("kernel.ts", "export class Kernel { run(): void {} }\nexport function helper(): void {}\n");
+  const caller = file("caller.ts", [
+    'export async function go() {',
+    '  const { Kernel, helper } = await import("./kernel.ts");',
+    '  new Kernel().run();',
+    '  helper();',
+    '}',
+  ].join("\n"));
+  const analysis = analyzeTypeScript([moduleFile, caller]);
+  const kernel = (analysis.nodes as JsonObject[]).find((node) => node.name === "Kernel");
+  const helper = (analysis.nodes as JsonObject[]).find((node) => node.name === "helper");
+  const go = (analysis.nodes as JsonObject[]).find((node) => node.name === "go");
+  assert(kernel && helper && go, JSON.stringify((analysis.nodes as JsonObject[]).map((node) => node.name)));
+  const calls = analysis.edges as JsonObject[];
+  assert(calls.some((edge) => edge.kind === "calls" && edge.from_node_id === go!.id && edge.to_node_id === kernel!.id),
+    "new Kernel() through a dynamic import must resolve");
+  assert(calls.some((edge) => edge.kind === "calls" && edge.from_node_id === go!.id && edge.to_node_id === helper!.id),
+    "helper() through a dynamic import must resolve");
+});
+
+test("an ambiguous name inside a dynamically imported module is refused, not guessed", () => {
+  // Two declarations called `run` live in the imported module, so the dynamic
+  // binding cannot be pinned to one of them without inventing an edge.
+  const moduleFile = file("dup.ts", "export function run(): void {}\nexport class Holder { run(): void {} }\n");
+  const caller = file("caller2.ts", 'export async function go() { const { run } = await import("./dup.ts"); run(); }\n');
+  const analysis = analyzeTypeScript([moduleFile, caller]);
+  const callerNode = (analysis.nodes as JsonObject[]).find((node) => node.name === "go")!;
+  const edges = (analysis.edges as JsonObject[]).filter((edge) => edge.kind === "calls" && edge.from_node_id === callerNode.id);
+  assert.equal(edges.length, 0, JSON.stringify(edges));
+  const d = analysis.diagnostics as JsonObject;
+  assert(d.unresolved_calls as number >= 1, "the ambiguous call stays an honest internal gap");
+});

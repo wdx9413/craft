@@ -32,10 +32,10 @@ export type TypeScriptAnalysisOptions = { readonly include_paths?: readonly stri
   readonly max_graph_nodes?: number };
 // Include Craft's serialized graph schema so cached file units are rebuilt when
 // emitted symbol facts change even if the TypeScript compiler itself is unchanged.
-// v10: each file unit carries its own unresolved-call samples, so the merged
-// graph can still report them (the workbench health page reads these). Cached
-// v9 units have no samples, so rebuild.
-export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v10`;
+// v11: destructured dynamic imports (`const { X } = await import("./m.ts")`)
+// resolve to the target module's declaration. Cached v10 units were built
+// without those cross-file edges, so rebuild.
+export const TYPESCRIPT_ANALYZER_VERSION = `${getTypeScriptVersion()}:craft-ts-semantic-v11`;
 export function typeScriptFileUnitDigest(unit: Omit<TypeScriptFileUnit, "unit_digest"> | TypeScriptFileUnit): string {
   return stableDigest({ path: unit.path, source_digest: unit.source_digest, analyzer_version: unit.analyzer_version,
     external_module: unit.external_module, nodes: unit.nodes, edges: unit.edges, unresolved_relations: unit.unresolved_relations,
@@ -96,6 +96,8 @@ const BUILTIN_CALLABLES: ReadonlySet<string> = new Set([
   "BroadcastChannel", "MessageChannel", "MessagePort", "TextEncoder", "TextDecoder", "addEventListener",
   "removeEventListener", "apply", "call", "bind", "super", "import",
   "DOMException", "DatabaseSync", "localStorage", "sessionStorage", "performance", "structuredClone",
+  "Response", "Request", "Headers", "Blob", "File", "FormData", "Event", "EventTarget", "CustomEvent",
+  "MessageEvent", "WebSocket", "URL", "URLSearchParams",
 ]);
 function isExternalModuleSpecifier(specifier: string): boolean {
   return !specifier.startsWith(".") && !specifier.startsWith("/");
@@ -152,7 +154,14 @@ export function createCheckpointCompilerHost(files: readonly Source[]): ts.Compi
 /** Compiler binds names in an in-memory checkpoint; it never reads outside that checkpoint. */
 export function analyzeTypeScript(files: readonly Source[], analysisOptions: TypeScriptAnalysisOptions = {}): JsonObject {
   const host = createCheckpointCompilerHost(files), sources = host.sources;
-  const options: ts.CompilerOptions = { allowJs: true, checkJs: true, noLib: true, noResolve: false, target: getTypeScript().ScriptTarget.Latest, module: getTypeScript().ModuleKind.NodeNext, moduleResolution: getTypeScript().ModuleResolutionKind.NodeNext };
+  // This repository (and most ESM TypeScript projects) import with explicit
+  // `.ts` extensions. Without `allowImportingTsExtensions` the compiler reports
+  // TS5097 and leaves the imported binding unresolved, which silently severed
+  // every cross-file `new X()` / `X()` edge. Analysis never emits, so `noEmit`
+  // is safe and is a precondition for the flag.
+  const options: ts.CompilerOptions = { allowJs: true, checkJs: true, noLib: true, noResolve: false, noEmit: true,
+    allowImportingTsExtensions: true,
+    target: getTypeScript().ScriptTarget.Latest, module: getTypeScript().ModuleKind.NodeNext, moduleResolution: getTypeScript().ModuleResolutionKind.NodeNext };
   const rootNames = [...sources.keys()].sort();
   const programKey = stableDigest({ analyzer_version: getTypeScript().version, root_names: rootNames });
   const oldProgram = programs.get(programKey);
@@ -165,6 +174,11 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
   const outputPaths = new Set(analysisOptions.include_paths ?? files.map(file => file.path));
   if ([...outputPaths].some(path => !allFiles.has(path))) throw new Error("TypeScript analysis include_paths must exist in the checkpoint");
   const nodes: JsonObject[] = [], edges: JsonObject[] = [], declarations = new Map<ts.Node, string>(), unitDeclarations = new Map<ts.Node, string>(), fileNodes = new Map<string, string>();
+  // Declaration lookup by (path, name) for the dynamic-import fallback below.
+  const declarationByPathName = new Map<string, Map<string, string[]>>();
+  // `const { X } = await import("./mod.ts")` binds X to the module, not to a
+  // declaration; this maps the local name to the module path it came from.
+  const dynamicImportBindings = new Map<string, Map<string, string>>();
   const MAX_GRAPH_NODES = analysisOptions.max_graph_nodes ?? DEFAULT_MAX_GRAPH_NODES;
   const unitNodes = new Map<string, JsonObject[]>(), unitEdges = new Map<string, JsonObject[]>(), unitChars = new Map<string, number>();
   const unitBudgetLimited = new Set<string>();
@@ -242,6 +256,12 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
           if (emitted) {
             declarations.set(node, nodeId);
             if (functionInitializer) declarations.set(node.initializer!, nodeId);
+            const byName = declarationByPathName.get(file.path) ?? new Map<string, string[]>();
+            const name = String(node.name.getText());
+            const ids = byName.get(name) ?? [];
+            if (!ids.includes(nodeId)) ids.push(nodeId);
+            byName.set(name, ids);
+            declarationByPathName.set(file.path, byName);
           }
         }
       }
@@ -452,6 +472,27 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
         }
         else unresolvedAs(file.path, "import");
       }
+      // Record `const { A, B } = await import("./mod.ts")` so a later call to A
+      // can resolve to the declaration in that module. Dynamic imports are how
+      // this codebase lazy-loads most sub-kernels, and without this every such
+      // call looked like a broken internal relation.
+      if (getTypeScript().isVariableDeclaration(node) && getTypeScript().isObjectBindingPattern(node.name)
+        && node.initializer && getTypeScript().isAwaitExpression(node.initializer)
+        && getTypeScript().isCallExpression(node.initializer.expression)
+        && node.initializer.expression.expression.kind === getTypeScript().SyntaxKind.ImportKeyword
+        && node.initializer.expression.arguments.length === 1
+        && getTypeScript().isStringLiteral(node.initializer.expression.arguments[0]!)) {
+        const specifier = (node.initializer.expression.arguments[0] as ts.StringLiteral).text;
+        const resolved = getTypeScript().resolveModuleName(specifier, source.fileName, options, host).resolvedModule;
+        const targetPath = resolved ? sources.get(posix.normalize(resolved.resolvedFileName))?.path : undefined;
+        if (targetPath) {
+          const bindings = dynamicImportBindings.get(file.path) ?? new Map<string, string>();
+          for (const element of node.name.elements) {
+            if (getTypeScript().isIdentifier(element.name)) bindings.set(element.name.text, targetPath);
+          }
+          dynamicImportBindings.set(file.path, bindings);
+        }
+      }
       if (getTypeScript().isCallExpression(node) || getTypeScript().isNewExpression(node)) {
         // Unwrap a non-null assertion so `this.launch!()` resolves like `this.launch()`.
         const callee = getTypeScript().isNonNullExpression(node.expression) ? node.expression.expression : node.expression;
@@ -462,13 +503,26 @@ export function analyzeTypeScript(files: readonly Source[], analysisOptions: Typ
         // call signature. With `noLib` a great many expressions degrade to
         // `any`, so gating on `getCallSignatures().length` discarded resolvable
         // internal calls and they were miscounted as unresolved relations.
-        const candidates = [signature?.declaration, ...(symbol?.declarations ?? [])]
+        // A destructured dynamic import (`const { X } = await import(...)`)
+        // binds X to a BindingElement, which is not a graph declaration. The
+        // callee's type symbol still points at the class/function declaration,
+        // so it is a reliable extra candidate.
+        const typeSymbol = checker.getTypeAtLocation(callee).getSymbol();
+        const candidates = [signature?.declaration, ...(symbol?.declarations ?? []), ...(typeSymbol?.declarations ?? [])]
           .filter((value): value is ts.Declaration => value !== undefined);
         const targets = candidates.length
           ? resolveDeclarationTargets(candidates)
           : resolveTargets(callee, true);
         let target = targets.graph.find(Boolean);
         if (!target && signature?.declaration?.parent) target = declarations.get(signature.declaration.parent) ?? declarationId(signature.declaration.parent);
+        // `const { X } = await import("./mod.ts")` then `X(...)`: resolve the
+        // local binding through the module it was destructured from, requiring a
+        // unique declaration of that name in the target file.
+        if (!target && getTypeScript().isIdentifier(callee)) {
+          const modulePath = dynamicImportBindings.get(file.path)?.get(callee.text);
+          const ids = modulePath ? declarationByPathName.get(modulePath)?.get(callee.text) : undefined;
+          if (ids && ids.length === 1) target = ids[0];
+        }
         if (target) add("calls", callOwner(node, current), target, node.expression);
         else if (isInlineCallee(callee)) { inlineInvocations += 1; bump(inlineByPath, file.path); }
         else if (isComputedCallee(callee)
