@@ -529,6 +529,10 @@ export class WorkbenchWebApp {
       // craft-file-dir-desc: directory <-> semantic description, bidirectional, self-evolving.
       if (request.method === "POST" && path === "/api/workbench/file-dir-desc/record") return json(201, this.service.fileDirDescRecord(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/workbench/file-dir-desc/promote") return json(200, this.service.fileDirDescPromote(bodyObject(request.body)));
+      // NEEDREAD 16 (目录语义): correction, relocation and withdrawal are separate,
+      // attributed actions - a withdrawn entry must stop being recallable.
+      if (request.method === "POST" && path === "/api/workbench/file-dir-desc/relocate") return json(200, this.service.fileDirDescRelocate(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/workbench/file-dir-desc/revoke") return json(200, this.service.fileDirDescRevoke(bodyObject(request.body)));
       if (request.method === "GET" && path === "/api/workbench/file-dir-desc/resolve") return json(200, this.service.fileDirDescResolve({ description: queryValue(url, "description"), path: queryValue(url, "path"), limit: queryValue(url, "limit") }));
       // Mod 内核：认知约束的 draft -> approve -> active 生命周期，以及 Worker 上下文注入。
       if (request.method === "POST" && path === "/api/workbench/mods") return json(201, this.service.modCreate(bodyObject(request.body)));

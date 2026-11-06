@@ -41,7 +41,7 @@
 | 消息插件：按需 AI | `messageProcess` 派发 Pilot turn（幂等），仅此步消耗模型 | `tests/message-inbox.test.ts` |
 | 控制台消息批量治理 | `messageBatch`（read 0 Token / summarize 才按需派发，逐条报告失败）+ 控制台勾选与底部浮条「批量标记已读 / 丢给 AI 统一总结」 | `tests/message-inbox.test.ts`、`tests/message-dock.test.ts` |
 | 灵策消息流一键拖拽到 Chat | 消息卡片可拖拽，把「参考消息：发件人《主题》」写入当前输入框，不发送、0 Token | `tests/message-dock.test.ts` |
-| `craft-file-dir-desc` 目录↔描述双向检索 | `core/file-dir-desc.ts`（observed→promoted，3 次用过才转正，local/cloud）+ `craft dirs record/promote/resolve/list` CLI | `tests/file-dir-desc.test.ts`、`tests/cli-dirs.test.ts` |
+| `craft-file-dir-desc` 目录↔描述双向检索 | `core/file-dir-desc.ts`：`observe`（自动强化，不改写描述）与 `record`（人工纠错）分离；observed→promoted（3 次真实使用）；`relocate` 保留身份与使用次数并拒绝覆盖；`revoke` 署名撤销后停止召回且不会被再次使用自动恢复。CLI `craft dirs`，HTTP record/promote/relocate/revoke/resolve/list | `tests/file-dir-desc.test.ts`、`tests/cli-dirs.test.ts`、`tests/workbench-server.test.ts`、`tests/pilot-coordinator.test.ts` |
 | 工作台 UI 融合 | `mod-pages.js`（认知约束/目录语义/首次引导/切模式确认/观察室/阻塞队列）+ NAV + 三模式导航 | `tests/mod-pages.test.ts`、169 测试全绿 |
 | 控制台待我批准批量治理 | `app.js` 勾选列 + 底部浮条「批量批准 / 批量稍后」，逐条走 `/api/inbox/decide`（一 effect 一授权，不合并语义），勾选跨重绘保持 | `tests/visual-layer.test.ts` |
 | 桌面双击即应用（隐藏控制台） | `.tools/start-craft-workbench.ps1` 优先拉起 Tauri release exe、单实例、`-Browser` 降级；`.vbs` 隐藏窗口；`scripts/install-desktop-shortcut.ps1` 生成桌面/开始菜单 `.lnk`（图标 `assets/craft.ico`），数据目录固定 `~/.craft_data` | 构建产物 `craft-workbench-desktop.exe` 存在，快捷方式指向该 exe |
@@ -79,7 +79,7 @@ node --check workbench/app.js; node --check workbench/mod-pages.js; node --check
 | 评测面 | 当前结果 | 说明 |
 | --- | --- | --- |
 | memory / knowledge / workflow / datasec | 5 / 5 / 4 / 2 全过 | datasec 原为装配错误（默认规则刻意关闭凭据规则，用例却期望脱敏），已改为全规则集 |
-| self_evolution | 11 / 11 全过 | 影子门禁不可绕过、回归非恒真、候选可观测、坏源隔离、同内容不同文件都入库、目录语义用过才存与常用才转正、项目名解析、合并图不丢跨文件 calls、选择器收纳大声明文件、shell/PowerShell 定义与调用边 |
+| self_evolution | 14 / 14 全过 | 影子门禁不可绕过、回归非恒真、候选可观测、坏源隔离、同内容不同文件都入库、目录语义用过才存／常用才转正／不虚增频次／撤销终局／搬迁保身份、项目名解析、合并图不丢跨文件 calls、选择器收纳大声明文件、shell/PowerShell 定义与调用边、TS 缺口内外分项 |
 | end_to_end / governance | INCL（无 `WORKBUDDY_API_KEY`） | 缺凭据是环境缺口，如实记 inconclusive，不再整体崩溃 |
 | eval:codebase-retrieval | `evaluation_pass=true` | MRR 0.917、recall@5 1.0、调用图与影响分析 precision/recall 全 1.0 |
 

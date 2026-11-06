@@ -397,6 +397,10 @@ export class CraftService extends ServiceFoundation {
   /** Record or reinforce a directory↔description link; see `file-dir-desc.ts`. */
   fileDirDescRecord(args: JsonObject): JsonObject { return this.fileDirDesc.record(args); }
   fileDirDescPromote(args: JsonObject): JsonObject { return this.fileDirDesc.promote(args); }
+  /** Automatic reinforcement from real use; never rewrites a description. */
+  fileDirDescObserve(args: JsonObject): JsonObject { return this.fileDirDesc.observe(args); }
+  fileDirDescRelocate(args: JsonObject): JsonObject { return this.fileDirDesc.relocate(args); }
+  fileDirDescRevoke(args: JsonObject): JsonObject { return this.fileDirDesc.revoke(args); }
   fileDirDescResolve(args: JsonObject): JsonObject { return this.fileDirDesc.resolve(args); }
   fileDirDescList(args: JsonObject = {}): JsonObject { return this.fileDirDesc.list(args); }
 
@@ -2647,16 +2651,6 @@ export class CraftService extends ServiceFoundation {
     }
     const resolvedWorkspace = resolution.root_path === null
       ? null : this.workspace.resolveOrCreate({ root_path: resolution.root_path }) as JsonObject;
-    // craft-file-dir-desc 自进化落点：一次真实使用才记一笔，常用（>=3）才转正。
-    // 描述取已登记工作区的名称或最佳候选名，而不是意图原文——意图不是目录语义，
-    // 把它写进去会污染以后的「描述找目录」。首次只是 observed，不进召回索引。
-    if (resolvedWorkspace && resolution.root_path !== null) {
-      try {
-        const bestCandidate = resolution.candidates.find((item) => item.root_path === resolution.root_path);
-        const description = String(resolvedWorkspace.name ?? "") || (bestCandidate ? bestCandidate.name : "") || resolution.root_path;
-        this.fileDirDesc.record({ path: resolution.root_path, description });
-      } catch { /* 登记失败不影响派发：目录语义是旁路进化，不是执行前置条件 */ }
-    }
     const workspaceId = explicitWorkspace ?? (resolvedWorkspace ? String(resolvedWorkspace.id) : session.workspace_id);
     if (workspaceId !== undefined && workspaceId !== null) this.store.get("workspace", String(workspaceId));
     const split = splitPilotInput(input, { preferred_executor: preferred, available_executors: available })
@@ -2665,7 +2659,20 @@ export class CraftService extends ServiceFoundation {
     const existing = this.store.find("pilot_turn", turnId);
     if (existing) {
       if (existing.session_id !== sessionId) throw new Error("pilot turn idempotency conflict");
+      // A replayed turn is the same request, not another use of the directory.
+      // Reinforcing here would fake promotion frequency, which NEEDREAD 13.2 and
+      // the 16-chapter acceptance card explicitly forbid.
       return { turn: existing, ...(this.pilotSessionStatus({ session_id: sessionId })), idempotent: true };
+    }
+    // craft-file-dir-desc 自进化落点：一次真实派发才记一笔，常用（>=3）才转正。
+    // 走 observe 而不是 record：意图不是目录语义，重复使用不得改写描述。
+    // 放在幂等检查之后，所以重放不会虚增频次。
+    if (resolvedWorkspace && resolution.root_path !== null) {
+      try {
+        const bestCandidate = resolution.candidates.find((item) => item.root_path === resolution.root_path);
+        const description = String(resolvedWorkspace.name ?? "") || (bestCandidate ? bestCandidate.name : "") || resolution.root_path;
+        this.fileDirDesc.observe({ path: resolution.root_path, description });
+      } catch { /* 登记失败不影响派发：目录语义是旁路进化，不是执行前置条件 */ }
     }
     // Historical conflicts are read before any task exists, otherwise the tasks
     // this very turn is about to create would be reported as their own duplicates.

@@ -352,6 +352,20 @@ const SELF_EVOLUTION_CASES: GradedCase[] = [
     }),
     check: { kind: "equals", expected: "split" },
   },
+  {
+    case: defineEvalCase({
+      id: "self_evolution.dir_desc_use_is_not_faked", axis: "self_evolution", evidence: "kernel", partition: "held_out", sanitized: true, approved_by: SUITE_REVIEWER,
+      description: "Automatic reinforcement counts one use per committed turn: a replayed request, an ambiguous decision and a blocked intake add nothing, and reinforcement never rewrites the directory meaning.",
+    }),
+    check: { kind: "equals", expected: "honest" },
+  },
+  {
+    case: defineEvalCase({
+      id: "self_evolution.dir_desc_withdrawal_is_final", axis: "self_evolution", evidence: "kernel", partition: "held_out", sanitized: true, approved_by: SUITE_REVIEWER,
+      description: "A withdrawn directory stops being recallable and is not revived by further use; relocation keeps identity and accumulated use and refuses to overwrite another entry.",
+    }),
+    check: { kind: "equals", expected: "withdrawn" },
+  },
 ];
 
 /** Every graded case, in a stable order. */

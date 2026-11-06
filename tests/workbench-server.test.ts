@@ -1270,3 +1270,34 @@ test("Workbench exposes codebase relation health over HTTP and validates the wor
   // An unknown workspace is reported rather than silently returning zero counts.
   assert.equal(app.handle({ method: "GET", path: "/api/workbench/codebase/status?workspace_id=missing", token: "secret" }).status, 422);
 });
+
+test("Workbench serves directory-semantics withdrawal and relocation as attributed actions", async () => {
+  const f = await fixture();
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  const call = (method: string, path: string, body?: unknown) => app.handle({ method, path, token: "secret",
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const directory = await mkdtemp(path.join(tmpdir(), "craft-fdd-route-"));
+  let next = "";
+  try {
+    const recorded = JSON.parse(call("POST", "/api/workbench/file-dir-desc/record",
+      { path: directory, description: "billing service root" }).body);
+    call("POST", "/api/workbench/file-dir-desc/promote", { id: recorded.id });
+    assert.equal(JSON.parse(call("GET", "/api/workbench/file-dir-desc/resolve?description=billing%20service").body).results.length, 1);
+    // Withdrawal is attributed and reversible only by an explicit promote.
+    assert.equal(call("POST", "/api/workbench/file-dir-desc/revoke", { id: recorded.id, reason: "moved" }).status, 422);
+    const revoked = JSON.parse(call("POST", "/api/workbench/file-dir-desc/revoke",
+      { id: recorded.id, revoked_by: "user:alex", reason: "project moved" }).body);
+    assert.equal(revoked.status, "revoked");
+    assert.equal(JSON.parse(call("GET", "/api/workbench/file-dir-desc/resolve?description=billing%20service").body).results.length, 0);
+    // Relocation keeps identity but changes the path it answers to.
+    next = await mkdtemp(path.join(tmpdir(), "craft-fdd-route-2-"));
+    const moved = JSON.parse(call("POST", "/api/workbench/file-dir-desc/relocate",
+      { id: recorded.id, path: next }).body);
+    assert.equal(moved.id, recorded.id);
+    assert.equal(moved.path, next);
+    assert.equal(call("POST", "/api/workbench/file-dir-desc/relocate", { id: "nope", path: next }).status, 422);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    if (next) await rm(next, { recursive: true, force: true });
+  }
+});

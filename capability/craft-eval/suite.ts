@@ -722,6 +722,56 @@ if (inScope("self_evolution.unresolved_split_is_honest")) try {
   equals("self_evolution.unresolved_split_is_honest", ok ? "split" : `bad:${JSON.stringify(d)}`, "split");
 } catch (error) { unobserved("self_evolution.unresolved_split_is_honest", (error as Error).message); }
 
+if (inScope("self_evolution.dir_desc_use_is_not_faked")) try {
+  const dir = mkdtempSync(join(tmpdir(), "craft-eval-use-"));
+  try {
+    const registry = new FileDirDescRegistry(store);
+    registry.observe({ path: dir, description: "billing service root" });
+    // A replay of the same request is not a second use: the service calls
+    // observe only for a committed turn, and observe itself keeps the count
+    // monotonic per call while the description stays the directory's meaning.
+    const replayed = registry.observe({ path: dir, description: "a later task title" }) as Json;
+    const blocked = registry.list({ status: "promoted" }) as Json;
+    const honest = Number(replayed.useCount) === 2 && replayed.description === "billing service root"
+      && (blocked.items as Json[]).every((item) => item.path !== dir);
+    equals("self_evolution.dir_desc_use_is_not_faked", honest ? "honest" : `bad:${JSON.stringify(replayed)}`, "honest");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+} catch (error) { unobserved("self_evolution.dir_desc_use_is_not_faked", (error as Error).message); }
+
+if (inScope("self_evolution.dir_desc_withdrawal_is_final")) try {
+  const from = mkdtempSync(join(tmpdir(), "craft-eval-w-old-"));
+  const to = mkdtempSync(join(tmpdir(), "craft-eval-w-new-"));
+  try {
+    const registry = new FileDirDescRegistry(store);
+    // A case-unique description keeps this case independent of the shared store:
+    // suite cases must not read each other's data to decide their verdict.
+    const entry = registry.observe({ path: from, description: "withdrawal probe legacy service" }) as Json;
+    registry.promote({ id: String(entry.id) });
+    // The suite shares one store, so also pin the match to this entry's id.
+    const recallFor = () => ((registry.resolve({ description: "withdrawal probe legacy" }) as Json).results as Json[])
+      .filter((item) => item.id === entry.id);
+    const before = recallFor();
+    registry.revoke({ id: String(entry.id), revoked_by: "eval-reviewer", reason: "project moved" });
+    const afterRecall = recallFor();
+    // Continued use must not silently undo a deliberate withdrawal.
+    const usedAgain = registry.observe({ path: from }) as Json;
+    const revived = registry.promote({ id: String(entry.id) }) as Json;
+    const relocated = registry.relocate({ id: String(entry.id), path: to }) as Json;
+    const clash = (() => {
+      const other = registry.observe({ path: join(from, "other"), description: "other" }) as Json;
+      try { registry.relocate({ id: String(other.id), path: to }); return "accepted"; }
+      catch { return "refused"; }
+    })();
+    const ok = before.length === 1 && afterRecall.length === 0 && usedAgain.status === "revoked"
+      && revived.status === "promoted" && relocated.path === to && clash === "refused";
+    equals("self_evolution.dir_desc_withdrawal_is_final", ok ? "withdrawn"
+      : `bad:${String(afterRecall.length)}/${String(usedAgain.status)}/${String(relocated.path)}/${clash}`, "withdrawn");
+  } finally {
+    rmSync(from, { recursive: true, force: true });
+    rmSync(to, { recursive: true, force: true });
+  }
+} catch (error) { unobserved("self_evolution.dir_desc_withdrawal_is_final", (error as Error).message); }
+
 // ----------------------------------------------------------------- report
 store.close();
 rmSync(root, { recursive: true, force: true });

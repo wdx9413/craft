@@ -124,6 +124,43 @@ test("the Navigator binds a directory named in the intent, and says so", async (
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("a replayed turn reinforces the directory once, not once per attempt", async () => {
+  const f = await fixture();
+  try {
+    const dir = join(f.root, "billing"); await mkdir(dir);
+    f.service.workspaceResolveOrCreate({ root_path: dir });
+    const session = asSession(f.service.pilotSessionOpen({ input: "在 billing 里修登录" }) as JsonObject);
+    const input = "在 billing 里修登录";
+    const turnId = "turn_replay_once";
+    const first = f.service.pilotTurnAuto({ session_id: session.id, input, turn_id: turnId }) as JsonObject;
+    assert.notEqual(first.idempotent, true);
+    // A retry with the same turn id is the same request, not another use.
+    const replay = f.service.pilotTurnAuto({ session_id: session.id, input, turn_id: turnId }) as JsonObject;
+    assert.equal(replay.idempotent, true);
+    const recorded = f.service.fileDirDescList({}) as JsonObject;
+    const entry = ((recorded.items as JsonObject[]).find((item) => item.path === dir) ?? {}) as JsonObject;
+    assert.equal(Number(entry.useCount ?? 0), 1, "NEEDREAD 16: repeated queries must not fake use frequency");
+    // A genuinely different turn is a separate use.
+    f.service.pilotTurnAuto({ session_id: session.id, input: "在 billing 里补一个回归测试", turn_id: "turn_second" });
+    const after = f.service.fileDirDescList({}) as JsonObject;
+    const second = ((after.items as JsonObject[]).find((item) => item.path === dir) ?? {}) as JsonObject;
+    assert.equal(Number(second.useCount ?? 0), 2);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("a blocked directory decision records no use at all", async () => {
+  const f = await fixture();
+  try {
+    for (const name of ["alpha", "belta"]) await mkdir(join(f.root, name));
+    f.service.workspaceResolveOrCreate({ root_path: join(f.root, "alpha") });
+    f.service.workspaceResolveOrCreate({ root_path: join(f.root, "belta") });
+    const session = asSession(f.service.pilotSessionOpen({ input: "整理 alpha belta" }) as JsonObject);
+    const blocked = f.service.pilotTurnAuto({ session_id: session.id, input: "整理 alpha belta" }) as JsonObject;
+    assert.equal(blocked.status, "blocked");
+    assert.equal(((f.service.fileDirDescList({}) as JsonObject).items as JsonObject[]).length, 0);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("an ambiguous directory asks instead of guessing, and creates nothing", async () => {
   const f = await fixture();
   try {

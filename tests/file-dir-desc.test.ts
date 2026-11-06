@@ -98,3 +98,52 @@ test("cloud host directories are recorded and listed separately", async () => {
     assert.equal(asItems(local).length, 0);
   } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
 });
+
+test("observe reinforces use without rewriting the description", async () => {
+  const { store, registry } = await fixture();
+  try {
+    const path = "C:\\projects\\billing";
+    registry.observe({ path, description: "billing service root" });
+    const second = registry.observe({ path, description: "a later task title" }) as unknown as FileDirDescRecord;
+    assert.equal(second.description, "billing service root", "reinforcement must not overwrite directory meaning");
+    assert.equal(second.useCount, 2);
+    const third = registry.observe({ path }) as unknown as FileDirDescRecord;
+    assert.equal(third.status, "promoted", "three real uses promote");
+    assert.equal(asResults(registry.resolve({ description: "billing service" })).length, 1);
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
+
+test("withdrawal stops recall and survives later use without resurrecting", async () => {
+  const { store, registry } = await fixture();
+  try {
+    const rec = registry.observe({ path: "C:\\projects\\old", description: "legacy billing service" }) as unknown as FileDirDescRecord;
+    registry.promote({ id: rec.id });
+    assert.equal(asResults(registry.resolve({ description: "billing service" })).length, 1);
+    const revoked = registry.revoke({ id: rec.id, revoked_by: "user:alex", reason: "project moved" }) as unknown as FileDirDescRecord;
+    assert.equal(revoked.status, "revoked");
+    assert.equal(revoked.revokedBy, "user:alex");
+    assert.equal(asResults(registry.resolve({ description: "billing service" })).length, 0, "a withdrawn entry must stop being recallable");
+    // Continued use must not silently undo a deliberate withdrawal.
+    const usedAgain = registry.observe({ path: "C:\\projects\\old" }) as unknown as FileDirDescRecord;
+    assert.equal(usedAgain.status, "revoked");
+    assert.equal(asItems(registry.list({ status: "revoked" })).length, 1, "the audit trail survives");
+    assert.throws(() => registry.revoke({ id: rec.id, revoked_by: "user:alex", reason: "" }), /reason must be a non-empty string/u);
+    assert.throws(() => registry.revoke({ id: rec.id, revoked_by: "", reason: "x" }), /must name the operator/u);
+    // Only an explicit promote revives it.
+    assert.equal((registry.promote({ id: rec.id }) as unknown as FileDirDescRecord).status, "promoted");
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
+
+test("relocation keeps identity and use, and refuses to overwrite another entry", async () => {
+  const { store, registry } = await fixture();
+  try {
+    const rec = registry.observe({ path: "C:\\projects\\billing", description: "billing service root" }) as unknown as FileDirDescRecord;
+    registry.observe({ id: rec.id, path: "C:\\projects\\billing" });
+    const moved = registry.relocate({ id: rec.id, path: "D:\\work\\billing" }) as unknown as FileDirDescRecord;
+    assert.equal(moved.path, "D:\\work\\billing");
+    assert.equal(moved.useCount, 2, "relocation must not reset accumulated use");
+    assert.equal(asResults(registry.resolve({ path: "C:\\projects\\billing" })).length, 0);
+    const other = registry.observe({ path: "C:\\projects\\ledger", description: "ledger service" }) as unknown as FileDirDescRecord;
+    assert.throws(() => registry.relocate({ id: other.id, path: "D:\\work\\billing" }), /already describes/u);
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
