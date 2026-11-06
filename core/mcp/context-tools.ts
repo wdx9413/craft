@@ -7,7 +7,7 @@ import { parseToolName } from "../tool-plane.ts";
 
 type ContextToolIntent = typeof CONTEXT_TOOL_INTENTS[number];
 const TASK_TOOLS: Record<ContextToolIntent, string[]> = {
-  recall: ["craft_context_open", "craft_context_resolution_resolve", "craft_context_resolution_feedback",
+  recall: ["craft_context_directory_resolve", "craft_context_open", "craft_context_resolution_resolve", "craft_context_resolution_feedback",
     "craft_context_routing_render", "craft_context_ephemeral_record", "craft_context_ephemeral_search", "craft_context_ephemeral_purge",
     "craft_context_output_capture", "craft_context_compute", "craft_context_resume_checkpoint", "craft_context_resume_get",
     "craft_context_resume_resolve", "craft_context_stats", "craft_context_health",

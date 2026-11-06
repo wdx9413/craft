@@ -123,7 +123,7 @@ export function surfaceToolNames(surface: string, activeTools: readonly Tool[], 
   if (surface === "component-context-agent") {
     const names = new Set([
       "craft_info", "craft_component_readiness_get", "craft_component_diagnose",
-      "craft_context_open", "craft_context_resolution_resolve", "craft_context_tools_discover",
+      "craft_context_open", "craft_context_resolution_resolve", "craft_context_tools_discover", "craft_context_directory_resolve",
       "craft_knowledge_search", "craft_memory_capture_observed_fact", "craft_learning_cycle_finalize",
     ]);
     const codebase = COMPONENT_SURFACES["component-codebase"]!;
@@ -132,12 +132,12 @@ export function surfaceToolNames(surface: string, activeTools: readonly Tool[], 
     return [...new Set([...direct, ...SYSCALL_VERBS, ...passthrough])];
   }
   if (surface === "component-context-complete") {
-    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", "craft_learning_cycle_task_evidence_list", ...Object.values(DAILY_COMPONENT_TOOLS).flat()]);
+    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", "craft_context_directory_resolve", "craft_learning_cycle_task_evidence_list", ...Object.values(DAILY_COMPONENT_TOOLS).flat()]);
     const components = ["component-knowledge", "component-memory", "component-experience", "component-codebase"] as const;
     return activeTools.filter(tool => names.has(tool.name) || components.some(component => COMPONENT_SURFACES[component].test(tool.name))).map(tool => tool.name);
   }
   if (surface === "component-context-daily") {
-    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", "craft_knowledge_session_evidence_record", "craft_knowledge_evaluation_case_list", "craft_knowledge_evaluation_run_get", ...Object.values(DAILY_COMPONENT_TOOLS).flat(), ...surfaceToolNames("component-codebase", activeTools, coreToolNames)]);
+    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", "craft_context_directory_resolve", "craft_knowledge_session_evidence_record", "craft_knowledge_evaluation_case_list", "craft_knowledge_evaluation_run_get", ...Object.values(DAILY_COMPONENT_TOOLS).flat(), ...surfaceToolNames("component-codebase", activeTools, coreToolNames)]);
     return activeTools.filter(tool => names.has(tool.name)).map(tool => tool.name);
   }
   if (surface === "full") return activeTools.map((tool) => tool.name);

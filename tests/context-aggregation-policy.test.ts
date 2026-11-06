@@ -12,6 +12,7 @@ import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
 import { payload, stableDigest } from "../core/digest.ts";
 import { bindRemoteIdentity } from "../deploy/components/server.ts";
+import { REPOSITORY_SELECTION_LIMITS } from "../capability/craft-codebase/repository-files.ts";
 import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
@@ -240,7 +241,7 @@ test("Context reports query truncation, omitted files and unavailable contributi
   const f = await fixture();
   try {
     writeFileSync(join(f.repo, "a.ts"), "export function alphaOne() {}\nexport function alphaTwo() {}\n");
-    writeFileSync(join(f.repo, "large.ts"), "x".repeat(512 * 1024 + 1));
+    writeFileSync(join(f.repo, "large.ts"), "x".repeat(REPOSITORY_SELECTION_LIMITS.maxFileBytes + 1));
     const limited = await f.service.contextOpen({ project_root: f.repo, query: "alpha", max_items: 1, include_codebase: true });
     const reasons = (limited.pack_receipt as JsonObject).partial_reasons as string[];
     assert(reasons.includes("codebase_budget_exhausted"));

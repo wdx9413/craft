@@ -57,3 +57,31 @@ test("marketplace publishes one context plugin and keeps shared repository index
     assert.equal(coldFirst.structuredContent.codebase.index_id, coldSecond.structuredContent.codebase.index_id);
   } finally { rmSync(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }
 });
+
+test("packaged Context resolves the same directory records written by the packaged CLI", async () => {
+  const temporary = mkdtempSync(join(tmpdir(), "craft-directory-wire-"));
+  const directory = join(temporary, "billing");
+  const env = { ...process.env, CRAFT_DATA_DIR: join(temporary, ".craft_data"), CRAFT_CONTINUOUS_LEARNING: "0", CRAFT_EXPERIENCE_ASSET_MIGRATION: "0" };
+  const cli = (args: string[]) => JSON.parse(execFileSync(process.execPath, [join(root, "dist/core/cli.js"), ...args], { env, encoding: "utf8" }));
+  try {
+    const observed = cli(["dirs", "record", directory, "结算服务：不要修改生产配置", "--promote"]);
+    const launch = { command: process.execPath, args: [join(root, "plugins/craft-context/dist/plugin/craft-mcp.cjs"), "--product", "context"], env };
+    const before = cli(["dirs", "list"]);
+    const list = await exchange(launch, "tools/list");
+    const name = "craft_context_directory_resolve";
+    assert(list.tools.some((tool: { name: string }) => tool.name === name));
+    const result = await exchange(launch, "tools/call", { name, arguments: { description: "结算" } });
+    assert.equal(result.isError, false);
+    assert.equal(result.structuredContent.results[0].id, observed.id);
+    assert.equal(result.structuredContent.results[0].path, directory);
+    assert.equal(result.structuredContent.results[0].description, "结算服务：不要修改生产配置");
+    assert.equal(result.structuredContent.access_granted, false);
+    assert.deepEqual(cli(["dirs", "list"]), before);
+    const routed = await exchange(launch, "tools/call", { name: "craft_run", arguments: { resource: "context_directory", operation: "resolve", args: { path: directory } } });
+    assert.equal(routed.isError, false);
+    assert.equal(routed.structuredContent.results[0].id, observed.id);
+    await assert.rejects(exchange(launch, "tools/call", { name, arguments: { path: directory, description: "结算" } }), /tool call failed/u);
+    const info = await exchange(launch, "tools/call", { name: "craft_info", arguments: {} });
+    assert.equal(info.structuredContent.version, json(join(root, "package.json")).version);
+  } finally { rmSync(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }
+});

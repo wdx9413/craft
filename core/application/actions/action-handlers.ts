@@ -22,6 +22,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       ...createWorkspaceHandlers(service),
       craft_info: (a) => service.info(a),
       craft_context_tools_discover: service.contextToolsDiscover.bind(service),
+      craft_context_directory_resolve: (a) => service.contextDirectoryResolve(a),
       craft_context_open: (a) => service.contextOpen(a),
       craft_context_routing_render: service.contextExtensionsRenderRouting.bind(service),
       craft_context_ephemeral_record: service.contextExtensionsRecordEphemeral.bind(service),

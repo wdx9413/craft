@@ -62,6 +62,7 @@ import { ContextUsageWorkbench } from "./coordinators/context-usage.ts";
 import { WorkflowDesignWorkbench } from "./coordinators/workflow-design.ts";
 import { CognitiveWorkbenchCoordinator } from "./coordinators/cognitive-workbench.ts";
 import { FileDirDescRegistry } from "../file-dir-desc.ts";
+import { resolveContextDirectory } from "../context-directory.ts";
 import { ModRegistry, type ModScopeKind } from "../mod-registry.ts";
 import { MessageInbox } from "../message-inbox.ts";
 import { MessageListener, LocalDropAdapter, type SourceAdapter } from "../message-listener.ts";
@@ -271,6 +272,7 @@ export class CraftService extends ServiceFoundation {
   readonly dshPluginHost: DshPluginHostRuntime;
   private readonly knowledgeAdjudicationTransportFactory: () => ModelTransport;
   contextToolsDiscover(args: JsonObject): JsonObject { return discoverContextTools(args); }
+  contextDirectoryResolve(args: JsonObject): JsonObject { return resolveContextDirectory(this.fileDirDesc, args); }
   readonly workControl: WorkControl;
   readonly forgeDispatch: ForgeDispatchCoordinator;
   readonly cognitiveWorkbench: CognitiveWorkbenchCoordinator;
