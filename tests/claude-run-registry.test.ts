@@ -12,6 +12,14 @@ test("unknown runs expose only a safe classified cause", async () => {
   await settle(); assert.equal(registry.events("task", id, 0).reason, "settings_mismatch");
   const other = registry.start("task", async () => { throw new Error("secret prompt"); });
   await settle(); assert.equal(registry.events("task", other, 0).reason, "unknown");
+  for (const [message, expected] of [
+    ["Claude initialization event is missing", "initialization_missing"],
+    ["Claude event belongs to a different session", "session_mismatch"],
+  ] as const) {
+    const classified = registry.start("task", async () => { throw new Error("outer", { cause: new Error(message) }); });
+    await settle();
+    assert.equal(registry.events("task", classified, 0).reason, expected);
+  }
   assert.equal(JSON.stringify(registry.events("task", other, 0)).includes("secret prompt"), false);
   registry.close();
 });

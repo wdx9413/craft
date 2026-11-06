@@ -38,8 +38,8 @@ test("Claude discovery rejects malformed pages and filters sessions without usab
   try {
     const bad = new ClaudeNativeSessions(links, async () => Array.from({ length: 52 }, () => ({ sessionId: id, summary: "", lastModified: 0 })));
     await assert.rejects(bad.list(0), /Invalid/);
-    const native = new ClaudeNativeSessions(links, async () => [{ sessionId: "bad", cwd: root, summary: "", lastModified: 0 }, { sessionId: id, summary: "", lastModified: 0 }, { sessionId: id, cwd: root, summary: "", firstPrompt: "prompt", lastModified: 0 }, { sessionId: id, cwd: root, summary: "summary", customTitle: "title", lastModified: 0 }], async () => undefined);
-    const result = await native.list(0); assert.deepEqual((result.threads as any[]).map(row => row.title), ["prompt", "title"]);
+    const native = new ClaudeNativeSessions(links, async () => [{ sessionId: "bad", cwd: root, summary: "", lastModified: 0 }, { sessionId: id, summary: "", lastModified: 0 }, { sessionId: id, cwd: root, summary: "", firstPrompt: "prompt", lastModified: 0 }, { sessionId: id, cwd: root, summary: "summary", customTitle: "title", lastModified: 0 }, { sessionId: id, cwd: root, summary: "", lastModified: 0 }], async () => undefined);
+    const result = await native.list(0); assert.deepEqual((result.threads as any[]).map(row => row.title), ["prompt", "title", "Claude 会话"]);
     await assert.rejects(native.import("one", id, null, "ask"), /verified/);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });

@@ -140,3 +140,20 @@ test("reservation failure never starts Claude and distinguishes a competing key 
     assert.deepEqual(first.links.list("t").links, []);
   } finally { store.create = create; store.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test("work mode is validated before the first Claude turn reserves its key", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-claude-workmode-")));
+  const store = await new CraftStore(craftPaths(root)).open(); store.create("task", "t", {});
+  const adapter = new ClaudeWorkbenchAdapter(() => ({ async *[Symbol.asyncIterator]() {}, close() {} }));
+  const first = new ClaudeFirstTurn(store, adapter);
+  const base = { task_id: "t", workspace: root, permission: "ask" as const, executable: join(root, "claude"), prompt: "p" };
+  type Create = Parameters<typeof first.prepare>[0];
+  try {
+    // Omitted, explicit default and plan are accepted and only reserve a key.
+    for (const [index, workMode] of [undefined, "default", "plan"].entries()) {
+      const args = { ...base, operation_id: "mode-" + String(index), ...(workMode === undefined ? {} : { work_mode: workMode }) } as Create;
+      assert.equal(typeof first.prepare(args), "function");
+    }
+    assert.throws(() => first.prepare({ ...base, operation_id: "mode-bad", work_mode: "turbo" } as Create), /work mode is invalid/);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});

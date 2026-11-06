@@ -98,3 +98,29 @@ test('automatic mode requests and verifies Claude classifier and accepts CLI mod
   try { await run(); assert.equal(received?.permissionMode, 'auto'); mode = 'default'; await assert.rejects(run(), /effective settings/); }
   finally { rmSync(root, {recursive:true,force:true}); }
 });
+
+test("Claude adapter refuses a cancelled request and validates the work mode", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-claude-cancel-")));
+  const id = "12345678-1234-1234-1234-123456789012"; let received: Options | undefined;
+  const adapter = new ClaudeWorkbenchAdapter(({ options }) => {
+    received = options;
+    return { async *[Symbol.asyncIterator]() {
+      yield { type: "system", subtype: "init", session_id: id, cwd: root, permissionMode: "default", model: "model" } as SDKMessage;
+      yield { type: "result", subtype: "success", session_id: id } as SDKMessage;
+    }, close() {} };
+  });
+  const turn = { sessionId: id, workspace: root, prompt: "hello", model: "model", resume: false, permission: "ask" as const, executable: join(root, "claude") };
+  const run = async (args: typeof turn & { workMode?: "default" | "plan"; abortController?: AbortController }) => {
+    for await (const _ of adapter.run(args, new ClaudeWorkbenchApprovals())) { /* consume */ }
+  };
+  try {
+    const aborted = new AbortController(); aborted.abort();
+    await assert.rejects(run({ ...turn, abortController: aborted }), /was cancelled/);
+    // A live controller must still proceed.
+    await run({ ...turn, abortController: new AbortController() });
+    assert.equal(received?.permissionMode, "default");
+    // Explicit default is accepted; an unknown mode is refused before launch.
+    await run({ ...turn, workMode: "default" });
+    await assert.rejects(run({ ...turn, workMode: "turbo" as unknown as "default" }), /work mode is invalid/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

@@ -2456,6 +2456,36 @@
       "include": ["core/pilot-orchestrator.ts"],
       "tests": ["tests/pilot-orchestrator.test.ts"],
       "branches": true
+    },
+    {
+      "name": "claude-native-sessions",
+      "include": ["core/interfaces/claude-native-sessions.ts"],
+      "tests": ["tests/claude-native-sessions.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-run-registry",
+      "include": ["core/interfaces/claude-run-registry.ts"],
+      "tests": ["tests/claude-run-registry.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-first-turn",
+      "include": ["core/interfaces/claude-first-turn.ts"],
+      "tests": ["tests/claude-first-turn.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-linked-turn",
+      "include": ["core/interfaces/claude-linked-turn.ts"],
+      "tests": ["tests/claude-linked-turn.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-adapter",
+      "include": ["core/interfaces/claude-workbench-adapter.ts"],
+      "tests": ["tests/claude-workbench-adapter.test.ts"],
+      "branches": true
     }
   ]
 }

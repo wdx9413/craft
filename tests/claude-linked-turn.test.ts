@@ -23,6 +23,31 @@ test("Claude resumed turn uses the updated session configuration", async () => {
   finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("a resumed Claude turn rejects an unknown work mode before reservation", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-claude-linked-mode-"))), store = await new CraftStore(craftPaths(root)).open();
+  store.create("task", "task", {});
+  const links = new WorkbenchAgentSessionLinks(store);
+  const adapter = new ClaudeWorkbenchAdapter(() => ({ async *[Symbol.asyncIterator]() {}, close() {} }));
+  const turnFor = (nativeId: string) => {
+    const link = links.bind({ task_id: "task", provider: "claude", native_session_id: nativeId, workspace: root, model: "m", permission: "ask" }).link as Record<string, unknown>;
+    return new ClaudeLinkedTurn(links, adapter, "task", String(link.id));
+  };
+  try {
+    const cases: Array<[string, string | undefined]> = [
+      ["00000000-0000-4000-8000-000000000001", undefined],
+      ["00000000-0000-4000-8000-000000000002", "default"],
+      ["00000000-0000-4000-8000-000000000003", "plan"],
+    ];
+    for (const [nativeId, workMode] of cases) {
+      // Each accepted mode reserves on its own fresh link; a second prepare on the same
+      // link would be refused as an unsettled turn, which is a different contract.
+      assert.equal(typeof turnFor(nativeId).prepare("hello", join(root, "claude"), true, "op-" + nativeId, workMode), "function");
+    }
+    const rejecting = turnFor("00000000-0000-4000-8000-000000000004");
+    assert.throws(() => rejecting.prepare("hello", join(root, "claude"), true, "op-bad", "turbo"), /work mode is invalid/);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("Claude turn is reserved before dispatch and completes only on a matching native result", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "craft-claude-linked-"))); const store = await new CraftStore(craftPaths(root)).open();
   const id = "12345678-1234-1234-1234-123456789012"; store.create("task", "task", {});
