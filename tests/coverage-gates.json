@@ -2395,6 +2395,13 @@
         "tests/capability-loader.test.ts"
       ],
       "branches": true
+    },
+    {
+      "name": "self-evolution-regression",
+      "include": ["core/eval/self-evolution-regression.ts"],
+      "tests": ["tests/self-evolution-regression.test.ts"],
+      "branches": false,
+      "branchesNote": "Each of the 14 deterministic checks is a pass/fail assertion whose negative half is not exercised by design; line and function coverage stay at 100%."
     }
   ]
 }

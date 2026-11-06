@@ -69,7 +69,7 @@ export const SELF_EVOLUTION_CASES: readonly RegressionCase[] = [
 const caseById = new Map(SELF_EVOLUTION_CASES.map((entry) => [entry.id, entry]));
 const hash = (content: string): string => createHash("sha256").update(content).digest("hex");
 
-type Check = (store: CraftStore, root: string) => Promise<"passed" | "failed"> | "passed" | "failed";
+export type Check = (store: CraftStore, root: string) => Promise<"passed" | "failed"> | "passed" | "failed";
 
 const CHECKS: Readonly<Record<string, Check>> = {
   "self_evolution.shadow_gate_refuses_unrun_candidate": (store) => {
@@ -270,14 +270,19 @@ const CHECKS: Readonly<Record<string, Check>> = {
  * `unobserved` is reserved for a check that could not run (e.g. a kernel threw
  * while being set up); it is never counted as a pass.
  */
-export async function runSelfEvolutionRegression(options: { skip?: readonly string[] } = {}): Promise<RegressionReport> {
+export async function runSelfEvolutionRegression(options: {
+  skip?: readonly string[];
+  /** Override the check table for tests; production always uses CHECKS. */
+  checks?: Readonly<Record<string, Check>>;
+} = {}): Promise<RegressionReport> {
   const skip = new Set(options.skip ?? []);
+  const checks = options.checks ?? CHECKS;
   const root = mkdtempSync(join(tmpdir(), "craft-self-evolution-"));
   const results: RegressionResult[] = [];
   try {
     for (const entry of SELF_EVOLUTION_CASES) {
       if (skip.has(entry.id)) continue;
-      const check = CHECKS[entry.id];
+      const check = checks[entry.id];
       if (!check) { results.push({ ...entry, verdict: "unobserved", detail: "no check registered" }); continue; }
       const caseRoot = join(root, entry.id.replace(/[^A-Za-z0-9_-]/gu, "_"));
       const store = await new CraftStore(craftPaths(caseRoot)).open();
