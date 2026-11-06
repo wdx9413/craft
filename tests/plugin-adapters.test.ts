@@ -73,6 +73,60 @@ test("inline commands and skills map, and unresolved plugin roots are reported",
   assert.equal(normalizePluginManifest({ name: "Rooted", mcpServers: { x: { command: "${CODEX_PLUGIN_ROOT}/run.js" } } }, ["codex"], "D:/plug").adapters[0].entry, "D:/plug/run.js");
 });
 
+test("manifest parsing skips unusable entries and maps url servers and single-entry fallbacks", () => {
+  const manifest: JsonObject = { name: "Edge Pack",
+    mcpServers: {
+      broken: "not-an-object",
+      empty: {},
+      remote: { url: "https://example.invalid/mcp" },
+      httpTyped: { command: "node", type: "http" },
+      full: { command: "node", args: ["x.js"], env: { A: "1" }, headers: { H: "v" } },
+    },
+    commands: ["not-an-object", { name: "no-op" }, { name: "cli", entry: "node" }, { name: "capcli", entry: "node", capabilities: ["read"] }],
+    skills: ["not-an-object", { name: "missing-content" }, { name: "with-content", content: "# x" }] };
+  const out = normalizePluginManifest(manifest, ["claude"]);
+  const server = (name: string) => out.adapters.find((adapter) => String(adapter.adapter_id).endsWith("." + name));
+  // A non-object server and one with neither command nor url are dropped with a note.
+  assert.equal(server("broken"), undefined);
+  assert.equal(server("empty"), undefined);
+  assert.equal(out.notes.filter((note) => note.includes("empty")).length, 1);
+  // A url server or an http-typed server is an http transport; a command server is stdio.
+  assert.equal(server("remote")?.transport, "http");
+  assert.equal(server("httptyped")?.transport, "http");
+  assert.equal(server("full")?.transport, "stdio");
+  assert.deepEqual((server("full")?.metadata as JsonObject).env, { A: "1" });
+  assert.deepEqual((server("full")?.metadata as JsonObject).headers, { H: "v" });
+  // Commands without an entry or content are dropped; skills without content are noted.
+  assert.deepEqual(out.adapters.map((adapter) => adapter.adapter_id), ["claude.edge-pack.remote", "claude.edge-pack.httptyped", "claude.edge-pack.full", "claude.edge-pack.cli", "claude.edge-pack.capcli"]);
+  // A declared capability list wins over the default; an undeclared one falls back to "command".
+  assert.deepEqual(out.adapters[3]?.capabilities, ["command"]);
+  assert.deepEqual(out.adapters[4]?.capabilities, ["read"]);
+  assert.deepEqual(out.skills.map((skill) => skill.skill_id), ["edge-pack.with-content"]);
+  assert.equal(out.notes.some((note) => note.includes("missing-content")), true);
+
+  // A single-entry manifest maps only when the entry exists and the kind is mcp/command/unset.
+  assert.equal(normalizePluginManifest({ name: "One", entry: "node" }, ["dsh"]).adapters[0]?.kind, "mcp");
+  assert.equal(normalizePluginManifest({ name: "Two", kind: "command" }, ["dsh"]).adapters.length, 0);
+  assert.equal(normalizePluginManifest({ name: "Three", kind: "weird", entry: "node" }, ["dsh"]).adapters.length, 0);
+  // A command-shaped single entry carries its own transport, command metadata and capabilities.
+  const cmdEntry = normalizePluginManifest({ name: "Cmd", kind: "command", entry: "node", transport: "http", command: "run.js", capabilities: ["command"] }, ["dsh"]);
+  assert.equal(cmdEntry.adapters[0]?.kind, "command");
+  assert.equal(cmdEntry.adapters[0]?.transport, "http");
+  assert.deepEqual(cmdEntry.adapters[0]?.capabilities, ["command"]);
+  assert.equal((cmdEntry.adapters[0]?.metadata as JsonObject).command, "run.js");
+  // A bare "command" string already makes a manifest Craft-compatible.
+  assert.equal(isCraftCompatibleManifest({ command: "run.js" }), true);
+  // An unnamed plugin, command and skill fall back to generated identifiers instead of being dropped.
+  const unnamed = normalizePluginManifest({ mcpServers: { s: { command: "node" } }, commands: [{ entry: "node" }, { content: "# c", capabilities: ["read"] }], skills: [{ content: "# s" }] }, ["codex"]);
+  assert.equal(unnamed.adapters[0]?.adapter_id, "codex.plugin.s");
+  assert.equal(unnamed.adapters.length, 2);
+  assert.equal(unnamed.skills.length, 2);
+  // Generated fallback identifiers depend on the current entry counts, so assert the shape
+  // rather than a fixed number: no unnamed row may silently disappear.
+  assert.equal(unnamed.skills.every((skill) => /(?:command|skill)-\d+$/u.test(String(skill.skill_id))), true);
+  assert.equal(unnamed.adapters.every((adapter) => String(adapter.adapter_id).startsWith("codex.plugin.")), true);
+});
+
 test("installing a Claude-format plugin into Craft registers adapters and skills", async () => {
   const f = await fixture();
   const installed = f.service.workbenchPluginInstall({ target_hosts: ["craft"], plugin_root: "C:/plugins/context",

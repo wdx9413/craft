@@ -57,6 +57,37 @@ test("rejects malformed message input", async () => {
   } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
 });
 
+test("normalizes defaults, bounds summaries, filters priorities and reads malformed rows", async () => {
+  const { store, inbox } = await fixture();
+  try {
+    // Omitted, null and explicit "other" sources all normalize to "other".
+    assert.equal(asMsg(inbox.record({ from: "a", subject: "s" })).source, "other");
+    assert.equal(asMsg(inbox.record({ source: null, from: "a", subject: "s" })).source, "other");
+    assert.equal(asMsg(inbox.record({ source: "other", from: "a", subject: "s" })).source, "other");
+    // Omitted and null summaries become empty; non-strings and oversized text are refused.
+    assert.equal(asMsg(inbox.record({ from: "a", subject: "s", summary: null })).summary, "");
+    assert.throws(() => inbox.record({ from: "a", subject: "s", summary: 5 }), /must be a string/u);
+    assert.throws(() => inbox.record({ from: "a", subject: "s", summary: "x".repeat(4_001) }), /4000 characters/u);
+    assert.throws(() => inbox.markProcessed({ id: "missing" }), /Unknown message/u);
+    // Priority filters only return that priority.
+    inbox.record({ from: "a", subject: "h", priority: "high" });
+    inbox.record({ from: "a", subject: "l", priority: "low" });
+    assert.ok((inbox.list({ priority: "high" }).items as InboxMessage[]).every(item => item.priority === "high"));
+    assert.ok((inbox.list({ priority: "low" }).items as InboxMessage[]).every(item => item.priority === "low"));
+    // A stored row written outside record() must still project with safe defaults.
+    store.save("message_inbox", "raw", { id: "raw", received_at: "2020-01-01T00:00:00.000Z" });
+    const raw = (inbox.list().items as InboxMessage[]).find(item => item.id === "raw");
+    assert.deepEqual([raw?.source, raw?.from, raw?.subject, raw?.summary, raw?.priority, raw?.readAt, raw?.processedAt],
+      ["other", "", "", "", "normal", null, null]);
+    // Mixed normal-priority rows exercise both directions of the receivedAt tie-break.
+    for (const [id, at] of [["n2022", "2022-01-01T00:00:00.000Z"], ["n2023", "2023-01-01T00:00:00.000Z"], ["n2021", "2021-01-01T00:00:00.000Z"]] as const) {
+      store.save("message_inbox", id, { id, source: "im", from: "a", subject: "s", summary: "", priority: "normal", received_at: at, read_at: null, processed_at: null });
+    }
+    const ordered = (inbox.list().items as InboxMessage[]).filter(item => item.id.startsWith("n"));
+    assert.deepEqual(ordered.map(item => item.id), ["n2023", "n2022", "n2021"]);
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
+
 test("webhook ingest stores a bounded summary and on-demand processing dispatches a Pilot turn", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-msg-svc-"));
   const store = await new CraftStore(craftPaths(root)).open();

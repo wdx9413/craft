@@ -2486,6 +2486,24 @@
       "include": ["core/interfaces/claude-workbench-adapter.ts"],
       "tests": ["tests/claude-workbench-adapter.test.ts"],
       "branches": true
+    },
+    {
+      "name": "message-inbox",
+      "include": ["core/message-inbox.ts"],
+      "tests": ["tests/message-inbox.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "plugin-discovery",
+      "include": ["core/plugin-discovery.ts"],
+      "tests": ["tests/plugin-discovery.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "plugin-adapters",
+      "include": ["core/plugin-adapters.ts"],
+      "tests": ["tests/plugin-adapters.test.ts"],
+      "branches": true
     }
   ]
 }

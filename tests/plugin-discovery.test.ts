@@ -37,3 +37,37 @@ test("plugin discovery proposes a remedy from a registered capability, never inv
     assert.equal(listed.items.length, 1);
   } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
 });
+
+test("plugin discovery tolerates a missing catalog, maps sparse candidates and refuses non-proposed rows", async () => {
+  const { store, discovery } = await fixture();
+  try {
+    // A non-array catalog is empty, not an exception; a null evidence id stays null.
+    const empty = discovery.propose({ failure_class: "coverage_gap", evidence_id: null, capabilities: "not-a-list" });
+    assert.equal(empty.candidate_count, 0);
+    assert.equal(empty.evidence_id, null);
+    // Matches may come from id, kind or name; sparse rows fall back to whichever field exists.
+    const proposal = discovery.propose({ failure_class: "coverage_gap", capabilities: [
+      { id: "db", name: "Database" },
+      { id: "x1", name: "Web Search" },
+      { id: "search-x" },
+      { name: "OnlyName", kind: "search" },
+      { id: "only-id-search" },
+      { id: "db2" },
+      { name: "Search Only" },
+    ] });
+    assert.equal(proposal.candidate_count, 5);
+    assert.deepEqual(proposal.candidates, [
+      { id: "x1", name: "Web Search" },
+      { id: "search-x", name: "search-x" },
+      { id: "OnlyName", name: "OnlyName" },
+      { id: "only-id-search", name: "only-id-search" },
+      { id: "Search Only", name: "Search Only" },
+    ]);
+    assert.equal((discovery.list({ status: "proposed" }) as { items: unknown[] }).items.length, 2);
+    assert.equal((discovery.list() as { items: unknown[] }).items.length, 2);
+    assert.throws(() => discovery.approve({ id: "missing", approved_by: "u" }), /Unknown plugin discovery/u);
+    // A row that is no longer proposed can never be approved again.
+    store.save("plugin_discovery_proposal", "rejected-1", { id: "rejected-1", status: "rejected" });
+    assert.throws(() => discovery.approve({ id: "rejected-1", approved_by: "u" }), /only a proposed/u);
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
