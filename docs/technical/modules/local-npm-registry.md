@@ -1,6 +1,6 @@
 # Craft 本地 npm 制品仓库规范
 
-状态：本轮固定版本为 Craft `0.14.0`、Workbench `0.13.0`、Craft-Eval `0.1.5`。这些版本在完成冻结安装、备份恢复和 Craft-Eval 项目评测后进入远端 `main`；Tauri 桌面打包与跨机器／CI 安装另行验收。本规范适用于三个独立仓库：`craft-eval`、`craft`、`craft-workbench`。
+状态：Craft-Eval `0.2.0` 已发布到本机私服，源码已推送远端 `main`（`c67c5f3`）；Craft `0.14.0` 与 Workbench `0.13.0` 未变更。新增保存 Context 回执的确定性审计；该能力尚未集成进 Craft 运行时。Tauri 桌面打包与跨机器／CI 安装仍需另行验收。本规范适用于三个独立仓库：`craft-eval`、`craft`、`craft-workbench`。
 
 ## 目标与边界
 
@@ -21,9 +21,9 @@ craft      → 发布固定版本 ├→ 本机 npm 兼容制品仓库 → 安�
 
 本机持久仓库在 `~/.craft_data/package-registry/`，使用 Verdaccio `6.11.1`，仅监听 `127.0.0.1:4874`。端口 `4873` 已被未能核实归属的进程占用，因此本机实例使用 `4874`。认证配置和 bcrypt 密码文件权限为 `600`，未改全局 npm 源；未登录不能读取内部包，普通认证用户也不能撤销已发布版本。公共依赖仅经只读上游镜像 `https://registry.npmmirror.com/` 获取。当前服务需手动在前台启动，不安装登录自启项。
 
-本机当前版本组为 `craft-eval@0.1.5`、`craft@0.14.0`、三个 `craft-common-* @0.14.0` 和四个 `@craft/capability-* @0.14.0`。旧的 `craft@0.13.0` 及其组件仍保留在私服中作回退。Workbench 固定依赖 `craft@0.14.0`，Craft 固定依赖 `craft-eval@0.1.5`；Craft 和 Workbench 锁文件中的外部包完整性值逐项与私服读回一致。旧 Workbench `vendor/*.tgz` 仍由 Git 跟踪，作为回滚副本，不再是活动依赖。
+本机当前版本组为 `craft-eval@0.2.0`、`craft@0.14.0`、三个 `craft-common-* @0.14.0` 和四个 `@craft/capability-* @0.14.0`。Craft-Eval `0.2.0` 的私服完整性为 `sha512-lKxKx9EBWN9yD5EHXu+G4cCbFyr5Sin8hxvvDQhLbMi11OMgPen9bJaymFiLZ4OSl/v7c09bs4XAVXFUAbXtZQ==`，已从隔离目录安装并调用安装包 CLI 通过示例。Craft 仍固定依赖 `craft-eval@0.1.5`；Eval 0.2.0 暂由独立命令使用，未进入 Craft/Workbench 运行依赖。旧的 `craft@0.13.0` 及其组件仍保留在私服中作回退。Workbench 固定依赖 `craft@0.14.0`，Craft 固定依赖 `craft-eval@0.1.5`；Craft 和 Workbench 锁文件中的外部包完整性值逐项与私服读回一致。旧 Workbench `vendor/*.tgz` 仍由 Git 跟踪，作为回滚副本，不再是活动依赖。
 
-验收记录（2026-11-07）：Workbench 本机冻结安装通过，读回 `Craft runtime 0.14.0: protocol 1`；Workbench 自测 `185/185`，Craft-Eval 对 Workbench 的项目套件 `2/2`、对 Craft 的项目套件 `7/7`，Craft-Eval 单测 `128/128`。评测生成器行／分支／函数覆盖为 `100%`。Craft 身份与迁移重点回归 `164` 项通过、`1` 项因未启用 GC 被跳过；`core/scope-identity.ts`、`core/project-data-inventory.ts` 和 `core/project-data-migration.ts` 的行／分支／函数覆盖均为 `100%`。Craft 发布目录检查、类型检查、分层／接口／文档／一致性审计和 CLI smoke 通过。Craft-Eval 报告位于 `/private/tmp/craft-eval-craft-0.14.0-final-20261107/` 与 `/private/tmp/craft-eval-workbench-0.13.0-final-20261107/`。Workbench 首次受限沙箱运行因 loopback 权限失败，正常本机权限复跑通过。这些确定性检查不证明真实用户收益。
+验收记录（2026-11-07）：Workbench 本机冻结安装通过，读回 `Craft runtime 0.14.0: protocol 1`；Workbench 自测 `185/185`，Craft-Eval 对 Workbench 的项目套件 `2/2`、对 Craft 的项目套件 `7/7`。本轮 Craft-Eval `0.2.0` 单测 `136/136`，Context 回执审计模块行／分支／函数覆盖 `100%`；Craft Context 合同套件 `4/4`。评测生成器行／分支／函数覆盖为 `100%`。Craft 身份与迁移重点回归 `164` 项通过、`1` 项因未启用 GC 被跳过；`core/scope-identity.ts`、`core/project-data-inventory.ts` 和 `core/project-data-migration.ts` 的行／分支／函数覆盖均为 `100%`。Craft 发布目录检查、类型检查、分层／接口／文档／一致性审计和 CLI smoke 通过。Craft-Eval 报告位于 `/private/tmp/craft-eval-craft-0.14.0-final-20261107/` 与 `/private/tmp/craft-eval-workbench-0.13.0-final-20261107/`。Workbench 首次受限沙箱运行因 loopback 权限失败，正常本机权限复跑通过。这些确定性检查不证明真实用户收益。
 
 持久仓库按版本组保留独立备份；每次发布后须在隔离 storage 恢复，并逐包核对摘要。匿名私有包读取仍应被拒绝。服务自动启动、跨机器安装、远端 CI、离线构建和 Tauri 桌面打包未验证，因此这些不属于本轮已证明能力。旧 vendor 包暂不删除。部署应选择受支持且维护中的 Node 版本，并在目标机器重新验证 Verdaccio、认证、恢复与桌面构建；本次使用的 Node 版本不代表跨版本兼容。
 

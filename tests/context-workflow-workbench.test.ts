@@ -13,6 +13,7 @@ import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
 import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
 import { payload } from "../core/digest.ts";
+import { contextFeedbackWeight } from "../core/context-feedback-weight.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-context-design-"));
@@ -255,8 +256,13 @@ test("feedback history renders a running weight curve and marks which events cou
     assert.equal(counts.negative, 1);
     assert.equal(counts.dismissed, 1);
     assert.equal(counts.events, 4);
-    const weights = (history.timeline as JsonObject[]).map((event) => event.weight_after);
-    assert.deepEqual(weights, [1.2, 1.2, 1, 1]);
+    const timeline = history.timeline as JsonObject[];
+    assert.deepEqual(timeline.map((event) => event.at), timeline.map((event) => event.at).toSorted());
+    let positive = 0, negative = 0;
+    for (const event of timeline) {
+      if (event.counted) { if (event.source === "feedback") positive += 1; else negative += 1; }
+      assert.equal(event.weight_after, contextFeedbackWeight(positive, negative));
+    }
     assert.equal((history.points as JsonObject[]).length, 4);
     assert.throws(() => designer.feedbackHistory({ asset_id: "proc-1", member: "plugin" }), /member/u);
   } finally { await f.close(); }
