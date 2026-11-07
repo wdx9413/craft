@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import evaluatorPackage from "craft-eval/package.json" with { type: "json" };
 import { mkdir, mkdtemp, open as openReader, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -32,7 +33,7 @@ test("Workbench Context audit persists only digests and a verifiable content-fre
   try {
     const result = await f.evaluations.auditContextReceipt({ operation_id: "audit-one", pack_path: f.packPath, expectations_path: f.expectationsPath });
     assert.equal(result.audit.state, "completed");
-    assert.equal(result.audit.evaluator_version, "0.5.0");
+    assert.equal(result.audit.evaluator_version, evaluatorPackage.version);
     assert.equal(result.report.status, "passed");
     assert.equal(result.integrity, "verified_against_saved_report");
     assert.equal(JSON.stringify(result).includes("sensitive claim body"), false);

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import evaluatorPackage from "craft-eval/package.json" with { type: "json" };
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -43,7 +44,7 @@ test("controlled worker preserves context input receipts from the installed eval
     const report = result.report as { results: Array<{ input_receipt: unknown; verdict: string }> };
     assert.equal(report.results[0]!.verdict, "passed");
     assert.deepEqual(report.results[0]!.input_receipt, prepareTaskInput(prompt, context).receipt);
-    assert.equal(evaluations.get(id).evaluator_version, "0.5.0");
+    assert.equal(evaluations.get(id).evaluator_version, evaluatorPackage.version);
     const engine = evaluations.get(id).execution_engine as { kind: string; sha256: string };
     assert.equal(engine.kind, "claude"); assert.match(engine.sha256, /^[a-f0-9]{64}$/u);
     const frozenSubject = join(String(evaluations.get(id).report_root), "subject.json");
@@ -145,7 +146,7 @@ test("evaluation API authenticates, freezes inputs, deduplicates, reports and ca
     const report = await call("GET", `${base}/${id}/report`);
     assert.equal(report.status, 200, report.body); assert.equal(JSON.parse(report.body).report.passed, 1);
     const receipt = evaluations.get(id);
-    assert.equal(receipt.evaluator_version, "0.5.0");
+    assert.equal(receipt.evaluator_version, evaluatorPackage.version);
     assert.equal(receipt.node_version, process.versions.node);
     assert.equal(JSON.parse(report.body).integrity, "verified_against_controlled_run");
     const resultPath = join(String(receipt.run_directory), "results/exit-1.json");

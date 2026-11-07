@@ -1,3 +1,10 @@
+## 0.19.0
+
+- Context responses that omit selected entries now remain explicitly partial through Craft-Eval; audit status is inconclusive instead of falsely passing.
+- Workbench Context Audit summaries expose response-level omitted item counts.
+- Add focused 100% line, branch, and function coverage for response projection and audit behavior.
+- These contract checks do not establish context usefulness on independent user tasks.
+
 ## 0.18.0
 
 - Align the published npm file allowlist with the runtime artifact contract; add release gates for package contents and Workbench sidecar preparation. This corrects the `.17.0` package contract before the Workbench release is pushed.
