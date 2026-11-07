@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { beginHookRuntimeDiagnostic, hookStorageFailureDetails } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
+import { queryHookRuntimeDiagnostics } from "../core/interfaces/hook-runtime-query.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 
 test("Hook diagnostics leave a content-free start marker and one bounded completion record", async () => {
@@ -113,6 +114,109 @@ test("DataSec Hook diagnostics identify the standalone PreToolUse event without 
     assert.equal(records[1].rules_load_ms, 2);
     assert.equal(records[1].handler_ms, 4);
     assert.equal(records[1].outcome, "completed");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Hook diagnostics query pairs completion records and exposes interrupted starts without private payloads", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-hook-query-"));
+  try {
+    beginHookRuntimeDiagnostic({ data_root: root, request_id: "request-interrupted", member: "context", host: "codex",
+      event: "UserPromptSubmit", session_id: "private-session", wall_clock: () => "2026-11-07T10:00:00.000Z" });
+    const completed = beginHookRuntimeDiagnostic({ data_root: root, request_id: "request-completed", member: "datasec", host: "claude",
+      event: "PreToolUse", wall_clock: () => "2026-11-07T10:01:00.000Z" });
+    completed.finish({ outcome: "failed", error_code: "STORAGE_BUSY", handler_ms: 9, database_role: "primary", database_phase: "transaction_begin" });
+
+    const result = queryHookRuntimeDiagnostics({ data_root: root, limit: 10 });
+
+    assert.equal(result.partial, false);
+    assert.equal(result.items.length, 2);
+    assert.deepEqual(result.items.map(item => ({ member: item.member, event: item.event, status: item.status })), [
+      { member: "datasec", event: "PreToolUse", status: "completed" },
+      { member: "context", event: "UserPromptSubmit", status: "unmatched_start" },
+    ]);
+    assert.equal(result.items[0]!.error_code, "STORAGE_BUSY");
+    assert.equal(result.items[0]!.host, "claude");
+    assert.equal(result.items[0]!.handler_ms, 9);
+    assert.equal(result.items[0]!.database_role, "primary");
+    assert.equal(result.items[1]!.host, "codex");
+    assert.equal(result.items[0]!.outcome, "failed");
+    assert.equal("session_hash" in result.items[1]!, false);
+    assert(!JSON.stringify(result).includes("private-session"));
+    assert.deepEqual(queryHookRuntimeDiagnostics({ data_root: root, member: "datasec", event: "PreToolUse" }).items.map(item => item.request_id), ["request-completed"]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Hook diagnostics query handles missing roots, malformed rows, symlinks and invalid filters", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-hook-query-"));
+  try {
+    assert.deepEqual(queryHookRuntimeDiagnostics({ data_root: join(root, "missing") }), { items: [], partial: false, scanned_files: 0, malformed_rows: 0 });
+    assert.equal(queryHookRuntimeDiagnostics({ data_root: "\0" }).partial, true);
+    assert.throws(() => queryHookRuntimeDiagnostics({ data_root: root, limit: 0 }), /limit must be an integer/u);
+    assert.throws(() => queryHookRuntimeDiagnostics({ data_root: root, member: "unknown" }), /member is not supported/u);
+    assert.throws(() => queryHookRuntimeDiagnostics({ data_root: root, event: "unknown" }), /event is not supported/u);
+
+    const directory = join(root, "trace", "hook-runtime", "v1");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "00.jsonl"), "not-json\n");
+    await writeFile(join(directory, "03.jsonl"), "{}\n");
+    await writeFile(join(directory, "06.jsonl"), "[]\n");
+    const validTime = "2026-11-07T10:00:00.000Z";
+    const invalidDetails = { request_id: "invalid-details", member: "memory", event: "Stop", phase: "finished", started_at: validTime, finished_at: validTime,
+      outcome: "other", error_code: "credential hidden", error_type: "Not Type!", database_role: "unknown", database_phase: "unknown",
+      busy_timeout_ms: -1, waited_ms: "long", retryable: "true", duration_ms: -1, process_elapsed_ms: -1, input_read_ms: -1, input_parse_ms: -1,
+      input_bytes: -1, rules_load_ms: -1, store_open_ms: -1, runtime_import_ms: -1, service_open_ms: -1, handler_ms: -1, output_write_ms: -1, store_close_ms: -1 };
+    await writeFile(join(directory, "04.jsonl"), JSON.stringify(invalidDetails) + "\n");
+    await writeFile(join(directory, "05.jsonl"), JSON.stringify({ ...invalidDetails, request_id: "invalid-finished-at", finished_at: "unknown" }) + "\n");
+    const validDetails = { ...invalidDetails, request_id: "valid-details", host: "codex", outcome: "skipped", error_code: "SAFE_CODE",
+      error_type: "SafeError", database_role: "capability_partition", database_phase: "savepoint_operation", busy_timeout_ms: 60_000,
+      waited_ms: 3_600_000, retryable: false, handler_ms: 0 };
+    const newerStart = { request_id: "newest-start", member: "memory", event: "Stop", phase: "started", started_at: "2026-11-07T10:02:00.000Z" };
+    const olderStart = { ...newerStart, started_at: "2026-11-07T09:00:00.000Z" };
+    await writeFile(join(directory, "07.jsonl"), `\n${JSON.stringify(validDetails)}\n${JSON.stringify(newerStart)}\n${JSON.stringify(olderStart)}\n`);
+    await writeFile(join(directory, "ignored.txt"), "not a shard\n");
+    await writeFile(join(root, "outside.jsonl"), "not read\n");
+    await symlink(join(root, "outside.jsonl"), join(directory, "01.jsonl"));
+    await mkdir(join(directory, "02.jsonl"));
+    const malformed = queryHookRuntimeDiagnostics({ data_root: root });
+    assert.equal(malformed.partial, true);
+    assert.equal(malformed.malformed_rows, 4);
+    assert.equal(malformed.scanned_files, 8);
+    const details = malformed.items.find(item => item.request_id === "valid-details");
+    assert.equal(details?.host, "codex");
+    assert.equal(details?.outcome, "skipped");
+    assert.equal(details?.error_code, "SAFE_CODE");
+    assert.equal(details?.error_type, "SafeError");
+    assert.equal(details?.database_role, "capability_partition");
+    assert.equal(details?.database_phase, "savepoint_operation");
+    assert.equal(details?.busy_timeout_ms, 60_000);
+    assert.equal(details?.waited_ms, 3_600_000);
+    assert.equal(details?.retryable, false);
+    assert.equal(details?.handler_ms, 0);
+    assert.equal(malformed.items.find(item => item.request_id === "newest-start")?.started_at, newerStart.started_at);
+
+    const linkRoot = join(root, "linked");
+    await mkdir(linkRoot);
+    await symlink(directory, join(linkRoot, "trace"));
+    const linked = queryHookRuntimeDiagnostics({ data_root: linkRoot });
+    assert.equal(linked.partial, true);
+    assert.equal(linked.scanned_files, 0);
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 }); }
+});
+
+test("Hook diagnostics query bounds each shard read to a recent tail", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-hook-query-"));
+  try {
+    const directory = join(root, "trace", "hook-runtime", "v1");
+    await mkdir(directory, { recursive: true });
+    const requestId = "recent-tail";
+    const shard = createHash("sha256").update(requestId).digest()[0]!.toString(16).padStart(2, "0");
+    const path = join(directory, `${shard}.jsonl`);
+    const recent = JSON.stringify({ request_id: requestId, member: "context", event: "UserPromptSubmit", phase: "started", started_at: "2026-11-07T10:00:00.000Z" });
+    await writeFile(path, "x".repeat(9_000) + "\n" + recent + "\n");
+    const result = queryHookRuntimeDiagnostics({ data_root: root });
+    assert.equal(result.partial, true);
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0]!.request_id, requestId);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

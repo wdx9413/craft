@@ -195,6 +195,8 @@ try {
       for (const sessionId of memorySessions) {
         callPackagedMemoryHook(dataRoot, { hook_event_name: "SessionEnd", cwd: projectRoot, session_id: sessionId });
         assert(service.memoryGovernance.ledger.files.isSessionArchived(sessionId), "SessionEnd must persist Memory archive state");
+        const cleanupBy = Date.now() + 5_000;
+        while (existsSync(temporaryMemoryDirectory(sessionId)) && Date.now() < cleanupBy) await delay(25);
         assert(!existsSync(temporaryMemoryDirectory(sessionId)), "archived Memory sessions must delete their temporary directories");
       }
     }

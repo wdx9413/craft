@@ -40,6 +40,7 @@ async function main(): Promise<void> {
     if (["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd", "PreCompact"].includes(event))
       diagnostic = beginHookRuntimeDiagnostic({ data_root: craftPaths().root, request_id: requestId, member: component,
         event: event as "SessionStart" | "UserPromptSubmit" | "PostToolUse" | "Stop" | "SessionEnd" | "PreCompact",
+        ...(input.session_host === "codex" || input.session_host === "claude" ? { host: input.session_host } : {}),
         ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}) });
   } catch { /* Diagnostics must never delay or prevent the Host Hook. */ }
   if (event === "SessionStart" && process.argv[1]) launchMemoryArchiveWorker(process.argv[1], craftPaths().root);

@@ -1,3 +1,15 @@
+## 0.18.0
+
+- Align the published npm file allowlist with the runtime artifact contract; add release gates for package contents and Workbench sidecar preparation. This corrects the `.17.0` package contract before the Workbench release is pushed.
+- Ship bounded, content-free Hook diagnostics with Host identity and authenticated Workbench inspection; unmatched starts remain incomplete evidence rather than asserted timeouts.
+- Local tests and package checks do not establish visual quality, Host timeout attribution, or user task benefit.
+
+## 0.17.0
+
+- Record Hook Host identity in content-free runtime diagnostics and expose a bounded, authenticated Workbench query for recent Hook outcomes and stage timings.
+- Add on-demand Hook diagnostics in Workbench settings; unmatched starts are reported as incomplete evidence, not asserted to be Host timeouts.
+- Add strict diagnostic coverage and API contract evaluation cases. Local tests do not prove timeout root cause, rendered UI quality, or user benefit.
+
 ## 0.16.0
 
 - Keep migration preflight pagination on one read snapshot while WAL writers continue; a later scan sees committed changes.

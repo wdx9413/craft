@@ -10,6 +10,14 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { prepareRuntimeArtifact } from "../scripts/release/runtime-artifact.ts";
 
+test("npm package files and the runtime artifact contract stay aligned", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as { files?: string[] };
+  const artifact = JSON.parse(await readFile(new URL("../runtime-artifacts.json", import.meta.url), "utf8")) as { npm_files?: string[]; runtime_copies?: Array<{ source: string; target: string }> };
+  assert.deepEqual(manifest.files, artifact.npm_files);
+  assert.equal(manifest.files?.includes("vendor"), false);
+  assert.equal(artifact.runtime_copies?.some((entry) => entry.source.startsWith("vendor/") || entry.target.startsWith("vendor/")), false);
+});
+
 test("built public runtime declarations type-check without skipping dependency declarations", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-public-types-"));
   try {

@@ -61,7 +61,7 @@ const result = runIfInvoked(process.argv[1], fileURLToPath(import.meta.url), () 
   if (!(host === "claude" || host === "codex") || !(event === "PreToolUse" || event === "PostToolUse" || event === "UserPromptSubmit")) {
     return runDataSecHookCli(args, readFileSync(0, "utf8"));
   }
-  try { diagnostic = beginHookRuntimeDiagnostic({ data_root: craftPaths().root, request_id: randomUUID(), member: "datasec", event }); }
+  try { diagnostic = beginHookRuntimeDiagnostic({ data_root: craftPaths().root, request_id: randomUUID(), member: "datasec", event, host }); }
   catch { /* Diagnostics must never delay or prevent the Host Hook. */ }
   const readStarted = performance.now();
   const raw = readFileSync(0, "utf8");

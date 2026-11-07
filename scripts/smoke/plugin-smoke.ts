@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +25,7 @@ try {
   const relativeBundle = String(server.args[0]);
   const copiedBundle = join(pluginRoot, relativeBundle);
   await mkdir(dirname(copiedBundle), { recursive: true });
-  await copyFile(join(pluginSource, relativeBundle), copiedBundle);
+  await cp(join(pluginSource, "dist", "plugin"), dirname(copiedBundle), { recursive: true });
   const request = [
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: MCP_PREFERRED_PROTOCOL_VERSION } },
     { jsonrpc: "2.0", id: 2, method: "tools/list" },

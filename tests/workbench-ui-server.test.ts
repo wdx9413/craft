@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { craftPaths, CraftService, VERSION, CraftStore, WorkbenchWebApp, workbenchBridge } from "../core/runtime-api.ts";
+import { beginHookRuntimeDiagnostic } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
 import { LocalWorkbenchServer } from "../core/workbench-server.ts";
 
 test("explicitly mounted ES modules are served without a per-file allowlist entry", async (t) => {
@@ -38,6 +39,30 @@ async function fixture() {
   const store = await new CraftStore(craftPaths(root)).open();
   return { root, store, service: new CraftService(store) };
 }
+
+test("Workbench exposes authenticated bounded Hook diagnostics without source content", async (t) => {
+  const f = await fixture();
+  t.after(() => f.store.close());
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  beginHookRuntimeDiagnostic({ data_root: f.store.paths.root, request_id: "timed-out-request", member: "context", event: "UserPromptSubmit",
+    session_id: "private-session", wall_clock: () => "2026-11-07T10:00:00.000Z" });
+  const failed = beginHookRuntimeDiagnostic({ data_root: f.store.paths.root, request_id: "failed-request", member: "datasec", event: "PreToolUse",
+    wall_clock: () => "2026-11-07T10:01:00.000Z" });
+  failed.finish({ outcome: "failed", error_code: "STORAGE_BUSY", handler_ms: 10 });
+
+  assert.equal(app.handle({ method: "GET", path: "/api/workbench/hook-diagnostics" }).status, 401);
+  assert.equal(app.handle({ method: "GET", path: "/api/workbench/hook-diagnostics", token: "secret", origin: "https://evil.example" }).status, 403);
+  assert.equal(app.handle({ method: "GET", path: "/api/workbench/hook-diagnostics?limit=101", token: "secret" }).status, 422);
+  const response = app.handle({ method: "GET", path: "/api/workbench/hook-diagnostics?limit=5", token: "secret" });
+  const result = JSON.parse(response.body) as { items: Array<Record<string, unknown>>; partial: boolean };
+  assert.equal(response.status, 200);
+  assert.equal(result.partial, false);
+  assert.deepEqual(result.items.map(item => ({ member: item.member, status: item.status })), [
+    { member: "datasec", status: "completed" }, { member: "context", status: "unmatched_start" },
+  ]);
+  assert.equal(result.items[0]!.error_code, "STORAGE_BUSY");
+  assert(!response.body.includes("private-session"));
+});
 
 test("core serves no UI by default and accepts an explicit presentation mount", async (t) => {
   const f = await fixture();

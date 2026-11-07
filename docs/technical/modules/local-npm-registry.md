@@ -1,6 +1,6 @@
 # Craft 本地 npm 制品仓库规范
 
-状态（2026-11-07）：Craft-Eval `0.3.0`、Craft `0.16.0` 及其公共基础包和能力包 `0.16.0` 已发布到本机私服；Workbench `0.15.0` 已固定依赖 Craft `0.16.0`，从私服安装并通过本地运行时协议与 HTTP 集成评测。三个仓库的对应提交仍需推送远端 main。Tauri 桌面打包与跨机器／CI 安装仍需另行验收。本规范适用于三个独立仓库：`craft-eval`、`craft`、`craft-workbench`。
+状态（2026-11-07）：Craft-Eval `0.5.0`、Craft `0.18.0`、其七个公共基础／能力包 `0.18.0` 已发布到本机私服；Workbench `0.16.0` 固定依赖 Craft `0.18.0` 并从私服安装。Craft-Eval 的 Craft 套件 `16/16`、Workbench 套件 `7/7` 通过，Workbench 全量测试 `203/203` 通过，安装 Runtime 协议检查及 Tauri 侧车预检通过。9 个制品的私服完整性均已核对，并备份与隔离恢复到 `~/.craft_data/package-registry/backups/craft-release-0.18.0-20261107/`。三个仓库的代码提交仍需推送远端 main；完整 Tauri 打包未运行，因为当前机器没有 `cargo`；渲染截图验收也未运行。本规范适用于三个独立仓库：`craft-eval`、`craft`、`craft-workbench`。
 
 ## 目标与边界
 
@@ -21,9 +21,9 @@ craft      → 发布固定版本 ├→ 本机 npm 兼容制品仓库 → 安�
 
 本机持久仓库在 `~/.craft_data/package-registry/`，使用 Verdaccio `6.11.1`，仅监听 `127.0.0.1:4874`。端口 `4873` 已被未能核实归属的进程占用，因此本机实例使用 `4874`。认证配置和 bcrypt 密码文件权限为 `600`，未改全局 npm 源；未登录不能读取内部包，普通认证用户也不能撤销已发布版本。公共依赖仅经只读上游镜像 `https://registry.npmmirror.com/` 获取。当前服务需手动在前台启动，不安装登录自启项。
 
-本机当前版本组为 `craft-eval@0.2.0`、`craft@0.15.0`、三个 `craft-common-* @0.15.0` 和四个 `@craft/capability-* @0.15.0`。Craft-Eval `0.2.0` 的私服完整性为 `sha512-lKxKx9EBWN9yD5EHXu+G4cCbFyr5Sin8hxvvDQhLbMi11OMgPen9bJaymFiLZ4OSl/v7c09bs4XAVXFUAbXtZQ==`；Craft `0.15.0` 已在本机私服发布，Workbench 冻结安装读回 `Craft runtime 0.15.0: protocol 1`。Craft 固定依赖 `craft-eval@0.2.0`，Workbench 固定依赖 `craft@0.15.0`。锁文件固定所有包版本和完整性；旧 Workbench `vendor/*.tgz` 仍由 Git 跟踪，作为回滚副本，不再是活动依赖。
+本机当前版本组为 `craft-eval@0.5.0`、`craft@0.18.0`、三个 `craft-common-* @0.18.0` 和四个 `@craft/capability-* @0.18.0`。Craft 固定依赖 `craft-eval@0.5.0`，Workbench 固定依赖 `craft@0.18.0`。锁文件固定所有包版本和完整性；旧 Workbench `vendor/*.tgz` 仍由 Git 跟踪，作为回滚副本，不再是活动依赖。Craft `0.18.0` 的 npm 压缩包约 52 MB，包含 CLI、插件 bundle、OCR 资源和运行时代码；这与 Git 仓库体积是两个独立指标。
 
-验收记录（2026-11-07）：Craft `0.15.0` 完整构建通过；类型检查、分层／接口／文档／一致性审计、CLI smoke 和新增 Context 审计及委托覆盖均通过。Craft-Eval 对 Craft 的固定套件 `9/9`，对 Workbench 的固定套件 `3/3`；Workbench 从私服冻结安装 `craft@0.15.0` 后完整测试通过，Context 审计面板行／分支／函数覆盖 `100%`。安装策略仅对本机私服中的精确内部版本设置最小发布时间豁免，公共依赖仍执行等待期校验。报告位于 `/private/tmp/craft-eval-craft-context-audit-final-20261107/65c70fc6886e4ab9bbcf33918c642be3` 和 `/private/tmp/craft-eval-workbench-context-audit-final-20261107/2eb5a20c758141a5acf68c3e62df81b0`。这些确定性工程检查不证明真实用户收益。Tauri 桌面打包与跨机器／CI 安装仍未验证。
+验收记录（2026-11-07）：Craft `0.18.0` 完整构建、类型检查、分层／接口／发布清单审计、CLI 与插件 smoke 通过；新增 Hook 诊断与运行包契约测试通过，Hook 诊断代码行／分支／函数覆盖率 `100%`。Craft-Eval 对 Craft `16/16`、对 Workbench `7/7`。Workbench 从私服冻结安装 `craft@0.18.0` 后协议检查、侧车预检及全量测试 `203/203` 通过，Hook 诊断面板行／分支／函数覆盖率 `100%`。Tauri 完整打包因缺少 `cargo` 未验证；Impeccable 静态检测仅报告未改动代码中的一个既有圆角 advisory，渲染视觉 QA 未运行。安装策略仅对本机私服中的精确内部版本设置最小发布时间豁免，公共依赖仍执行等待期校验。报告位于 `/private/tmp/craft-eval-018-release-final/285a8c2515024554a304204baedad267` 和 `/private/tmp/craft-eval-workbench-016-release/696a981dc99348a1bf791e34edc21c18`。这些确定性工程检查不证明真实用户收益；三个仓库的当前源码尚未提交或推送。
 
 持久仓库按版本组保留独立备份；每次发布后须在隔离 storage 恢复，并逐包核对摘要。匿名私有包读取仍应被拒绝。服务自动启动、跨机器安装、远端 CI、离线构建和 Tauri 桌面打包未验证，因此这些不属于本轮已证明能力。旧 vendor 包暂不删除。部署应选择受支持且维护中的 Node 版本，并在目标机器重新验证 Verdaccio、认证、恢复与桌面构建；本次使用的 Node 版本不代表跨版本兼容。
 

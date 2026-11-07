@@ -1125,7 +1125,8 @@
     {
       "name": "hook-runtime-diagnostics",
       "include": [
-        "core/interfaces/codex-hook-runtime-diagnostics.ts"
+        "core/interfaces/codex-hook-runtime-diagnostics.ts",
+        "core/interfaces/hook-runtime-query.ts"
       ],
       "tests": [
         "tests/codex-hook-runtime-diagnostics.test.ts"

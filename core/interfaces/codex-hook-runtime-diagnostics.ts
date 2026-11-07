@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 
 export type HookRuntimeEvent = "SessionStart" | "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "Stop" | "SessionEnd" | "PreCompact";
 export type HookRuntimeMember = "context" | "knowledge" | "memory" | "experience" | "datasec";
+export type HookRuntimeHost = "codex" | "claude";
 
 export interface HookRuntimeTiming {
   readonly process_elapsed_ms?: number;
@@ -73,6 +74,7 @@ export function beginHookRuntimeDiagnostic(args: {
   readonly data_root: string;
   readonly request_id: string;
   readonly member: HookRuntimeMember;
+  readonly host?: HookRuntimeHost;
   readonly event: HookRuntimeEvent;
   readonly session_id?: string;
   readonly now?: () => number;
@@ -97,7 +99,7 @@ export function beginHookRuntimeDiagnostic(args: {
   const wallClock = args.wall_clock ?? (() => new Date().toISOString());
   const started = now();
   const sessionHash = args.session_id ? createHash("sha256").update(args.session_id).digest("hex") : undefined;
-  const base = { request_id: args.request_id, member: args.member, event: args.event, started_at: wallClock(),
+  const base = { request_id: args.request_id, member: args.member, event: args.event, ...(args.host ? { host: args.host } : {}), started_at: wallClock(),
     ...(sessionHash ? { session_hash: sessionHash } : {}) };
   appendLine(path, { ...base, phase: "started" });
   let finished = false;

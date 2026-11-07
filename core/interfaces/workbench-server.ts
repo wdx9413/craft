@@ -21,6 +21,7 @@ import { resolveDshLaunch } from "../dsh-executable.ts";
 import { loadSettingsSync } from "../settings.ts";
 import { detectAgentDesktop, registerAgentDesktopAdapter } from "./agent-desktop-adapter.ts";
 import { INTERNAL_ONLY_TOOLS } from "../internal-host-driver.ts";
+import { queryHookRuntimeDiagnostics } from "./hook-runtime-query.ts";
 
 const MAX_BODY = 64 * 1024;
 /**
@@ -228,6 +229,11 @@ export class WorkbenchWebApp {
       }
       if (request.method === "GET" && path === "/api/workbench-experience") return json(200, this.service.workbenchExperienceQuery({ project_id: queryValue(url, "project_id"), task_id: queryValue(url, "task_id"), limit: queryValue(url, "limit") }));
       if (request.method === "GET" && path === "/api/traces") return json(200, this.service.traceQuery({ task_id: queryValue(url, "task_id"), event_kind: queryValue(url, "event_kind"), limit: queryValue(url, "limit") }));
+      if (request.method === "GET" && path === "/api/workbench/hook-diagnostics") return json(200, {
+        ...queryHookRuntimeDiagnostics({ data_root: this.service.store.paths.root,
+          limit: queryValue(url, "limit") === undefined ? undefined : Number(queryValue(url, "limit")),
+          member: queryValue(url, "member"), event: queryValue(url, "event") }),
+      });
       if (request.method === "GET" && path === "/api/long-task-checkpoints") return json(200, this.service.longTaskList({ session_id: queryValue(url, "session_id"), limit: queryValue(url, "limit") }));
       if (request.method === "GET" && path === "/api/settings") return json(200, this.service.settingsGet());
       // The object rail and its focused card (plan 8 / 15.3). One view serves the left
