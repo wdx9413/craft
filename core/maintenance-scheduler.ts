@@ -1,0 +1,41 @@
+/** Idempotent, lease-bound maintenance scheduling. Light work may run at a
+ * session boundary; review/deep require an explicit idle budget and never publish. */
+import { randomUUID } from "node:crypto";
+import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
+import type { MemoryMaintenanceKernel } from "./memory-maintenance.ts";
+import { stableDigest } from "./digest.ts";
+
+export class MaintenanceScheduler {
+  readonly store: CraftStore; readonly maintenance: MemoryMaintenanceKernel; readonly expireMemory: (args: JsonObject) => JsonObject;
+  constructor(store: CraftStore, maintenance: MemoryMaintenanceKernel, expireMemory: (args: JsonObject) => JsonObject = () => ({ count: 0 })) { this.store = store; this.maintenance = maintenance; this.expireMemory = expireMemory; }
+  tick(args: JsonObject = {}): JsonObject {
+    const stage = String(args.stage ?? "light");
+    if (!new Set(["light", "review", "deep"]).has(stage)) throw new Error("maintenance stage is unsupported");
+    if (stage !== "light" && (args.idle !== true || args.budget_available !== true || args.model_available !== true)) {
+      return { status: "skipped", reason: "idle_budget_or_model_unavailable", stage };
+    }
+    const leaseId = String(args.lease_id ?? `maintenance_lease_${randomUUID().replaceAll("-", "")}`);
+    const identity = { stage, scope: args.scope ?? null, cursor: args.cursor ?? null };
+    const existing = this.store.find("maintenance_schedule_receipt", leaseId);
+    if (existing) {
+      if (existing.identity_digest !== stableDigest(identity)) throw new Error("Maintenance schedule idempotency conflict");
+      return { status: existing.status, receipt: existing, idempotent: true };
+    }
+    // The process may have stopped after persisting the run but before the
+    // schedule receipt. Reuse that run instead of recomputing its timestamped
+    // identity or claiming an expiry count that was not checkpointed.
+    const completedRun = this.store.find("memory_maintenance_run", `scheduled_${leaseId}`);
+    if (completedRun) {
+      if (stage !== "light" || identity.scope !== null || identity.cursor !== null || completedRun.stage !== "light" || completedRun.status !== "completed"
+        || stableDigest(completedRun.scope) !== stableDigest({ kind: "global", id: "global" }))
+        throw new Error("Maintenance schedule recovery identity conflict");
+      const receipt = this.store.create("maintenance_schedule_receipt", leaseId, { ...identity, identity_digest: stableDigest(identity), status: "completed", run_id: completedRun.id, expired_memory: null, publication_allowed: false });
+      return { status: "completed", receipt, recovered: true };
+    }
+    const expiry = this.expireMemory({ limit: 100 });
+    const result = this.maintenance.run({ stage, maintenance_id: `scheduled_${leaseId}` });
+    const receipt = this.store.create("maintenance_schedule_receipt", leaseId, { ...identity, identity_digest: stableDigest(identity), status: "completed", run_id: (result.run as JsonObject).id,
+      expired_memory: Number.isSafeInteger(expiry.count) && Number(expiry.count) >= 0 ? expiry.count : null, publication_allowed: false });
+    return { status: "completed", receipt, result, expiry, idempotent: false };
+  }
+}

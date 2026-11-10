@@ -1,0 +1,515 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { linkDirectory } from "./symlink-support.ts";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+import { projectKnowledgeContentDirectory } from "../core/project-knowledge-content.ts";
+import { projectExperienceContentDirectory, projectExperienceDirectory, projectPathAliasDigest } from "../core/project-experience-directory.ts";
+import { MemoryFileStore } from "../capability/craft-memory/memory-files.ts";
+import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
+import { ContextResolutionKernel } from "../core/context-resolution.ts";
+import { stableDigest } from "../core/digest.ts";
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "craft-component-integration-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = await CraftService.open(store);
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:p", alias_kind: "path", alias: root });
+  for (const projectId of ["hybrid", "portable"]) {
+    const projectRoot = join(root, projectId);
+    await mkdir(projectRoot, { recursive: true });
+    service.scopeAliasBind({ scope_kind: "project", scope_id: `project:${projectId}`, alias_kind: "path", alias: projectRoot });
+  }
+  return { root, store, service };
+}
+async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+
+test("capability directories reject a scope with a missing historic project root", async () => {
+  const f = await fixture();
+  try {
+    const scope = "project:incomplete-roots";
+    const root = join(f.root, "current-project"); await mkdir(root);
+    for (const path of [root, join(f.root, "missing-project")]) f.service.scopeAliasBind({ scope_kind: "project", scope_id: scope, alias_kind: "path", alias: path });
+    assert.throws(() => projectKnowledgeContentDirectory(f.store, scope, { create: true }), /ambiguous/u);
+    assert.throws(() => projectExperienceDirectory(f.store, scope, root, true), /ambiguous/u);
+    assert.throws(() => projectExperienceContentDirectory(f.store, scope, { create: true }), /ambiguous/u);
+    assert.throws(() => projectPathAliasDigest(f.store, scope, root), /ambiguous/u);
+    assert.throws(() => new MemoryFileStore(f.store).pathFor({ kind: "project", id: scope }, root), /ambiguous/u);
+  } finally { await dispose(f); }
+});
+
+test("Knowledge directory rejects a registered project with an unavailable identity path", async () => {
+  const f = await fixture();
+  try {
+    const id = "project:identity-unavailable", scope = { kind: "project", id };
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: id, alias_kind: "path", alias: f.root });
+    const project_kind = "local_fingerprint", remote_digest = null;
+    f.store.create("project_identity", id, { canonical_scope: scope, local_path_alias: join(f.root, "missing"), project_kind, remote_digest,
+      identity_digest: stableDigest({ canonical: scope, project_kind, remote_digest }) });
+    assert.throws(() => projectKnowledgeContentDirectory(f.store, id, { create: true }), /ambiguous/u);
+  } finally { await dispose(f); }
+});
+
+test("does not read a legacy project alias before its data is migrated", async () => {
+  const f = await fixture();
+  try {
+    f.service.knowledgeMemoryInstallBuiltins();
+    const isolatedRoot = join(f.root, "isolated-project"); await mkdir(isolatedRoot);
+    const identity = f.service.scopeIdentityResolveProject({ project_root: isolatedRoot }).identity as JsonObject;
+    const canonical = identity.canonical_scope as JsonObject;
+    f.service.scopeAliasMigrate({ project_root: isolatedRoot, legacy_scope_id: "project:old-machine-path" });
+    f.service.memoryLedgerRemember({ memory_id: "legacy-memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "project:old-machine-path", content: "Prefer verified local tests.", confidence: "bounded", topic: "testing" });
+    const resolved = await f.service.contextResolutionResolve({ receipt_id: "scope-receipt", query: "verified tests", scope_kind: "project", scope_id: canonical.id });
+    assert(!(resolved.items as JsonObject[]).some(item => String(item.content).includes("verified local tests")));
+    const receipt = resolved.receipt as JsonObject;
+    assert.equal((receipt.attempted_scopes as JsonObject[]).some((scope) => scope.id === "project:old-machine-path"), false);
+    assert.equal((receipt.excluded_scopes as JsonObject[]).some((entry) => entry.reason === "project_scope_migration_required"), true);
+    assert.equal((receipt.excluded_scopes as JsonObject[]).some((entry) => entry.reason === "explicit_global_not_requested"), true);
+  } finally { await dispose(f); }
+});
+
+test("separate checkouts of the same remote do not share project memory", async () => {
+  const f = await fixture();
+  try {
+    f.service.knowledgeMemoryInstallBuiltins();
+    const roots = [join(f.root, "checkout-a"), join(f.root, "checkout-b")];
+    for (const root of roots) {
+      await mkdir(root); execFileSync("git", ["init", "--quiet", root]);
+      execFileSync("git", ["-C", root, "remote", "add", "origin", "https://example.invalid/shared/repository.git"]);
+    }
+    const scopes = roots.map(root => ((f.service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject).canonical_scope as JsonObject).id);
+    assert.notEqual(scopes[0], scopes[1]);
+    f.service.memoryLedgerRemember({ memory_id: "isolated-memory", source_id: "builtin.evidence-wiki", kind: "preference",
+      scope_kind: "project", scope_id: scopes[0], content: "Use verified focused tests for this checkout.", confidence: "bounded", topic: "testing" });
+    const own = await f.service.contextResolutionResolve({ receipt_id: "own-receipt", query: "verified focused tests", scope_kind: "project", scope_id: scopes[0] });
+    assert((own.items as JsonObject[]).some(item => String(item.content).includes("verified focused tests")));
+    const result = await f.service.contextResolutionResolve({ receipt_id: "isolated-receipt", query: "verified focused tests", scope_kind: "project", scope_id: scopes[1] });
+    assert(!(result.items as JsonObject[]).some(item => String(item.content).includes("verified focused tests")));
+  } finally { await dispose(f); }
+});
+
+test("records actual keyword fallback when an eligible vector adapter has no provider credential", async () => {
+  const f = await fixture();
+  try {
+    f.service.knowledgeMemoryInstallBuiltins();
+    f.service.memoryLedgerRemember({ memory_id: "m", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "p", content: "Use bounded retrieval receipts.", confidence: "bounded" });
+    f.service.retrievalAdapterConfigure({ adapter_id: "vector", strategy: "vector", provider_fingerprint: "provider-v1", configuration: { endpoint: "https://example.invalid/embeddings", model: "embed", credential_env: "CRAFT_TEST_MISSING_KEY" } });
+    f.service.retrievalAdapterEvaluate({ adapter_id: "vector", metrics: { recall: 1, cross_project_leak_count: 0, latency_ms: 1, cost_usd: 0 } });
+    const resolved = await f.service.contextResolutionResolve({ receipt_id: "vector-fallback", query: "retrieval", scope_kind: "project", scope_id: "p", retrieval_adapter_id: "vector" });
+    const receipt = resolved.receipt as JsonObject;
+    assert.equal(((receipt.retrieval_execution as JsonObject).used), "keyword");
+    assert.equal(((receipt.retrieval_execution as JsonObject).unavailable_reason), "retrieval_evaluation_required");
+  } finally { await dispose(f); }
+});
+
+test("keeps hybrid unavailable until its embedding provider can really run", async () => {
+  const f = await fixture();
+  try {
+    f.service.knowledgeMemoryInstallBuiltins();
+    f.service.memoryLedgerRemember({ memory_id: "hybrid-memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "project:hybrid", topic: "testing", content: "Run focused tests before broad verification." });
+    const configured = f.service.retrievalAdapterConfigure({ adapter_id: "hybrid", strategy: "hybrid", provider_fingerprint: "embed:v1", configuration: { endpoint: "https://example.invalid/embeddings", model: "embed", credential_env: "MISSING_EMBEDDING_KEY" } }).adapter as JsonObject;
+    f.service.retrievalAdapterEvaluate({ adapter_id: configured.id, metrics: { recall: 1, cross_project_leak_count: 0, latency_ms: 1, cost_usd: 0 } });
+    const result = await f.service.contextResolutionResolve({ receipt_id: "hybrid-receipt", query: "focused tests", scope_kind: "project", scope_id: "project:hybrid", retrieval_adapter_id: configured.id }) as JsonObject;
+    assert.equal((result.receipt as JsonObject).retrieval_mode, "keyword");
+    assert.equal(((result.receipt as JsonObject).retrieval_execution as JsonObject).unavailable_reason, "retrieval_evaluation_required");
+    assert.equal(((result.items as JsonObject[])[0]).reason, "keyword_bm25");
+  } finally { await dispose(f); }
+});
+
+test("ingests immutable source revisions as Evidence and candidates, never reviewed context", async () => {
+  const f = await fixture();
+  try {
+    const sourceRoot = join(f.root, "notes"); await (await import("node:fs/promises")).mkdir(sourceRoot);
+    await writeFile(join(sourceRoot, "README.md"), "# Rule\nRun focused verification before delivery.\n", "utf8");
+    const source = f.service.knowledgeSourceRegister({ source_id: "source", kind: "readme", label: "fixture", scope_kind: "project", scope_id: "p", locator: sourceRoot, content_digest: "registered", trust: "verified", access: "read_only" }).source as JsonObject;
+    assert.throws(() => f.service.knowledgeSourceIngest({ source_id: source.id, root: f.root }), /outside the registered Source locator/u);
+    const ingested = f.service.knowledgeSourceIngest({ source_id: source.id, root: sourceRoot, max_files: 5, max_chars_per_fragment: 200 });
+    assert.equal((ingested.fragments as JsonObject[]).length, 1);
+    assert.equal((ingested.candidates as JsonObject[])[0]?.status, "candidate");
+    assert.equal(((ingested.automatic_review as JsonObject).summary as JsonObject).revalidation_required, 1);
+    assert.equal(f.store.list("knowledge_claim", 10).length, 1);
+    assert.equal(f.store.list("knowledge_claim", 10)[0]?.status, "candidate");
+    const reader = new KnowledgeContribution(f.store);
+    const request = { query: "focused verification", scope_kind: "project" as const, scope_id: "p", max_items: 10, max_chars: 10_000 };
+    assert.equal((await reader.search(request, true)).items.length, 1);
+    await writeFile(join(sourceRoot, "README.md"), "# Rule\nRun full verification before delivery.\n", "utf8");
+    assert.equal((await reader.search(request, true)).items.length, 0, "changed file is withheld before background ingestion");
+    await rm(join(sourceRoot, "README.md"));
+    assert.equal((await reader.search(request, true)).items.length, 0, "missing source is withheld");
+    const external = join(f.root, "external.md");
+    await writeFile(external, "# Rule\nRun focused verification before delivery.\n", "utf8");
+    await linkDirectory(external, join(sourceRoot, "README.md"));
+    assert.equal((await reader.search(request, true)).items.length, 0, "symlink outside the source is withheld");
+    await rm(join(sourceRoot, "README.md"));
+    await writeFile(join(sourceRoot, "README.md"), "# Rule\nRun full verification before delivery.\n", "utf8");
+    const refreshed = f.service.knowledgeSourceIngest({ source_id: source.id, root: sourceRoot, max_files: 5, max_chars_per_fragment: 200 });
+    assert.notEqual((refreshed.revision as JsonObject).id, (ingested.revision as JsonObject).id);
+  } finally { await dispose(f); }
+});
+
+test("a changed file makes its required Knowledge reference unavailable", async t => {
+  const f = await fixture();
+  try {
+    const sourceRoot = join(f.root, "required-notes"); await mkdir(sourceRoot);
+    const path = join(sourceRoot, "README.md"); await writeFile(path, "alpha required fact\n");
+    f.service.knowledgeSourceRegister({ source_id: "required-source", kind: "readme", label: "required", scope_kind: "project", scope_id: "p",
+      locator: sourceRoot, content_digest: "registered", trust: "verified", access: "read_only" });
+    const ingested = f.service.knowledgeSourceIngest({ source_id: "required-source" });
+    const candidateId = String((ingested.candidates as JsonObject[])[0]!.claim_id);
+    attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", candidateId));
+    const kernel = new ContextResolutionKernel(f.store, [new KnowledgeContribution(f.store)]);
+    const request = { query: "alpha", scope_kind: "project", scope_id: "p", members: ["knowledge"],
+      required_refs: [{ member: "knowledge", id: candidateId }] };
+    const before = await kernel.resolve(request);
+    assert((before.contributions as JsonObject[]).some(part => (part.items as JsonObject[]).some(item => item.claim_id === candidateId)));
+    for (const mutation of ["replace_before_open", "replace", "grow"] as const) {
+      const originalOpen = fsPromises.open, resolvedPath = fs.realpathSync(path);
+      let injected = false;
+      const fault = t.mock.method(fsPromises, "open", async (...args: Parameters<typeof fsPromises.open>) => {
+        const target = String(args[0]) === resolvedPath;
+        if (target && mutation === "replace_before_open") {
+          injected = true; fs.writeFileSync(`${path}.new`, "replacement\n"); fs.renameSync(`${path}.new`, path);
+        }
+        const handle = await Reflect.apply(originalOpen, fsPromises, args);
+        if (target && mutation !== "replace_before_open") {
+          const originalRead = handle.read.bind(handle);
+          t.mock.method(handle, "read", async (...readArgs: Parameters<typeof handle.read>) => {
+            if (!injected) {
+              injected = true;
+              if (mutation === "replace") { fs.writeFileSync(`${path}.new`, "replacement\n"); fs.renameSync(`${path}.new`, path); }
+              else fs.appendFileSync(path, "extra\n");
+            }
+            return Reflect.apply(originalRead, handle, readArgs);
+          });
+        }
+        return handle;
+      });
+      try {
+        await assert.rejects(kernel.resolve(request), /Required Context reference is unavailable/u);
+        assert.equal(injected, true);
+      } finally { fault.mock.restore(); }
+      await writeFile(path, "alpha required fact\n");
+    }
+    await writeFile(path, "alpha changed fact\n");
+    await assert.rejects(kernel.resolve(request), /Required Context reference is unavailable/u);
+    const partial = await kernel.resolve({ query: "alpha", scope_kind: "project", scope_id: "p", members: ["knowledge"], allow_partial: true });
+    assert.equal((partial.receipt as JsonObject).partial, true);
+    assert.deepEqual((partial.receipt as JsonObject).contributor_failures, [{ member: "knowledge", reason: "source_verification_incomplete" }]);
+  } finally { await dispose(f); }
+});
+
+test("Knowledge verifies documents ingested from a source subdirectory", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "knowledge-subdir"), subdir = join(root, "nested");
+    await mkdir(join(subdir, "child"), { recursive: true });
+    await writeFile(join(subdir, "child", "note.md"), "alpha subdirectory fact\n");
+    f.service.knowledgeSourceRegister({ source_id: "subdir-source", kind: "readme", label: "subdir", scope_kind: "project", scope_id: "p",
+      locator: root, content_digest: "registered", trust: "verified", access: "read_only" });
+    f.service.knowledgeSourceIngest({ source_id: "subdir-source", root: subdir });
+    const reader = new KnowledgeContribution(f.store);
+    const request = { query: "alpha", scope_kind: "project" as const, scope_id: "p", max_items: 10, max_chars: 10_000 };
+    assert.equal((await reader.search(request, true)).items.length, 1);
+    await writeFile(join(subdir, "child", "note.md"), "alpha changed\n");
+    assert.equal((await reader.search(request, true)).items.length, 0);
+  } finally { await dispose(f); }
+});
+
+test("Knowledge keeps an ingested fact pending after source support until independent evaluation", async () => {
+  const f = await fixture();
+  try {
+    const body = "# Project rule\nRun focused verification before delivery.\n";
+    const roots = [join(f.root, "notes-a"), join(f.root, "notes-b")];
+    const claims: JsonObject[] = [];
+    let sharedClaimId = "";
+    for (const [index, root] of roots.entries()) {
+      await mkdir(root);
+      await writeFile(join(root, "README.md"), body, "utf8");
+      if (index === 0) await writeFile(join(root, "copied-note.md"), body, "utf8");
+      f.service.knowledgeSourceRegister({ source_id: `source-${index}`, kind: "readme", label: `verified-${index}`, scope_kind: "project", scope_id: "p", locator: root, content_digest: `registered-${index}`, trust: "verified", access: "read_only" });
+      const result = f.service.knowledgeSourceIngest({ source_id: `source-${index}`, max_chars_per_fragment: 200 });
+      claims.push(...(result.candidates as JsonObject[]));
+      const claimId = String((result.candidates as JsonObject[])[0]!.claim_id);
+      sharedClaimId = claimId;
+      const review = (result.automatic_review as JsonObject).assessments as JsonObject[];
+      if (index === 0) {
+        assert.equal(review[0]!.promoted, false);
+        assert.deepEqual(review[0]!.reasons, ["independent_effectiveness_evaluation_required", "independent_support_below_threshold"]);
+        assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
+        assert.equal(f.store.count("knowledge_claim_support"), 1);
+        const duplicate = f.service.evidenceRecord({ evidence_id: "duplicate-source-evidence", source_type: "knowledge_fragment", confidence: "bounded", claim: "Copied text is still one source.", scope: { kind: "project", id: "p" } });
+        f.store.create("knowledge_claim_support", "duplicate-source-support", { claim_id: claimId, evidence_id: duplicate.id, observation_key: "knowledge-source:source-0", scope: "project:p", confidence: "bounded" });
+        const rechecked = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "p", claim_ids: [claimId] }).assessments as JsonObject[];
+        assert.equal(rechecked[0]!.promoted, false);
+        assert.equal(rechecked[0]!.independent_support, 1);
+        const revokedSource = f.service.knowledgeSourceRegister({ source_id: "revoked-support-source", kind: "readme", label: "revoked corroboration", scope_kind: "project", scope_id: "p", locator: root, content_digest: "revoked-source", trust: "verified", access: "read_only" }).source as JsonObject;
+        const revokedEvidence = f.service.evidenceRecord({ evidence_id: "revoked-source-evidence", source_type: "knowledge_fragment",
+          source_id: revokedSource.id, confidence: "bounded", claim: "Support from this source will be revoked.", scope: { kind: "project", id: "p" } });
+        f.service.knowledgeClaimSupportRecord({ claim_id: claimId, evidence_id: revokedEvidence.id, observation_key: "knowledge-source:revoked-support-source", scope: "project:p" });
+        f.service.knowledgeSourceTransition({ source_id: revokedSource.id, status: "revoked", reason: "fixture trust revoked" });
+        const revokedRecheck = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "p", claim_ids: [claimId] }).assessments as JsonObject[];
+        assert.equal(revokedRecheck[0]!.promoted, false);
+        assert.equal(revokedRecheck[0]!.independent_support, 1);
+      } else {
+        assert.equal(review[0]!.promoted, false);
+        assert.equal(review[0]!.independent_support, 2);
+        assert.deepEqual(review[0]!.reasons, ["independent_effectiveness_evaluation_required"]);
+        assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
+      }
+    }
+    assert.equal(new Set(claims.map(item => item.claim_id)).size, 1);
+    // The append-only ledger retains duplicate/revoked support history; the
+    // assessment exposes only two currently independent, active sources.
+    assert.equal(f.store.count("knowledge_claim_support"), 4);
+    assert.equal(f.store.list("knowledge_claim_support", 10, item => item.claim_id === sharedClaimId).length, 4);
+    const search = await f.service.knowledgeSearchScoped({ query: "focused verification delivery", scope_kind: "project", scope_id: "p" });
+    assert.equal((search.hits as JsonObject[]).length, 0);
+  } finally { await dispose(f); }
+});
+
+test("ingests only bounded readable files and makes stale reviewed claims explicit", async () => {
+    const f = await fixture();
+  try {
+    const sourceRoot = join(f.root, "source-tree"); await mkdir(join(sourceRoot, "nested"), { recursive: true }); await mkdir(join(sourceRoot, "zzz")); await mkdir(join(sourceRoot, ".git")); await mkdir(join(sourceRoot, "node_modules"));
+    await writeFile(join(sourceRoot, "nested", "note.txt"), "first version", "utf8"); await writeFile(join(sourceRoot, "zzz", "later.txt"), "must skip by limit", "utf8"); await writeFile(join(sourceRoot, ".hidden.md"), "must skip", "utf8"); await writeFile(join(sourceRoot, "node_modules", "skip.md"), "must skip", "utf8");
+    const outside = join(f.root, "outside.md"); await mkdir(outside, { recursive: true }); await linkDirectory(outside, join(sourceRoot, "leak.md"));
+    const source = f.service.knowledgeSourceRegister({ source_id: "ingest-source", kind: "readme", label: "source", scope_kind: "project", scope_id: "p", locator: sourceRoot, content_digest: "registered", trust: "bounded", access: "read_only" }).source as JsonObject;
+    assert.equal(f.service.knowledgeSourceIngest({ source_id: source.id, root: join(sourceRoot, "missing") }).status, "unavailable");
+    assert.throws(() => f.service.knowledgeSourceIngest({ source_id: source.id, root: sourceRoot, max_files: 0 }), /budget/u);
+    const first = f.service.knowledgeSourceIngest({ source_id: source.id, root: sourceRoot, max_files: 1, max_chars_per_fragment: 100 });
+    assert.equal((first.fragments as JsonObject[]).length, 1);
+    assert.doesNotMatch(JSON.stringify(first), /must never ingest/u);
+    const claim = (first.candidates as JsonObject[])[0]!.claim_id as string;
+    f.store.save("knowledge_claim", claim, { ...f.store.get("knowledge_claim", claim), status: "reviewed" });
+    await writeFile(join(sourceRoot, "nested", "note.txt"), "second version", "utf8");
+    f.service.knowledgeSourceIngest({ source_id: source.id, root: sourceRoot, max_files: 1, max_chars_per_fragment: 100 });
+    assert.equal(f.store.get("knowledge_claim", claim).status, "stale");
+    const proposalOnly = f.service.knowledgeSourceRegister({ source_id: "proposal-only", kind: "readme", label: "proposal", scope_kind: "project", scope_id: "p", locator: sourceRoot, content_digest: "proposal", trust: "bounded", access: "proposal_only" }).source as JsonObject;
+    assert.throws(() => f.service.knowledgeSourceIngest({ source_id: proposalOnly.id, root: sourceRoot }), /read-only ingest/u);
+    f.service.knowledgeSourceTransition({ source_id: source.id, status: "disabled", reason: "test" });
+    assert.throws(() => f.service.knowledgeSourceIngest({ source_id: source.id, root: sourceRoot }), /read-only ingest/u);
+    const singleFile = f.service.knowledgeSourceRegister({ source_id: "single-file", kind: "readme", label: "file", scope_kind: "project", scope_id: "p", locator: join(sourceRoot, "nested", "note.txt"), content_digest: "file", trust: "bounded", access: "read_only" }).source as JsonObject;
+    assert.equal((f.service.knowledgeSourceIngest({ source_id: singleFile.id, max_chars_per_fragment: 100 }).fragments as JsonObject[]).length, 1);
+    assert.equal((f.service.knowledgeSourceIngest({ source_id: singleFile.id, max_chars_per_fragment: 100 }).fragments as JsonObject[]).length, 1);
+    const emptyPath = join(sourceRoot, "empty.md"); await writeFile(emptyPath, "\n\n", "utf8");
+    const emptySource = f.service.knowledgeSourceRegister({ source_id: "empty-file", kind: "readme", label: "empty", scope_kind: "project", scope_id: "p", locator: emptyPath, content_digest: "empty", trust: "bounded", access: "read_only" }).source as JsonObject;
+    assert.deepEqual(f.service.knowledgeSourceIngest({ source_id: emptySource.id, max_chars_per_fragment: 100 }).fragments, []);
+  } finally { await dispose(f); }
+});
+
+test("automatic Knowledge review counts exact trusted support but awaits independent evaluation", async () => {
+  const f = await fixture();
+  try {
+    const projectRoot = join(f.root, "project-shared");
+    await mkdir(projectRoot);
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:shared", alias_kind: "path", alias: projectRoot });
+    const roots = [join(f.root, "source-a"), join(f.root, "source-b")];
+    for (const root of roots) { await mkdir(root); await writeFile(join(root, "rule.md"), "Run focused verification before delivery.", "utf8"); }
+    const sources = roots.map((root, index) => f.service.knowledgeSourceRegister({ source_id: `trusted-${index}`, kind: "readme", label: `trusted-${index}`, scope_kind: "project", scope_id: "shared", locator: root, content_digest: "registered", trust: "verified", access: "read_only" }).source as JsonObject);
+    const first = f.service.knowledgeSourceIngest({ source_id: sources[0]!.id, max_chars_per_fragment: 200 });
+    const claimId = String((first.candidates as JsonObject[])[0]!.claim_id);
+    assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
+    f.service.knowledgeSourceIngest({ source_id: sources[1]!.id, max_chars_per_fragment: 200 });
+    assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
+    assert.equal(f.store.list("knowledge_claim_support", 10_000, item => item.claim_id === claimId).length, 2);
+    const stale = f.store.list("knowledge_claim", 10_000).filter(item => item.status === "revalidation_required");
+    assert.equal(stale.length, 0);
+  } finally { await dispose(f); }
+});
+
+test("keeps temporal conflict abstention and schedules only bounded maintenance", async () => {
+  const f = await fixture();
+  try {
+    f.service.knowledgeMemoryInstallBuiltins();
+    for (const [id, content] of [["old", "I drink coffee."], ["new", "I avoid coffee."]] as const) f.service.memoryLedgerRemember({ memory_id: id, source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "user", scope_id: "u", content, confidence: "bounded", topic: "drink:coffee", observed_at: "2026-09-01T00:00:00.000Z", effective_from: id === "old" ? "2026-01-01T00:00:00.000Z" : "2026-09-01T00:00:00.000Z" });
+    const resolved = await f.service.contextResolutionResolve({ query: "coffee", scope_kind: "user", scope_id: "u", receipt_id: "conflict" });
+    assert.equal((resolved.items as JsonObject[]).length, 0);
+    assert.equal(((resolved.receipt as JsonObject).excluded_scopes as JsonObject[]).some((item) => item.reason === "temporal_conflict_abstain"), true);
+    assert.equal(f.service.memoryMaintenanceSchedule({ stage: "review" }).status, "skipped");
+    assert.equal(f.service.memoryMaintenanceSchedule({ stage: "light", lease_id: "light" }).status, "completed");
+  } finally { await dispose(f); }
+});
+
+test("exports replayable schema-3 bundles and turns merge collisions into candidates", async () => {
+  const source = await fixture(); const target = await fixture();
+  try {
+    source.service.knowledgeMemoryInstallBuiltins();
+    source.service.memoryLedgerRemember({ memory_id: "portable", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "project:portable", content: "Keep portable knowledge scoped.", confidence: "bounded" });
+    const bundle = source.service.knowledgeMemoryBundleManage({ operation: "export", scope_kind: "project", scope_id: "project:portable", device_id: "laptop", export_id: "export-one", cursor: "cursor-1" }).bundle as JsonObject;
+    assert.equal(bundle.schema_version, 3); assert.equal(bundle.device_id, "laptop");
+    assert.equal((bundle.records as JsonObject[]).some(entry => entry.kind === "scope_alias" && (entry.payload as JsonObject).alias_kind === "path"), false);
+    assert.equal(target.service.knowledgeMemoryBundleManage({ operation: "verify", bundle }).valid, true);
+    assert.equal((target.service.knowledgeMemoryBundleManage({ operation: "import_apply", import_id: "portable-import", approved: true, bundle }).import as JsonObject).merge_receipt instanceof Object, true);
+    target.store.save("memory_ledger", "portable", { ...target.store.get("memory_ledger", "portable"), content_digest: "sha256:conflicting-local-record" });
+    const conflict = target.service.knowledgeMemoryBundleManage({ operation: "import_apply", import_id: "portable-conflict", approved: true, bundle }).plan as JsonObject;
+    assert.equal(conflict.conflicts, 1);
+    assert.equal(target.store.list("knowledge_memory_conflict", 10).length, 1);
+  } finally { await dispose(source); await dispose(target); }
+});
+
+test("portable bundles rehydrate Workflow JSON definitions under the receiving Experience domain", async () => {
+  const source = await fixture(); const target = await fixture();
+  try {
+    const definition = new ProcedureDefinitionStore(source.store).write({
+      schema_version: "craft.procedure.v1", procedure_id: "portable-procedure", procedure_version: 1, kind: "workflow",
+      scope: "project:p", trigger: "portable verification", preconditions: ["workspace ready"], allowed_effects: ["read"],
+      acceptance_ref: "acceptance:fixture", failure_disposition: "checkpoint_and_handoff", scenario_signature: { project: "p", target_class: "fixture" },
+      evidence_ids: ["evidence"], proposal_ref: { id: "proposal", version: 1 }, definition: { inputs: [], steps: [{ type: "assertion" }] },
+    }, "Portable verification");
+    const content = source.store.contentStore.writeSync({ kind: "experience", record_id: "portable-procedure", version: 1, scope: "project:p", status: "routeable", sensitivity: "internal", source_id: "fixture", title: "Portable verification", folder: "workflows", body: "# Portable verification\n" });
+    source.store.create("experience_procedure", "portable-procedure", { procedure_kind: "workflow", scope: "project:p", trigger: "portable verification", title: "Portable verification", acceptance_ref: "acceptance:fixture", scenario_signature: { project: "p", target_class: "fixture" }, lifecycle: "routeable", routeable: true, content_ref: content, content_digest: content.digest, definition_ref: definition, definition_digest: definition.digest });
+    const bundle = source.service.knowledgeMemoryBundleExport({ scope_kind: "project", scope_id: "p" }).bundle as JsonObject;
+    const entry = (bundle.records as JsonObject[]).find((item) => item.kind === "experience_procedure")!;
+    assert.equal(((entry.payload as JsonObject).definition_ref as JsonObject).path, undefined);
+    assert.equal((entry.procedure_definition as JsonObject).kind, "workflow");
+    const importedResult = target.service.knowledgeMemoryBundleImportApply({ bundle, approved: true });
+    assert.equal((importedResult.graph_manifests as JsonObject[])[0]!.current_version, 1);
+    const imported = target.store.get("experience_procedure", "portable-procedure");
+    const rehydrated = new ProcedureDefinitionStore(target.store).read(imported.definition_ref as never);
+    assert.equal(rehydrated.definition.steps instanceof Array, true);
+    assert.notEqual((imported.definition_ref as JsonObject).path, definition.path);
+  } finally { await dispose(source); await dispose(target); }
+});
+
+test("bundle directory transport writes only a verified portable JSON envelope", async () => {
+  const source = await fixture(); const target = await fixture();
+  try {
+    source.service.knowledgeMemoryInstallBuiltins();
+    source.service.memoryLedgerRemember({ memory_id: "transported", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "p", content: "Keep bundles reviewable.", confidence: "bounded" });
+    const bundle = source.service.knowledgeMemoryBundleExport({ scope_kind: "project", scope_id: "p" }).bundle as JsonObject;
+    assert.throws(() => source.service.knowledgeMemoryBundleTransport({ operation: "write", transport: "directory", transport_root: join(source.root, "transfer"), bundle }), /allow_local_write/u);
+    const written = source.service.knowledgeMemoryBundleTransport({ operation: "write", transport: "directory", transport_root: join(source.root, "transfer"), allow_local_write: true, bundle });
+    const read = source.service.knowledgeMemoryBundleTransport({ operation: "read", transport: "directory", transport_root: join(source.root, "transfer"), file_name: written.file_name }) as JsonObject;
+    assert.equal((read.bundle as JsonObject).digest, bundle.digest);
+    assert.equal(target.service.knowledgeMemoryBundleImportApply({ bundle: read.bundle, approved: true }).plan instanceof Object, true);
+  } finally { await dispose(source); await dispose(target); }
+});
+
+test("eligible vector retrieval persists safe configuration, caches embeddings, and opens a bounded circuit", async () => {
+  const f = await fixture(); const originalFetch = globalThis.fetch; const originalKey = process.env.CRAFT_VECTOR_TEST_KEY;
+  try {
+    process.env.CRAFT_VECTOR_TEST_KEY = "fixture-key"; let calls = 0; let contextInputs: string[] = [];
+    globalThis.fetch = async (_input, init) => {
+      calls += 1; const body = JSON.parse(String(init?.body)) as { input: string[] };
+      contextInputs.push(...body.input);
+      return new Response(JSON.stringify({ data: body.input.map((value) => ({ embedding: value.includes("alpha") ? [1, 0] : [0, 1] })), usage: { total_tokens: body.input.length } }), { status: 200 });
+    };
+    f.service.knowledgeMemoryInstallBuiltins();
+    f.service.memoryLedgerRemember({ memory_id: "vector-memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "p", content: `alpha retrieval uses evidence marker-unique. ${"unrelated detail. ".repeat(500)}` });
+    const adapter = f.service.retrievalAdapterConfigure({ adapter_id: "vector-success", strategy: "vector", provider_fingerprint: "fixture-v1", configuration: { endpoint: "https://fixture.local/context-excerpt/embeddings", model: "fixture-embed", model_revision: "fixture-context-excerpt", credential_env: "CRAFT_VECTOR_TEST_KEY" } }).adapter as JsonObject;
+    assert.equal(((adapter.configuration as JsonObject).model), "fixture-embed");
+    const dataset = { documents: [{ id: "a", body: "alpha", scope: "p" }], cases: [{ query: "alpha", scope: "p", expected_ids: ["a"] }] };
+    await f.service.retrievalAdapterEvaluate({ adapter_id: adapter.id, dataset }); calls = 0; contextInputs = [];
+    const first = await f.service.contextResolutionResolve({ receipt_id: "vector-success-one", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: adapter.id });
+    const second = await f.service.contextResolutionResolve({ receipt_id: "vector-success-two", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: adapter.id });
+    assert.equal(((first.receipt as JsonObject).retrieval_execution as JsonObject).used, "vector");
+    assert.equal(((second.receipt as JsonObject).retrieval_execution as JsonObject).used, "vector"); assert.equal(calls, 1);
+    assert(contextInputs.some(input => input.length <= 600 && input.includes("alpha")), "vector retrieval receives only a query excerpt of a long Memory body");
+    assert(String((first.items as JsonObject[])[0]!.content).length <= 600);
+    const hybrid = f.service.retrievalAdapterConfigure({ adapter_id: "hybrid-success", strategy: "hybrid", provider_fingerprint: "fixture-v1", configuration: { endpoint: "https://fixture.local/embeddings", model: "fixture-embed", credential_env: "CRAFT_VECTOR_TEST_KEY" } }).adapter as JsonObject;
+    await f.service.retrievalAdapterEvaluate({ adapter_id: hybrid.id, dataset });
+    const hybridResult = await f.service.contextResolutionResolve({ receipt_id: "hybrid-success", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: hybrid.id });
+    assert.equal(((hybridResult.receipt as JsonObject).retrieval_execution as JsonObject).used, "hybrid");
+    assert.equal(((hybridResult.items as JsonObject[])[0]).reason, "hybrid_rrf");
+    const failed = f.service.retrievalAdapterConfigure({ adapter_id: "vector-failure", strategy: "vector", provider_fingerprint: "fixture-v2", configuration: { endpoint: "https://fixture.local/failure", model: "fixture-embed-v2", credential_env: "CRAFT_VECTOR_TEST_KEY" } }).adapter as JsonObject;
+    await f.service.retrievalAdapterEvaluate({ adapter_id: failed.id, dataset });
+    globalThis.fetch = async () => { throw new Error("network_failure"); };
+    for (const receipt_id of ["failure-one", "failure-two", "failure-three"]) await f.service.contextResolutionResolve({ receipt_id, query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: failed.id });
+    const opened = await f.service.contextResolutionResolve({ receipt_id: "failure-open", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: failed.id });
+    assert.equal(((opened.receipt as JsonObject).retrieval_execution as JsonObject).unavailable_reason, "embedding_circuit_open");
+  } finally { globalThis.fetch = originalFetch; if (originalKey === undefined) delete process.env.CRAFT_VECTOR_TEST_KEY; else process.env.CRAFT_VECTOR_TEST_KEY = originalKey; await dispose(f); }
+});
+
+test("semantic review packet is fragment-bound and a routeable Prompt Procedure remains Markdown-native", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "source"); await mkdir(root); await writeFile(join(root, "README.md"), "# Delivery rule\nRun focused tests before delivery.\n", "utf8");
+    const source = f.service.knowledgeSourceRegister({ source_id: "packet-source", kind: "readme", label: "packet", scope_kind: "project", scope_id: "p", locator: root, content_digest: "packet-source-v1", trust: "verified", access: "read_only" }).source as JsonObject;
+    const ingested = f.service.knowledgeSourceIngest({ source_id: source.id, max_chars_per_fragment: 500 }); const claim = f.store.get("knowledge_claim", String((ingested.candidates as JsonObject[])[0]!.claim_id));
+    const packet = f.service.knowledgeSemanticReviewPacket({ claim_id: claim.id }); assert.equal(packet.status, "ready");
+    assert.equal((await f.service.knowledgeSemanticProviderReview({ claim_id: claim.id })).status, "unavailable");
+    const review = f.service.knowledgeHostReview({ claim_id: claim.id, host_kind: "codex", host_run_key: "turn:packet", source_digest: source.content_digest, packet_digest: packet.packet_digest, decision: "supported" });
+    assert.equal(review.promoted, false); assert.equal((review.review as JsonObject).packet_attested, true);
+    assert.deepEqual(review.blocking_reasons, ["independent_effectiveness_evaluation_required"]);
+    const evidence = f.service.evidenceRecord({ evidence_id: "procedure-evidence", source_type: "fixture", confidence: "confirmed", claim: "Verification passed.", locator: "fixture://procedure" }) as JsonObject;
+    const signature = { schema: "craft.scenario-signature.v1", project: "p", verifier: "test", effect_class: "read" };
+    for (const id of ["one", "two"]) f.service.workflowEvolutionObserve({ observation_id: `procedure-${id}`, scenario_key: "delivery.tests", scenario_signature: signature, source_kind: "fixture", source_id: id, source_digest: `sha256:${id}`, scope: "project:p", outcome: "passed", evidence_ids: [evidence.id], sanitized: true, content_stored: false });
+    const request = f.service.workflowEvolutionPropose({ scenario_key: "delivery.tests", observation_ids: ["procedure-one", "procedure-two"], hypothesis: "Verify before delivery.", design_axes: ["orchestration"], procedure_kind: "workflow", output_contract_ref: "acceptance:tests" }).request as JsonObject;
+    const proposal = f.service.workflowEvolutionProposalSubmit({ request_id: request.id, workflow_id: "procedure-workflow", name: "Verified delivery", description: "Run focused tests before delivery.", inputs: [], steps: [{ type: "assertion" }] }).proposal as JsonObject;
+    const procedure = f.service.experienceProcedureDraft({ proposal_id: proposal.id, procedure_kind: "prompt", allowed_effects: ["read"], evidence_ids: [evidence.id] }).procedure as JsonObject;
+    assert.equal(procedure.definition_ref, null);
+    for (const stage of ["shadow", "held_out", "signoff", "canary"]) f.service.experienceProcedures.gate({ procedure_id: procedure.id, stage, evidence_ids: [evidence.id], passed: true });
+    const routeable = f.service.experienceProcedureGet({ procedure_id: procedure.id }).procedure as JsonObject; assert.equal(routeable.lifecycle, "routeable");
+    const procedurePath = String((routeable.content_ref as JsonObject).path);
+    assert.match(procedurePath, /experience[\\/]md[\\/]prompts[\\/]/u);
+    const markdown = await readFile(procedurePath, "utf8");
+    assert.match(markdown, /procedure_kind: "prompt"[\s\S]*lifecycle: "routeable"/u);
+    const context = await f.service.contextResolutionResolve({ receipt_id: "procedure-context", query: "delivery tests", scope_kind: "project", scope_id: "p", members: ["experience"] });
+    assert.match(JSON.stringify(context.contributions), /content_digest/u);
+    assert.doesNotMatch(JSON.stringify(context.contributions), /Run focused tests/u);
+    const exported = f.service.experienceProcedureSkillExport({ procedure_id: procedure.id });
+    assert.equal((exported.export as JsonObject).enabled, false);
+    assert.match(String((exported.export as JsonObject).path), /experience[\\/]skills[\\/]/u);
+    assert.equal((exported.export as JsonObject).definition_path, null);
+  } finally { await dispose(f); }
+});
+
+test("more-specific memory scopes shadow parent topics while working notes remain opt-in", async () => {
+  const f = await fixture();
+  try {
+    f.service.knowledgeMemoryInstallBuiltins();
+    f.service.memoryLedgerRemember({ memory_id: "user-testing", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "user", scope_id: "u", topic: "testing", content: "Use the broad suite.", confidence: "bounded", observed_at: "2026-09-01T00:00:00.000Z" });
+    f.service.memoryLedgerRemember({ memory_id: "project-testing", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "p", topic: "testing", content: "Use focused tests first.", confidence: "bounded", observed_at: "2026-09-02T00:00:00.000Z" });
+    f.service.memoryLedgerRemember({ memory_id: "working-note", source_id: "builtin.evidence-wiki", kind: "working", working_note: true, scope_kind: "project", scope_id: "p", topic: "working-note", content: "Temporary local note.", confidence: "bounded" });
+    const defaultResult = await f.service.contextResolutionResolve({ receipt_id: "specific-scope", query: "focused tests", scope_kind: "project", scope_id: "p", user_scope_id: "u" });
+    assert.match(JSON.stringify(defaultResult.items), /focused tests/u);
+    assert.doesNotMatch(JSON.stringify(defaultResult.items), /broad suite|Temporary local/u);
+    const withWorking = await f.service.contextResolutionResolve({ receipt_id: "working-scope", query: "temporary", scope_kind: "project", scope_id: "p", user_scope_id: "u", include_working_notes: true });
+    assert.match(JSON.stringify(withWorking.items), /Temporary local/u);
+  } finally { await dispose(f); }
+});
+
+test("scope envelopes keep team data opt-in, audience-bound, and separate from personal/project context", async () => {
+  const f = await fixture();
+  try {
+    f.service.knowledgeMemoryInstallBuiltins();
+    const envelope = {
+      applicability: { kind: "team", id: "platform" }, custody: { kind: "team", id: "platform" },
+      audience: { mode: "scoped", principal_ids: ["alice"] }, purpose: "procedure", retention: "long_term", tenant_id: "acme",
+    };
+    const evidence = f.service.evidenceRecord({ evidence_id: "team-procedure-evidence", source_type: "fixture", confidence: "bounded", claim: "Team procedure fixture", locator: "fixture://team-procedure" }) as JsonObject;
+    f.service.memoryLedgerRemember({ memory_id: "team-procedure", source_id: "builtin.evidence-wiki", kind: "procedural", scope_kind: "team", scope_id: "platform",
+      scope_envelope: envelope, topic: "delivery", content: "The platform team runs focused verification first.", confidence: "bounded", evidence_ids: [evidence.id] });
+    const hidden = await f.service.contextResolutionResolve({ receipt_id: "team-hidden", query: "verification", scope_kind: "project", scope_id: "craft", team_scope_id: "platform", principal_id: "bob", tenant_id: "acme" });
+    assert.equal((hidden.items as JsonObject[]).length, 0);
+    const visible = await f.service.contextResolutionResolve({ receipt_id: "team-visible", query: "verification", scope_kind: "project", scope_id: "craft", team_scope_id: "platform", principal_id: "alice", tenant_id: "acme", cognitive_purpose: "procedure" });
+    assert.match(JSON.stringify(visible.items), /platform team/u);
+    const wrongTenant = await f.service.contextResolutionResolve({ receipt_id: "team-wrong-tenant", query: "verification", scope_kind: "project", scope_id: "craft", team_scope_id: "platform", principal_id: "alice", tenant_id: "other", cognitive_purpose: "procedure" });
+    assert.equal((wrongTenant.items as JsonObject[]).length, 0);
+    assert.equal((((visible.items as JsonObject[])[0]!.scope_envelope as JsonObject).audience as JsonObject).mode, "scoped");
+  } finally { await dispose(f); }
+});
+
+test("global Knowledge is read only when explicitly requested, not as a project fallback", async () => {
+  const f = await fixture();
+  try {
+    f.service.knowledgeMemoryInstallBuiltins();
+    const evidence = f.service.evidenceRecord({ evidence_id: "global-evidence", source_type: "fixture", confidence: "bounded", claim: "Global rule fixture", locator: "fixture://global" }) as JsonObject;
+    f.service.knowledgeClaimSave({ claim_id: "global-claim", kind: "rule", content: "An explicitly public baseline rule.", scope: "global", source_id: "builtin.evidence-wiki", evidence_ids: [evidence.id],
+      scope_envelope: { applicability: { kind: "global", id: "global" }, custody: { kind: "organization", id: "craft" }, audience: { mode: "public", principal_ids: [] }, purpose: "fact", retention: "long_term", tenant_id: null } });
+    attachVerifiedPromotionFixture(f.store, f.store.get("knowledge_claim", "global-claim"));
+    const defaultContext = await f.service.contextResolutionResolve({ receipt_id: "global-default", query: "baseline rule", scope_kind: "project", scope_id: "craft", members: ["knowledge"] });
+    assert.equal(((defaultContext.contributions as JsonObject[])[0]!.items as JsonObject[]).length, 0);
+    const explicitContext = await f.service.contextResolutionResolve({ receipt_id: "global-explicit", query: "baseline rule", scope_kind: "project", scope_id: "craft", include_global: true, members: ["knowledge"] });
+    assert.match(JSON.stringify(explicitContext.contributions), /public baseline/u);
+  } finally { await dispose(f); }
+});

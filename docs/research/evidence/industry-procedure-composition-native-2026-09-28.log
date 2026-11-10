@@ -1,0 +1,64 @@
+(node:80963) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80963) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (28.063167ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (13.920958ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (19.949583ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (23.105208ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (13.693208ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (30.358042ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (20.675375ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.816333ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (10.667417ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (17.66975ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (23.79875ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (270.440708ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (18.811792ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1623.781625ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2362.584ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (49.66125ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (253.296416ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (11.392583ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (28.330292ms)
+✔ full development and standalone review select explicit routes, preserving child acceptance and no execution (34.899375ms)
+✔ composition rejects ambiguous and unreachable contracts before persistence (0.625041ms)
+✔ plans fail closed for identity, scope, input, effects, evidence and integrity (39.968334ms)
+✔ child calls pin versions and digest, propagate permission limits and reject recursion/expansion (101.425ms)
+✔ composition rejects disguised calls, ambiguous binding names and colliding plan paths (30.119291ms)
+✔ promoted parent/child Procedures remain pinned and plannable after portable import (85.096334ms)
+✔ nested invocation uses public seams, defers child evidence, accepts aliases only after child exit and survives restart (53.856709ms)
+✔ failed child verification blocks parent; pending dispatch remains reconcilable without double dispatch (19.615125ms)
+✔ strict invocation inputs, optimistic concurrency, policy, scope and revocation checks fail closed (16.261583ms)
+✔ evidence is tied to exact invocation, call, Task, inputs, state revision and expiry (22.452083ms)
+✔ receipt binding rejects foreign sessions, observations, outputs and evidence and rolls back partial persistence (36.507167ms)
+✔ resume invalidates drift and budget/Task changes stop new dispatches (14.735583ms)
+✔ paired trials require terminal and identical context, expose route outcomes without promotion (73.065125ms)
+✔ active budget balances, malformed refs, missing artifacts and post-dispatch drift are enforced (20.584458ms)
+✔ content-free metrics are attributed to each route and comparable only under the paired context (25.847375ms)
+✔ MCP wire validates bind, all invocation operations and real Host observation field types (44.226875ms)
+✔ failed nested exit blocks parent consumption and late receipt cannot erase workspace drift (34.053333ms)
+✔ blocked, inconclusive and retryable failures retain verdicts and require fresh safe-retry evidence before continuing (99.885042ms)
+✔ Host cancellation is a distinct terminal result and cannot be automatically reopened (16.222042ms)
+✔ explicit read-only parallel group dispatches independently and joins before exit (30.207083ms)
+✔ recovery rejects handoff failures, exhausted retries and drift after verified resolution (70.711292ms)
+✔ parallel group schema bounds and a failed Host with a passing observation remain failures (17.50025ms)
+✔ parallel receipt draining preserves each blocker and recovery cannot skip unresolved siblings (121.435125ms)
+ℹ tests 42
+ℹ suites 0
+ℹ pass 42
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6552.732958
+ℹ start of coverage report
+ℹ ---------------------------------------------------------------------------
+ℹ file                       | line % | branch % | funcs % | uncovered lines
+ℹ ---------------------------------------------------------------------------
+ℹ capability                 |        |          |         | 
+ℹ  craft-experience          |        |          |         | 
+ℹ   procedure-composition.ts | 100.00 |   100.00 |  100.00 | 
+ℹ ---------------------------------------------------------------------------
+ℹ all files                  | 100.00 |   100.00 |  100.00 | 
+ℹ ---------------------------------------------------------------------------
+ℹ end of coverage report

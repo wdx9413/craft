@@ -1,0 +1,23 @@
+(node:<pid>) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Claude executable discovery prefers a real binary over a shell shim (2.511917ms)
+✔ Claude discovery ignores empty, relative and directory entries and can locate an exe filename (0.825916ms)
+✔ Windows Codex discovery uses a direct binary or the official npm package binary (5.308875ms)
+✔ CLI paths preserve existing order and add standard GUI installation directories once (0.509417ms)
+✔ CLI environment supplies PATH when it is absent (0.225334ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 60.5045
+----------------------|---------|----------|---------|---------|-------------------
+File                  | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+----------------------|---------|----------|---------|---------|-------------------
+All files             |     100 |      100 |     100 |     100 |                   
+ claude-executable.ts |     100 |      100 |     100 |     100 |                   
+ cli-path.ts          |     100 |      100 |     100 |     100 |                   
+ codex-executable.ts  |     100 |      100 |     100 |     100 |                   
+----------------------|---------|----------|---------|---------|-------------------

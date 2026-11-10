@@ -1,0 +1,56 @@
+{
+  "baseline": "current worktree snapshot at /tmp/craft-standards-before before this review fix",
+  "instrument": "c8 V8 coverage; changed source statement/branch start lines against snapshot",
+  "test_count": 50,
+  "passed": 50,
+  "modules": {
+    "capability/craft-knowledge/contribution.ts": {
+      "statements": [
+        2,
+        2
+      ],
+      "branches": [
+        2,
+        2
+      ],
+      "miss_statements": [],
+      "miss_branches": []
+    },
+    "capability/craft-memory/memory-ledger.ts": {
+      "statements": [
+        18,
+        18
+      ],
+      "branches": [
+        16,
+        16
+      ],
+      "miss_statements": [],
+      "miss_branches": []
+    },
+    "core/memory-maintenance.ts": {
+      "statements": [
+        13,
+        13
+      ],
+      "branches": [
+        18,
+        18
+      ],
+      "miss_statements": [],
+      "miss_branches": []
+    },
+    "core/scope-policy.ts": {
+      "statements": [
+        6,
+        6
+      ],
+      "branches": [
+        1,
+        1
+      ],
+      "miss_statements": [],
+      "miss_branches": []
+    }
+  }
+}

@@ -1,0 +1,40 @@
+(node:81019) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:81019) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (33.762625ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (14.199916ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (23.335459ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (21.905084ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (12.575833ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (29.007167ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (23.021833ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.689708ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (12.454958ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (15.494125ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (28.823834ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (255.991084ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (20.234167ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1631.990667ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2290.045417ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (42.101417ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (253.091167ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (12.202709ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (26.653084ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5437.583333
+ℹ start of coverage report
+ℹ -------------------------------------------------------------------------
+ℹ file                     | line % | branch % | funcs % | uncovered lines
+ℹ -------------------------------------------------------------------------
+ℹ core                     |        |          |         | 
+ℹ  retrieval-evaluation.ts | 100.00 |   100.00 |  100.00 | 
+ℹ -------------------------------------------------------------------------
+ℹ all files                | 100.00 |   100.00 |  100.00 | 
+ℹ -------------------------------------------------------------------------
+ℹ end of coverage report

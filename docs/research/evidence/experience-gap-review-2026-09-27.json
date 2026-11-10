@@ -1,0 +1,122 @@
+{
+  "date": "2026-09-27",
+  "basis": "relative to start-of-follow-up dirty workspace snapshot",
+  "regressions": {
+    "passed": 71,
+    "failed": 0
+  },
+  "incremental_coverage": [
+    {
+      "file": "capability/craft-experience/procedure-projection.ts",
+      "changed_lines": 27,
+      "covered_lines": 27,
+      "branch_paths": 27,
+      "covered_branch_paths": 27
+    },
+    {
+      "file": "capability/craft-experience/procedure-composition.ts",
+      "changed_lines": 8,
+      "covered_lines": 8,
+      "branch_paths": 6,
+      "covered_branch_paths": 6
+    },
+    {
+      "file": "core/mcp/tool-schema.ts",
+      "changed_lines": 4,
+      "covered_lines": 4,
+      "branch_paths": 0,
+      "covered_branch_paths": 0
+    },
+    {
+      "file": "core/mcp/tool-catalog.ts",
+      "changed_lines": 2,
+      "covered_lines": 2,
+      "branch_paths": 0,
+      "covered_branch_paths": 0
+    },
+    {
+      "file": "core/component-readiness.ts",
+      "changed_lines": 1,
+      "covered_lines": 1,
+      "branch_paths": 0,
+      "covered_branch_paths": 0
+    },
+    {
+      "file": "core/knowledge-memory-bundle.ts",
+      "changed_lines": 4,
+      "covered_lines": 4,
+      "branch_paths": 4,
+      "covered_branch_paths": 4
+    },
+    {
+      "file": "scripts/smoke/component-conformance.ts",
+      "changed_lines": 4,
+      "covered_lines": 4,
+      "branch_paths": 1,
+      "covered_branch_paths": 1
+    }
+  ],
+  "native_gate": {
+    "procedure_composition": {
+      "lines": 100,
+      "branches": 100,
+      "functions": 100
+    },
+    "procedure_projection": {
+      "lines": 100,
+      "branches": 100,
+      "functions": 100
+    }
+  },
+  "stdio": {
+    "artifact_sha256": "6b229c02e6acef6d315d2ecc3efc8196fe6c1ae88b8c9bc2a3cc6d0a83efc7a1",
+    "reports": [
+      {
+        "product": "knowledge",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 17,
+        "host_session_verified": false
+      },
+      {
+        "product": "memory",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 9,
+        "host_session_verified": false
+      },
+      {
+        "product": "experience",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 18,
+        "calls": 40,
+        "host_session_verified": false
+      },
+      {
+        "product": "codebase",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 12,
+        "calls": 8,
+        "host_session_verified": false
+      }
+    ]
+  },
+  "real_host_sessions_verified": false,
+  "deployed": false,
+  "packaging_and_protocol_tests": {
+    "passed": 14,
+    "failed": 0
+  }
+}

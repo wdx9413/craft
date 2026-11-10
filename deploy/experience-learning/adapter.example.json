@@ -1,0 +1,55 @@
+{
+  "schema": "craft.experience-learning-adapter.v1",
+  "mcp": {
+    "transport": "stdio",
+    "command": "craft-mcp",
+    "args": ["--surface", "component-context-daily"],
+    "poll_interval_seconds": 30
+  },
+  "distillation": {
+    "ticket_queue_tool": "craft_evaluation_model_ticket_list",
+    "ticket_queue_filter": { "purpose": "workflow_evolution", "readiness": "ready_for_adapter" },
+    "input_tool": "craft_experience_learning_request_get",
+    "submit_tool": "craft_experience_procedure_submit",
+    "worker_entrypoint": "pnpm learning:worker",
+    "model_purpose": "workflow_evolution",
+    "required_observations": 2,
+    "store_raw_observations": false,
+    "must_preserve_observed_failure_branches": true
+  },
+  "evaluation": {
+    "local_read_only_workflow_runner_included": true,
+    "scenario_catalog_path": "$CRAFT_DATA_DIR/experience/projects/{project_id}/experience-scenarios.json",
+    "dispatch_tool": "craft_experience_learning_evaluation_dispatch",
+    "pending_queue_tool": "craft_experience_learning_evaluation_dispatch_list",
+    "run_tool": "craft_experience_learning_evaluation_run",
+    "result_tool": "craft_experience_learning_evaluation_result",
+    "stages": ["shadow", "held_out", "signoff", "canary"],
+    "case_set_ref": "sha256:<digest-of-exact-case-array>",
+    "held_out_independent_of_training": true,
+    "signoff_policy_ref": "craft:auto-signoff:all-prior-gates-passed.v1",
+    "evidence_source_type": "program",
+    "evidence_confidence": "confirmed",
+    "evidence_metadata_required": [
+      "experience_evaluation_dispatch_id",
+      "procedure_id",
+      "procedure_version",
+      "definition_digest",
+      "baseline_version",
+      "stage",
+      "status",
+      "evaluator_ref",
+      "environment_digest"
+    ],
+    "held_out_additional_metadata_required": ["held_out_set_ref", "independent_of_training"],
+    "signoff_additional_metadata_required": ["signoff_policy_ref"]
+  },
+  "safety": {
+    "secrets_from_environment_only": true,
+    "raw_prompts_or_repository_content_persisted": false,
+    "publish_only_after_canary": true,
+    "candidate_failure_preserves_previous_current": true,
+    "automatic_skill_install": false,
+    "automatic_remote_push": false
+  }
+}

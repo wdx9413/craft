@@ -1,0 +1,163 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
+import { McpServer } from "../core/mcp.ts";
+import { KnowledgeBoundLaunchKernel } from "../capability/craft-knowledge/knowledge-bound-launch.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService, VERSION } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+
+function record(result: JsonObject, key: string): JsonObject { return result[key] as JsonObject; }
+function contextDigest(context: string): string { return `sha256:${createHash("sha256").update(JSON.stringify(context)).digest("hex")}`; }
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-launch-")); const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
+  const projectRoot = join(root, "project"); await mkdir(projectRoot, { recursive: true });
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:brief", alias_kind: "path", alias: projectRoot });
+  const task = record(service.taskOpen({ title: "Brief", goal: "Prepare an accurate brief" }), "task");
+  const evidence = service.evidenceRecord({ evidence_id: "evidence", source_type: "program", claim: "Program observation.", confidence: "bounded" });
+  const claim = record(service.knowledgeClaimSave({ claim_id: "claim", kind: "rule", content: "Use the approved project facts.", scope: "project:brief", valid_until: "2027-01-01T00:00:00.000Z", evidence_ids: [evidence.id] }), "claim");
+  attachVerifiedPromotionFixture(store, claim);
+  const compiled = service.wikiContextCompile({ bundle_id: "bundle", query: "approved facts", scope: "project:brief", max_items: 2, max_chars: 1_000, now: "2026-09-10T00:00:00.000Z" });
+  return { root, store, service, task, evidence, claim: service.knowledgeClaimGet({ claim_id: claim.id }).claim as JsonObject, bundle: record(compiled, "bundle") };
+}
+
+test("Knowledge-bound Work Launch pins reviewed Wiki knowledge across Dispatch, Trial, and Outcome", async () => {
+  const f = await fixture(); let receivedPrompt = "";
+  try {
+    f.service.codexHost.executor = async (request) => { receivedPrompt = request.stdin; return { exitCode: 0, signal: null, stdout: "", stderr: "", timedOut: false, cancelled: false, outputLimited: false }; };
+    const args = { task_id: f.task.id, host: "codex-cli", workspace: f.root, prompt: "Prepare the brief", bundle_id: f.bundle.id, bundle_version: f.bundle.version, sandbox: "workspace-write", now: "2026-09-10T00:00:00.000Z" };
+    const prepared = await f.service.knowledgeContextWorkLaunchPrepare(args); const launch = record(prepared, "launch"); const dispatch = record(prepared, "dispatch"); const binding = record(prepared, "knowledge_binding");
+    assert.equal(binding.bundle_id, f.bundle.id); assert.equal(binding.bundle_version, f.bundle.version); assert.match(String(binding.context_digest), /^sha256:/); assert.match(String(binding.context), /Evidence: evidence/);
+    const trial = record(f.service.trialGet({ trial_id: launch.trial_id }), "trial"); assert.deepEqual((trial.environment as JsonObject).knowledge_binding, binding); assert.deepEqual(launch.knowledge_binding, binding); assert.deepEqual(dispatch.knowledge_binding, binding);
+    assert.throws(() => f.service.hostRunStart({ host: "codex-cli", dispatch_id: dispatch.id, prompt: "ignored" }), /Knowledge-bound/);
+    await assert.rejects(f.service.codexDispatchExecute({ dispatch_id: dispatch.id, prompt: "ignored" }), /Knowledge-bound/);
+    assert.throws(() => f.service.workLaunchDecide({ launch_id: launch.id, actor: "human", approved: true, prompt: "Prepare the brief" }), /Knowledge-bound/);
+    const decided = await f.service.knowledgeContextWorkLaunchDecide({ launch_id: launch.id, actor: "human", approved: true, prompt: "Prepare the brief", now: "2026-09-10T00:00:00.000Z" }); const running = record(decided, "launch");
+    await f.service.hostRuns.wait(String(running.run_id)); assert.match(receivedPrompt, /craft-read-only-evidence-knowledge/); assert.match(receivedPrompt, /Use the approved project facts/);
+    const outcome = f.store.get("outcome", `outcome_${launch.trial_id}`); assert.deepEqual(outcome.knowledge_binding, binding);
+    const mcp = new McpServer(f.service, "full"); const mcpPrepared = await mcp.handle({ id: "mcp", method: "tools/call", params: { name: "craft_knowledge_context_work_launch_prepare", arguments: { ...args, launch_id: "mcp-launch" } } }); assert.equal((mcpPrepared?.result as JsonObject).isError, false);
+    const mcpDecided = await mcp.handle({ id: "mcp-decide", method: "tools/call", params: { name: "craft_knowledge_context_work_launch_decide", arguments: { launch_id: "mcp-launch", actor: "human", approved: false, prompt: args.prompt, now: args.now } } }); assert.equal((mcpDecided?.result as JsonObject).isError, false);
+    assertCurrentReleaseVersion(VERSION);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Knowledge-bound Work Launch fails closed on Claim, Bundle, Evidence, expiry, and retry drift", async () => {
+  const f = await fixture();
+  try {
+    const args = { task_id: f.task.id, host: "codex-cli", workspace: f.root, prompt: "Prepare", bundle_id: f.bundle.id, sandbox: "workspace-write", now: "2026-09-10T00:00:00.000Z" };
+    // Evidence drift is checked on a fresh fixture: removing the record cannot be
+    // undone exactly, and mutating this one later would change the claim version.
+    const drift = await fixture();
+    try {
+      drift.store.remove("evidence", String(drift.evidence.id));
+      await assert.rejects(drift.service.knowledgeContextWorkLaunchPrepare({ ...args, task_id: drift.task.id, workspace: drift.root, bundle_id: drift.bundle.id }), /verified formal promotion evidence/);
+    } finally { drift.store.close(); await rm(drift.root, { recursive: true, force: true }); }
+    await assert.rejects(f.service.knowledgeContextWorkLaunchPrepare({ ...args, now: "2027-01-01T00:00:00.000Z" }), /expired/);
+    const prepared = await f.service.knowledgeContextWorkLaunchPrepare({ ...args, launch_id: "changed" }); const launch = record(prepared, "launch");
+    assert.throws(() => f.service.workLaunchRetry({ launch_id: launch.id, prompt: "Retry" }), /Knowledge-bound/);
+    f.service.knowledgeClaimReview({ claim_id: f.claim.id, status: "disputed", reviewer: "reviewer", reason: "changed" });
+    await assert.rejects(async () => f.service.knowledgeContextWorkLaunchDecide({ launch_id: launch.id, actor: "human", approved: true, prompt: args.prompt, now: args.now }), /version changed/);
+    const other = await fixture();
+    try {
+      const second = await other.service.knowledgeContextWorkLaunchPrepare({ ...args, task_id: other.task.id, workspace: other.root, bundle_id: other.bundle.id, launch_id: "bundle-changed" }); const secondLaunch = record(second, "launch");
+      other.store.save("wiki_context_bundle", String(other.bundle.id), { ...other.bundle, context_digest: "sha256:changed" });
+      await assert.rejects(async () => other.service.knowledgeContextWorkLaunchDecide({ launch_id: secondLaunch.id, actor: "human", approved: true, prompt: args.prompt, now: args.now }), /bundle changed/);
+    } finally { other.store.close(); await rm(other.root, { recursive: true, force: true }); }
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Knowledge-bound Work Launch retries only through the revalidating protocol", async () => {
+  const f = await fixture();
+  try {
+    f.service.codexHost.executor = async () => ({ exitCode: 1, signal: null, stdout: "", stderr: "failed", timedOut: false, cancelled: false, outputLimited: false });
+    const pending = await f.service.knowledgeContextWorkLaunchPrepare({ task_id: f.task.id, host: "codex-cli", workspace: f.root, prompt: "Pending", bundle_id: f.bundle.id, sandbox: "workspace-write", launch_id: "pending" });
+    await assert.rejects(f.service.knowledgeContextWorkLaunchRetry({ launch_id: record(pending, "launch").id, prompt: "Retry" }), /Only a failed/);
+    assert.equal(record(await f.service.knowledgeContextWorkLaunchDecide({ launch_id: "pending", actor: "human", approved: false, prompt: "Pending" }), "launch").status, "denied");
+    const args = { task_id: f.task.id, host: "codex-cli", workspace: f.root, prompt: "Prepare", bundle_id: f.bundle.id, sandbox: "read-only", now: "2026-09-10T00:00:00.000Z", acceptance_name: "Proof", acceptance_criteria: [{ id: "proof", name: "Proof", method: "program", required: true }] };
+    const first = await f.service.knowledgeContextWorkLaunchPrepare(args); const launch = record(first, "launch"); await f.service.hostRuns.wait(String(launch.run_id));
+    const retried = await f.service.knowledgeContextWorkLaunchRetry({ launch_id: launch.id, prompt: "Retry", new_launch_id: "retry", now: args.now }); assert.equal(record(retried, "launch").retry_of, launch.id); await f.service.hostRuns.wait(String(record(retried, "launch").run_id));
+    const defaultRetry = await f.service.knowledgeContextWorkLaunchRetry({ launch_id: "retry", prompt: "Retry default", now: args.now }); await f.service.hostRuns.wait(String(record(defaultRetry, "launch").run_id));
+    await assert.rejects(f.service.knowledgeContextWorkLaunchRetry({ launch_id: "retry", prompt: "Duplicate branch", now: args.now }), /already has a successor/);
+    const mcp = new McpServer(f.service, "full"); const mcpRetry = await mcp.handle({ id: "retry", method: "tools/call", params: { name: "craft_knowledge_context_work_launch_retry", arguments: { launch_id: record(defaultRetry, "launch").id, prompt: "Retry again", new_launch_id: "retry-mcp", now: args.now } } }); assert.equal((mcpRetry?.result as JsonObject).isError, false); await f.service.hostRuns.wait(String(f.store.get("work_launch", "retry-mcp").run_id));
+    await assert.rejects(f.service.knowledgeContextWorkLaunchRetry({ launch_id: "retry-mcp", prompt: "Fourth", now: args.now }), /rework limit/);
+    f.service.claudeHost.executor = async () => ({ exitCode: 1, signal: null, stdout: "", stderr: "failed", timedOut: false, cancelled: false, outputLimited: false });
+    await assert.rejects(f.service.knowledgeContextWorkLaunchPrepare({ ...args, host: "claude-code", launch_id: "blocked-root" }), /evidence-backed replan/);
+    const claudeTask = f.service.taskOpen({ title: "Independent Claude protocol check", goal: "Verify Claude protocol separately from the exhausted task" }).task as JsonObject;
+    const claude = await f.service.knowledgeContextWorkLaunchPrepare({ ...args, task_id: claudeTask.id, host: "claude-code", launch_id: "claude", acceptance_criteria: undefined }); const claudeLaunch = record(claude, "launch"); const claudeDispatch = record(claude, "dispatch"); await f.service.hostRuns.wait(String(claudeLaunch.run_id)); await assert.rejects(f.service.claudeDispatchExecute({ dispatch_id: claudeDispatch.id, prompt: args.prompt }), /Knowledge-bound/);
+    const claudeRetry = await f.service.knowledgeContextWorkLaunchRetry({ launch_id: claudeLaunch.id, prompt: "Retry Claude", new_launch_id: "claude-retry", now: args.now }); await f.service.hostRuns.wait(String(record(claudeRetry, "launch").run_id));
+    assert.throws(() => f.service.hostRunStart({ host: "unknown", dispatch_id: "none", prompt: "No" }), /unsupported/);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Knowledge binding validator rejects malformed or no-longer-safe receipts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-validator-")); const store = await new CraftStore(craftPaths(root)).open(); const kernel = new KnowledgeBoundLaunchKernel(store);
+  try {
+    const service = new CraftService(store);
+    // A root bound to two scopes is a genuine conflict, so the two projects use
+    // distinct roots and the foreign case is still a different project.
+    const rootA = join(root, "a"), rootB = join(root, "b"); await mkdir(rootA); await mkdir(rootB);
+    service.scopeAliasBind({ scope_kind: "project", scope_id: "project:a", alias_kind: "path", alias: rootA });
+    service.scopeAliasBind({ scope_kind: "project", scope_id: "project:b", alias_kind: "path", alias: rootB });
+    store.create("evidence", "e", { claim: "Observed." });
+    const add = (id: string, claim: JsonObject = {}, bundle: JsonObject = {}, persistBundle = true) => {
+      const content = String(claim.content ?? "Fact."); const evidenceIds = (claim.evidence_ids ?? ["e"]) as string[];
+      const saved = store.create("knowledge_claim", id, { status: "candidate", scope: "project:a", content, evidence_ids: evidenceIds, ...claim });
+      const promoted = claim.status === "candidate" || evidenceIds.length === 0 ? saved : attachVerifiedPromotionFixture(store, saved);
+      const currentEvidenceIds = Array.isArray(promoted.evidence_ids) ? promoted.evidence_ids.map(String) : evidenceIds;
+      const context = `[Knowledge ${id}]\n${content}\nEvidence: ${currentEvidenceIds.join(", ")}\n`;
+      if (persistBundle) store.create("wiki_context_bundle", `b-${id}`, { scope: "project:a", max_chars: 500, used_chars: context.length, claim_refs: [{ claim_id: id, claim_version: promoted.version }], context_digest: contextDigest(context), ...bundle });
+      else store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+        .run("wiki_context_bundle", `b-${id}`, 1, JSON.stringify({ scope: "project:a", max_chars: 500, used_chars: context.length,
+          claim_refs: [{ claim_id: id, claim_version: promoted.version }], context_digest: contextDigest(context), ...bundle }), new Date().toISOString(), new Date().toISOString());
+      return `b-${id}`;
+    };
+    const normal = add("normal"); const binding = kernel.bind({ bundle_id: normal }); assert.equal(kernel.revalidate(binding).bundle_id, normal); assert.throws(() => kernel.prompt({ ...binding, context: " " }, "Prompt"), /context/);
+    assert.throws(() => kernel.bind({ bundle_id: normal, now: "bad" }), /ISO/); assert.throws(() => kernel.bind({ bundle_id: normal, bundle_version: 0 }), /positive/); assert.throws(() => kernel.bind({ bundle_id: " " }), /empty/);
+    // Revalidate before later fixtures mutate the shared evidence version.
+    assert.throws(() => kernel.revalidate({ ...binding, context: "changed" }), /binding changed/);
+    const duplicate = add("duplicate", {}, { claim_refs: [{ claim_id: "duplicate", claim_version: 1 }, { claim_id: "duplicate", claim_version: 1 }] }); assert.throws(() => kernel.bind({ bundle_id: duplicate }), /unique/);
+    const candidate = add("candidate", { status: "candidate" }); assert.throws(() => kernel.bind({ bundle_id: candidate }), /verified formal promotion evidence/);
+    const global = add("global", { scope: "global", valid_until: null }); assert.equal(kernel.bind({ bundle_id: global }).scope, "project:a");
+    const foreign = add("foreign", { scope: "project:b", valid_until: null }, {}, false); assert.throws(() => kernel.bind({ bundle_id: foreign }), /scope/);
+    const malformedExpiry = add("bad-expiry", { valid_until: "bad" }); assert.throws(() => kernel.bind({ bundle_id: malformedExpiry }), /ISO/);
+    const noEvidence = add("no-evidence", { evidence_ids: [] }); assert.throws(() => kernel.bind({ bundle_id: noEvidence }), /verified formal promotion evidence/);
+    const tooSmall = add("too-small", {}, { max_chars: 1 }); assert.throws(() => kernel.bind({ bundle_id: tooSmall }), /character budget/);
+    const badDigest = add("bad-digest", {}, { context_digest: "sha256:wrong" }); assert.throws(() => kernel.bind({ bundle_id: badDigest }), /digest/);
+    store.create("wiki_context_bundle", "bad-array", { scope: "project:a", max_chars: 10, claim_refs: "bad", context_digest: "sha256:x" }); assert.throws(() => kernel.bind({ bundle_id: "bad-array" }), /array/);
+    store.create("wiki_context_bundle", "bad-object", { scope: "project:a", max_chars: 10, claim_refs: [[]], context_digest: "sha256:x" }); assert.throws(() => kernel.bind({ bundle_id: "bad-object" }), /object/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Task Run retry revalidates and retains its Knowledge-bound prompt", async () => {
+  const f = await fixture();
+  const prompts: string[] = [];
+  try {
+    f.service.codexHost.executor = async request => {
+      prompts.push(request.stdin);
+      return { exitCode: prompts.length === 1 ? 1 : 0, signal: null, stdout: `${JSON.stringify({ type: "turn.completed", usage: {} })}\n`, stderr: "", timedOut: false, outputLimited: false };
+    };
+    const prepared = f.service.knowledgeWorkbenchWorkLaunchPrepare({ task_id: f.task.id, host: "codex-cli", workspace: f.root, prompt: "first", bundle_id: f.bundle.id, bundle_version: f.bundle.version, defer_host_start: true });
+    const launch = f.store.save("work_launch", String((prepared.launch as JsonObject).id), { ...(prepared.launch as JsonObject), deferred_start: false });
+    const control = f.service.taskControlSave({ contract_id: "knowledge-task-control", task_id: f.task.id, workspace: f.root, allowed_effects: ["read_only"] }).contract as JsonObject;
+    f.service.taskControlBindLaunch({ contract_id: control.id, launch_id: launch.id });
+    const run = f.service.taskRuns.create({ task_run_id: "knowledge-task", contract_id: control.id, launch_id: launch.id }).run as JsonObject;
+    const started = f.service.taskRunStart({ task_run_id: run.id, task_run_version: run.version, launch_version: launch.version, prompt: "first" }).launch as JsonObject;
+    await f.service.hostRuns.wait(String(started.run_id));
+    const current = f.store.get("work_launch", String(launch.id)); const host = f.store.get("host_run", String(current.run_id));
+    const retry = f.service.taskRunRetry({ task_run_id: run.id, task_run_version: run.version, launch_version: current.version, host_run_version: host.version, new_task_run_id: "knowledge-task-retry", prompt: "  revised  ", actor: "user:owner" });
+    const next = retry.launch as JsonObject;
+    await f.service.hostRuns.wait(String(next.run_id));
+    assert.equal((next.knowledge_binding as JsonObject).bundle_id, f.bundle.id);
+    assert.equal((next.knowledge_binding as JsonObject).context_digest, (launch.knowledge_binding as JsonObject).context_digest);
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /Use the approved project facts/);
+    assert.match(prompts[1], /revised/);
+    assert.equal((f.service.taskRunRefresh({ task_run_id: "knowledge-task-retry" }).state as JsonObject).action, "deliver");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});

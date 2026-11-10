@@ -1,0 +1,130 @@
+(node:81279) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:81279) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ v0.12.43 assembles the Knowledge capability from the catalog rather than in place (21.144583ms)
+✔ v0.12.43 fails on the kernel a removed capability owed instead of leaving it undefined (8.452042ms)
+✔ v0.12.43 claims the families its kernels implement and no others (8.90575ms)
+✔ v0.12.43 keeps the Knowledge projection at exactly the name space it promised (0.530667ms)
+✔ v0.12.43 owns the Source registry now that it no longer shares a class with memory (0.193916ms)
+✔ v0.12.43 composes the Context product from both members without restating them (0.380916ms)
+✔ v0.12.43 keeps the service working through the assembled capability (10.736208ms)
+✔ v0.12.43 assembles the Memory capability from the catalog rather than in place (8.857875ms)
+✔ v0.12.43 fails on the kernel a removed capability owed instead of leaving it undefined (8.4295ms)
+✔ v0.12.43 claims the Ledger's scoped reads and writes, the derived signals, and nothing else (0.521667ms)
+✔ v0.12.43 keeps the Memory projection at the name space it promised, and repairs one name (0.396042ms)
+✔ v0.12.43 keeps component-context composing the frozen memory name space (0.216208ms)
+✔ v0.12.43 exposes every signal through the registered kernel, not only through the module (8.714875ms)
+✔ v0.12.43 keeps the ledger closed without a Source and keeps the facade working (16.126667ms)
+✔ v0.12.43 resolves memory through a kernel in the core, not through either member's package (9.62375ms)
+✔ strict MCP: each standalone resolves its own member, scope, gate and aggregate budget without hooks (51.718916ms)
+✔ Knowledge search fails closed without scope and separates candidate inspection from Context (37.336917ms)
+✔ Experience accepts array contracts over MCP and remains candidate until quality gates (24.01625ms)
+✔ Codebase alone can declare, checkpoint, activate, query and refresh changed paths (37.655042ms)
+✔ Hook observations never mistake command success, old edits or session identity for verified task success (70.198125ms)
+✔ external code analyzers import only checkpoint-bound UTF-16 facts for Java, Python and Go (36.224917ms)
+✔ memory transitions reject stale writes and repeat without adding versions (16.339208ms)
+✔ Context feedback pins the exact receipt without mutating source status or crossing members (18.921958ms)
+✔ explicit verification intake validates sequence and outcome while retaining host-attested provenance (15.355375ms)
+✔ Knowledge source digest drift invalidates reviewed claims (15.549542ms)
+✔ Codebase bootstrap recovers an interrupted declaration and exposes unavailable freshness (15.671375ms)
+✔ Hook verification before any edit is observable but cannot establish a verified change (15.989875ms)
+✔ standalone Memory reads and writes only its named scope (13.054917ms)
+✔ standalone Knowledge registers a source, writes a candidate, and only reviewed evidence enters governed search (19.5125ms)
+✔ Experience turns independent observations into a draft Graph Procedure without creating a second executor (15.296875ms)
+✔ Experience keeps a graph proposal deterministic when optional graph fields are omitted (12.456625ms)
+✔ Experience is a Context member, but only routeable Procedure projections are injected (9.401167ms)
+✔ Experience honors scope, query and budget without falling back to diagnostic history (10.720042ms)
+✔ Experience reaches Context Resolution beside Knowledge and remains replayable (9.013083ms)
+✔ Fresh or candidate-only Experience produces an empty Context contribution (12.532709ms)
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (14.482209ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (12.042125ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (20.050583ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (21.972542ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (12.978ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (17.345459ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (15.388667ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.703875ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (10.251375ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (14.585667ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (19.205167ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (267.006917ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (16.663042ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1611.16675ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2413.459792ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (42.483ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (264.129584ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (20.215042ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (25.679ms)
+✔ default BM25 retrieves Chinese words and mixed code identifiers without punctuation artifacts (0.303709ms)
+✔ reviewed knowledge contributes to a scoped Context receipt while candidates remain diagnostic only (17.073833ms)
+✔ memory without a scope is an explicit safe skip rather than a malformed global search (7.13825ms)
+✔ automated knowledge review records why legacy imports require live revalidation and promotes only current evidence (11.550834ms)
+✔ explicit user memory is scoped, conflict-aware and retires only the replaced active entry (15.087667ms)
+✔ portable Knowledge/Memory bundles preserve content but merge only additions (27.030459ms)
+✔ component diagnosis distinguishes a reachable MCP process from a stale or incomplete Host surface (12.666583ms)
+✔ standalone Knowledge and Memory surfaces expose the same portable bundle protocol (10.81325ms)
+✔ v0.12.28 makes a Host proposal policy-aware without turning a candidate into memory (10.567167ms)
+✔ v0.12.43 lets the context decision see every accumulated member, not only knowledge (10.792125ms)
+✔ v0.12.28 keeps console hooks declarative and validates Agent-mode semantic ownership (9.975375ms)
+✔ v0.12.28 evaluates deterministic turn decisions and rejects cross-scope fixtures (10.498291ms)
+✔ v0.12.28 rejects unsafe, stale, and malformed turn inputs (7.890667ms)
+✔ v0.12.28 covers conservative policy branches, candidate lifecycle, and replay guards (10.113375ms)
+✔ v0.12.28 exhausts default, generated-id, and negative decision paths (9.966458ms)
+✔ v0.12.28 records replay-safe receipts and generated evaluation records (8.606916ms)
+✔ v0.12.28 exposes every Turn Cognitive operation through the CraftService facade (8.475458ms)
+✔ v0.12.19 makes Knowledge Sources, Memory Ledger, receipts and retrieval selection explicit (19.672541ms)
+✔ v0.12.19 keeps Console and Agent mode as a mode-neutral plan over verified work (29.207542ms)
+✔ v0.12.19 fails closed for untrusted, stale, restricted, malformed and drifting runtime facts (33.134958ms)
+✔ v0.12.34 resolves a body that lives in the content store and refuses a broken reference (11.315834ms)
+✔ Knowledge ingest refuses a registered symlink root before reading any source file (8.937375ms)
+✔ Context retrieval reopens an expired embedding circuit before making a new decision (7.784292ms)
+✔ Context records unavailable embedding fallbacks and preserves an explicit no-reason retrieval result (14.667833ms)
+✔ v0.12.34 resolves named accumulated Context members without widening Memory (9.734625ms)
+✔ v0.12.37 resolves one canonical project through an explicit legacy alias without global fallback (20.547084ms)
+✔ v0.12.37 records actual keyword fallback when an eligible vector adapter has no provider credential (13.031542ms)
+✔ v0.12.37 keeps hybrid unavailable until its embedding provider can really run (14.208208ms)
+✔ v0.12.37 ingests immutable source revisions as Evidence and candidates, never reviewed context (11.7785ms)
+✔ v0.12.37 ingests only bounded readable files and makes stale reviewed claims explicit (16.216542ms)
+✔ v0.12.37 keeps temporal conflict abstention and schedules only bounded maintenance (9.910333ms)
+✔ v0.12.37 exports replayable schema-3 bundles and turns merge collisions into candidates (18.557459ms)
+✔ portable bundles rehydrate Workflow JSON definitions under the receiving Experience domain (21.142375ms)
+✔ bundle directory transport writes only a verified portable JSON envelope (24.459ms)
+✔ eligible vector retrieval persists safe configuration, caches embeddings, and opens a bounded circuit (24.064ms)
+✔ semantic review packet is fragment-bound and a routeable Prompt Procedure remains Markdown-native (24.68575ms)
+✔ more-specific memory scopes shadow parent topics while working notes remain opt-in (12.570958ms)
+✔ scope envelopes keep team data opt-in, audience-bound, and separate from personal/project context (10.954916ms)
+✔ global Knowledge is read only when explicitly requested, not as a project fallback (10.43625ms)
+✔ Verified Work Loop is the small public seam over launch, observed state, approval, acceptance, human changes and replan (84.464416ms)
+✔ State Workspace adapters retain only hashes, reject unsafe selections, and compare file tree and file artifact observations (14.600166ms)
+✔ Eval Campaign plans held-out repeated pairs, binds only comparable observed runs, and keeps candidate evolution gated (14.979792ms)
+✔ Project Knowledge reads only trusted Serena project memories, pins selection, and proposes but never writes updates (24.312334ms)
+✔ Verified Work Loop kernels reject mixed facts, retain idempotent receipts, and expose every MCP command through the full surface (31.683834ms)
+✔ State, campaign, and project-knowledge failures remain explicit instead of silently widening execution (20.873375ms)
+✔ Verified Work Loop receipts bind to one observation and keep the first explicit replan cause (30.186584ms)
+✔ Verified Work Loop pauses progress assumptions after repeated identical running observations (18.401875ms)
+✔ v0.12.3 retains deterministic rejection and idempotency branches (58.603583ms)
+ℹ tests 102
+ℹ suites 0
+ℹ pass 102
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7018.057375
+ℹ start of coverage report
+ℹ -------------------------------------------------------------------------------
+ℹ file                           | line % | branch % | funcs % | uncovered lines
+ℹ -------------------------------------------------------------------------------
+ℹ capability                     |        |          |         | 
+ℹ  craft-knowledge               |        |          |         | 
+ℹ   knowledge-source-registry.ts | 100.00 |   100.00 |  100.00 | 
+ℹ  craft-memory                  |        |          |         | 
+ℹ   memory-ledger.ts             | 100.00 |   100.00 |  100.00 | 
+ℹ core                           |        |          |         | 
+ℹ  context-resolution.ts         | 100.00 |   100.00 |  100.00 | 
+ℹ  verified-work-loop.ts         | 100.00 |   100.00 |  100.00 | 
+ℹ  work-runtime-mode.ts          | 100.00 |   100.00 |  100.00 | 
+ℹ -------------------------------------------------------------------------------
+ℹ all files                      | 100.00 |   100.00 |  100.00 | 
+ℹ -------------------------------------------------------------------------------
+ℹ end of coverage report

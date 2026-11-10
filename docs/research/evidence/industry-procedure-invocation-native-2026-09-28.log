@@ -1,0 +1,58 @@
+(node:80977) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80977) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (32.2455ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (15.775667ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (22.936958ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (25.4005ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (13.322208ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (29.874083ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (21.311209ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.698459ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (11.876375ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (16.050458ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (20.970708ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (258.761917ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (18.58825ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1694.977833ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2377.225917ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (41.390209ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (257.057375ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (12.017042ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (25.921583ms)
+✔ nested invocation uses public seams, defers child evidence, accepts aliases only after child exit and survives restart (56.811ms)
+✔ failed child verification blocks parent; pending dispatch remains reconcilable without double dispatch (16.222166ms)
+✔ strict invocation inputs, optimistic concurrency, policy, scope and revocation checks fail closed (15.552375ms)
+✔ evidence is tied to exact invocation, call, Task, inputs, state revision and expiry (22.930167ms)
+✔ receipt binding rejects foreign sessions, observations, outputs and evidence and rolls back partial persistence (35.891833ms)
+✔ resume invalidates drift and budget/Task changes stop new dispatches (16.2795ms)
+✔ paired trials require terminal and identical context, expose route outcomes without promotion (69.721584ms)
+✔ active budget balances, malformed refs, missing artifacts and post-dispatch drift are enforced (24.8965ms)
+✔ content-free metrics are attributed to each route and comparable only under the paired context (28.376959ms)
+✔ MCP wire validates bind, all invocation operations and real Host observation field types (46.548834ms)
+✔ failed nested exit blocks parent consumption and late receipt cannot erase workspace drift (40.244ms)
+✔ blocked, inconclusive and retryable failures retain verdicts and require fresh safe-retry evidence before continuing (106.072042ms)
+✔ Host cancellation is a distinct terminal result and cannot be automatically reopened (15.369041ms)
+✔ explicit read-only parallel group dispatches independently and joins before exit (28.846ms)
+✔ recovery rejects handoff failures, exhausted retries and drift after verified resolution (69.640792ms)
+✔ parallel group schema bounds and a failed Host with a passing observation remain failures (15.562ms)
+✔ parallel receipt draining preserves each blocker and recovery cannot skip unresolved siblings (109.223792ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6333.282708
+ℹ start of coverage report
+ℹ --------------------------------------------------------------------------
+ℹ file                      | line % | branch % | funcs % | uncovered lines
+ℹ --------------------------------------------------------------------------
+ℹ core                      |        |          |         | 
+ℹ  application              |        |          |         | 
+ℹ   procedure-invocation.ts | 100.00 |   100.00 |  100.00 | 
+ℹ --------------------------------------------------------------------------
+ℹ all files                 | 100.00 |   100.00 |  100.00 | 
+ℹ --------------------------------------------------------------------------
+ℹ end of coverage report

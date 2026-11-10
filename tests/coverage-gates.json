@@ -1,0 +1,2691 @@
+{
+  "$comment": [
+    "Coverage gates are grouped by capability or behavior, never by release number.",
+    "Each group names its source modules and tests and runs as a separate Node test process.",
+    "Every managed group asserts 100% line, function and branch coverage.",
+    "Platform-only unreachable branches require explicit platform metadata; ordinary modules have no exemptions."
+  ],
+  "thresholds": {
+    "lines": 100,
+    "functions": 100,
+    "branches": 100
+  },
+  "type_only": [
+    "core/application/actions/handler-types.ts",
+    "core/interfaces/mcp/handler-types.ts"
+  ],
+  "groups": [
+    {
+      "name": "coverage-gate-select",
+      "include": ["scripts/coverage/coverage-gate-select.ts"],
+      "tests": ["tests/coverage-gate-select.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "eval-comparator",
+      "include": ["capability/craft-eval/compare-run-reports.ts"],
+      "tests": ["tests/eval-compare-run-reports.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "knowledge-lineage-impact",
+      "include": ["capability/craft-knowledge/knowledge-lineage-impact.ts"],
+      "tests": ["tests/knowledge-lineage-impact.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "local-process-sandbox",
+      "include": ["core/local-process-sandbox.ts"],
+      "tests": ["tests/local-process-sandbox.test.ts", "tests/local-sandbox-service.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "work-review-verification",
+      "include": ["core/work-review-verification.ts", "core/docker-sandbox.ts"],
+      "tests": ["tests/work-review-verification.test.ts", "tests/docker-sandbox.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "work-review-risk",
+      "include": ["core/work-review-risk.ts"],
+      "tests": ["tests/work-review-risk.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "task-replan",
+      "include": [
+        "core/task-replan.ts",
+        "core/task-execution-fence.ts"
+      ],
+      "tests": ["tests/task-replan.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "work-attempt-budget",
+      "include": ["core/work-attempt-budget.ts"],
+      "tests": ["tests/work-attempt-budget.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "work-review",
+      "include": ["core/work-review.ts"],
+      "tests": ["tests/work-review.test.ts", "tests/work-review-risk.test.ts", "tests/work-review-verification.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "task-assignment",
+      "include": ["core/task-assignment.ts"],
+      "tests": ["tests/task-assignment.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "work-retry-policy",
+      "include": ["core/work-retry-policy.ts"],
+      "tests": ["tests/work-retry-policy.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "context-directory",
+      "include": ["core/context-directory.ts"],
+      "tests": ["tests/context-directory.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "native-cli-discovery",
+      "include": [
+        "core/infrastructure/cli-path.ts",
+        "core/infrastructure/claude-executable.ts",
+        "core/infrastructure/codex-executable.ts",
+        "core/interfaces/workbench-cli-path.ts",
+        "core/interfaces/claude-executable.ts",
+        "core/interfaces/codex-executable.ts"
+      ],
+      "tests": [
+        "tests/workbench-cli-path.test.ts",
+        "tests/codex-executable.test.ts",
+        "tests/claude-executable.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-controlled-task-effects",
+      "include": [
+        "core/knowledge-task-contract.ts",
+        "core/knowledge-task-effect-proof.ts",
+        "core/knowledge-task-effects.ts"
+      ],
+      "tests": [
+        "tests/knowledge-task-effects.test.ts",
+        "tests/bundled-knowledge-task-effects.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "project-data-migration",
+      "include": [
+        "core/project-data-inventory.ts",
+        "core/project-data-migration.ts"
+      ],
+      "tests": [
+        "tests/project-data-inventory.test.ts",
+        "tests/project-data-migration.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "evaluation-engine-identity",
+      "include": [
+        "core/evaluation-engine-identity.ts"
+      ],
+      "tests": [
+        "tests/evaluation-engine-identity.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-compiler-runtime",
+      "include": [
+        "capability/craft-codebase/typescript-runtime.ts"
+      ],
+      "tests": [
+        "tests/typescript-runtime.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "python-symbol-fallback",
+      "include": [
+        "capability/craft-codebase/python-fallback.ts"
+      ],
+      "tests": [
+        "tests/python-fallback.test.ts",
+        "tests/python-analysis.test.ts",
+        "tests/python-fallback-index.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "runtime-public-api",
+      "include": [
+        "core/runtime-api.ts"
+      ],
+      "tests": [
+        "tests/workbench-ui-server.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "workbench-controlled-evaluations",
+      "include": [
+        "core/workbench-evaluations.ts",
+        "core/interfaces/workbench-evaluations.ts"
+      ],
+      "tests": [
+        "tests/workbench-evaluation-concurrency.test.ts",
+        "tests/bundled-knowledge-task-effects.test.ts",
+        "tests/workbench-evaluations.test.ts",
+        "tests/workbench-context-audit.test.ts",
+        "tests/knowledge-task-effects.test.ts",
+        "tests/evaluation-process.test.ts",
+        "tests/evaluation-process-crash.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "workbench-context-receipt-audit",
+      "include": [
+        "core/workbench-context-audit.ts"
+      ],
+      "tests": [
+        "tests/workbench-context-audit.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "workbench-context-audit-routing",
+      "include": [
+        "core/interfaces/workbench-context-audit-route.ts"
+      ],
+      "tests": [
+        "tests/workbench-context-audit-route.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "memory-archive-background-worker",
+      "include": [
+        "core/interfaces/memory-archive-worker.ts",
+        "core/interfaces/memory-archive-launcher.ts",
+        "core/maintenance-scheduler.ts"
+      ],
+      "tests": [
+        "tests/memory-archive-worker.test.ts",
+        "tests/maintenance-scheduler-recovery.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "learning-worker-diagnostic",
+      "include": [
+        "core/learning-worker-diagnostic.ts"
+      ],
+      "tests": [
+        "tests/learning-worker-diagnostic.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "skill-release-order",
+      "include": [
+        "scripts/ci/skill-release-compatibility.ts"
+      ],
+      "tests": [
+        "tests/skill-release-compatibility.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "session-evidence-repair-preflight",
+      "include": [
+        "core/session-evidence-repair-preflight.ts"
+      ],
+      "tests": [
+        "tests/knowledge-session-evidence.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codex-task-evidence-verification",
+      "include": [
+        "core/codex-session-verification.ts",
+        "core/codex-task-prose.ts",
+        "capability/craft-knowledge/session-evidence.ts",
+        "capability/craft-knowledge/session-evidence-repair.ts"
+      ],
+      "tests": [
+        "tests/codex-session-verification.test.ts",
+        "tests/codex-task-prose.test.ts",
+        "tests/knowledge-session-evidence.test.ts",
+        "tests/knowledge-managed-adjudication.test.ts",
+        "tests/codex-session-archive.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "capability-storage-migration",
+      "include": [
+        "core/codebase-storage-migration.ts",
+        "core/codebase-storage-migration-command.ts",
+        "core/codebase-storage-preflight.ts",
+        "core/storage-migration-preflight.ts",
+        "core/legacy-repository-storage-preflight.ts"
+      ],
+      "tests": [
+        "tests/codebase-storage-migration.test.ts",
+        "tests/codebase-storage-migration-command.test.ts",
+        "tests/codebase-storage-preflight.test.ts",
+        "tests/storage-migration-preflight.test.ts",
+        "tests/storage-migration-apply.test.ts",
+        "tests/legacy-repository-storage-preflight.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "legacy-session-memory-preflight",
+      "include": [
+        "core/legacy-session-memory-preflight.ts"
+      ],
+      "tests": [
+        "tests/legacy-session-memory-preflight.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "legacy-session-memory-quarantine",
+      "include": [
+        "core/legacy-session-memory-quarantine.ts"
+      ],
+      "tests": [
+        "tests/legacy-session-memory-quarantine.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "legacy-repository-storage-migration",
+      "include": [
+        "core/legacy-repository-storage-migration.ts",
+        "core/legacy-repository-storage-migration-command.ts"
+      ],
+      "tests": [
+        "tests/legacy-repository-storage-migration.test.ts",
+        "tests/legacy-repository-storage-migration-command.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codex-session-provenance",
+      "include": [
+        "core/codex-session-archive.ts",
+        "deploy/experience-learning/session-knowledge-candidates.ts",
+        "deploy/experience-learning/session-knowledge-evaluation.ts"
+      ],
+      "tests": [
+        "tests/codex-session-archive.test.ts",
+        "tests/session-knowledge-candidates.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-session-adjudication",
+      "include": [
+        "deploy/experience-learning/session-knowledge-adjudication.ts"
+      ],
+      "tests": [
+        "tests/session-knowledge-adjudication.test.ts",
+        "tests/knowledge-managed-adjudication.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-session-adjudication-state",
+      "include": [
+        "deploy/experience-learning/session-knowledge-adjudication-state.ts"
+      ],
+      "tests": [
+        "tests/session-knowledge-adjudication-state.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-evaluation-provenance",
+      "include": [
+        "core/knowledge-evaluation-provenance.ts"
+      ],
+      "tests": [
+        "tests/knowledge-evaluation-provenance.test.ts",
+        "tests/knowledge-evaluation.test.ts",
+        "tests/knowledge-promotion-policy.test.ts",
+        "tests/wiki-candidate-evaluation-bridge.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "wiki-candidate-publication-proof",
+      "include": [
+        "capability/craft-knowledge/wiki-candidate-governance.ts"
+      ],
+      "tests": [
+        "tests/capability-knowledge-package.test.ts",
+        "tests/wiki-candidate-evaluation-bridge.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "memory-session-storage",
+      "include": [
+        "capability/craft-memory/memory-files.ts"
+      ],
+      "tests": [
+        "tests/memory-session-storage.test.ts",
+        "tests/memory-tiers.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-revocation-race",
+      "include": [
+        "common/craft-common-store-local/src/context-access-guard.ts",
+        "core/context-access-guard.ts"
+      ],
+      "tests": [
+        "tests/context-revocation-race.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/context-read-snapshot.test.ts",
+        "tests/memory-contribution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-remediation",
+      "include": [
+        "common/craft-common-base/src/bm25.ts",
+        "common/craft-common-base/src/context-assets.ts",
+        "capability/craft-codebase/context-search.ts",
+        "capability/craft-codebase/symbol-kind.ts",
+        "capability/craft-codebase/python-analysis.ts",
+        "capability/craft-codebase/multi-language-analysis.ts",
+        "capability/craft-codebase/typescript-incremental.ts",
+        "capability/craft-codebase/python-incremental.ts",
+        "capability/craft-codebase/java-analysis.ts",
+        "capability/craft-codebase/java-incremental.ts",
+        "capability/craft-codebase/repository-onboarding.ts",
+        "capability/craft-codebase/project-graph-store.ts",
+        "capability/craft-experience/procedure-release.ts",
+        "capability/craft-experience/graph-matching.ts",
+        "core/mcp/context-tools.ts",
+        "capability/craft-memory/memory-capture.ts",
+        "capability/craft-memory/memory-files.ts",
+        "capability/craft-knowledge/claim-governance.ts",
+        "capability/craft-knowledge/scenario-catalog.ts"
+      ],
+      "tests": [
+        "tests/ideal-state-gaps.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/codebase-context-search.test.ts",
+        "tests/repository-context.test.ts",
+        "tests/context-working-set-budget.test.ts",
+        "tests/codebase-project-graph-store.test.ts",
+        "tests/multi-language-analysis.test.ts",
+        "tests/typescript-incremental.test.ts",
+        "tests/python-incremental.test.ts",
+        "tests/python-analysis.test.ts",
+        "tests/java-analysis.test.ts",
+        "tests/java-incremental.test.ts",
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/knowledge-session-evidence.test.ts",
+        "tests/knowledge-scenario-catalog.test.ts",
+        "tests/knowledge-promotion-policy.test.ts",
+        "tests/procedure-projection.test.ts",
+        "tests/experience-contribution.test.ts",
+        "tests/codex-hook-bridge.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/validation.test.ts",
+        "tests/remaining-branch-cases.test.ts",
+        "tests/service-edge-coverage.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/codebase-view-lifecycle.test.ts",
+        "tests/memory-contribution.test.ts",
+        "tests/codebase-context-projection.test.ts",
+        "tests/memory-tiers.test.ts",
+        "tests/memory-session-storage.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-graph-assets",
+      "include": [
+        "capability/craft-experience/graph-assets.ts",
+        "capability/craft-experience/graph-version-manifest.ts",
+        "capability/craft-experience/procedure-definition.ts",
+        "capability/craft-experience/procedure-configuration.ts",
+        "capability/craft-experience/procedure-templates.ts"
+      ],
+      "tests": [
+        "tests/experience-graph-assets.test.ts",
+        "tests/graph-version-manifest.test.ts",
+        "tests/procedure-runtime-graph.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/context-remediation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-claim-access",
+      "include": [
+        "capability/craft-knowledge/claim-access.ts"
+      ],
+      "tests": [
+        "tests/context-source-access.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "scope-identity",
+      "include": [
+        "core/scope-identity.ts"
+      ],
+      "tests": [
+        "tests/scope-identity.test.ts",
+        "tests/knowledge-scope.test.ts",
+        "tests/component-integration.test.ts",
+        "tests/repository-context.test.ts",
+        "tests/project-data-inventory.test.ts",
+        "tests/project-registry-migration.test.ts",
+        "tests/project-data-migration.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "common-base-package",
+      "include": [
+        "common/craft-common-base/src/*.ts"
+      ],
+      "tests": [
+        "tests/common-base-boundaries.test.ts",
+        "tests/capability-protocol.test.ts",
+        "tests/digest-canonical.test.ts",
+        "tests/validation.test.ts",
+        "tests/retrieval-port.test.ts",
+        "tests/retrieval-excerpt.test.ts",
+        "tests/component-hookless.test.ts",
+        "tests/workflow.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts",
+        "tests/model-gateway.test.ts",
+        "tests/knowledge-scope.test.ts",
+        "tests/common-packages.test.ts",
+        "tests/catalog-search-regression.test.ts",
+        "tests/ideal-state-gaps.test.ts",
+        "tests/component-integration.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "common-store-local-package",
+      "include": [
+        "common/craft-common-store-local/src/*.ts"
+      ],
+      "tests": [
+        "tests/store.test.ts",
+        "tests/codebase-shard-store.test.ts",
+        "tests/trace-shard-store.test.ts",
+        "tests/memory-partition-store.test.ts",
+        "tests/knowledge-partition-store.test.ts",
+        "tests/store-partition-atomicity.test.ts",
+        "tests/experience-graph-assets.test.ts",
+        "tests/content-store.test.ts",
+        "tests/store-migrations.test.ts",
+        "tests/private-json.test.ts",
+        "tests/config.test.ts",
+        "tests/project-storage-paths.test.ts",
+        "tests/project-experience-directory.test.ts",
+        "tests/storage-migration-preflight.test.ts",
+        "tests/legacy-session-memory-preflight.test.ts",
+        "tests/project-knowledge-content.test.ts",
+        "tests/memory-session-storage.test.ts",
+        "tests/platform-settings.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts",
+        "tests/common-packages.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/context-revocation-race.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-read-snapshot.test.ts",
+        "tests/memory-contribution.test.ts",
+        "tests/component-observability.test.ts",
+        "tests/evolution-cycle.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "common-log-sdk",
+      "include": [
+        "common/craft-common-log/src/*.ts"
+      ],
+      "tests": [
+        "tests/common-packages.test.ts",
+        "tests/cost-ledger.test.ts",
+        "tests/runtime-contracts.test.ts",
+        "tests/runtime-truth.test.ts",
+        "tests/observability-memory.test.ts",
+        "tests/trace-evolution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "component-versions-runtime-graph",
+      "include": [
+        "capability/craft-experience/procedure-graph.ts",
+        "capability/craft-experience/procedure-configuration.ts",
+        "core/application/procedure-graph-progress.ts",
+        "core/application/procedure-work-items.ts",
+        "core/application/coordinators/component-assets.ts"
+      ],
+      "tests": [
+        "tests/procedure-runtime-graph.test.ts",
+        "tests/component-asset-revisions.test.ts",
+        "tests/procedure-invocation.test.ts",
+        "tests/procedure-composition.test.ts",
+        "tests/context-spec-regressions.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/experience-graph-assets.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "task-run",
+      "include": [
+        "core/task-run.ts"
+      ],
+      "tests": [
+        "tests/task-run.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "task-delivery-control",
+      "include": [
+        "core/task-control.ts",
+        "core/delivery-loop.ts",
+        "core/work-delivery.ts"
+      ],
+      "tests": [
+        "tests/task-control.test.ts",
+        "tests/work-review-risk.test.ts",
+        "tests/work-review-verification.test.ts",
+        "tests/delivery-loop.test.ts",
+        "tests/work-delivery.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "token-budget",
+      "include": [
+        "core/token-budget.ts"
+      ],
+      "tests": [
+        "tests/token-budget.test.ts",
+        "tests/service-coverage.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "internal-tool-authorization",
+      "include": [
+        "core/internal-tool-authorization.ts"
+      ],
+      "tests": [
+        "tests/internal-tool-authorization.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "internal-action-approval",
+      "include": ["core/internal-action-approval.ts"],
+      "tests": [
+        "tests/internal-task-host.test.ts",
+        "tests/runtime-completion.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "internal-host-driver",
+      "include": ["core/internal-host-driver.ts"],
+      "tests": [
+        "tests/model-gateway.test.ts",
+        "tests/internal-task-host.test.ts",
+        "tests/internal-loop-coverage.test.ts",
+        "tests/internal-loop-dispatchable.test.ts",
+        "tests/workbench-server.test.ts",
+        "tests/capability-assets.test.ts",
+        "tests/subagent-execution.test.ts",
+        "tests/remaining-branch-cases.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "capability-assets",
+      "include": [
+        "core/assets.ts",
+        "core/model-independence.ts"
+      ],
+      "tests": [
+        "tests/capability-assets.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "root-design-documents",
+      "include": [
+        "scripts/ci/root-design-documents.ts"
+      ],
+      "tests": [
+        "tests/root-design-documents.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "retrieval-terms",
+      "include": [
+        "common/craft-common-base/src/retrieval-terms.ts"
+      ],
+      "tests": [
+        "tests/component-hookless.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "store-atomicity",
+      "include": [
+        "common/craft-common-store-local/src/store.ts"
+      ],
+      "tests": [
+        "tests/store.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts",
+        "tests/store-migrations.test.ts",
+        "tests/store-write-retry.test.ts",
+        "tests/project-storage-paths.test.ts",
+        "tests/content-store.test.ts",
+        "tests/memory-session-storage.test.ts",
+        "tests/memory-tiers.test.ts",
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/storage-migration-preflight.test.ts",
+        "tests/legacy-session-memory-preflight.test.ts",
+        "tests/legacy-knowledge-migration.test.ts",
+        "tests/legacy-knowledge-migration-coverage.test.ts",
+        "tests/project-brain-work-session.test.ts",
+        "tests/trace-archive-store.test.ts",
+        "tests/trace-retention-worker.test.ts",
+        "tests/codebase-shard-store.test.ts",
+        "tests/trace-shard-store.test.ts",
+        "tests/context-extensions.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-read-snapshot.test.ts",
+        "tests/memory-partition-store.test.ts",
+        "tests/knowledge-partition-store.test.ts",
+        "tests/store-partition-atomicity.test.ts",
+        "tests/experience-graph-assets.test.ts",
+        "tests/component-observability.test.ts",
+        "tests/evolution-cycle.test.ts",
+        "tests/knowledge-session-evidence.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "coverage-inventory",
+      "include": [
+        "scripts/coverage/coverage-inventory.ts"
+      ],
+      "tests": [
+        "tests/coverage-inventory.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-lsp-stdio-client",
+      "include": [
+        "capability/craft-codebase/lsp-stdio-client.ts"
+      ],
+      "tests": [
+        "tests/codebase-lsp-stdio-client.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-lsp-relations",
+      "include": [
+        "capability/craft-codebase/lsp-relations.ts"
+      ],
+      "tests": [
+        "tests/codebase-lsp-relations.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-lsp-adapter",
+      "include": [
+        "capability/craft-codebase/lsp-adapter.ts",
+        "capability/craft-codebase/symbol-kind.ts"
+      ],
+      "tests": [
+        "tests/codebase-lsp-adapter.test.ts",
+        "tests/industry-gaps.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-definition-query",
+      "include": [
+        "capability/craft-codebase/definition-query.ts"
+      ],
+      "tests": [
+        "tests/codebase-definition-query.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "procedure-automation",
+      "include": [
+        "capability/craft-experience/procedure-automation.ts"
+      ],
+      "tests": [
+        "tests/procedure-automation.test.ts",
+        "tests/procedure-composition.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "delivery-evaluation",
+      "include": [
+        "core/delivery-evaluation.ts"
+      ],
+      "tests": [
+        "tests/delivery-evaluation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-control-flow",
+      "include": [
+        "capability/craft-codebase/control-flow.ts"
+      ],
+      "tests": [
+        "tests/control-flow.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "craft-codebase",
+      "include": [
+        "capability/craft-codebase/capability.ts",
+        "capability/craft-codebase/ownership.ts",
+        "capability/craft-codebase/codebase-index.ts",
+        "capability/craft-codebase/java-analysis.ts",
+        "capability/craft-codebase/java-incremental.ts",
+        "capability/craft-codebase/control-flow.ts",
+        "capability/craft-codebase/data-flow.ts",
+        "capability/craft-codebase/lsp-diagnostics-query.ts",
+        "core/application/use-cases/codebase.ts"
+      ],
+      "tests": [
+        "tests/craft-codebase.test.ts",
+        "tests/java-analysis.test.ts",
+        "tests/java-incremental.test.ts",
+        "tests/control-flow.test.ts",
+        "tests/data-flow.test.ts",
+        "tests/component-hookless.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/repository-context.test.ts",
+        "tests/codebase-context-projection.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "action-gate",
+      "include": [
+        "core/action-gate.ts"
+      ],
+      "tests": [
+        "tests/action-gate.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "receipt",
+      "include": [
+        "core/receipt.ts"
+      ],
+      "tests": [
+        "tests/receipt.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "subscription-drift",
+      "include": [
+        "core/subscription-drift.ts"
+      ],
+      "tests": [
+        "tests/subscription-drift.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "subscription-authorization",
+      "include": [
+        "core/subscription-authorization.ts"
+      ],
+      "tests": [
+        "tests/subscription-authorization.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "prepared-state",
+      "include": [
+        "core/prepared-state.ts"
+      ],
+      "tests": [
+        "tests/prepared-state.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "adjudication-queue",
+      "include": [
+        "core/adjudication-queue.ts"
+      ],
+      "tests": [
+        "tests/adjudication-queue.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "decision-surface",
+      "include": [
+        "core/decision-surface.ts"
+      ],
+      "tests": [
+        "tests/decision-surface.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "capability-base",
+      "include": [
+        "core/capability-base.ts"
+      ],
+      "tests": [
+        "tests/capability-base.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "browser-driving",
+      "include": [
+        "core/browser-driving.ts"
+      ],
+      "tests": [
+        "tests/browser-driving.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "honest-claims",
+      "include": [
+        "core/honest-claims.ts"
+      ],
+      "tests": [
+        "tests/honest-claims.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "object-model",
+      "include": [
+        "core/object-model.ts"
+      ],
+      "tests": [
+        "tests/object-model.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "human-touchpoints",
+      "include": [
+        "core/human-touchpoints.ts"
+      ],
+      "tests": [
+        "tests/human-touchpoints.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "object-hatching",
+      "include": [
+        "core/object-hatching.ts"
+      ],
+      "tests": [
+        "tests/object-hatching.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "authorization",
+      "include": [
+        "core/authorization.ts"
+      ],
+      "tests": [
+        "tests/authorization.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "object-rail",
+      "include": [
+        "core/object-rail.ts"
+      ],
+      "tests": [
+        "tests/object-rail.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "control-plane",
+      "include": [
+        "core/runtime-execution-attempt.ts",
+        "core/context-working-set.ts",
+        "core/graph-compiler.ts",
+        "core/capability-intake.ts",
+        "core/workbench-command.ts"
+      ],
+      "tests": [
+        "tests/control-plane.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-revocation-race.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/context-working-set-budget.test.ts",
+        "tests/codebase-context-projection.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "federated-runtime",
+      "include": [
+        "core/federated-delegation.ts",
+        "core/harness-topology.ts",
+        "core/runtime-readiness.ts",
+        "core/runtime-model-probe.ts"
+      ],
+      "tests": [
+        "tests/federated-runtime.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "assured-pilot",
+      "include": [
+        "core/assured-pilot.ts"
+      ],
+      "tests": [
+        "tests/assured-pilot.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "capability-platform",
+      "include": [
+        "core/capability-kit-runtime.ts"
+      ],
+      "tests": [
+        "tests/capability-platform.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "engineering-quality-profile",
+      "include": [
+        "capability/engineering-quality-profile.ts",
+        "capability/verified-evaluation-receipt.ts"
+      ],
+      "tests": [
+        "tests/engineering-quality-profile.test.ts",
+        "tests/verified-evaluation-receipt.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "engineering-evaluation-runner",
+      "include": [
+        "core/application/engineering-evaluation-runner.ts",
+        "core/codex-driver.ts",
+        "core/host-driver.ts"
+      ],
+      "tests": [
+        "tests/engineering-evaluation-runner.test.ts",
+        "tests/codex-driver.test.ts",
+        "tests/host-output-limit.test.ts",
+        "tests/task-run.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "activation-proof-and-runtime-acceptance",
+      "include": [
+        "core/activation-proof.ts",
+        "core/component-history-migration.ts",
+        "core/decision-context-gate.ts",
+        "core/runtime-acceptance.ts"
+      ],
+      "tests": [
+        "tests/activation-proof-and-history.test.ts",
+        "tests/decision-context-gate-coverage.test.ts",
+        "tests/runtime-proof.test.ts",
+        "tests/branch-boundary-fill.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "universal-runtime",
+      "include": [
+        "capability/craft-knowledge/knowledge-source-registry.ts",
+        "capability/craft-memory/memory-ledger.ts",
+        "core/context-resolution.ts",
+        "core/work-runtime-mode.ts",
+        "core/verified-work-loop.ts"
+      ],
+      "tests": [
+        "tests/universal-runtime.test.ts",
+        "tests/verified-work-loop.test.ts",
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/capability-memory-package.test.ts",
+        "tests/capability-knowledge-package.test.ts",
+        "tests/experience-contribution.test.ts",
+        "tests/component-integration.test.ts",
+        "tests/turn-cognitive-runtime.test.ts",
+        "tests/component-hookless.test.ts",
+        "tests/knowledge-contribution.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/repository-context.test.ts",
+        "tests/context-source-access.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-revocation-race.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/context-read-snapshot.test.ts",
+        "tests/memory-contribution.test.ts",
+        "tests/memory-session-storage.test.ts",
+        "tests/memory-tiers.test.ts",
+        "tests/memory-commit-optimization.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "verified-iteration",
+      "include": [
+        "core/application/use-cases/verified-iteration.ts"
+      ],
+      "tests": [
+        "tests/verified-iteration.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "evolution-cycle",
+      "include": [
+        "core/evolution-cycle.ts"
+      ],
+      "tests": [
+        "tests/evolution-cycle.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "evolution-candidate-workspace",
+      "include": [
+        "core/evolution-candidate-workspace.ts"
+      ],
+      "tests": [
+        "tests/evolution-candidate-workspace.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "continual-harness",
+      "include": [
+        "core/continual-harness.ts",
+        "core/stateful-compute.ts"
+      ],
+      "tests": [
+        "tests/continual-harness.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "platform-ideal-state",
+      "include": [
+        "core/uncertainty-policy.ts",
+        "core/release-qualification.ts"
+      ],
+      "tests": [
+        "tests/platform-ideal-state.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "component-plugins",
+      "include": [
+        "core/host-protocol.ts",
+        "core/host-bridge.ts",
+        "core/interfaces/mcp/surface-registry.ts",
+        "core/interfaces/mcp/product-launch.ts",
+        "core/data-space.ts"
+      ],
+      "tests": [
+        "tests/component-plugins.test.ts",
+        "tests/execution-fabric.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "hook-runtime-diagnostics",
+      "include": [
+        "core/interfaces/codex-hook-runtime-diagnostics.ts",
+        "core/interfaces/hook-runtime-query.ts"
+      ],
+      "tests": [
+        "tests/codex-hook-runtime-diagnostics.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codex-component-hook-bridge",
+      "include": [
+        "core/interfaces/codex-hook-bridge.ts",
+        "core/interfaces/codex-hook-signal-sanitizer.ts"
+      ],
+      "tests": [
+        "tests/codex-hook-bridge.test.ts",
+        "tests/component-hookless.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "verification-plane",
+      "include": [
+        "core/verification-plane.ts"
+      ],
+      "tests": [
+        "tests/verification-plane.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "evaluation-model-workflow-evolution",
+      "include": [
+        "capability/craft-experience/capability.ts",
+        "capability/craft-experience/contribution.ts",
+        "capability/craft-experience/gate-signals.ts",
+        "capability/craft-experience/evaluation-model-profile.ts",
+        "capability/craft-experience/workflow-evolution.ts"
+      ],
+      "tests": [
+        "tests/evaluation-model-workflow-evolution.test.ts",
+        "tests/codex-hook-bridge.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/capability-experience-package.test.ts",
+        "tests/experience-contribution.test.ts",
+        "tests/experience-gate-signals.test.ts",
+        "tests/component-integration.test.ts",
+        "tests/component-hookless.test.ts",
+        "tests/procedure-composition.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-remediation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "host-learning-cycle",
+      "include": [
+        "core/application/use-cases/learning-cycle.ts"
+      ],
+      "tests": [
+        "tests/codex-hook-bridge.test.ts",
+        "tests/evaluation-model-workflow-evolution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "trust-web-runtime",
+      "include": [
+        "core/trust-profile.ts",
+        "core/web-operation.ts",
+        "core/interfaces/mcp-http.ts"
+      ],
+      "tests": [
+        "tests/trust-web-runtime.test.ts",
+        "tests/remote-mcp-access.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "generic-adapter-runtime",
+      "include": [
+        "core/generic-adapter-runtime.ts"
+      ],
+      "tests": [
+        "tests/generic-adapter-runtime.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "turn-cognitive-runtime",
+      "include": [
+        "core/turn-cognitive-runtime.ts"
+      ],
+      "tests": [
+        "tests/turn-cognitive-runtime.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "remote-mcp-access",
+      "include": [
+        "core/remote-mcp-access.ts",
+        "core/host-session-events.ts",
+        "core/outcome-observer.ts"
+      ],
+      "tests": [
+        "tests/remote-mcp-access.test.ts",
+        "tests/session-observer.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "runtime-proof",
+      "include": [
+        "core/remote-runtime.ts",
+        "core/oidc-jwks.ts",
+        "core/supply-chain-attestation.ts",
+        "core/runtime-acceptance.ts",
+        "core/a2a-v1-adapter.ts"
+      ],
+      "tests": [
+        "tests/runtime-proof.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "durable-experience",
+      "include": [
+        "core/durable-action-loop.ts",
+        "capability/craft-experience/experience-ledger.ts"
+      ],
+      "tests": [
+        "tests/durable-action-experience.test.ts",
+        "tests/capability-experience-package.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/procedure-invocation.test.ts"
+      , "tests/experience-ledger-dedup.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "trace-storage",
+      "include": [
+        "core/trace-archive-store.ts",
+        "core/trace-archive-storage.ts"
+      ],
+      "tests": [
+        "tests/trace-archive-store.test.ts",
+        "tests/trace-archive-storage.test.ts"
+      ],
+      "branches": true,
+      "skipBranchesOn": [
+        "win32"
+      ],
+      "branchesNote": "trace-archive-store.ts:140 guards chmodSync with `process.platform !== \"win32\"`. That branch is unreachable on Windows -- a V8 dump confirms it is the single never-executed range in the module, and 98.68% is exactly 75/76 -- so the branch gate is kept where it is reachable (POSIX) and skipped where it measures the platform instead of the code. Line and function coverage stay enforced everywhere."
+    },
+    {
+      "name": "first-run-readiness",
+      "include": [
+        "core/distribution-and-first-run.ts"
+      ],
+      "tests": [
+        "tests/first-run-readiness.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "ideal-state-gaps",
+      "include": [
+        "core/context-retrieval-capture.ts"
+      ],
+      "tests": [
+        "tests/ideal-state-gaps.test.ts",
+        "tests/industry-gaps.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "memory-wiring",
+      "include": [
+        "capability/craft-memory/memory-signals.ts",
+        "capability/craft-memory/memory-signals-kernel.ts"
+      ],
+      "tests": [
+        "tests/memory-wiring.test.ts",
+        "tests/capability-memory-package.test.ts",
+        "tests/memory-contribution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "verification-sensor",
+      "include": [
+        "core/verification-sensor.ts"
+      ],
+      "tests": [
+        "tests/verification-sensor.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "trajectory-abstraction",
+      "include": [
+        "core/trajectory-abstraction.ts"
+      ],
+      "tests": [
+        "tests/trajectory-abstraction.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "failure-attribution",
+      "include": [
+        "core/failure-attribution.ts"
+      ],
+      "tests": [
+        "tests/failure-attribution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "declaration-consistency",
+      "include": [
+        "core/declaration-consistency.ts"
+      ],
+      "tests": [
+        "tests/declaration-consistency.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "governance-pinning",
+      "include": [
+        "core/governance-pinning.ts"
+      ],
+      "tests": [
+        "tests/governance-pinning.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "mcp-forward-compat",
+      "include": [
+        "core/mcp-forward-compat.ts"
+      ],
+      "tests": [
+        "tests/mcp-forward-compat.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "eval-suite",
+      "include": [
+        "core/eval-suite.ts",
+        "core/eval-cases.ts"
+      ],
+      "tests": [
+        "tests/eval-suite.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "subagent-execution",
+      "include": [
+        "core/subagent-execution.ts"
+      ],
+      "tests": [
+        "tests/subagent-execution.test.ts",
+        "tests/subagent-run.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "coverage-gate-report",
+      "include": [
+        "scripts/coverage/coverage-gate-report.ts"
+      ],
+      "tests": [
+        "tests/coverage-gate-report.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "capability-protocol",
+      "include": [
+        "common/craft-common-base/src/capability-protocol.ts",
+        "core/hook-plane.ts",
+        "core/capability-catalog.ts"
+      ],
+      "tests": [
+        "tests/capability-protocol.test.ts",
+        "tests/hook-plane.test.ts",
+        "tests/capability-knowledge-package.test.ts",
+        "tests/capability-memory-package.test.ts",
+        "tests/capability-experience-package.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/memory-contribution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "capability-packages",
+      "include": [
+        "capability/craft-knowledge/capability.ts",
+        "capability/craft-knowledge/ownership.ts",
+        "capability/craft-memory/capability.ts",
+        "capability/craft-memory/ownership.ts",
+        "capability/craft-experience/ownership.ts"
+      ],
+      "tests": [
+        "tests/capability-knowledge-package.test.ts",
+        "tests/capability-memory-package.test.ts",
+        "tests/capability-experience-package.test.ts",
+        "tests/memory-contribution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "shared-digest",
+      "include": [
+        "common/craft-common-base/src/digest.ts"
+      ],
+      "tests": [
+        "tests/digest-canonical.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "shared-validation",
+      "include": [
+        "common/craft-common-base/src/validation.ts"
+      ],
+      "tests": [
+        "tests/validation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "compaction",
+      "include": [
+        "core/compaction.ts"
+      ],
+      "tests": [
+        "tests/compaction-edges.test.ts",
+        "tests/context-projection.test.ts",
+        "tests/governance-pinning.test.ts",
+        "tests/ideal-state-gaps.test.ts",
+        "tests/runtime-truth.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-projection",
+      "include": [
+        "core/context-projection.ts"
+      ],
+      "tests": [
+        "tests/context-projection.test.ts",
+        "tests/compaction-edges.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "state-view",
+      "include": [
+        "core/state-view.ts"
+      ],
+      "tests": [
+        "tests/state-view.test.ts",
+        "tests/compaction-edges.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "agent-foundation",
+      "include": [
+        "core/memory-governance.ts",
+        "core/workflow-dag.ts",
+        "core/task-state.ts"
+      ],
+      "tests": [
+        "tests/agent-foundation.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/observability-memory.test.ts",
+        "tests/workflow-dag-coverage.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "memory-governance",
+      "include": [
+        "core/memory-governance.ts",
+        "capability/craft-memory/memory-governance.ts"
+      ],
+      "tests": [
+        "tests/agent-foundation.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/observability-memory.test.ts",
+        "tests/memory-session-storage.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/memory-commit-optimization.test.ts",
+        "tests/memory-tiers.test.ts",
+        "tests/cognitive-write.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-promotion-policy",
+      "include": [
+        "core/knowledge-auto-review.ts"
+      ],
+      "tests": [
+        "tests/knowledge-promotion-authority.test.ts",
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/knowledge-promotion-policy.test.ts",
+        "tests/component-hookless.test.ts",
+        "tests/knowledge-session-evidence.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "observability-memory",
+      "include": [
+        "core/trace-review.ts",
+        "core/memory-maintenance.ts"
+      ],
+      "tests": [
+        "tests/observability-memory.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/context-source-access.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/memory-commit-optimization.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "mcp-tasks-runtime-proof",
+      "include": [
+        "core/mcp-tasks.ts",
+        "core/runtime-proof.ts"
+      ],
+      "tests": [
+        "tests/mcp-tasks.test.ts",
+        "tests/runtime-proof.test.ts",
+        "tests/runtime-proof-kernel.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "legacy-knowledge-migration",
+      "include": [
+        "core/legacy-knowledge-migration.ts",
+        "core/application/use-cases/legacy-knowledge-migration.ts"
+      ],
+      "tests": [
+        "tests/legacy-knowledge-migration.test.ts",
+        "tests/legacy-knowledge-migration-coverage.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "application-dispatch",
+      "include": [
+        "core/application/actions/action-handlers.ts",
+        "core/application/actions/runtime-handlers.ts",
+        "core/application/actions/work-handlers.ts",
+        "core/application/actions/evaluation-handlers.ts",
+        "core/application/actions/workspace-handlers.ts"
+      ],
+      "tests": [
+        "tests/action-handlers.test.ts",
+        "tests/mcp.test.ts",
+        "tests/internal-tool-authorization.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/session-knowledge-candidates.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "runtime-artifact-graph",
+      "include": [
+        "core/runtime-artifact.ts"
+      ],
+      "tests": [
+        "tests/runtime-artifact.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "browser-control-adapter",
+      "include": [
+        "adapters/browser-control.ts"
+      ],
+      "tests": [
+        "tests/browser-control.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "store-control-authority",
+      "include": [
+        "core/application/control-authority.ts"
+      ],
+      "tests": [
+        "tests/control-authority.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "control-session-lifecycle",
+      "include": [
+        "capability/control-session.ts"
+      ],
+      "tests": [
+        "tests/control-session.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "control-transports-and-layer-graph",
+      "include": [
+        "adapters/cdp-session.ts",
+        "core/application/coordinators/cognitive-workbench.ts",
+        "core/application/coordinators/cognitive-write.ts",
+        "core/application/use-cases/workbench-workflow-input.ts",
+        "scripts/ci/layer-graph.ts"
+      ],
+      "tests": [
+        "tests/cdp-session.test.ts",
+        "tests/cognitive-workbench.test.ts",
+        "tests/cognitive-write.test.ts",
+        "tests/memory-observed-fact-tool.test.ts",
+        "tests/layer-graph.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "acceptance-worker",
+      "include": [
+        "core/application/acceptance-worker.ts"
+      ],
+      "tests": [
+        "tests/acceptance-worker.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "retrieval-port",
+      "include": [
+        "common/craft-common-base/src/retrieval-port.ts"
+      ],
+      "tests": [
+        "tests/retrieval-port.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/context-revocation-race.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-contribution",
+      "include": [
+        "capability/craft-knowledge/contribution.ts"
+      ],
+      "tests": [
+        "tests/knowledge-contribution.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/context-source-access.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/context-read-snapshot.test.ts",
+        "tests/memory-partition-store.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "procedure-projection",
+      "include": [
+        "capability/craft-experience/procedure-projection.ts"
+      ],
+      "tests": [
+        "tests/procedure-projection.test.ts",
+        "tests/procedure-composition.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/context-spec-regressions.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/procedure-runtime-graph.test.ts",
+        "tests/component-asset-revisions.test.ts",
+        "tests/context-remediation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "component-readiness",
+      "include": [
+        "core/component-readiness.ts"
+      ],
+      "tests": [
+        "tests/component-standalone-readiness.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "claude-host-driver",
+      "include": [
+        "core/claude-driver.ts"
+      ],
+      "tests": [
+        "tests/claude-driver.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "private-json-and-paths",
+      "include": [
+        "common/craft-common-store-local/src/paths.ts"
+      ],
+      "tests": [
+        "tests/private-json.test.ts",
+        "tests/config.test.ts",
+        "tests/platform-settings.test.ts",
+        "tests/project-storage-paths.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "cost-ledger",
+      "include": [
+        "common/craft-common-log/src/cost-ledger.ts",
+        "core/mcp/tool-catalog.ts"
+      ],
+      "tests": [
+        "tests/cost-ledger.test.ts",
+        "tests/industry-gaps.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "local-supervisor",
+      "include": [
+        "core/interfaces/supervisor.ts"
+      ],
+      "tests": [
+        "tests/supervisor.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "maintenance-worker",
+      "include": [
+        "core/application/maintenance.ts"
+      ],
+      "tests": [
+        "tests/maintenance.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "procedure-composition",
+      "include": [
+        "capability/craft-experience/procedure-composition.ts"
+      ],
+      "tests": [
+        "tests/procedure-composition.test.ts",
+        "tests/procedure-invocation.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/procedure-runtime-graph.test.ts",
+        "tests/procedure-projection.test.ts",
+        "tests/component-asset-revisions.test.ts",
+        "tests/context-remediation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-claim-import-authority",
+      "include": [
+        "core/knowledge-claim-import.ts"
+      ],
+      "tests": [
+        "tests/knowledge-bundle-promotion-import.test.ts",
+        "tests/knowledge-claim-import-authority.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "procedure-invocation",
+      "include": [
+        "core/application/procedure-invocation.ts"
+      ],
+      "tests": [
+        "tests/procedure-invocation.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/procedure-runtime-graph.test.ts",
+        "tests/activation-proof-and-history.test.ts",
+        "tests/component-asset-revisions.test.ts",
+        "tests/context-remediation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "typescript-analysis",
+      "include": [
+        "capability/craft-codebase/typescript-analysis.ts"
+      ],
+      "tests": [
+        "tests/industry-gaps.test.ts",
+        "tests/repository-context.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "retrieval-evaluation",
+      "include": [
+        "core/retrieval-evaluation.ts"
+      ],
+      "tests": [
+        "tests/industry-gaps.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "component-ablation",
+      "include": [
+        "scripts/eval/component-ablation.ts"
+      ],
+      "tests": [
+        "tests/industry-gaps.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-workflow-product",
+      "include": [
+        "core/application/coordinators/context-usage.ts",
+        "core/application/coordinators/workflow-design.ts",
+        "scripts/eval/completion-contract.ts"
+      ],
+      "tests": [
+        "tests/context-workflow-workbench.test.ts",
+        "tests/completion-contract.test.ts",
+        "tests/workflow-design-capture.test.ts",
+        "tests/workflow-design-capture-edges.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "repository-context-products",
+      "include": [
+        "capability/craft-codebase/repository-files.ts",
+        "capability/craft-codebase/basic-analysis.ts",
+        "core/application/use-cases/codebase-failure.ts",
+        "core/application/use-cases/repository-context.ts",
+        "core/operation-error.ts",
+        "adapters/deepseek-harness/mcp-client.ts",
+        "adapters/deepseek-harness/adapter-tools.ts",
+        "adapters/deepseek-harness/index.ts"
+      ],
+      "tests": [
+        "tests/repository-context.test.ts",
+        "tests/dsh-product-adapter.test.ts",
+        "tests/context-spec-regressions.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/codebase-failure.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-revocation-race.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/codebase-view-lifecycle.test.ts",
+        "tests/context-working-set-budget.test.ts",
+        "tests/codebase-context-projection.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "workspace-repository-state",
+      "include": [
+        "core/workspace-repository-state.ts"
+      ],
+      "tests": [
+        "tests/workspace-repository-state.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "workspace-snapshot-repository-binding",
+      "include": [
+        "core/workspace.ts"
+      ],
+      "tests": [
+        "tests/workspace-checkpoints.test.ts",
+        "tests/repository-context.test.ts",
+        "tests/workspace-binding.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-host-evaluation",
+      "include": [
+        "core/context-host-evaluation.ts"
+      ],
+      "tests": [
+        "tests/context-host-evaluation.test.ts",
+        "tests/component-ablation-execution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "memory-contribution",
+      "include": [
+        "capability/craft-memory/contribution.ts"
+      ],
+      "tests": [
+        "tests/memory-contribution.test.ts",
+        "tests/context-revocation-race.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/universal-runtime.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-optimization.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-learning-evaluation",
+      "include": [
+        "capability/craft-experience/learning-evaluation.ts"
+      ],
+      "tests": [
+        "tests/experience-learning-automation.test.ts",
+        "tests/scenario-evaluation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-scenario-catalog",
+      "include": [
+        "capability/craft-experience/scenario-catalog.ts"
+      ],
+      "tests": [
+        "tests/experience-scenario-catalog.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-scenario-classification-worker",
+      "include": [
+        "deploy/experience-learning/experience-scenario-classification.ts",
+        "deploy/experience-learning/experience-classification-state.ts"
+      ],
+      "tests": [
+        "tests/experience-scenario-classification.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-task-goals",
+      "include": [
+        "core/experience-task-goals.ts"
+      ],
+      "tests": [
+        "tests/experience-task-goals.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "project-experience-directory",
+      "include": [
+        "core/project-experience-directory.ts"
+      ],
+      "tests": [
+        "tests/project-experience-directory.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-scenario-evaluation-contract",
+      "include": [
+        "capability/craft-experience/scenario-evaluation.ts"
+      ],
+      "tests": [
+        "tests/scenario-evaluation.test.ts",
+        "tests/experience-learning-automation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-distilled-workflow-contract",
+      "include": [
+        "deploy/experience-learning/workflow-contract.ts"
+      ],
+      "tests": [
+        "tests/experience-workflow-contract.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-learning-worker",
+      "include": [
+        "deploy/experience-learning/knowledge-sync.ts"
+      ],
+      "tests": [
+        "tests/knowledge-learning-worker.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-classification-worker",
+      "include": [
+        "core/knowledge-model-redaction.ts",
+        "deploy/experience-learning/knowledge-classification.ts",
+        "deploy/experience-learning/knowledge-classification-state.ts"
+      ],
+      "tests": [
+        "tests/knowledge-classification-worker.test.ts",
+        "tests/knowledge-classification-state.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-learning-resilience",
+      "include": [
+        "deploy/experience-learning/learning-tick.ts"
+      ],
+      "tests": [
+        "tests/experience-learning-worker.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codex-cli-learning-transport",
+      "include": [
+        "core/codex-cli-model-transport.ts"
+      ],
+      "tests": [
+        "tests/codex-cli-learning-transport.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "learning-worker-supervisor",
+      "include": [
+        "core/interfaces/learning-worker-supervisor.ts",
+        "core/infrastructure/learning-worker-lock.ts"
+      ],
+      "tests": [
+        "tests/learning-worker-supervisor.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-lsp-snapshot-files",
+      "include": [
+        "capability/craft-codebase/lsp-snapshot-files.ts"
+      ],
+      "tests": [
+        "tests/codebase-lsp-snapshot-files.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-lsp-runtime",
+      "include": [
+        "capability/craft-codebase/lsp-config.ts",
+        "capability/craft-codebase/lsp-worker.ts"
+      ],
+      "tests": [
+        "tests/codebase-lsp-config.test.ts",
+        "tests/codebase-lsp-worker.test.ts",
+        "tests/repository-context.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-impact-evaluation",
+      "include": [
+        "scripts/eval/codebase-impact-evaluation.ts"
+      ],
+      "tests": [
+        "tests/codebase-impact-evaluation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-evaluation-graph",
+      "include": [
+        "scripts/eval/codebase-evaluation-graph.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-graph.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-evaluation-provenance",
+      "include": [
+        "scripts/eval/codebase-evaluation-provenance.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-provenance.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-evaluation-store",
+      "include": [
+        "scripts/eval/codebase-evaluation-store.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-store.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-project-data-git-exclude",
+      "include": [
+        "capability/craft-codebase/project-data-git-exclude.ts"
+      ],
+      "tests": [
+        "tests/codebase-project-data-git-exclude.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-evaluation-source",
+      "include": [
+        "scripts/eval/codebase-evaluation-source.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-source.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-evaluation-source-policy",
+      "include": [
+        "scripts/eval/codebase-evaluation-source-policy.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-source-policy.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-retrieval-language-strata",
+      "include": [
+        "scripts/eval/codebase-retrieval-strata.ts"
+      ],
+      "tests": [
+        "tests/codebase-retrieval-strata.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-project-analysis-cache",
+      "include": [
+        "capability/craft-codebase/project-analysis-cache.ts"
+      ],
+      "tests": [
+        "tests/codebase-project-analysis-cache.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "project-knowledge-content",
+      "include": [
+        "core/project-knowledge-content.ts"
+      ],
+      "tests": [
+        "tests/project-knowledge-content.test.ts",
+        "tests/content-store.test.ts",
+        "tests/knowledge-promotion-policy.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "trace-retention-worker",
+      "include": [
+        "core/interfaces/trace-retention-worker.ts"
+      ],
+      "tests": [
+        "tests/trace-retention-worker.test.ts",
+        "tests/mcp.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-asset-worker",
+      "include": [
+        "core/interfaces/experience-asset-worker.ts"
+      ],
+      "tests": [
+        "tests/experience-asset-worker.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-response-projection",
+      "include": [
+        "core/context-response-projection.ts"
+      ],
+      "tests": [
+        "tests/context-response-projection.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "retrieval-excerpt",
+      "include": [
+        "common/craft-common-base/src/retrieval-excerpt.ts"
+      ],
+      "tests": [
+        "tests/retrieval-excerpt.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "cognitive-search-coordinator",
+      "include": [
+        "core/application/coordinators/cognitive-search.ts"
+      ],
+      "tests": [
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/knowledge-scope.test.ts",
+        "tests/knowledge-relation.test.ts",
+        "tests/knowledge-promotion-authority.test.ts",
+        "tests/service-coverage.test.ts",
+        "tests/integration.test.ts",
+        "tests/component-integration.test.ts",
+        "tests/component-hookless.test.ts",
+        "tests/loop-memory-access.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "evaluation-run-coordinator",
+      "include": [
+        "core/application/coordinators/evaluation-runs.ts"
+      ],
+      "tests": [
+        "tests/mcp.test.ts",
+        "tests/closed-loop.test.ts",
+        "tests/promotion-gates.test.ts",
+        "tests/wiki-candidate-evaluation-bridge.test.ts",
+        "tests/evaluation-model-workflow-evolution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "procedure-decision",
+      "include": [
+        "core/application/procedure-decision.ts"
+      ],
+      "tests": [
+        "tests/procedure-decision.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "procedure-host-control",
+      "include": [
+        "core/application/procedure-host-control.ts"
+      ],
+      "tests": [
+        "tests/procedure-host-control.test.ts",
+        "tests/experience-usage.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "session-memory-scope",
+      "include": [
+        "core/application/use-cases/session-memory-scope.ts"
+      ],
+      "tests": [
+        "tests/session-memory-scope.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "datasec-cli-and-capability",
+      "include": [
+        "bin/craft-datasec-hook.ts",
+        "capability/craft-datasec/build.ts",
+        "capability/craft-datasec/hook.ts",
+        "capability/craft-datasec/rules.ts",
+        "capability/craft-datasec/vault.ts"
+      ],
+      "tests": [
+        "tests/craft-datasec.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "hook-sqlite-busy-timeout",
+      "include": [
+        "common/craft-common-store-local/src/sqlite-busy-timeout.ts"
+      ],
+      "tests": [
+        "tests/project-storage-paths.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-extensions",
+      "include": [
+        "core/context-extensions.ts",
+        "capability/craft-codebase/usage-signals.ts"
+      ],
+      "tests": [
+        "tests/context-extensions.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-storage-preflight",
+      "include": [
+        "core/context-storage-preflight.ts"
+      ],
+      "tests": [
+        "tests/context-extensions.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-storage-migration",
+      "include": [
+        "scripts/context-storage-migration.ts"
+      ],
+      "tests": [
+        "tests/context-extensions.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-storage-restore",
+      "include": [
+        "scripts/context-storage-restore.ts"
+      ],
+      "tests": [
+        "tests/context-extensions.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-feedback-weight",
+      "include": [
+        "core/context-feedback-weight.ts"
+      ],
+      "tests": [
+        "tests/context-feedback-weight.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "pilot-and-approval-grants",
+      "include": [
+        "core/pilot.ts",
+        "core/approval-grant.ts"
+      ],
+      "tests": [
+        "tests/pilot.test.ts",
+        "tests/pilot-model-split.test.ts",
+        "tests/approval-grant.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "plugin-workbench-protocol",
+      "include": [
+        "core/plugin-workbench.ts"
+      ],
+      "tests": [
+        "tests/plugin-workbench.test.ts",
+        "tests/plugin-workbench-edges.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "capability-loader",
+      "include": [
+        "core/capability-loader.ts"
+      ],
+      "tests": [
+        "tests/capability-loader.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "self-evolution-regression",
+      "include": ["core/eval/self-evolution-regression.ts"],
+      "tests": ["tests/self-evolution-regression.test.ts"],
+      "branches": false,
+      "branchesNote": "Each of the 14 deterministic checks is a pass/fail assertion whose negative half is not exercised by design; line and function coverage stay at 100%."
+    },
+    {
+      "name": "claude-workbench-api",
+      "include": ["core/interfaces/claude-workbench-api.ts"],
+      "tests": ["tests/claude-workbench-api.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-approvals",
+      "include": ["core/interfaces/claude-workbench-approvals.ts"],
+      "tests": ["tests/claude-workbench-approvals.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-commands",
+      "include": ["core/interfaces/claude-workbench-commands.ts"],
+      "tests": ["tests/claude-workbench-commands.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-history",
+      "include": ["core/interfaces/claude-workbench-history.ts"],
+      "tests": ["tests/claude-workbench-history.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-models",
+      "include": ["core/interfaces/claude-workbench-models.ts"],
+      "tests": ["tests/claude-workbench-models.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "codex-linked-turn",
+      "include": ["core/interfaces/codex-linked-turn.ts"],
+      "tests": ["tests/codex-linked-turn.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "workbench-folder-picker",
+      "include": ["core/interfaces/workbench-folder-picker.ts"],
+      "tests": ["tests/workbench-folder-picker.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "workbench-queue-runner",
+      "include": ["core/interfaces/workbench-queue-runner.ts"],
+      "tests": ["tests/workbench-queue-runner.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "pilot-orchestrator",
+      "include": ["core/pilot-orchestrator.ts"],
+      "tests": ["tests/pilot-orchestrator.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-native-sessions",
+      "include": ["core/interfaces/claude-native-sessions.ts"],
+      "tests": ["tests/claude-native-sessions.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-run-registry",
+      "include": ["core/interfaces/claude-run-registry.ts"],
+      "tests": ["tests/claude-run-registry.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-first-turn",
+      "include": ["core/interfaces/claude-first-turn.ts"],
+      "tests": ["tests/claude-first-turn.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-linked-turn",
+      "include": ["core/interfaces/claude-linked-turn.ts"],
+      "tests": ["tests/claude-linked-turn.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-adapter",
+      "include": ["core/interfaces/claude-workbench-adapter.ts"],
+      "tests": ["tests/claude-workbench-adapter.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "message-inbox",
+      "include": ["core/message-inbox.ts"],
+      "tests": ["tests/message-inbox.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "plugin-discovery",
+      "include": ["core/plugin-discovery.ts"],
+      "tests": ["tests/plugin-discovery.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "plugin-adapters",
+      "include": ["core/plugin-adapters.ts"],
+      "tests": ["tests/plugin-adapters.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "shell-analysis",
+      "include": ["capability/craft-codebase/shell-analysis.ts"],
+      "tests": ["tests/shell-analysis.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "workbench-cli-detection",
+      "include": ["core/interfaces/workbench-cli-detection.ts"],
+      "tests": ["tests/workbench-cli-detection.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "model-egress-security",
+      "include": ["core/model-egress-security.ts"],
+      "tests": ["tests/model-egress-security.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-runs",
+      "include": ["core/interfaces/claude-workbench-runs.ts"],
+      "tests": ["tests/claude-workbench-runs.test.ts","tests/claude-workbench-api.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "workbench-queue-recovery",
+      "include": ["core/interfaces/workbench-queue-recovery.ts"],
+      "tests": ["tests/workbench-queue-recovery.test.ts","tests/claude-linked-turn.test.ts","tests/workbench-queue-reconciliation.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "codex-app-server-client",
+      "include": ["core/interfaces/codex-app-server-client.ts"],
+      "tests": ["tests/codex-app-server-client.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "pilot-coordinator",
+      "include": ["core/pilot-coordinator.ts"],
+      "tests": ["tests/pilot-coordinator.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "context-extension-methods",
+      "include": ["core/application/use-cases/context-extensions.ts"],
+      "tests": ["tests/context-extensions.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "claude-workbench-usage",
+      "include": ["core/interfaces/claude-workbench-usage.ts"],
+      "tests": ["tests/claude-workbench-usage.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "graph-budget",
+      "include": ["capability/craft-codebase/graph-budget.ts"],
+      "tests": ["tests/graph-budget.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "memory-legacy-field",
+      "include": ["capability/craft-memory/memory-legacy-field.ts"],
+      "tests": ["tests/memory-legacy-field.test.ts"],
+      "branches": true
+    },
+    {
+      "name": "workbench-directories",
+      "include": ["core/interfaces/workbench-directories.ts"],
+      "tests": ["tests/workbench-directories.test.ts"],
+      "branches": true
+    }
+  ]
+}

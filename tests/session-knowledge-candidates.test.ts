@@ -1,0 +1,1760 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { linkDirectory } from "./symlink-support.ts";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { TraceKernel } from "../core/trace-kernel.ts";
+import { CraftService } from "../core/service.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { ComponentReadinessKernel } from "../core/component-readiness.ts";
+import { acquireLearningWorkerLocks } from "../core/infrastructure/learning-worker-lock.ts";
+import { stableDigest } from "../core/digest.ts";
+import { codexSessionTaskBatch, readCodexSessionTaskExcerpt, reconcileCodexSessionTaskEvidence, runCodexSessionCollectionOnce } from "../core/codex-session-archive.ts";
+import { runSessionKnowledgeCandidateOnce } from "../deploy/experience-learning/session-knowledge-candidates.ts";
+import { runSessionKnowledgeEvaluationOnce } from "../deploy/experience-learning/session-knowledge-evaluation.ts";
+import type { ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
+
+const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
+  api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
+
+async function setup(partition: "candidate_generation" | "development" | "held_out" = "candidate_generation", includeVerification = true,
+  includeContextEvidence = true, transcriptCommand = false) {
+  const root = await mkdtemp(join(tmpdir(), "craft-session-knowledge-"));
+  const project = join(root, "project"), sessions = join(root, "sessions"), state = join(root, "runtime", "sessions.json");
+  const workerState = join(root, "knowledge", "session-candidates.json"), source = join(sessions, "session.jsonl");
+  await mkdir(project, { recursive: true }); await mkdir(sessions, { recursive: true });
+  execFileSync("git", ["init", "--quiet", project]);
+  let sessionId = "candidate-session-1";
+  const selectPartition = (id: string) => {
+    const hash = (value: string) => Number.parseInt(createHash("sha256").update(value).digest("hex").slice(0, 8), 16);
+    return hash(id) % 5 === 0 ? "held_out" : hash(`development\0${id}`) % 4 === 0 ? "development" : "candidate_generation";
+  };
+  while (selectPartition(sessionId) !== partition) sessionId += "x";
+  const event = (payload: JsonObject) => JSON.stringify({ type: "event_msg", payload });
+  const response = (payload: JsonObject) => JSON.stringify({ type: "response_item", payload });
+  const verification = includeVerification ? [
+    response({ type: "custom_tool_call", call_id: "verification-call", name: "exec", input: "pnpm test" }),
+    response({ type: "custom_tool_call_output", call_id: "verification-call", output: [
+      { type: "text", text: "Process exited with code 0" }, { type: "text", text: "Tests 1 passed (1)" },
+    ] }),
+  ] : [];
+  const transcriptVerification = transcriptCommand ? [event({ type: "item_completed", turn_id: "turn-1", item: { type: "CommandExecution", id: "command-1",
+    command: ["/bin/zsh", "-lc", `cd '${project}' && pnpm test`], aggregated_output: [{ type: "text", text: "Tests 1 passed (1)" }],
+    exit_code: 0, status: "completed" } })] : [];
+  const lines = [JSON.stringify({ type: "session_meta", payload: { session_id: sessionId, cwd: project } }),
+    event({ type: "task_started", turn_id: "turn-1", started_at: "2026-10-20T00:00:00Z" }),
+    response({ type: "message", role: "user", content: [{ type: "input_text", text: "整理项目依赖升级的验证流程" }] }),
+    ...verification, ...transcriptVerification,
+    response({ type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "本次已验证依赖升级后运行单测并检查锁文件" }] }),
+    event({ type: "task_complete", turn_id: "turn-1", completed_at: "2026-10-20T00:01:00Z" })];
+  await writeFile(source, `${lines.join("\n")}\n`);
+  await runCodexSessionCollectionOnce({ sessions_root: sessions, state_file: state });
+  const index = JSON.parse(await readFile(state, "utf8")) as JsonObject;
+  const task = Object.values(index.tasks as Record<string, JsonObject>)[0]!;
+  const evidence = { evidence_id: "evidence-session-task", host: "codex-cli", session_id: sessionId, turn_id: "turn-1", task_id: task.task_id,
+    context_receipt_id: "context-receipt", verification_ref_digest: `sha256:${"a".repeat(64)}`,
+    terminal_identity_digest: `sha256:${"b".repeat(64)}`, verification_outcome: "passed", verified: true, content_stored: false };
+  if (includeContextEvidence) await reconcileCodexSessionTaskEvidence([evidence], { sessions_root: sessions, state_file: state });
+  return { root, project, sessions, state, workerState, source, task, sessionId };
+}
+
+async function mutateIndexedTask(f: Awaited<ReturnType<typeof setup>>, changes: JsonObject) {
+  const index = JSON.parse(await readFile(f.state, "utf8")) as JsonObject;
+  const tasks = index.tasks as Record<string, JsonObject>;
+  tasks[String(f.task.task_id)] = { ...tasks[String(f.task.task_id)]!, ...changes };
+  await writeFile(f.state, JSON.stringify(index));
+}
+
+function workerClient(overrides: Record<string, (args: JsonObject) => JsonObject> = {}) {
+  const calls: Array<{ name: string; args: JsonObject }> = [];
+  const client: ExperienceLearningClient = { async call(name, args = {}) {
+    calls.push({ name, args });
+    if (overrides[name]) return overrides[name]!(args);
+    if (name === "craft_evaluation_model_profile_ensure_single") return { status: "ready_for_adapter", profile: { id: "profile", version: 1, provider: "test", model: "test-model", max_attempts: 1 } };
+    if (name === "craft_evaluation_model_profile_get") return { readiness: { status: "ready_for_adapter" } };
+    if (name === "craft_trace_start") return { trace: { id: "trace-session-task" } };
+    if (name === "craft_trace_append" || name === "craft_trace_finalize") return {};
+    if (name === "craft_knowledge_session_evidence_record") return { evidence: { id: "evidence-session-program", source_id: "source-session", fragment_id: "fragment-session" },
+      source_id: "source-session", fragment_id: "fragment-session", sanitized_content_stored: true, raw_content_stored: false, transcript_check: { status: "transcript_matched", verification_outcome: "passed" } };
+    if (name === "craft_knowledge_claim_save") return { claim: { id: args.claim_id, status: "candidate", scope: args.scope,
+      version: 1, identity_digest: "identity", content_digest: "content" } };
+    throw new Error(`unexpected tool ${name}`);
+  } };
+  return { client, calls };
+}
+
+function modelTransport(text: string, seen: string[] = []): ModelTransport {
+  return { acquireCall: () => true, async complete(_provider, request): Promise<ChatResult> {
+    const messages = request.body.messages as JsonObject[];
+    const system = String(messages[0]?.content ?? ""), input = String(messages[1]?.content ?? "");
+    seen.push(input);
+    assert.match(system, /中文/u);
+    assert.match(input, /项目依赖升级/u);
+    return { text, model: "test-model", usage: { input_tokens: 20, output_tokens: 10 } };
+  } };
+}
+
+function candidateClaimClient(scope: unknown, extra?: Record<string, (args: JsonObject) => JsonObject>) {
+  return workerClient({ craft_knowledge_claim_list: () => ({ claims: [{ id: "candidate-claim", status: "candidate", scope }] }),
+    craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", version: 1,
+      identity_digest: "candidate-identity", content_digest: "candidate-content", title: "依赖升级验证", content: "依赖升级后运行单测。", tags: [] } } }),
+    ...extra });
+}
+
+async function evaluate(f: Awaited<ReturnType<typeof setup>>, client: ExperienceLearningClient, transport?: ModelTransport,
+  extra: Record<string, unknown> = {}) {
+  return runSessionKnowledgeEvaluationOnce({ client, providers: [provider], transport, state_file: f.workerState,
+    archive_options: { sessions_root: f.sessions, state_file: f.state }, ...extra });
+}
+
+test("learning reports pending source rechecks without calling the model", async () => {
+  for (const partition of ["candidate_generation", "held_out"] as const) {
+    const f = await setup(partition);
+    try {
+      const originalState = await readFile(f.state, "utf8");
+      await mutateIndexedTask(f, { verification_status: "unverified", verification_source_recheck: "verified" });
+      const fixture = workerClient();
+      const result = partition === "held_out" ? await evaluate(f, fixture.client)
+        : await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+      assert.equal(result.status, "waiting_for_source_recheck");
+      assert.equal(result.source_recheck_pending, 1);
+      assert.deepEqual(fixture.calls, []);
+      await writeFile(f.state, originalState);
+      const resumedClient = candidateClaimClient(f.task.project_scope_id, {
+        craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id, evaluation_eligible: false } }),
+        craft_knowledge_evaluation_run: () => ({ run: { id: "run", metrics: { provenance_eligible: false } } }),
+      });
+      const transport = modelTransport(JSON.stringify(partition === "candidate_generation"
+        ? { decision: "candidate", kind: "rule", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: ["验证"] }
+        : { decision: "labeled", expected_claim_ids: ["candidate-claim"] }));
+      const deps = { client: resumedClient.client, providers: [provider], transport, state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } };
+      const resumed = await (partition === "candidate_generation" ? runSessionKnowledgeCandidateOnce : runSessionKnowledgeEvaluationOnce)(deps);
+      assert.equal(resumed.status, partition === "candidate_generation" ? "candidate_created" : "case_candidate_created");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test("learning rejects a growing rewritten session before any model call", async () => {
+  for (const partition of ["candidate_generation", "held_out"] as const) {
+    const f = await setup(partition);
+    try {
+      const original = await readFile(f.source, "utf8");
+      await writeFile(f.source, original.replace("本次已验证依赖升级后运行单测并检查锁文件", "改写后的任务结果".repeat(80)));
+      const options = { sessions_root: f.sessions, state_file: f.state };
+      await runCodexSessionCollectionOnce(options);
+      const fixture = workerClient(), inputs: string[] = [];
+      const deps = { client: fixture.client, providers: [provider], transport: modelTransport("{}", inputs), state_file: f.workerState, archive_options: options };
+      const result = await (partition === "candidate_generation" ? runSessionKnowledgeCandidateOnce : runSessionKnowledgeEvaluationOnce)(deps);
+      assert.equal(result.status, "waiting_for_consistent_excerpt");
+      assert.equal(result.processed, 0);
+      assert.deepEqual(inputs, []);
+      assert.deepEqual(fixture.calls, []);
+      const state = JSON.parse(await readFile(f.state, "utf8")) as JsonObject;
+      assert.equal(Object.values(state.sources as Record<string, JsonObject>)[0]!.force_recheck, true);
+      await runCodexSessionCollectionOnce(options);
+      const rescanned = JSON.parse(await readFile(f.state, "utf8")) as JsonObject;
+      assert.equal(Object.values(rescanned.sources as Record<string, JsonObject>)[0]!.force_recheck, undefined);
+      assert.equal((await readCodexSessionTaskExcerpt(String(f.task.task_id), { ...options, expected_partition: partition })).status, "ineligible");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test("MCP verifies development evidence without treating it as generation or held-out evidence", async () => {
+  const f = await setup("development", false, false, true);
+  const dataRoot = join(f.root, "verification-data"), stateFile = join(dataRoot, "runtime", "codex-session-collection.json");
+  const previousCodexHome = process.env.CODEX_HOME;
+  const store = await new CraftStore(craftPaths(dataRoot)).open();
+  try {
+    await mkdir(join(dataRoot, "runtime"), { recursive: true });
+    await writeFile(stateFile, await readFile(f.state));
+    process.env.CODEX_HOME = f.root;
+    const service = new CraftService(store);
+    service.scopeAliasBind({ scope_kind: "project", scope_id: f.task.project_scope_id, alias_kind: "path", alias: f.project });
+    const excerpt = await readCodexSessionTaskExcerpt(String(f.task.task_id), { state_file: f.state, sessions_root: f.sessions, expected_partition: "development" });
+    assert.equal(excerpt.status, "ready");
+    const args = { scope: excerpt.project_scope_id, task_id: excerpt.task_id, source_session_id: excerpt.session_id,
+      turn_id: excerpt.turn_id, source_ref: excerpt.source_ref, task_goal: excerpt.task_goal, task_result: excerpt.task_result,
+      verification_artifacts: excerpt.verification_artifacts, sanitized: true, verify_against_archive: true, dataset_partition: "development" };
+    const server = new McpServer(service, "component-context-complete");
+    const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_knowledge_session_evidence_record", arguments: args } });
+    const result = response!.result as JsonObject;
+    assert.equal(result.isError, false, JSON.stringify(result));
+    const body = result.structuredContent as JsonObject;
+    assert.equal((body.transcript_check as JsonObject).status, "transcript_matched");
+    assert.equal((body.evidence as JsonObject).record_origin, "caller_asserted");
+    assert.equal(((await codexSessionTaskBatch("candidate_generation", { state_file: f.state, sessions_root: f.sessions })).tasks as unknown[]).length, 0);
+    assert.equal(((await codexSessionTaskBatch("held_out", { state_file: f.state, sessions_root: f.sessions })).tasks as unknown[]).length, 0);
+  } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousCodexHome;
+    store.close(); await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("MCP checks session evidence against the server archive without granting trust", async () => {
+  const f = await setup("candidate_generation", false, false, true);
+  const dataRoot = join(f.root, "verification-data"), stateFile = join(dataRoot, "runtime", "codex-session-collection.json");
+  const previousCodexHome = process.env.CODEX_HOME;
+  const store = await new CraftStore(craftPaths(dataRoot)).open();
+  try {
+    await mkdir(join(dataRoot, "runtime"), { recursive: true });
+    await writeFile(stateFile, await readFile(f.state));
+    process.env.CODEX_HOME = f.root;
+    const service = new CraftService(store);
+    service.scopeAliasBind({ scope_kind: "project", scope_id: f.task.project_scope_id, alias_kind: "path", alias: f.project });
+    const excerpt = await readCodexSessionTaskExcerpt(f.task.task_id, { state_file: f.state, sessions_root: f.sessions, expected_partition: "candidate_generation" });
+    assert.equal(excerpt.status, "ready");
+    const args = { scope: excerpt.project_scope_id, task_id: excerpt.task_id, source_session_id: excerpt.session_id,
+      turn_id: excerpt.turn_id, source_ref: excerpt.source_ref, task_goal: excerpt.task_goal, task_result: excerpt.task_result,
+      verification_artifacts: excerpt.verification_artifacts, sanitized: true, verify_against_archive: true, dataset_partition: "candidate_generation" };
+    for (const mode of ["component-context-daily", "component-context-complete"] as const) {
+      const server = new McpServer(service, mode);
+      const call = async (arguments_: JsonObject) => (await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: "craft_knowledge_session_evidence_record", arguments: arguments_ } }))!.result as JsonObject;
+      const matched = await call(args);
+      assert.equal(matched.isError, false, JSON.stringify(matched));
+      const body = matched.structuredContent as JsonObject, check = body.transcript_check as JsonObject;
+      assert.equal(check.status, "transcript_matched");
+      assert.equal(check.task_result_verified, false); assert.equal(check.claim_effect_proven, false);
+      assert.equal((body.evidence as JsonObject).record_origin, "caller_asserted");
+      const wrong = await call({ ...args, task_result: `${String(args.task_result)} 修改` });
+      assert.equal(((wrong.structuredContent as JsonObject).transcript_check as JsonObject).status, "unverified");
+      const missingPartition = await call({ ...args, dataset_partition: undefined });
+      assert.equal(missingPartition.isError, true);
+    }
+    process.env.CODEX_HOME = join(f.root, "missing-home");
+    const server = new McpServer(service, "component-context-complete");
+    const response = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_knowledge_session_evidence_record", arguments: args } });
+    assert.equal(((((response!.result as JsonObject).structuredContent as JsonObject).transcript_check) as JsonObject).status, "unavailable");
+  } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousCodexHome;
+    store.close(); await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("archived verified generation and held-out tasks remain usable once without mixing their roles", async () => {
+  for (const partition of ["candidate_generation", "held_out"] as const) {
+    const f = await setup(partition);
+    try {
+      const archive = join(f.root, "archived_sessions");
+      await mkdir(archive);
+      await rename(f.source, join(archive, "session.jsonl"));
+      const archiveOptions = { sessions_root: f.sessions, archived_sessions_root: archive, state_file: f.state };
+      const collection = await runCodexSessionCollectionOnce(archiveOptions);
+      assert.equal(collection.tasks_verified, 1);
+      const fixture = candidateClaimClient(f.task.project_scope_id, {
+        craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id, evaluation_eligible: false } }),
+        craft_knowledge_evaluation_run: () => ({ run: { id: "run", metrics: { provenance_eligible: false } } }),
+      });
+      const seen: string[] = [];
+      const transport = modelTransport(JSON.stringify(partition === "candidate_generation"
+        ? { decision: "candidate", kind: "rule", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: ["验证"] }
+        : { decision: "labeled", expected_claim_ids: ["candidate-claim"] }), seen);
+      const deps = { client: fixture.client, providers: [provider], transport, state_file: f.workerState, archive_options: archiveOptions };
+      const run = partition === "candidate_generation" ? runSessionKnowledgeCandidateOnce : runSessionKnowledgeEvaluationOnce;
+      const result = await run(deps);
+      assert.equal(result.status, partition === "candidate_generation" ? "candidate_created" : "case_candidate_created");
+      assert.equal(seen.length, 1);
+      const saved = fixture.calls.find(call => call.name === (partition === "candidate_generation" ? "craft_knowledge_claim_save" : "craft_knowledge_evaluation_case_save"))!;
+      assert.equal(saved.args.scope, f.task.project_scope_id);
+      const evidenceIds = (saved.args.evidence_ids ?? saved.args.source_evidence_ids) as string[];
+      assert.equal(evidenceIds.length, 2);
+      assert(evidenceIds.includes("evidence-session-task"));
+      assert(fixture.calls.some(call => call.name === "craft_knowledge_session_evidence_record" && call.args.sanitized === true));
+      assert.equal((await run(deps)).status, "idle");
+      assert.equal(seen.length, 1, "a relocation must not cause repeated model calls");
+      const other = partition === "candidate_generation" ? runSessionKnowledgeEvaluationOnce : runSessionKnowledgeCandidateOnce;
+      assert.equal((await other({ ...deps, state_file: join(f.root, "knowledge", "other-partition.json") })).status, "idle");
+      assert.equal(seen.length, 1, "generation and held-out roles remain isolated after archiving");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test("creates one Chinese Knowledge candidate from a verified generation task and records a content-free Trace", async () => {
+  const f = await setup();
+  try {
+    const fixture = workerClient(), modelInputs: string[] = [];
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport(
+      JSON.stringify({ decision: "candidate", kind: "rule", title: "依赖升级验证", content: "依赖升级后应运行单测并检查锁文件。", tags: ["依赖", "验证"] }), modelInputs),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.deepEqual(result, { status: "candidate_created", processed: 1, task_id: f.task.task_id, claim_id: `knowledge_claim_${stableDigest(String(f.task.task_id)).slice(-24)}`,
+      trace_id: "trace-session-task", independent_review_required: true, raw_content_stored: false });
+    assert.equal(modelInputs.length, 1);
+    const save = fixture.calls.find(call => call.name === "craft_knowledge_claim_save")!;
+    assert.equal(save.args.scope, f.task.project_scope_id);
+    assert.equal(save.args.source_id, "source-session");
+    assert.equal((save.args.evidence_ids as string[]).length, 2);
+    assert((save.args.evidence_ids as string[]).includes("evidence-session-task"));
+    const programEvidence = fixture.calls.find(call => call.name === "craft_knowledge_session_evidence_record")!;
+    assert.equal(programEvidence.args.sanitized, true);
+    assert.equal(programEvidence.args.source_session_id, f.task.session_id);
+    assert.equal((programEvidence.args.verification_artifacts as JsonObject[]).length, 1);
+    assert.equal(save.args.content, "依赖升级后应运行单测并检查锁文件。");
+    const traceCalls = fixture.calls.filter(call => call.name === "craft_trace_append");
+    assert.equal(traceCalls.length, 3);
+    assert.equal((traceCalls.at(-1)!.args.data as JsonObject).transcript_check_status, "transcript_matched");
+    assert((traceCalls.at(-1)!.args.output_refs as string[]).includes("evidence-session-program"));
+    assert.equal(JSON.stringify(traceCalls).includes("本次已验证"), false);
+    const savedState = await readFile(f.workerState, "utf8");
+    assert.equal(savedState.includes("本次已验证"), false);
+    assert.equal(savedState.includes(String(f.task.task_id)), true);
+    const state = JSON.parse(savedState) as JsonObject;
+    assert.equal((state.trace_ids_by_task as JsonObject)[String(f.task.task_id)], "trace-session-task");
+    assert.deepEqual(await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }),
+      { status: "idle", processed: 0, verified_candidates_pending: 0, raw_content_stored: false });
+    assert.equal(modelInputs.length, 1, "an idle pass must not call the model");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("does not publish a candidate when the archive check becomes unavailable", async () => {
+  const f = await setup();
+  try {
+    const fixture = workerClient({ craft_knowledge_session_evidence_record: () => ({
+      evidence: { id: "evidence-session-program", source_id: "source-session", fragment_id: "fragment-session" },
+      source_id: "source-session", fragment_id: "fragment-session", sanitized_content_stored: true,
+      raw_content_stored: false, transcript_check: { status: "unverified" },
+    }) });
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport(
+      JSON.stringify({ decision: "candidate", kind: "rule", title: "验证", content: "完成后运行测试。", tags: ["测试"] })),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }), /archive verification is unavailable or mismatched/u);
+    assert.equal(fixture.calls.some(call => call.name === "craft_knowledge_claim_save"), false);
+    const state = JSON.parse(await readFile(f.workerState, "utf8")) as { uncertain_calls: Record<string, unknown>; processed_task_ids: string[] };
+    assert.equal(state.uncertain_calls[String(f.task.task_id)], undefined);
+    assert.equal(state.processed_task_ids.includes(String(f.task.task_id)), false);
+    const changed = workerClient({ craft_knowledge_session_evidence_record: () => ({
+      evidence: { id: "evidence-session-program", source_id: "source-session", fragment_id: "fragment-session" },
+      source_id: "source-session", fragment_id: "fragment-session", sanitized_content_stored: true,
+      raw_content_stored: false, transcript_check: { status: "transcript_matched", verification_outcome: "failed" },
+    }) });
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: changed.client, providers: [provider], transport: modelTransport(
+      JSON.stringify({ decision: "candidate", kind: "rule", title: "验证", content: "完成后运行测试。", tags: ["测试"] })),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }), /archive verification is unavailable or mismatched/u);
+    assert.equal(changed.calls.some(call => call.name === "craft_knowledge_claim_save"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("does not publish a candidate when its excerpt changes after the model call", async () => {
+  const f = await setup();
+  try {
+    const fixture = workerClient(); let reads = 0;
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport(
+      JSON.stringify({ decision: "candidate", kind: "rule", title: "验证", content: "完成后运行测试。", tags: ["测试"] })),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state },
+      read_excerpt: async (id, options, env) => {
+        const excerpt = await readCodexSessionTaskExcerpt(id, options, env);
+        return ++reads === 1 ? excerpt : { ...excerpt, evidence_ids: ["changed-evidence"] };
+      } }), /Evidence changed during model execution/u);
+    assert.equal(fixture.calls.some(call => call.name === "craft_knowledge_claim_save"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("creates a candidate from a transcript test result without requiring a Context receipt", async () => {
+  const f = await setup("candidate_generation", false, false, true);
+  try {
+    const fixture = workerClient({ craft_knowledge_session_evidence_record: () => ({ evidence: { id: "evidence-session-program", source_id: "source-session", fragment_id: "fragment-session" },
+      source_id: "source-session", fragment_id: "fragment-session", sanitized_content_stored: true, raw_content_stored: false,
+      transcript_check: { status: "transcript_matched", verification_outcome: null } }) }), modelInputs: string[] = [];
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport(
+      JSON.stringify({ decision: "candidate", kind: "rule", title: "依赖升级验证", content: "升级后运行单测并检查锁文件。", tags: ["验证"] }), modelInputs),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "candidate_created");
+    assert.equal(modelInputs.length, 1);
+    assert.equal(JSON.parse(modelInputs[0]!).verification_outcome, null);
+    const save = fixture.calls.find(call => call.name === "craft_knowledge_claim_save")!;
+    assert.deepEqual(save.args.evidence_ids, ["evidence-session-program"]);
+    const evidence = fixture.calls.find(call => call.name === "craft_knowledge_session_evidence_record")!;
+    assert.equal(evidence.args.source_session_id, f.sessionId);
+    assert.equal((evidence.args.verification_artifacts as JsonObject[]).length, 1);
+    assert.equal(JSON.stringify(fixture.calls).includes("pnpm test"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("rejects a corrupt fractional verification artifact count without invoking a model", async () => {
+  const f = await setup("candidate_generation", false, false, true);
+  try {
+    await mutateIndexedTask(f, { verification_artifact_count: 1.5 });
+    const fixture = workerClient(), inputs: string[] = [];
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider],
+      transport: modelTransport("{}", inputs), state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } }), /Codex session task index is invalid/u);
+    assert.deepEqual(fixture.calls, []);
+    assert.deepEqual(inputs, []);
+    await assert.rejects(readFile(f.workerState, "utf8"), { code: "ENOENT" });
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out sessions are never passed to candidate generation", async () => {
+  const f = await setup("held_out");
+  try {
+    let modelCalls = 0;
+    const transport: ModelTransport = { async complete() { modelCalls++; return { text: "{}", model: "test-model", usage: { input_tokens: 0, output_tokens: 0 } }; } };
+    const fixture = workerClient();
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport,
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "idle");
+    assert.equal(modelCalls, 0);
+    assert.equal(fixture.calls.length, 0);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("task without a successful test transcript remains pending without model calls", async () => {
+  const f = await setup("candidate_generation", false);
+  try {
+    const fixture = workerClient(); let modelCalls = 0;
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider],
+      transport: { async complete() { modelCalls++; return { text: "{}", model: "test-model", usage: { input_tokens: 0, output_tokens: 0 } }; } },
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.deepEqual(result, { status: "waiting_for_verification_artifacts", processed: 0, reason: "verifiable_test_result_unavailable", raw_content_stored: false });
+    assert.equal(modelCalls, 0);
+    assert.equal(fixture.calls.length, 0);
+    const saved = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    assert.deepEqual(saved.processed_task_ids, []);
+    assert.equal(JSON.stringify(saved).includes("依赖升级"), false);
+    assert.equal((await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "waiting_for_verification_artifacts");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("upgrades a legacy candidate state while waiting for evidence", async () => {
+  const f = await setup("candidate_generation", false);
+  try {
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [] }));
+    const fixture = workerClient();
+    assert.equal((await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "waiting_for_verification_artifacts");
+    const saved = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    assert.deepEqual(saved.processed_task_ids, []);
+    assert.equal(fixture.calls.length, 0);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("a terminal skip is reconsidered after its source changes", async () => {
+  const f = await setup("candidate_generation");
+  try {
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    const id = String(f.task.task_id);
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [id],
+      terminal_skips: { [id]: { source_ref_digest: stableDigest("old-source"), reason_code: "verified_project_evidence_incomplete", recorded_at: "2026-10-20T00:00:00Z" } } }));
+    const fixture = workerClient({ craft_evaluation_model_profile_ensure_single: () => ({ status: "unavailable" }) });
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "waiting_for_model");
+    const state = JSON.parse(await readFile(f.workerState, "utf8"));
+    assert.deepEqual(state.processed_task_ids, []);
+    assert.deepEqual(state.terminal_skips, {});
+    assert.equal(fixture.calls.some(call => call.name === "craft_trace_start"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("a changed terminal skip with a prior model Trace is not replayed", async () => {
+  const f = await setup("candidate_generation");
+  try {
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    const id = String(f.task.task_id), skip = { source_ref_digest: stableDigest("old-source"),
+      reason_code: "verified_project_evidence_incomplete", recorded_at: "2026-10-20T00:00:00Z" };
+    for (const prior of [{ trace_ids_by_task: { [id]: "trace-existing" } },
+      { uncertain_calls: { [id]: { trace_id: "trace-existing", input_digest: `sha256:${"a".repeat(64)}` } } }]) {
+      await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [id],
+        terminal_skips: { [id]: skip }, ...prior }));
+      const fixture = workerClient();
+      const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+        archive_options: { sessions_root: f.sessions, state_file: f.state } });
+      assert.equal(result.status, "waiting_for_skip_reconciliation");
+      assert.equal(result.blocked_skips, 1);
+      assert.deepEqual(fixture.calls, []);
+      assert.deepEqual(JSON.parse(await readFile(f.workerState, "utf8")).processed_task_ids, [id]);
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("previously skipped candidate resumes when indexed verification appears", async () => {
+  const f = await setup("candidate_generation", true, false, true);
+  try {
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    const id = String(f.task.task_id);
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [id],
+      terminal_skips: { [id]: { source_ref_digest: stableDigest(f.task.source_ref), reason_code: "verifiable_test_result_unavailable", recorded_at: "2026-10-20T00:00:00Z" } } }));
+    const fixture = workerClient({ craft_evaluation_model_profile_ensure_single: () => ({ status: "unavailable" }) });
+    const task = ((await codexSessionTaskBatch("candidate_generation", { state_file: f.state })).tasks as JsonObject[])[0]!;
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      read_excerpt: async () => ({ status: "ready", session_id: task.session_id, turn_id: task.turn_id,
+        project_scope_id: task.project_scope_id, source_ref: task.source_ref, verification_outcome: task.verification_outcome,
+        verification_source: task.verification_source, evidence_ids: task.verification_evidence_ids,
+        verification_artifacts: [{ result: "passed" }] }),
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "waiting_for_model");
+    const state = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    assert.deepEqual(state.processed_task_ids, []);
+    assert.deepEqual(state.terminal_skips, {});
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("records a terminal skip when the verified excerpt has no structured artifact list", async () => {
+  const f = await setup();
+  try {
+    const fixture = workerClient();
+    const task = ((await codexSessionTaskBatch("candidate_generation", { state_file: f.state })).tasks as JsonObject[])[0]!;
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      read_excerpt: async () => ({ status: "ready", session_id: task.session_id, turn_id: task.turn_id,
+        project_scope_id: task.project_scope_id, verification_outcome: "passed", evidence_ids: task.verification_evidence_ids,
+        verification_source: task.verification_source, source_ref: task.source_ref, task_goal: "已验证的任务目标", task_result: "已验证的结果" }),
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.reason, "verifiable_test_result_unavailable");
+    assert.equal(fixture.calls.length, 0);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("does not publish a held-out case when archive verification fails", async () => {
+  const f = await setup("held_out");
+  try {
+    const fixture = candidateClaimClient(f.task.project_scope_id, { craft_knowledge_session_evidence_record: () => ({
+      evidence: { id: "evidence-session-program", source_id: "source-session", fragment_id: "fragment-session" },
+      source_id: "source-session", fragment_id: "fragment-session", sanitized_content_stored: true,
+      raw_content_stored: false, transcript_check: { status: "unavailable" },
+    }) });
+    await assert.rejects(evaluate(f, fixture.client, modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] }))), /archive verification is unavailable or mismatched/u);
+    assert.equal(fixture.calls.some(call => call.name === "craft_knowledge_evaluation_case_save"), false);
+    const state = JSON.parse(await readFile(f.workerState, "utf8")) as { uncertain_calls: Record<string, unknown>; processed_task_ids: string[] };
+    assert.equal(state.uncertain_calls[String(f.task.task_id)], undefined);
+    assert.equal(state.processed_task_ids.includes(String(f.task.task_id)), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out cases require a reported archive status and terminal outcome", async () => {
+  const f = await setup("held_out");
+  try {
+    for (const check of [undefined, [], { status: "unexpected" }, { status: "transcript_matched" },
+      { status: "transcript_matched", verification_outcome: "failed" }]) {
+      const fixture = candidateClaimClient(f.task.project_scope_id, { craft_knowledge_session_evidence_record: () => ({
+        evidence: { id: "evidence-session-program", source_id: "source-session", fragment_id: "fragment-session" },
+        source_id: "source-session", fragment_id: "fragment-session", sanitized_content_stored: true,
+        raw_content_stored: false, transcript_check: check,
+      }) });
+      await assert.rejects(evaluate(f, fixture.client, modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] }))), /archive verification is unavailable or mismatched/u);
+      assert.equal(fixture.calls.some(call => call.name === "craft_knowledge_evaluation_case_save"), false);
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("model skip remains retryable if the indexed source changes during execution", async () => {
+  for (const partition of ["candidate_generation", "held_out"] as const) {
+    const f = await setup(partition);
+    try {
+      const fixture = partition === "held_out" ? candidateClaimClient(f.task.project_scope_id) : workerClient();
+      let reads = 0;
+      const readExcerpt: typeof readCodexSessionTaskExcerpt = async (id, options, env) => {
+        const excerpt = await readCodexSessionTaskExcerpt(id, options, env);
+        return ++reads === 1 ? excerpt : { ...excerpt, source_ref: `sha256:${"f".repeat(64)}` };
+      };
+      const response = partition === "held_out" ? { decision: "skip", expected_claim_ids: [] }
+        : { decision: "skip", kind: "fact", title: "", content: "", tags: [] };
+      const run = partition === "held_out" ? evaluate(f, fixture.client, modelTransport(JSON.stringify(response)), { read_excerpt: readExcerpt })
+        : runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport(JSON.stringify(response)),
+          state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state }, read_excerpt: readExcerpt });
+      await assert.rejects(run, /Evidence changed during model execution/u);
+      const state = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+      assert.deepEqual(state.processed_task_ids, []);
+      assert.deepEqual(state.uncertain_calls, {});
+      assert.equal(fixture.calls.some(call => call.name === "craft_knowledge_claim_save" || call.name === "craft_knowledge_evaluation_case_save"), false);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test("does not publish a held-out case when its excerpt changes after the model call", async () => {
+  const f = await setup("held_out");
+  try {
+    const fixture = candidateClaimClient(f.task.project_scope_id); let reads = 0;
+    await assert.rejects(evaluate(f, fixture.client, modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] })), {
+      read_excerpt: async (id: unknown, options: Parameters<typeof readCodexSessionTaskExcerpt>[1], env: NodeJS.ProcessEnv) => {
+        const excerpt = await readCodexSessionTaskExcerpt(id, options, env);
+        return ++reads === 1 ? excerpt : { ...excerpt, evidence_ids: ["changed-evidence"] };
+      },
+    }), /Evidence changed during model execution/u);
+    assert.equal(fixture.calls.some(call => call.name === "craft_knowledge_evaluation_case_save"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out task creates a separately labeled evaluation case and preserves ineligible provenance", async () => {
+  const f = await setup("held_out");
+  try {
+    const fixture = workerClient({
+      craft_knowledge_claim_list: () => ({ claims: [{ id: "candidate-claim", status: "candidate", scope: f.task.project_scope_id }] }),
+      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", version: 1,
+        identity_digest: "candidate-identity", content_digest: "candidate-content", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: ["依赖"] } } }),
+      craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id, version: 1, identity_digest: "case-identity", evaluation_eligible: false, status: "unverified_source_evidence" } }),
+      craft_knowledge_evaluation_run: () => ({ run: { id: "run", version: 1, identity_digest: "run-identity", metrics: { provenance_eligible: false } } }),
+    });
+    const result = await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
+      transport: modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] })),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "case_candidate_created"); assert.equal(result.evaluation_eligible, false);
+    assert.equal(result.independent_adjudication_required, true); assert.equal(result.label_source, "model_candidate");
+    const saved = fixture.calls.find(call => call.name === "craft_knowledge_evaluation_case_save")!;
+    assert.deepEqual(saved.args.expected_claim_ids, ["candidate-claim"]);
+    assert.deepEqual(saved.args.candidate_claim_refs, [{ claim_id: "candidate-claim", claim_version: 1,
+      identity_digest: "candidate-identity", content_digest: "candidate-content" }]);
+    const shadowRun = fixture.calls.find(call => call.name === "craft_knowledge_evaluation_run")!;
+    assert.equal(shadowRun.args.mode, "candidate_shadow");
+    assert.deepEqual(shadowRun.args.candidate_claim_ids, ["candidate-claim"]);
+    assert.equal((saved.args.source_evidence_ids as string[]).length, 2);
+    assert((saved.args.source_evidence_ids as string[]).includes("evidence-session-task"));
+    assert.equal(saved.args.dataset_partition, "held_out"); assert.equal(saved.args.sanitized, true);
+    assert.equal(saved.args.label_source, "model_candidate");
+    const trace = fixture.calls.filter(call => call.name === "craft_trace_append");
+    assert(trace.some(call => call.args.event_kind === "knowledge.evaluation_case_candidate"));
+    assert((trace.at(-1)!.args.output_refs as string[]).includes("evidence-session-program"));
+    assert.equal(JSON.stringify(trace).includes("本次已验证"), false);
+    assert.equal((await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "idle");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out test evidence waits for a terminal outcome without consuming the task or calling a model", async () => {
+  const f = await setup("held_out", false, false, true);
+  try {
+    const modelInputs: string[] = [];
+    const fixture = candidateClaimClient(f.task.project_scope_id, {
+      craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id, evaluation_eligible: false } }),
+      craft_knowledge_evaluation_run: () => ({ run: { id: "run-session-test", metrics: { provenance_eligible: false } } }),
+    });
+    const result = await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
+      transport: modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] }), modelInputs),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "waiting_for_terminal_outcome");
+    assert.equal(modelInputs.length, 0);
+    assert.equal(fixture.calls.length, 0);
+    const state = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    assert.deepEqual(state.processed_task_ids, []);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out task without successful test evidence does not call the model or create an evaluation case", async () => {
+  const f = await setup("held_out", false);
+  try {
+    const fixture = workerClient(); let modelCalls = 0;
+    const result = await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
+      transport: { async complete() { modelCalls++; return { text: "{}", model: "test-model", usage: { input_tokens: 0, output_tokens: 0 } }; } },
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.deepEqual(result, { status: "waiting_for_verification_artifacts", processed: 0, reason: "verifiable_test_result_unavailable", raw_content_stored: false });
+    assert.equal(modelCalls, 0);
+    assert.equal(fixture.calls.length, 0);
+    const state = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    assert.deepEqual(state.processed_task_ids, []);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluation waits for current candidate Claims and rejects model labels outside the current candidate set", async () => {
+  const f = await setup("held_out");
+  try {
+    const noClaims = workerClient({ craft_knowledge_claim_list: () => ({ claims: [] }) });
+    assert.equal((await runSessionKnowledgeEvaluationOnce({ client: noClaims.client, providers: [provider], transport: modelTransport("{}"),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "waiting_for_candidate_claims");
+    const fixture = workerClient({
+      craft_knowledge_claim_list: () => ({ claims: [{ id: "candidate-claim", status: "candidate", scope: f.task.project_scope_id }] }),
+      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", version: 1,
+        identity_digest: "candidate-identity", content_digest: "candidate-content", content: "稳定验证规则。" } } }),
+    });
+    await assert.rejects(runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider], transport: modelTransport(
+      JSON.stringify({ decision: "labeled", expected_claim_ids: ["not-candidate"] })), state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } }), /selected from current candidate Claims/u);
+    assert(fixture.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"));
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluation records only terminal Trace references and leaves failed evidence work retryable", async () => {
+  {
+    const f = await setup("held_out");
+    try {
+      const fixture = workerClient(); let modelCalls = 0;
+      const excerpt = await readCodexSessionTaskExcerpt(String(f.task.task_id), { sessions_root: f.sessions, state_file: f.state, expected_partition: "held_out" });
+      const result = await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
+        transport: { async complete() { modelCalls++; return { text: "{}", model: "test-model", usage: null }; } }, state_file: f.workerState,
+        archive_options: { sessions_root: f.sessions, state_file: f.state }, read_excerpt: async () => ({ ...excerpt, verification_artifacts: undefined }) });
+      assert.deepEqual(result, { status: "waiting_for_verification_artifacts", processed: 0, reason: "verifiable_test_result_unavailable", raw_content_stored: false });
+      assert.equal(modelCalls, 0);
+      const state = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+      assert.deepEqual(state.processed_task_ids, []);
+      assert.deepEqual(state.trace_ids_by_task, {});
+      const retried = await evaluate(f, workerClient({ craft_knowledge_claim_list: () => ({ claims: [] }) }).client);
+      assert.equal(retried.status, "waiting_for_candidate_claims");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+  {
+    const f = await setup("held_out");
+    try {
+      const fixture = workerClient({ craft_knowledge_claim_list: () => ({ claims: [{ id: "candidate-claim", status: "candidate", scope: f.task.project_scope_id }] }),
+        craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", version: 1,
+          identity_digest: "candidate-identity", content_digest: "candidate-content", content: "稳定规则" } } }) });
+      const excerpt = await readCodexSessionTaskExcerpt(String(f.task.task_id), { sessions_root: f.sessions, state_file: f.state, expected_partition: "held_out" });
+      const { task_goal: _taskGoal, ...missingGoal } = excerpt;
+      await assert.rejects(runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
+        transport: { async complete() { return { text: JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] }), model: "test-model", usage: null }; } }, state_file: f.workerState,
+        archive_options: { sessions_root: f.sessions, state_file: f.state }, read_excerpt: async () => missingGoal }), /held-out test Evidence is unavailable/u);
+      const state = JSON.parse(await readFile(f.workerState, "utf8"));
+      assert.deepEqual(state.processed_task_ids, []);
+      assert.deepEqual(state.trace_ids_by_task, {});
+      assert.equal(state.last_attempted_task_id, f.task.task_id);
+      assert(fixture.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"));
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test("held-out evaluation is incremental across exact archive, readiness and source integrity gates", async () => {
+  for (const changes of [{ project_scope_id: null }, { project_scope_id: "not-a-project-scope" }]) {
+    const f = await setup("held_out");
+    try {
+      await mutateIndexedTask(f, changes);
+      const result = await evaluate(f, workerClient().client, modelTransport("{}"));
+      assert.equal(result.status, "idle");
+    }
+    finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+  {
+    const f = await setup("held_out");
+    try {
+      await writeFile(f.source, "changed after verified indexing\n");
+      assert.equal((await evaluate(f, workerClient().client, modelTransport("{}"))).reason, "held_out_excerpt_unavailable");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+  {
+    const f = await setup("held_out");
+    try {
+      await mkdir(join(f.root, "knowledge"), { recursive: true });
+      await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1", processed_task_ids: [f.task.task_id] }));
+      assert.equal((await evaluate(f, workerClient().client, modelTransport("{}"))).status, "waiting_for_legacy_trace_reconciliation");
+      await writeFile(f.workerState, "{}");
+      await assert.rejects(evaluate(f, workerClient().client, modelTransport("{}")), /state is invalid/u);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+  {
+    const f = await setup("held_out");
+    try {
+      await mkdir(join(f.root, "knowledge"), { recursive: true });
+      const target = join(f.root, "target-state.json"); await mkdir(target, { recursive: true });
+      await linkDirectory(target, f.workerState);
+      await assert.rejects(evaluate(f, workerClient().client, modelTransport("{}")), /state file is invalid/u);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+  {
+    const f = await setup("held_out");
+    try {
+      const linked = join(f.root, "linked-knowledge"), target = join(f.root, "target-knowledge"); await mkdir(target);
+      await linkDirectory(target, linked);
+      await assert.rejects(evaluate(f, workerClient().client, modelTransport("{}"), { state_file: join(linked, "state.json") }), /directory must not be a symbolic link/u);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test("held-out evaluation waits safely for current candidate Claims, a ready profile, provider and Host budget", async () => {
+  const defaultF = await setup("held_out");
+  try {
+    const defaultStateRoot = join(defaultF.root, "default-state-root");
+    const defaultState = candidateClaimClient(defaultF.task.project_scope_id, { craft_knowledge_claim_list: () => ({ claims: [] }) });
+    assert.equal((await evaluate(defaultF, defaultState.client, undefined, { state_file: undefined,
+      env: { ...process.env, CRAFT_DATA_DIR: defaultStateRoot } })).status, "waiting_for_candidate_claims");
+    assert.equal((await readFile(join(defaultStateRoot, "knowledge", "session-evaluation-state.json"), "utf8")).includes("processed_task_ids"), true);
+  } finally { await rm(defaultF.root, { recursive: true, force: true }); }
+  const f = await setup("held_out");
+  try {
+    const filtered = workerClient({ craft_knowledge_claim_list: () => ({ claims: [
+      { id: "other-project", status: "candidate", scope: "project:other" },
+    ] }) });
+    assert.equal((await evaluate(f, filtered.client, modelTransport("{}"))).status, "waiting_for_candidate_claims");
+    const malformedList = workerClient({ craft_knowledge_claim_list: () => ({ claims: "bad" }) });
+    assert.equal((await evaluate(f, malformedList.client, modelTransport("{}"))).status, "waiting_for_candidate_claims");
+    const notReady = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_ensure_single: () => ({ status: "needs_enablement" }) });
+    assert.equal((await evaluate(f, notReady.client, modelTransport("{}"))).status, "waiting_for_model");
+    const missingProfile = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_ensure_single: () => ({ status: "ready_for_adapter" }) });
+    assert.equal((await evaluate(f, missingProfile.client, modelTransport("{}"))).reason, "ready_for_adapter");
+    const notReadyDetail = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_get: () => ({ readiness: {} }) });
+    assert.equal((await evaluate(f, notReadyDetail.client, modelTransport("{}"))).reason, "model_profile_not_ready");
+    const providerUnavailable = candidateClaimClient(f.task.project_scope_id);
+    assert.equal((await evaluate(f, providerUnavailable.client, modelTransport("{}"), { providers: [] })).reason, "provider_unavailable");
+    const builtinProviderUnavailable = candidateClaimClient(f.task.project_scope_id);
+    assert.equal((await evaluate(f, builtinProviderUnavailable.client, modelTransport("{}"), { providers: undefined })).reason, "provider_unavailable");
+    const providerFallback = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_get: () => ({ readiness: { status: "ready_for_adapter" }, provider }) });
+    assert.equal((await evaluate(f, providerFallback.client, modelTransport(JSON.stringify({ decision: "skip", expected_claim_ids: [] })), { providers: [] })).reason, undefined,
+      "a ready provider returned with its Host Profile is usable when the static catalog omits it");
+    await rm(f.workerState, { force: true });
+    const noTransport = candidateClaimClient(f.task.project_scope_id);
+    assert.equal((await evaluate(f, noTransport.client)).reason, "model_transport_unavailable");
+    const noBudget = candidateClaimClient(f.task.project_scope_id);
+    const budgetTransport: ModelTransport = { acquireCall: () => false, async complete() { throw new Error("unreachable"); } };
+    assert.equal((await evaluate(f, noBudget.client, budgetTransport)).reason, "model_call_budget_exhausted");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluation covers Codex output schema and safe retry diagnostics", async () => {
+  for (const failure of ["private failure", Object.assign(new Error("private failure"), { name: "../../unsafe" })]) {
+    const f = await setup("held_out");
+    try {
+      const claims = candidateClaimClient(f.task.project_scope_id, {
+        craft_evaluation_model_profile_ensure_single: () => ({ status: "ready_for_adapter", profile: { id: "profile", version: 1, provider: "codex-cli", model: "gpt-6-luna" } }),
+        craft_evaluation_model_profile_get: () => ({ readiness: { status: "ready_for_adapter" }, provider: { ...provider, provider: "codex-cli", host_managed_auth: true } as unknown as JsonObject }),
+      });
+      const transport: ModelTransport = { async complete(_spec, request): Promise<ChatResult> {
+        assert.ok(request.body.codex_output_schema);
+        throw failure;
+      } };
+      await assert.rejects(evaluate(f, claims.client, transport));
+      const failed = claims.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.failed");
+      assert.equal(failed?.args.data && (failed.args.data as JsonObject).failure_kind, "Error");
+      assert.equal(claims.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"), true);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+
+  for (const metrics of [undefined, { provenance_eligible: true }]) {
+    const f = await setup("held_out");
+    try {
+      const claims = candidateClaimClient(f.task.project_scope_id, {
+        craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id } }),
+        craft_knowledge_evaluation_run: () => ({ run: { id: "run", metrics } }),
+      });
+      const result = await evaluate(f, claims.client, modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["candidate-claim"] })));
+      assert.equal(result.status, "case_candidate_created");
+      assert.equal(result.evaluation_eligible, metrics?.provenance_eligible === true);
+      assert.equal(result.independent_adjudication_required, true);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test("candidate generation waits when the source changes between batch and excerpt", async () => {
+  const f = await setup("candidate_generation");
+  try {
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    const excerpt = await readCodexSessionTaskExcerpt(String(f.task.task_id), { ...options, expected_partition: "candidate_generation" });
+    const calls: string[] = [];
+    const result = await runSessionKnowledgeCandidateOnce({ client: workerClient().client, providers: [provider], transport: modelTransport("{}", calls),
+      state_file: f.workerState, archive_options: options, read_excerpt: async () => ({ ...excerpt, source_ref: `sha256:${"f".repeat(64)}` }) });
+    assert.equal(result.status, "waiting_for_consistent_excerpt");
+    assert.equal(calls.length, 0);
+    assert.deepEqual(JSON.parse(await readFile(f.workerState, "utf8")).processed_task_ids, []);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluator isolates exact Excerpt and candidate Claim identities", async () => {
+  const f = await setup("held_out");
+  const baseExcerpt = { status: "ready", session_id: f.task.session_id, turn_id: f.task.turn_id, project_scope_id: f.task.project_scope_id,
+    source_ref: f.task.source_ref,
+    evidence_ids: f.task.verification_evidence_ids, verification_source: f.task.verification_source,
+    verification_outcome: f.task.verification_outcome } as JsonObject;
+  try {
+    for (const changes of [{ status: "ineligible" }, { session_id: "other" }, { turn_id: "other" }, { project_scope_id: "project:other" }, { source_ref: `sha256:${"f".repeat(64)}` },
+      { verification_outcome: "failed" }, { evidence_ids: [] }]) {
+      const result = await evaluate(f, workerClient().client, modelTransport("{}"), { read_excerpt: async () => ({ ...baseExcerpt, ...changes }) });
+      assert.equal(result.reason, "held_out_excerpt_unavailable");
+      assert.equal(result.status, "waiting_for_consistent_excerpt");
+      assert.deepEqual(JSON.parse(await readFile(f.workerState, "utf8")).processed_task_ids, []);
+      await rm(f.workerState, { force: true });
+    }
+    const packetResults = [
+      { status: "unavailable" },
+      { status: "ready", packet: { claim: { id: "candidate-claim", content: "缺少当前状态。" } } },
+      { status: "ready", claim_status: "revoked", packet: { claim: { id: "candidate-claim", status: "candidate", content: "旧状态不能覆盖撤销。" } } },
+      { status: "ready", claim_status: "candidate", packet: { claim: { id: "other", content: "内容。" } } },
+      { status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", content: "内容。" } } },
+      { status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", content: " " } } },
+    ];
+    for (const packetResult of packetResults) {
+      const claims = candidateClaimClient(f.task.project_scope_id, { craft_knowledge_semantic_review_packet: () => packetResult });
+      assert.equal((await evaluate(f, claims.client, modelTransport("{}"))).status, "waiting_for_candidate_claims");
+      await rm(f.workerState, { force: true });
+    }
+    const malformedPacket = candidateClaimClient(f.task.project_scope_id, { craft_knowledge_semantic_review_packet: () => ({ status: "ready", packet: [] }) });
+    await assert.rejects(evaluate(f, malformedPacket.client, modelTransport("{}")), /candidate Claim packet must be an object/u);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out task retries after a transient excerpt mismatch without an early model call", async () => {
+  const f = await setup("held_out");
+  try {
+    const claims = candidateClaimClient(f.task.project_scope_id);
+    const first = await evaluate(f, claims.client, modelTransport("{}"), { read_excerpt: async () => ({ status: "unavailable" }) });
+    assert.equal(first.status, "waiting_for_consistent_excerpt");
+    assert.equal(claims.calls.length, 0);
+    assert.deepEqual(JSON.parse(await readFile(f.workerState, "utf8")).processed_task_ids, []);
+    const recovered = await evaluate(f, claims.client, modelTransport('{"decision":"skip","expected_claim_ids":[]}'));
+    assert.equal(recovered.status, "case_skipped");
+    assert.equal(recovered.task_id, f.task.task_id);
+    assert.equal(claims.calls.filter(call => call.name === "craft_trace_start").length, 1);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluation preserves an uncertain model call for reconciliation", async () => {
+  const f = await setup("held_out");
+  try {
+    const claims = candidateClaimClient(f.task.project_scope_id); let calls = 0;
+    const transport: ModelTransport = { async complete() { calls++; throw new Error("connection ended after dispatch"); } };
+    await assert.rejects(evaluate(f, claims.client, transport), /connection ended after dispatch/u);
+    const state = JSON.parse(await readFile(f.workerState, "utf8"));
+    assert.equal(state.uncertain_calls[String(f.task.task_id)].trace_id, "trace-session-task");
+    assert.deepEqual(state.processed_task_ids, []);
+    assert.equal((await evaluate(f, claims.client, transport)).status, "waiting_for_call_reconciliation");
+    assert.equal(calls, 1);
+    for (const uncertain_calls of [null, [], { task: null }, { task: {} }, { task: { trace_id: "invalid", input_digest: `sha256:${"a".repeat(64)}` } },
+      { task: { trace_id: "trace-valid", input_digest: "invalid" } }, { " ": { trace_id: "trace-valid", input_digest: `sha256:${"a".repeat(64)}` } }]) {
+      await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1", processed_task_ids: [], uncertain_calls }));
+      await assert.rejects(evaluate(f, claims.client), /evaluation state is invalid/u);
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluation reconciles only an exact completed no-case Trace", async () => {
+  const f = await setup("held_out");
+  const store = await new CraftStore(craftPaths(join(f.root, "evaluation-trace-data"))).open();
+  try {
+    const id = String(f.task.task_id), traceId = "trace-evaluation-completed", input = `sha256:${"a".repeat(64)}`;
+    const kernel = new TraceKernel(store);
+    kernel.start({ trace_id: traceId, task_id: `knowledge:${id}`, operation_id: id });
+    const event = (event_kind: string, extra: JsonObject = {}) => kernel.append({ trace_id: traceId, event_kind,
+      actor: "knowledge-session-evaluation-worker", source: "test", operation_id: id, ...extra });
+    event("model.request", { input_refs: [input], data: { purpose: "knowledge_held_out_label", input_digest: input, source_ref: f.task.source_ref, content_stored: false }, data_digest: stableDigest({ purpose: "knowledge_held_out_label", input_digest: input, source_ref: f.task.source_ref, content_stored: false }) }); event("model.completed"); event("knowledge.evaluation_case_candidate");
+    kernel.finalize({ trace_id: traceId, status: "completed", summary: "complete" });
+    const valid = kernel.get({ trace_id: traceId }), trace = valid.trace as JsonObject, events = valid.events as JsonObject[];
+    let response: JsonObject = valid;
+    const fixture = workerClient({ craft_trace_get: () => response });
+    const run = () => evaluate(f, fixture.client);
+    const reset = () => writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1", processed_task_ids: [],
+      uncertain_calls: { [id]: { trace_id: traceId, input_digest: input } } }));
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    for (const change of [
+      { trace: { ...trace, id: "other" }, events }, { trace: { ...trace, task_id: "other" }, events },
+      { trace: { ...trace, operation_id: "other" }, events }, { trace: { ...trace, status: "running" }, events },
+      { trace, events: null }, { trace, events: [] },
+      { trace, events: events.map(e => e.event_kind === "model.request" ? { ...e, input_refs: ["wrong"] } : e) },
+      { trace, events: events.map(e => e.event_kind === "model.request" ? { ...e, data_digest: stableDigest({ source_ref: "changed" }) } : e) },
+      { trace, events: events.map(e => e.event_kind === "model.request" ? { ...e, data_digest: undefined } : e) },
+      { trace, events: events.map(e => e.event_kind === "knowledge.evaluation_case_candidate" ? { ...e, output_refs: ["case"] } : e) },
+      { trace, events: events.map(e => e.event_kind === "model.completed" ? { ...e, sequence: 0 } : e) },
+    ]) {
+      response = change; await reset(); assert.equal((await run()).status, "waiting_for_call_reconciliation");
+    }
+    response = valid; await reset();
+    const missing = await evaluate(f, fixture.client, undefined, { read_excerpt: async () => { throw new Error("missing archive"); } });
+    assert.equal(missing.status, "waiting_for_source_revalidation");
+    assert.equal(missing.reason, "archive_unavailable");
+    const changed = await evaluate(f, fixture.client, undefined, { read_excerpt: async () => ({ status: "ready", source_ref: "changed" }) });
+    assert.equal(changed.reason, "archive_changed");
+    assert.deepEqual(JSON.parse(await readFile(f.workerState, "utf8")).processed_task_ids, []);
+    const recovered = await run();
+    assert.equal(recovered.status, "completed_call_reconciled"); assert.equal(recovered.decision, "skip");
+    const state = JSON.parse(await readFile(f.workerState, "utf8"));
+    assert.deepEqual(state.processed_task_ids, [id]); assert.deepEqual(state.uncertain_calls, {});
+    assert.equal(state.trace_ids_by_task[id], traceId);
+    assert.equal(fixture.calls.some(call => call.name === "craft_trace_start"), false);
+  } finally { store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluation reconciles only a version-bound case and run", async () => {
+  const f = await setup("held_out");
+  try {
+    const id = String(f.task.task_id), traceId = "trace-evaluation-case", input = `sha256:${"a".repeat(64)}`;
+    const caseId = `knowledge_case_${"a".repeat(24)}`, evidenceId = "evidence-test", runId = "knowledge_run_test";
+    const candidates = [{ claim_id: "claim", claim_version: 1, identity_digest: "identity", content_digest: "content" }];
+    const item: JsonObject = { id: caseId, version: 1, identity_digest: "case-digest", scope: f.task.project_scope_id,
+      source_session_id: f.task.session_id, source_task_id: id, label_source: "model_candidate", dataset_partition: "held_out",
+      source_evidence_ids: [evidenceId], candidate_claim_refs: candidates };
+    const run: JsonObject = { id: runId, version: 1, identity_digest: "run-digest", mode: "candidate_shadow",
+      case_refs: [{ case_id: caseId, case_version: 1, identity_digest: "case-digest" }], candidate_claim_refs: candidates };
+    const evidence: JsonObject = { id: evidenceId, metadata: { provenance: "codex_session_program_verification", scope: f.task.project_scope_id,
+      source_session_id: f.task.session_id, task_id: id, turn_id: f.task.turn_id } };
+    const binding = stableDigest({ case_id: caseId, case_version: 1, case_identity: "case-digest", run_id: runId,
+      run_version: 1, run_identity: "run-digest", evidence_id: evidenceId });
+    const event = (event_kind: string, sequence: number, extra: JsonObject = {}) => ({ trace_id: traceId, operation_id: id,
+      actor: "knowledge-session-evaluation-worker", event_kind, sequence, ...extra });
+    const trace = { id: traceId, task_id: `knowledge:${id}`, operation_id: id, status: "completed" };
+    let refs: unknown[] = [caseId, evidenceId, runId, binding], currentCase = item, currentRun = run, currentEvidence = evidence, wrapEvidence = false, malformedList = false;
+    const fixture = workerClient({ craft_trace_get: () => ({ trace, events: [event("model.request", 1, { input_refs: [input], data: { purpose: "knowledge_held_out_label", input_digest: input, source_ref: f.task.source_ref, content_stored: false }, data_digest: stableDigest({ purpose: "knowledge_held_out_label", input_digest: input, source_ref: f.task.source_ref, content_stored: false }) }),
+      event("model.completed", 2), event("knowledge.evaluation_case_candidate", 3, { output_refs: refs })] }),
+    craft_knowledge_evaluation_case_list: () => ({ cases: malformedList ? null : [currentCase] }), craft_knowledge_evaluation_run_get: () => ({ run: currentRun }),
+    craft_evidence_get: () => wrapEvidence ? { evidence: currentEvidence } : currentEvidence });
+    const reset = () => writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1", processed_task_ids: [],
+      uncertain_calls: { [id]: { trace_id: traceId, input_digest: input } } }));
+    const attempt = () => evaluate(f, fixture.client);
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    for (const bad of [[caseId, evidenceId], ["wrong", evidenceId, runId, binding], [caseId, null, runId, binding],
+      [caseId, evidenceId, null, binding], [caseId, evidenceId, runId, null], [caseId, evidenceId, runId, "wrong"]]) {
+      refs = bad; await reset(); assert.equal((await attempt()).status, "waiting_for_call_reconciliation");
+    }
+    refs = [caseId, evidenceId, runId, binding];
+    malformedList = true; await reset(); assert.equal((await attempt()).status, "waiting_for_call_reconciliation"); malformedList = false;
+    for (const bad of [{ id: "wrong" }, { scope: "project:other" }, { source_session_id: "other" }, { source_task_id: "other" },
+      { label_source: "host_adjudicated" }, { dataset_partition: "development" }, { source_evidence_ids: [] }, { version: null }, { identity_digest: null }]) {
+      currentCase = { ...item, ...bad }; await reset(); assert.equal((await attempt()).status, "waiting_for_call_reconciliation");
+    }
+    currentCase = item;
+    for (const bad of [{ id: "wrong" }, { mode: "retrieval" }, { version: null }, { identity_digest: null }, { case_refs: [] },
+      { case_refs: [{ case_id: "other" }] }, { case_refs: [{ case_id: caseId, case_version: 2, identity_digest: "case-digest" }] },
+      { case_refs: [{ case_id: caseId, case_version: 1, identity_digest: "wrong" }] }, { candidate_claim_refs: [] }]) {
+      currentRun = { ...run, ...bad }; await reset(); assert.equal((await attempt()).status, "waiting_for_call_reconciliation");
+    }
+    currentRun = run;
+    for (const bad of [{ id: "wrong" }, { metadata: {} }, { metadata: { ...evidence.metadata as JsonObject, scope: "project:other" } },
+      { metadata: { ...evidence.metadata as JsonObject, source_session_id: "other" } },
+      { metadata: { ...evidence.metadata as JsonObject, task_id: "other" } }, { metadata: { ...evidence.metadata as JsonObject, turn_id: "other" } }]) {
+      currentEvidence = { ...evidence, ...bad }; await reset(); assert.equal((await attempt()).status, "waiting_for_call_reconciliation");
+    }
+    currentEvidence = evidence; await reset();
+    const recovered = await attempt(); assert.equal(recovered.status, "completed_call_reconciled"); assert.equal(recovered.decision, "case");
+    wrapEvidence = true; await reset(); assert.equal((await attempt()).status, "completed_call_reconciled");
+    assert.equal(fixture.calls.some(call => call.name === "craft_trace_start"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluation reconciles real MCP case, run and scoped Evidence", async () => {
+  const f = await setup("held_out");
+  const store = await new CraftStore(craftPaths(join(f.root, "evaluation-recovery-data"))).open();
+  try {
+    const service = new CraftService(store), scope = String(f.task.project_scope_id), id = String(f.task.task_id);
+    service.scopeAliasBind({ scope_kind: "project", scope_id: scope, alias_kind: "path", alias: f.project });
+    const sha = (c: string) => `sha256:${c.repeat(64)}`;
+    const saved = service.knowledgeSessionEvidenceRecord({ scope, task_id: id, source_session_id: f.task.session_id, turn_id: f.task.turn_id,
+      source_ref: f.task.source_ref, task_goal: "整理项目依赖升级的验证流程", task_result: "运行单测并检查锁文件", sanitized: true,
+      verification_artifacts: [{ runner: "javascript", command_digest: sha("b"), result_digest: sha("c"), call_digest: sha("d"),
+        exit_code: 0, summary_kind: "tests_passed", content_stored: false }] });
+    const evidence = saved.evidence as JsonObject;
+    const claim = service.knowledgeClaimSave({ claim_id: "candidate-test", kind: "rule", title: "依赖升级验证", content: "依赖升级后运行单测。",
+      scope, source_id: saved.source_id, evidence_ids: [evidence.id], tags: [] }).claim as JsonObject;
+    const candidateRefs = [{ claim_id: claim.id, claim_version: claim.version, identity_digest: claim.identity_digest, content_digest: claim.content_digest }];
+    const caseId = `knowledge_case_${"a".repeat(24)}`, input = sha("a"), traceId = "trace-real-evaluation";
+    const item = service.knowledgeEvaluationCaseSave({ case_id: caseId, query: "依赖升级验证", scope, expected_claim_ids: [claim.id],
+      source_session_id: f.task.session_id, source_task_id: id, source_evidence_ids: [evidence.id], evaluation_channel: "real_session",
+      dataset_partition: "held_out", label_source: "model_candidate", sanitized: true, candidate_claim_refs: candidateRefs }).case as JsonObject;
+    const runId = `knowledge_run_${"b".repeat(24)}`;
+    const run = service.knowledgeEvaluationRun({ run_id: runId, mode: "candidate_shadow", case_ids: [caseId], candidate_claim_ids: [claim.id] }).run as JsonObject;
+    const binding = stableDigest({ case_id: caseId, case_version: item.version, case_identity: item.identity_digest,
+      run_id: runId, run_version: run.version, run_identity: run.identity_digest, evidence_id: evidence.id });
+    const kernel = new TraceKernel(store); kernel.start({ trace_id: traceId, task_id: `knowledge:${id}`, operation_id: id });
+    const event = (event_kind: string, extra: JsonObject = {}) => kernel.append({ trace_id: traceId, event_kind,
+      actor: "knowledge-session-evaluation-worker", source: "test", operation_id: id, ...extra });
+    event("model.request", { input_refs: [input], data: { purpose: "knowledge_held_out_label", input_digest: input, source_ref: f.task.source_ref, content_stored: false }, data_digest: stableDigest({ purpose: "knowledge_held_out_label", input_digest: input, source_ref: f.task.source_ref, content_stored: false }) }); event("model.completed");
+    event("knowledge.evaluation_case_candidate", { output_refs: [caseId, evidence.id, runId, binding] });
+    kernel.finalize({ trace_id: traceId, status: "completed", summary: "complete" });
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    for (const mode of ["component-context-daily", "component-context-complete"] as const) {
+      await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1", processed_task_ids: [],
+        uncertain_calls: { [id]: { trace_id: traceId, input_digest: input } } }));
+      const server = new McpServer(service, mode); let requestId = 0; const failures: string[] = [];
+      const client: ExperienceLearningClient = { async call(name, args = {}) {
+        const response = await server.handle({ jsonrpc: "2.0", id: ++requestId, method: "tools/call", params: { name, arguments: args } });
+        if (response?.error) { failures.push(`${name}: ${String((response.error as JsonObject).message)}`); throw new Error(failures.at(-1)); }
+        const result = response?.result as JsonObject;
+        if (result.isError) { failures.push(`${name}: ${String((result.content as JsonObject[])[0]?.text)}`); throw new Error(failures.at(-1)); }
+        return result.structuredContent as JsonObject;
+      } };
+      const result = await runSessionKnowledgeEvaluationOnce({ client, state_file: f.workerState,
+        archive_options: { sessions_root: f.sessions, state_file: f.state } });
+      assert.equal(result.status, "completed_call_reconciled", JSON.stringify({ mode, requestId, failures }));
+      assert.equal(result.decision, "case"); assert.equal(requestId, 4);
+      assert.equal((service.knowledgeEvaluationRunGet({ run_id: runId }).run as JsonObject).status, "insufficient");
+    }
+  } finally { store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluator records safe Trace failure for malformed profile and Trace receipts", async () => {
+  const f = await setup("held_out");
+  try {
+    const noStatus = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_ensure_single: () => ({}) });
+    assert.equal((await evaluate(f, noStatus.client, modelTransport("{}"))).reason, "model_profile_unavailable");
+    const missingAction = candidateClaimClient(f.task.project_scope_id, { craft_evaluation_model_profile_get: () => ({ readiness: { status: "needs_enablement" } }) });
+    assert.equal((await evaluate(f, missingAction.client, modelTransport("{}"))).reason, "model_profile_not_ready");
+    const missingTraceId = candidateClaimClient(f.task.project_scope_id, { craft_trace_start: () => ({ trace: {} }) });
+    await assert.rejects(evaluate(f, missingTraceId.client, modelTransport("{}")), /Trace has no id/u);
+    const invalidTraceId = candidateClaimClient(f.task.project_scope_id, { craft_trace_start: () => ({ trace: { id: "bad-id" } }) });
+    await assert.rejects(evaluate(f, invalidTraceId.client, modelTransport("{}")), /Trace id is invalid/u);
+    let firstAppend = true;
+    const appendClient = workerClient({
+      craft_knowledge_claim_list: () => ({ claims: [{ id: "candidate-claim", status: "candidate", scope: f.task.project_scope_id }] }),
+      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "candidate", packet: { claim: { id: "candidate-claim", version: 1,
+        identity_digest: "candidate-identity", content_digest: "candidate-content", content: "有效内容" } } }),
+      craft_trace_append: args => { if (firstAppend) { firstAppend = false; throw new Error("trace append unavailable"); } return {}; },
+    });
+    await assert.rejects(evaluate(f, appendClient.client, modelTransport("{}")), /trace append unavailable/u);
+    assert(appendClient.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"));
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluation handles valid skip labels and retries malformed model responses", async () => {
+  const f = await setup("held_out");
+  try {
+    const claims = candidateClaimClient(f.task.project_scope_id);
+    const skipped = await evaluate(f, claims.client, modelTransport(JSON.stringify({ decision: "skip", expected_claim_ids: [] })));
+    assert.equal(skipped.status, "case_skipped"); assert.equal(skipped.case_id, null); assert.equal(skipped.evaluation_eligible, null);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+  const f2 = await setup("held_out");
+  try {
+    const invalid = candidateClaimClient(f2.task.project_scope_id);
+    await assert.rejects(evaluate(f2, invalid.client, modelTransport("not-json")), /one JSON object/u);
+    assert(invalid.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"));
+  } finally { await rm(f2.root, { recursive: true, force: true }); }
+});
+
+test("waits for model readiness without consuming the verified task", async () => {
+  const f = await setup();
+  try {
+    const fixture = workerClient({ craft_evaluation_model_profile_ensure_single: () => ({ status: "needs_enablement", reason: "needs_enablement" }) });
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.deepEqual(result, { status: "waiting_for_model", processed: 0, reason: "needs_enablement", raw_content_stored: false });
+    await assert.rejects(readFile(f.workerState, "utf8"), { code: "ENOENT" });
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("records an explicit no-candidate decision without creating a Claim", async () => {
+  const f = await setup();
+  try {
+    const fixture = workerClient();
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport(
+      JSON.stringify({ decision: "skip", kind: "fact", title: "", content: "", tags: [] })), state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "candidate_skipped");
+    assert.equal(fixture.calls.some(call => call.name === "craft_knowledge_claim_save"), false);
+    assert.equal(fixture.calls.some(call => call.name === "craft_trace_finalize"), true);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("rejects malformed or sensitive model candidates without advancing the task", async () => {
+  for (const output of ["not json", JSON.stringify({ decision: "candidate", kind: "fact", title: "凭据", content: "api_key=abcdefghijklmnop", tags: [] })]) {
+    const f = await setup();
+    try {
+      const fixture = workerClient();
+      await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport(output),
+        state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }));
+      assert.equal(JSON.parse(await readFile(f.workerState, "utf8")).uncertain_calls[String(f.task.task_id)].trace_id, "trace-session-task");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test("rejects a symlinked candidate state and invalid result structures", async () => {
+  const f = await setup();
+  try {
+    await mkdir(join(f.root, "other"));
+    await mkdir(join(f.root, "knowledge"));
+    const linked = join(f.root, "knowledge", "link.json");
+    await linkDirectory(join(f.root, "other"), linked);
+    const fixture = workerClient();
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"), state_file: linked,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } }), /state file is invalid/u);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("rejects malformed candidate state and refuses a symlinked state directory", async () => {
+  const f = await setup();
+  try {
+    const fixture = workerClient();
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    await writeFile(f.workerState, JSON.stringify({ schema: "wrong", processed_task_ids: [] }));
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }), /state is invalid/u);
+
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [], terminal_skips: { malformed: null } }));
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }), /state is invalid/u);
+
+    for (const uncertain_calls of [null, [], { task: null }, { task: {} }, { task: { trace_id: "invalid", input_digest: `sha256:${"a".repeat(64)}` } },
+      { task: { trace_id: "trace-valid", input_digest: "invalid" } }, { " ": { trace_id: "trace-valid", input_digest: `sha256:${"a".repeat(64)}` } }]) {
+      await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [], uncertain_calls }));
+      await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+        archive_options: { sessions_root: f.sessions, state_file: f.state } }), /state is invalid/u);
+    }
+
+    const target = join(f.root, "target"); await mkdir(target);
+    const parentLink = join(f.root, "knowledge-link");
+    await linkDirectory(target, parentLink);
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"), state_file: join(parentLink, "state.json"),
+      archive_options: { sessions_root: f.sessions, state_file: f.state } }), /must not be a symbolic link/u);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("excludes a verified task missing project evidence metadata before model work", async () => {
+  const f = await setup("candidate_generation", false);
+  try {
+    const index = JSON.parse(await readFile(f.state, "utf8")) as JsonObject;
+    const task = Object.values(index.tasks as Record<string, JsonObject>)[0]!;
+    delete task.context_receipt_id; delete task.verification_ref_digest; delete task.terminal_identity_digest;
+    await writeFile(f.state, JSON.stringify(index));
+    const batch = await codexSessionTaskBatch("candidate_generation", { state_file: f.state });
+    assert.equal((batch.tasks as JsonObject[]).length, 0);
+    assert.equal(batch.excluded_incomplete_context_provenance, 1);
+    const fixture = workerClient();
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.deepEqual(result, { status: "idle", processed: 0, verified_candidates_pending: 0, raw_content_stored: false });
+    assert.equal(fixture.calls.length, 0);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("keeps a source that changes after indexing pending with a content-free cursor", async () => {
+  const f = await setup();
+  try {
+    const file = join(f.sessions, "session.jsonl");
+    const current = await readFile(file, "utf8");
+    await writeFile(file, current.replace("单测并检查锁文件", "单测并核对锁文件"));
+    const fixture = workerClient();
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.deepEqual(result, { status: "waiting_for_consistent_excerpt", processed: 0, reason: "verified_task_excerpt_unavailable", raw_content_stored: false });
+    assert.equal(fixture.calls.length, 0);
+    const saved = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    assert.deepEqual(saved.processed_task_ids, []);
+    assert.equal(saved.last_unavailable_task_id, f.task.task_id);
+    assert.deepEqual(saved.terminal_skips, {});
+    await writeFile(file, current);
+    // The worker collects before it generates candidates; that collection clears the
+    // pending source recheck once the source matches its recorded digest again.
+    await runCodexSessionCollectionOnce({ sessions_root: f.sessions, state_file: f.state });
+    const recovered = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider],
+      transport: modelTransport('{"decision":"skip"}'), state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(recovered.status, "candidate_skipped");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("candidate generation rotates past a temporarily unavailable task", async () => {
+  const f = await setup("candidate_generation", false, false, true);
+  try {
+    let secondSession = "candidate-fairness";
+    while (Number.parseInt(createHash("sha256").update(secondSession).digest("hex").slice(0, 8), 16) % 5 === 0) secondSession += "x";
+    await writeFile(join(f.sessions, "second.jsonl"), (await readFile(f.source, "utf8")).replaceAll(f.sessionId, secondSession));
+    await runCodexSessionCollectionOnce({ sessions_root: f.sessions, state_file: f.state });
+    const tasks = (await codexSessionTaskBatch("candidate_generation", { state_file: f.state })).tasks as JsonObject[];
+    assert.equal(tasks.length, 2);
+    const blockedId = String(tasks[0]!.task_id);
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [blockedId],
+      terminal_skips: { [blockedId]: { source_ref_digest: stableDigest("old-source"), reason_code: "verified_project_evidence_incomplete", recorded_at: "2026-10-20T00:00:00Z" } },
+      trace_ids_by_task: { [blockedId]: "trace-existing" } }));
+    const partialClient = workerClient({ craft_evaluation_model_profile_ensure_single: () => ({ status: "unavailable" }) });
+    const partial = await runSessionKnowledgeCandidateOnce({ client: partialClient.client, state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(partial.status, "waiting_for_model");
+    assert.equal(partial.blocked_skips, 1);
+    assert.equal(partialClient.calls.some(call => call.name === "craft_trace_start"), false);
+    await rm(f.workerState, { force: true });
+    const fixture = workerClient();
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    const run = () => runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport('{"decision":"skip"}'),
+      state_file: f.workerState, archive_options: options, read_excerpt: async (id, opts, env) => id === tasks[0]!.task_id
+        ? { status: "unavailable" } : readCodexSessionTaskExcerpt(id, opts, env) });
+    assert.equal((await run()).status, "waiting_for_consistent_excerpt");
+    assert.equal(fixture.calls.length, 0);
+    const second = await run();
+    assert.equal(second.task_id, tasks[1]!.task_id);
+    assert.equal(second.status, "candidate_skipped");
+    const state = JSON.parse(await readFile(f.workerState, "utf8"));
+    assert.deepEqual(state.processed_task_ids, [tasks[1]!.task_id]);
+    assert.equal((await run()).status, "waiting_for_consistent_excerpt");
+    assert.equal(fixture.calls.filter(call => call.name === "craft_trace_start").length, 1);
+    for (const cursor of [null, 1, "", " ", "x".repeat(161)]) {
+      await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [], last_unavailable_task_id: cursor }));
+      await assert.rejects(run(), /candidate state is invalid/u);
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("candidate generation retains an unknown model result instead of repeating the external call", async () => {
+  const f = await setup();
+  try {
+    const fixture = workerClient(); let calls = 0;
+    const transport: ModelTransport = { async complete() { calls++; throw new Error("connection ended after dispatch"); } };
+    const run = () => runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport,
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    await assert.rejects(run(), /connection ended after dispatch/u);
+    const state = JSON.parse(await readFile(f.workerState, "utf8"));
+    assert.equal(state.uncertain_calls[String(f.task.task_id)].trace_id, "trace-session-task");
+    assert.deepEqual(state.processed_task_ids, []);
+    assert.equal((await run()).status, "waiting_for_call_reconciliation");
+    assert.equal((await run()).reason, "model_result_unknown");
+    assert.equal(calls, 1);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("candidate generation reconciles only an exact completed no-candidate Trace", async () => {
+  const f = await setup();
+  try {
+    const id = String(f.task.task_id), traceId = "trace-completed", input = `sha256:${"a".repeat(64)}`;
+    const event = (event_kind: string, sequence: number, extra: JsonObject = {}) => ({ trace_id: traceId, operation_id: id,
+      actor: "knowledge-session-candidate-worker", event_kind, sequence, ...extra });
+    const trace = { id: traceId, task_id: `knowledge:${id}`, operation_id: id, status: "completed" };
+    const events = [event("model.request", 1, { input_refs: [input], data: { purpose: "knowledge_session_candidate_generation", input_digest: input, source_ref: f.task.source_ref, content_stored: false }, data_digest: stableDigest({ purpose: "knowledge_session_candidate_generation", input_digest: input, source_ref: f.task.source_ref, content_stored: false }) }), event("model.completed", 2),
+      event("knowledge.candidate_skipped", 3, { output_refs: [] })];
+    let response: JsonObject = { trace, events };
+    const fixture = workerClient({ craft_trace_get: () => response });
+    const run = () => runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    const reset = () => writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [],
+      uncertain_calls: { [id]: { trace_id: traceId, input_digest: input } } }));
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    for (const change of [
+      { trace: { ...trace, id: "other" }, events }, { trace: { ...trace, task_id: "other" }, events },
+      { trace: { ...trace, operation_id: "other" }, events }, { trace: { ...trace, status: "running" }, events },
+      { trace, events: null }, { trace, events: [] }, { trace, events: [events[0], events[1], events[2], event("knowledge.candidate_created", 4)] },
+      { trace, events: [event("model.request", 1, { input_refs: ["wrong"] }), events[1], events[2]] },
+      { trace, events: [event("model.request", 1, { input_refs: [input], data: { source_ref: "changed" } }), events[1], events[2]] },
+      { trace, events: [event("model.request", 1, { input_refs: [input] }), events[1], events[2]] },
+      { trace, events: [events[0], events[1], event("knowledge.candidate_skipped", 3, { output_refs: ["unexpected"] })] },
+      { trace, events: [events[0], event("model.completed", 0), events[2]] },
+    ]) {
+      response = change; await reset(); assert.equal((await run()).status, "waiting_for_call_reconciliation");
+    }
+    response = { trace, events }; await reset();
+    for (const read_excerpt of [async () => { throw new Error("missing archive"); }, async () => ({ status: "ready", source_ref: "changed" })]) {
+      const waiting = await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+        archive_options: { sessions_root: f.sessions, state_file: f.state }, read_excerpt });
+      assert.equal(waiting.status, "waiting_for_source_revalidation");
+      assert.deepEqual(JSON.parse(await readFile(f.workerState, "utf8")).processed_task_ids, []);
+    }
+    const recovered = await run();
+    assert.equal(recovered.status, "completed_call_reconciled");
+    const state = JSON.parse(await readFile(f.workerState, "utf8"));
+    assert.deepEqual(state.processed_task_ids, [id]);
+    assert.deepEqual(state.uncertain_calls, {});
+    assert.equal(state.trace_ids_by_task[id], traceId);
+    assert.equal(fixture.calls.some(call => call.name === "craft_trace_start"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("candidate generation keeps an unbound saved revision uncertain", async () => {
+  const f = await setup();
+  try {
+    const fixture = workerClient({ craft_knowledge_claim_save: args => ({ claim: { id: args.claim_id } }) });
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider],
+      transport: modelTransport(JSON.stringify({ decision: "candidate", kind: "fact", title: "依赖升级验证", content: "依赖升级后运行单测。", tags: [] })),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }), /lacks exact revision binding/u);
+    assert.equal((await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "waiting_for_call_reconciliation");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("candidate reconciliation reads an actual persisted Trace without another model call", async () => {
+  const f = await setup();
+  const store = await new CraftStore(craftPaths(join(f.root, "trace-data"))).open();
+  try {
+    const kernel = new TraceKernel(store), id = String(f.task.task_id), traceId = "trace-persisted", input = `sha256:${"a".repeat(64)}`;
+    kernel.start({ trace_id: traceId, task_id: `knowledge:${id}`, operation_id: id });
+    const event = (event_kind: string, extra: JsonObject = {}) => kernel.append({ trace_id: traceId, event_kind,
+      actor: "knowledge-session-candidate-worker", source: "test", operation_id: id, ...extra });
+    event("model.request", { input_refs: [input], data: { purpose: "knowledge_session_candidate_generation", input_digest: input, source_ref: f.task.source_ref, content_stored: false }, data_digest: stableDigest({ purpose: "knowledge_session_candidate_generation", input_digest: input, source_ref: f.task.source_ref, content_stored: false }) }); event("model.completed"); event("knowledge.candidate_skipped");
+    kernel.finalize({ trace_id: traceId, status: "completed", summary: "complete" });
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [],
+      uncertain_calls: { [id]: { trace_id: traceId, input_digest: input } } }));
+    const fixture = workerClient({ craft_trace_get: args => kernel.get(args) });
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "completed_call_reconciled");
+    assert.deepEqual(fixture.calls.map(call => call.name), ["craft_trace_get"]);
+  } finally { store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("candidate reconciliation requires exact revision and scoped Evidence", async () => {
+  const f = await setup();
+  try {
+    const id = String(f.task.task_id), traceId = "trace-created", input = `sha256:${"a".repeat(64)}`;
+    const claimId = `knowledge_claim_${stableDigest(id).slice(-24)}`, evidenceId = "evidence-created";
+    const claim: JsonObject = { id: claimId, version: 1, scope: f.task.project_scope_id, source_id: "source",
+      identity_digest: "identity", content_digest: "content", evidence_ids: [evidenceId] };
+    const evidence: JsonObject = { id: evidenceId, source_id: "source", metadata: { provenance: "codex_session_program_verification",
+      scope: f.task.project_scope_id, source_session_id: f.task.session_id, task_id: id, turn_id: f.task.turn_id } };
+    const binding = stableDigest({ claim_id: claimId, claim_version: 1, identity_digest: "identity", content_digest: "content",
+      scope: f.task.project_scope_id, evidence_id: evidenceId });
+    const event = (event_kind: string, sequence: number, extra: JsonObject = {}) => ({ trace_id: traceId, operation_id: id,
+      actor: "knowledge-session-candidate-worker", event_kind, sequence, ...extra });
+    const trace = { id: traceId, task_id: `knowledge:${id}`, operation_id: id, status: "completed" };
+    let refs: unknown[] = [claimId, evidenceId, binding], currentClaim = claim, currentEvidence = evidence;
+    const fixture = workerClient({ craft_trace_get: () => ({ trace, events: [event("model.request", 1, { input_refs: [input], data: { purpose: "knowledge_session_candidate_generation", input_digest: input, source_ref: f.task.source_ref, content_stored: false }, data_digest: stableDigest({ purpose: "knowledge_session_candidate_generation", input_digest: input, source_ref: f.task.source_ref, content_stored: false }) }),
+      event("model.completed", 2), event("knowledge.candidate_created", 3, { output_refs: refs })] }),
+    craft_knowledge_claim_get: () => ({ claim: currentClaim }), craft_evidence_get: () => ({ evidence: currentEvidence }) });
+    const reset = () => writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [],
+      uncertain_calls: { [id]: { trace_id: traceId, input_digest: input } } }));
+    const run = () => runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    for (const bad of [[], [claimId, evidenceId], ["wrong", evidenceId, binding], [claimId, null, binding], [claimId, evidenceId, null], [claimId, evidenceId, "wrong"]]) {
+      refs = bad; await reset(); assert.equal((await run()).status, "waiting_for_call_reconciliation");
+    }
+    refs = [claimId, evidenceId, binding];
+    for (const bad of [{ id: "wrong" }, { scope: "project:other" }, { version: null }, { evidence_ids: [] },
+      { identity_digest: null }, { content_digest: null }, { version: 2 }]) {
+      currentClaim = { ...claim, ...bad }; await reset(); assert.equal((await run()).status, "waiting_for_call_reconciliation");
+    }
+    currentClaim = claim;
+    for (const bad of [{ id: "wrong" }, { source_id: "wrong" }, { metadata: {} },
+      { metadata: { ...evidence.metadata as JsonObject, scope: "project:other" } },
+      { metadata: { ...evidence.metadata as JsonObject, source_session_id: "other" } },
+      { metadata: { ...evidence.metadata as JsonObject, task_id: "other" } },
+      { metadata: { ...evidence.metadata as JsonObject, turn_id: "other" } }]) {
+      currentEvidence = { ...evidence, ...bad }; await reset(); assert.equal((await run()).status, "waiting_for_call_reconciliation");
+    }
+    currentEvidence = evidence; await reset();
+    const recovered = await run();
+    assert.equal(recovered.status, "completed_call_reconciled"); assert.equal(recovered.decision, "candidate");
+    assert.equal(fixture.calls.some(call => call.name === "craft_trace_start"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("candidate reconciliation reads real MCP Claim and Evidence with a persisted Trace", async () => {
+  const f = await setup();
+  const store = await new CraftStore(craftPaths(join(f.root, "real-recovery-data"))).open();
+  try {
+    const service = new CraftService(store), scope = String(f.task.project_scope_id), id = String(f.task.task_id);
+    service.scopeAliasBind({ scope_kind: "project", scope_id: scope, alias_kind: "path", alias: f.project });
+    const sha = (c: string) => `sha256:${c.repeat(64)}`;
+    const saved = service.knowledgeSessionEvidenceRecord({ scope, task_id: id, source_session_id: f.task.session_id, turn_id: f.task.turn_id,
+      source_ref: f.task.source_ref, task_goal: "整理项目依赖升级的验证流程", task_result: "运行单测并检查锁文件", sanitized: true,
+      verification_artifacts: [{ runner: "javascript", command_digest: sha("b"), result_digest: sha("c"), call_digest: sha("d"),
+        exit_code: 0, summary_kind: "tests_passed", content_stored: false }] });
+    const evidence = saved.evidence as JsonObject, claimId = `knowledge_claim_${stableDigest(id).slice(-24)}`;
+    const claim = service.knowledgeClaimSave({ claim_id: claimId, kind: "rule", title: "依赖升级验证", content: "依赖升级后运行单测。",
+      scope, source_id: saved.source_id, evidence_ids: [evidence.id], tags: [] }).claim as JsonObject;
+    const input = sha("a"), traceId = "trace-real-candidate", kernel = new TraceKernel(store);
+    const binding = stableDigest({ claim_id: claim.id, claim_version: claim.version, identity_digest: claim.identity_digest,
+      content_digest: claim.content_digest, scope: claim.scope, evidence_id: evidence.id });
+    kernel.start({ trace_id: traceId, task_id: `knowledge:${id}`, operation_id: id });
+    const event = (event_kind: string, extra: JsonObject = {}) => kernel.append({ trace_id: traceId, event_kind,
+      actor: "knowledge-session-candidate-worker", source: "test", operation_id: id, ...extra });
+    event("model.request", { input_refs: [input], data: { purpose: "knowledge_session_candidate_generation", input_digest: input, source_ref: f.task.source_ref, content_stored: false }, data_digest: stableDigest({ purpose: "knowledge_session_candidate_generation", input_digest: input, source_ref: f.task.source_ref, content_stored: false }) }); event("model.completed");
+    event("knowledge.candidate_created", { output_refs: [claimId, evidence.id, binding] });
+    kernel.finalize({ trace_id: traceId, status: "completed", summary: "complete" });
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    for (const mode of ["component-context-daily", "component-context-complete"] as const) {
+      await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [],
+        uncertain_calls: { [id]: { trace_id: traceId, input_digest: input } } }));
+      const server = new McpServer(service, mode); let requestId = 0; const failures: string[] = [];
+      const client: ExperienceLearningClient = { async call(name, args = {}) {
+        const response = await server.handle({ jsonrpc: "2.0", id: ++requestId, method: "tools/call", params: { name, arguments: args } });
+        const result = response?.result as JsonObject;
+        if (result.isError) { failures.push(`${name}: ${String((result.content as JsonObject[])[0]?.text)}`); throw new Error(failures.at(-1)); }
+        return result.structuredContent as JsonObject;
+      } };
+      const result = await runSessionKnowledgeCandidateOnce({ client, state_file: f.workerState,
+        archive_options: { sessions_root: f.sessions, state_file: f.state } });
+      assert.equal(result.status, "completed_call_reconciled", JSON.stringify({ mode, requestId, failures })); assert.equal(result.decision, "candidate");
+      assert.equal(requestId, 3);
+    }
+  } finally { store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("keeps pending tasks when model profile, provider, or shared call budget is unavailable", async () => {
+  const scenarios: Array<{ client: Record<string, (args: JsonObject) => JsonObject>; providers?: readonly ModelProviderSpec[]; expected: string }> = [
+    { client: { craft_evaluation_model_profile_get: () => ({ readiness: { status: "not_ready", next_action: "set_profile" } }) }, expected: "set_profile" },
+    { client: { craft_evaluation_model_profile_get: () => ({ readiness: { status: "not_ready" } }) }, expected: "model_profile_not_ready" },
+    { client: { craft_evaluation_model_profile_ensure_single: () => ({ status: "not_ready" }) }, expected: "model_profile_not_ready" },
+    { client: { craft_evaluation_model_profile_ensure_single: () => ({ status: "ready_for_adapter" }) }, expected: "model_profile_unavailable" },
+    { client: {}, providers: [], expected: "provider_unavailable" },
+  ];
+  for (const scenario of scenarios) {
+    const f = await setup();
+    try {
+      const fixture = workerClient(scenario.client);
+      const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: scenario.providers ?? [provider], transport: modelTransport("{}"),
+        state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+      assert.equal(result.status, "waiting_for_model"); assert.equal(result.reason, scenario.expected);
+      await assert.rejects(readFile(f.workerState, "utf8"), { code: "ENOENT" });
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+  const f = await setup();
+  try {
+    const fixture = workerClient();
+    const budgetTransport: ModelTransport = { acquireCall: () => false, async complete() { throw new Error("must not call model"); } };
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: budgetTransport,
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "waiting_for_budget");
+    assert.equal(fixture.calls.some(call => call.name === "craft_trace_start"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("supports a provider returned with its ready Host Profile and sets structured output for Codex CLI", async () => {
+  const f = await setup();
+  try {
+    const hostProvider = { ...provider, provider: "codex-cli", host_managed_auth: true } as ModelProviderSpec;
+    const fixture = workerClient({ craft_evaluation_model_profile_ensure_single: () => ({ status: "ready_for_adapter",
+      profile: { id: "profile", version: 1, provider: "codex-cli", model: "host-model" } }),
+    craft_evaluation_model_profile_get: () => ({ readiness: { status: "ready_for_adapter" }, provider: hostProvider as unknown as JsonObject }) });
+    let schema: unknown;
+    const transport: ModelTransport = { async complete(_spec, request): Promise<ChatResult> {
+      schema = request.body.codex_output_schema;
+      return { text: JSON.stringify({ decision: "skip", kind: "fact", title: "", content: "", tags: [] }), model: "host-model", usage: { input_tokens: 1, output_tokens: 1 } };
+    } };
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, transport, providers: [], state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "candidate_skipped");
+    assert.deepEqual(schema, { type: "object", properties: {
+      decision: { type: "string", enum: ["candidate", "skip"] }, kind: { type: "string", enum: ["fact", "rule", "decision", "term", "failure_mode"] },
+      title: { type: "string", maxLength: 160 }, content: { type: "string", maxLength: 2_000 }, tags: { type: "array", items: { type: "string", maxLength: 48 }, maxItems: 8 },
+    }, required: ["decision", "kind", "title", "content", "tags"], additionalProperties: false });
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("uses Craft data root and built-in Host provider defaults, and waits when no transport is available", async () => {
+  const f = await setup();
+  try {
+    const data = join(f.root, "craft-data");
+    const fixture = workerClient({ craft_evaluation_model_profile_ensure_single: () => ({ status: "ready_for_adapter",
+      profile: { id: "profile", version: 1, provider: "codex-cli", model: "gpt-6-luna" } }) });
+    const defaultTransport: ModelTransport = { async complete(spec, request): Promise<ChatResult> {
+      assert.equal(spec.provider, "codex-cli");
+      assert.ok(request.body.codex_output_schema);
+      return { text: JSON.stringify({ decision: "skip", kind: "fact", title: "", content: "", tags: [] }), model: "gpt-6-luna", usage: { input_tokens: 1, output_tokens: 1 } };
+    } };
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, transport: defaultTransport, env: { CRAFT_DATA_DIR: data },
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "candidate_skipped");
+    assert.equal((await readFile(join(data, "knowledge", "session-candidate-state.json"), "utf8")).includes(String(f.task.task_id)), true);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+
+  const missingTransport = await setup();
+  try {
+    const fixture = workerClient({ craft_evaluation_model_profile_ensure_single: () => ({ status: "ready_for_adapter",
+      profile: { id: "profile", version: 1, provider: "test", model: "test-model" } }) });
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], state_file: missingTransport.workerState,
+      archive_options: { sessions_root: missingTransport.sessions, state_file: missingTransport.state } });
+    assert.deepEqual(result, { status: "waiting_for_model", processed: 0, reason: "model_transport_unavailable", raw_content_stored: false });
+  } finally { await rm(missingTransport.root, { recursive: true, force: true }); }
+});
+
+test("rejects invalid structured candidates and malformed Trace responses", async () => {
+  const invalidOutputs = ["[]", JSON.stringify({ decision: "unknown", kind: "fact", title: "标题", content: "正文足够长。", tags: [] }),
+    JSON.stringify({ decision: "candidate", kind: "other", title: "标题", content: "正文足够长。", tags: [] }),
+    JSON.stringify({ decision: "candidate", kind: "fact", title: "", content: "正文足够长。", tags: [] }),
+    JSON.stringify({ decision: "candidate", kind: "fact", title: "标题", content: "正文足够长。", tags: "invalid" })];
+  for (const output of invalidOutputs) {
+    const f = await setup();
+    try {
+      const fixture = workerClient();
+      await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport(output),
+        state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }));
+      assert.equal(JSON.parse(await readFile(f.workerState, "utf8")).uncertain_calls[String(f.task.task_id)].trace_id, "trace-session-task");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+  const f = await setup();
+  try {
+    const fixture = workerClient({ craft_trace_start: () => ({ trace: {} }) });
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }), /Trace has no id/u);
+    const malformed = workerClient({ craft_trace_start: () => ({ trace: { id: "bad-trace-id" } }) });
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: malformed.client, providers: [provider], transport: modelTransport("{}"),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }), /Trace id is invalid/u);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("records a sanitized failed Trace and retains uncertain calls for reconciliation", async () => {
+  for (const errorName of ["TypeError", "private/path"]) {
+    const f = await setup();
+    try {
+      const fixture = workerClient();
+      const failure = new Error("private provider response"); failure.name = errorName;
+      const transport: ModelTransport = { async complete() { throw failure; } };
+      await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport, state_file: f.workerState,
+        archive_options: { sessions_root: f.sessions, state_file: f.state } }));
+      const failureEvent = fixture.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.failed");
+      assert.equal((failureEvent?.args.data as JsonObject).failure_kind, errorName === "TypeError" ? "TypeError" : "Error");
+      assert.equal(JSON.stringify(fixture.calls).includes("private provider response"), false);
+      assert.equal(fixture.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"), true);
+      assert.equal(JSON.parse(await readFile(f.workerState, "utf8")).uncertain_calls[String(f.task.task_id)].trace_id, "trace-session-task");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+  const missingEvidenceCase = await setup();
+  try {
+    const missingEvidence = workerClient();
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: missingEvidence.client, providers: [provider],
+      transport: modelTransport(JSON.stringify({ decision: "candidate", kind: "rule", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: [] })),
+      record_verification_evidence: async () => null,
+      state_file: missingEvidenceCase.workerState, archive_options: { sessions_root: missingEvidenceCase.sessions, state_file: missingEvidenceCase.state } }), /verified test Evidence is unavailable/u);
+    assert.equal(missingEvidence.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"), true);
+    assert.equal(JSON.parse(await readFile(missingEvidenceCase.workerState, "utf8")).uncertain_calls[String(missingEvidenceCase.task.task_id)].trace_id, "trace-session-task");
+  } finally { await rm(missingEvidenceCase.root, { recursive: true, force: true }); }
+  const f = await setup();
+  try {
+    const fixture = workerClient();
+    const transport: ModelTransport = { async complete() { throw "private string failure"; } };
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport, state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } }));
+    const failureEvent = fixture.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.failed");
+    assert.equal((failureEvent?.args.data as JsonObject).failure_kind, "Error");
+    assert.equal(JSON.stringify(fixture.calls).includes("private string failure"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+
+test("held-out tasks rotate past waiting projects without discarding pending work", async () => {
+  const f = await setup("held_out", false, false, true);
+  try {
+    let secondSession = "held-out-fairness";
+    while (Number.parseInt(createHash("sha256").update(secondSession).digest("hex").slice(0, 8), 16) % 5 !== 0) secondSession += "x";
+    const second = (await readFile(f.source, "utf8")).replaceAll(f.sessionId, secondSession);
+    await writeFile(join(f.sessions, "second.jsonl"), second);
+    await runCodexSessionCollectionOnce({ sessions_root: f.sessions, state_file: f.state });
+    const batch = await codexSessionTaskBatch("held_out", { state_file: f.state });
+    const tasks = batch.tasks as JsonObject[];
+    assert.equal(tasks.length, 2);
+    const noClaims = workerClient({ craft_knowledge_claim_list: () => ({ claims: [] }) });
+    const waiting = await evaluate(f, noClaims.client);
+    assert.equal(waiting.status, "waiting_for_terminal_outcome", JSON.stringify(waiting));
+    let state = JSON.parse(await readFile(f.workerState, "utf8"));
+    assert.equal(state.last_attempted_task_id, tasks[0]!.task_id);
+    assert.deepEqual(state.processed_task_ids, []);
+    await reconcileCodexSessionTaskEvidence([{ evidence_id: "second-terminal-evidence", session_id: tasks[1]!.session_id,
+      turn_id: tasks[1]!.turn_id, context_receipt_id: "second-receipt", verification_ref_digest: `sha256:${"a".repeat(64)}`,
+      terminal_identity_digest: `sha256:${"b".repeat(64)}`, verification_outcome: "passed", verified: true, content_stored: false }],
+    { state_file: f.state });
+    const ready = candidateClaimClient(f.task.project_scope_id);
+    const result = await evaluate(f, ready.client, modelTransport('{"decision":"skip","expected_claim_ids":[]}'));
+    assert.equal(result.task_id, tasks[1]!.task_id);
+    assert.equal(result.status, "case_skipped");
+    state = JSON.parse(await readFile(f.workerState, "utf8"));
+    assert.deepEqual(state.processed_task_ids, [tasks[1]!.task_id]);
+    assert.equal((await evaluate(f, noClaims.client)).status, "waiting_for_terminal_outcome");
+    assert.equal(JSON.parse(await readFile(f.workerState, "utf8")).last_attempted_task_id, tasks[0]!.task_id);
+    assert.equal(ready.calls.filter(call => call.name === "craft_trace_start").length, 1);
+    assert.equal(noClaims.calls.some(call => call.name === "craft_evaluation_model_profile_ensure_single"), false);
+    for (const cursor of [null, 1, "", " ", "x".repeat(161)]) {
+      await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1", processed_task_ids: [], last_attempted_task_id: cursor }));
+      await assert.rejects(evaluate(f, noClaims.client), /state is invalid/u);
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("legacy processed held-out tasks with unknown outcome remain visible without model calls", async () => {
+  const f = await setup("held_out", false, false, true);
+  try {
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1",
+      processed_task_ids: [f.task.task_id], trace_ids_by_task: { [String(f.task.task_id)]: "trace-legacy" } }));
+    const fixture = workerClient();
+    const result = await evaluate(f, fixture.client, modelTransport("{}"));
+    assert.equal(result.status, "waiting_for_legacy_outcome_evidence");
+    assert.equal(result.processed, 0);
+    assert.equal(result.legacy_unknown_outcomes, 1);
+    assert.equal(fixture.calls.length, 0);
+    const state = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    assert.equal(state.legacy_unknown_outcomes, 1);
+    assert.deepEqual(state.processed_task_ids, [f.task.task_id]);
+    assert.equal((state.trace_ids_by_task as JsonObject)[String(f.task.task_id)], "trace-legacy");
+    const priorState = await readFile(f.workerState, "utf8");
+    assert.equal((await evaluate(f, fixture.client, modelTransport("{}"))).status, "waiting_for_legacy_outcome_evidence");
+    assert.equal(await readFile(f.workerState, "utf8"), priorState, "an unchanged diagnostic must not rewrite state");
+    await reconcileCodexSessionTaskEvidence([{ evidence_id: "legacy-terminal", session_id: f.task.session_id, turn_id: f.task.turn_id,
+      context_receipt_id: "legacy-receipt", verification_ref_digest: `sha256:${"a".repeat(64)}`,
+      terminal_identity_digest: `sha256:${"b".repeat(64)}`, verification_outcome: "passed", verified: true, content_stored: false }], { state_file: f.state });
+    assert.equal((await evaluate(f, fixture.client, modelTransport("{}"))).status, "idle");
+    assert.equal((JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject).legacy_unknown_outcomes, 0);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("legacy unknown outcomes and missing traces are both reported without replay", async () => {
+  const f = await setup("held_out", false, false, true);
+  try {
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1", processed_task_ids: [f.task.task_id] }));
+    const fixture = workerClient();
+    const result = await evaluate(f, fixture.client, modelTransport("{}"));
+    assert.equal(result.status, "waiting_for_legacy_outcome_evidence");
+    assert.equal(result.legacy_unknown_outcomes, 1);
+    assert.equal(result.legacy_untraced_tasks, 1);
+    assert.equal(fixture.calls.length, 0);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("legacy processed tasks without a Trace remain visible without replaying an unknown call", async () => {
+  const f = await setup("held_out");
+  try {
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1", processed_task_ids: [f.task.task_id] }));
+    const fixture = workerClient();
+    const result = await evaluate(f, fixture.client, modelTransport("{}"));
+    assert.equal(result.status, "waiting_for_legacy_trace_reconciliation");
+    assert.equal(result.legacy_untraced_tasks, 1);
+    assert.equal(fixture.calls.length, 0);
+    const saved = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    assert.deepEqual(saved.processed_task_ids, [f.task.task_id]);
+    assert.equal(saved.legacy_untraced_tasks, 1);
+    const store = await new CraftStore(craftPaths(f.root)).open();
+    try {
+      await writeFile(join(store.paths.knowledgeDir, "session-evaluation-state.json"), JSON.stringify(saved));
+      const diagnostic = new ComponentReadinessKernel(store);
+      const projection = (diagnostic.diagnose({ component: "knowledge" }).observability as JsonObject).learning_evaluation as JsonObject;
+      assert.equal(projection.legacy_untraced_tasks, 1);
+      assert.equal(projection.legacy_untraced_scope, "processed_state");
+    } finally { store.close(); }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("locked learning pass makes legacy wait visible through component diagnosis", async () => {
+  const f = await setup("held_out", false, false, true);
+  const store = await new CraftStore(craftPaths(f.root)).open();
+  let release: (() => Promise<void>) | null = null;
+  try {
+    const statePath = join(store.paths.knowledgeDir, "session-evaluation-state.json");
+    await mkdir(store.paths.knowledgeDir, { recursive: true });
+    await writeFile(statePath, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1",
+      processed_task_ids: [f.task.task_id], trace_ids_by_task: { [String(f.task.task_id)]: "trace-legacy" } }));
+    release = await acquireLearningWorkerLocks(store.paths.runtimeDir, ["knowledge"]);
+    assert.ok(release);
+    assert.equal(await acquireLearningWorkerLocks(store.paths.runtimeDir, ["knowledge"]), null);
+    const fixture = workerClient();
+    const result = await runSessionKnowledgeEvaluationOnce({ client: fixture.client, env: { CRAFT_DATA_DIR: f.root },
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.legacy_unknown_outcomes, 1);
+    assert.equal(fixture.calls.length, 0);
+    const diagnostic = new ComponentReadinessKernel(store).diagnose({ component: "knowledge" });
+    const status = (diagnostic.observability as JsonObject).learning_evaluation as JsonObject;
+    assert.equal(status.status, "last_recorded");
+    assert.equal(status.legacy_unknown_outcomes, 1);
+    assert.equal(JSON.stringify(status).includes(String(f.task.task_id)), false);
+    await release(); release = null;
+    const replacement = await acquireLearningWorkerLocks(store.paths.runtimeDir, ["knowledge"]);
+    assert.ok(replacement); await replacement();
+  } finally {
+    if (release) await release();
+    store.close(); await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("a generator reply that is not one JSON object fails the pass without storing raw text", async () => {
+  // The transcript path needs no Context receipt, so it reaches the model turn.
+  const f = await setup("candidate_generation", false, false, true);
+  try {
+    const fixture = workerClient({ craft_knowledge_session_evidence_record: () => ({
+      evidence: { id: "evidence-session-program", source_id: "source-session", fragment_id: "fragment-session" },
+      source_id: "source-session", fragment_id: "fragment-session", sanitized_content_stored: true,
+      raw_content_stored: false, transcript_check: { status: "transcript_matched", verification_outcome: null },
+    }) });
+    const transport = modelTransport("not json at all");
+    await assert.rejects(runSessionKnowledgeCandidateOnce({
+      client: fixture.client, providers: [provider], transport,
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state },
+    }), /must return one JSON object/u);
+    // The failure is recorded with a bounded failure kind, never the raw reply.
+    const failure = fixture.calls.filter(call => call.name === "craft_trace_append")
+      .find(call => (call.args as JsonObject).event_kind === "model.failed")!;
+    assert.equal((failure.args.data as JsonObject).failure_kind, "Error");
+    assert.equal(JSON.stringify(fixture.calls).includes("not json at all"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("a fenced JSON reply is accepted and a plain fenced block still parses", async () => {
+  const f = await setup("candidate_generation", false, false, true);
+  try {
+    const fixture = workerClient({ craft_knowledge_session_evidence_record: () => ({
+      evidence: { id: "evidence-session-program", source_id: "source-session", fragment_id: "fragment-session" },
+      source_id: "source-session", fragment_id: "fragment-session", sanitized_content_stored: true,
+      raw_content_stored: false, transcript_check: { status: "verified" },
+    }) });
+    const fenced = "```json\n" + JSON.stringify({ decision: "skip" }) + "\n```";
+    const result = await runSessionKnowledgeCandidateOnce({
+      client: fixture.client, providers: [provider], transport: modelTransport(fenced),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state },
+    });
+    assert.equal(result.status, "candidate_skipped");
+    assert.equal(JSON.stringify(result).includes("```"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+

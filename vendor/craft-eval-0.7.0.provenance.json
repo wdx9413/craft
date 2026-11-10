@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "local_development_package",
+  "package": "craft-eval",
+  "version": "0.7.0",
+  "created_at": "2026-11-08T03:29:36.728Z",
+  "sha256": "3cab1a287e299f1d5c72b51e38cd4c0ee4fd7c8e38bfb5377af129d02b01bb72",
+  "integrity": "sha512-LsY29dBNRnIO5UPs6SqW1rvjuIdgRNxSpmZAxpMi/kmxFM3UGmsnE4QGz9BSF5XTwQAcm7xcpzAmTym+oOTW0A==",
+  "source_repository": "craft-eval",
+  "source_git_head": "79828fd31a5549b1d9fb3dba96a39434c5b152fe",
+  "source_has_uncommitted_changes": false,
+  "source_manifest": {
+    "package.json": "27c667dff0d176588debc1734bae88d535c74a47b302c2e2a9442f4d644f2093",
+    "dist/src/index.js": "1e44fdf4f5f0433b32183d302c1b98d1d7c5365931297187ad128df1051cf7f9",
+    "src/context-audit.ts": "c79b0b93a25c946534757e82c2ec041e18855ca4e8942608db5c4eb86c22ce46",
+    "src/loopback.ts": "6a3ef134b78aba89d25a779ea2f3f3841b20a6c4c9587f781960979724d61d52"
+  }
+}

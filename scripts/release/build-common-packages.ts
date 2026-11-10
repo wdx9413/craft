@@ -1,0 +1,54 @@
+import { execFileSync } from "node:child_process";
+import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const packages = [
+  ...["craft-common-store-local", "craft-common-base", "craft-common-log"].map(name => `common/${name}`),
+  ...["knowledge", "memory", "experience", "codebase"].map(name => `capability/craft-${name}`),
+];
+
+// Root declaration build keeps the exact checked types. Each package's JS is
+// then bundled so its runtime cannot reach back into the monorepo checkout.
+execFileSync(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "-p", join(root, "tsconfig.build.json")], { cwd: root, stdio: "inherit" });
+for (const relative of packages) {
+  const packageRoot = join(root, relative);
+  const sourceDir = join(packageRoot, relative.startsWith("common/") ? "src" : "");
+  const outDir = join(packageRoot, "dist");
+  rmSync(outDir, { recursive: true, force: true });
+  mkdirSync(outDir, { recursive: true });
+  const sources = readdirSync(sourceDir).filter(file => file.endsWith(".ts")).map(file => join(sourceDir, file));
+  await build({
+    entryPoints: sources,
+    bundle: true,
+    packages: "external",
+    platform: "node",
+    format: "esm",
+    target: "node23",
+    outbase: sourceDir,
+    outdir: outDir,
+    absWorkingDir: root,
+  });
+  const declarations = join(root, "dist", relative, relative.startsWith("common/") ? "src" : "");
+  for (const file of readdirSync(declarations).filter(file => file.endsWith(".d.ts"))) {
+    const output = join(outDir, file);
+    cpSync(join(declarations, file), output);
+    let body = readFileSync(output, "utf8");
+    body = body.replace(/\.\.\/\.\.\/common\/(craft-common-[a-z-]+)\/src\/([a-z-]+)\.ts/gu, "$1/$2");
+    body = body.replace(/\.\.\/\.\.\/craft-common-store-local\/src\/([a-z-]+)\.ts/gu, "craft-common-store-local/$1");
+    body = body.replace(/\.\/([a-z0-9-]+)\.ts/gu, "./$1.js");
+    writeFileSync(output, body);
+  }
+  if (relative === "capability/craft-codebase") {
+    const analyzers = join(outDir, "analyzers");
+    mkdirSync(analyzers, { recursive: true });
+    cpSync(join(packageRoot, "analyzers", "analyze-python.py"), join(analyzers, "analyze-python.py"));
+    cpSync(join(packageRoot, "analyzers", "python-control-flow.py"), join(analyzers, "python-control-flow.py"));
+    cpSync(join(packageRoot, "analyzers", "python-data-flow.py"), join(analyzers, "python-data-flow.py"));
+    cpSync(join(packageRoot, "analyzers", "AnalyzeJava.java"), join(analyzers, "AnalyzeJava.java"));
+    cpSync(join(packageRoot, "analyzers", "AnalyzeJavaControlFlow.java"), join(analyzers, "AnalyzeJavaControlFlow.java"));
+  }
+  process.stdout.write(`Built standalone package ${relative}\n`);
+}

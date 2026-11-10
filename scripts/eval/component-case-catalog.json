@@ -1,0 +1,415 @@
+{
+  "schema_version": 1,
+  "status": "development_case_catalog",
+  "independent_approval_required_before_held_out": true,
+  "cases": [
+    {
+      "id": "knowledge:synonym-query",
+      "component": "knowledge",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "knowledge:chinese-symbol-query",
+      "component": "knowledge",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "knowledge:changed-document",
+      "component": "knowledge",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "knowledge:deleted-document",
+      "component": "knowledge",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "knowledge:revoked-source",
+      "component": "knowledge",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "knowledge:mixed-context-budget",
+      "component": "knowledge",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "memory:new-session-recall",
+      "component": "memory",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "memory:preference-correction",
+      "component": "memory",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "memory:history-as-of",
+      "component": "memory",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "memory:conflicting-topic",
+      "component": "memory",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "memory:cross-project-negative",
+      "component": "memory",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "memory:maintenance-feedback",
+      "component": "memory",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "experience:full-development",
+      "component": "experience",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "experience:standalone-review",
+      "component": "experience",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "experience:child-exit-failure",
+      "component": "experience",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "experience:blocked-resume",
+      "component": "experience",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "experience:cancel-no-replay",
+      "component": "experience",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "experience:parallel-review-join",
+      "component": "experience",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "codebase:typescript-alias",
+      "component": "codebase",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "codebase:python-method",
+      "component": "codebase",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "codebase:same-name-negative",
+      "component": "codebase",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "codebase:comment-string-negative",
+      "component": "codebase",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "codebase:checkpoint-rename",
+      "component": "codebase",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    },
+    {
+      "id": "codebase:incremental-equivalence",
+      "component": "codebase",
+      "acceptance_required": [
+        "fixed_fixture_revision",
+        "observable_result",
+        "negative_control"
+      ],
+      "measurements": [
+        "passed",
+        "blocked",
+        "inconclusive",
+        "cost",
+        "latency",
+        "tokens"
+      ]
+    }
+  ]
+}

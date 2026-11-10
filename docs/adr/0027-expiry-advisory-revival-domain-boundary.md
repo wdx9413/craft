@@ -1,0 +1,3 @@
+# 过期不删除、弱参考默认关闭、复活重走证据、经验不跨域
+
+Knowledge、Memory 与 Experience 的生命周期决定是：过期是状态迁移而不是删除，退出态记录必须保留供审计；过期、失效、争议的记录默认**不进入强上下文**，只有在调用方显式声明 `include_stale` 时才以 `advisory` 标记、带衰减 `freshness_score` 和折损权重的弱参考返回，绝不冒充可信事实；任何"重新有效"都不是把旧记录翻回已审状态，而是产生新版本或新候选、重走证据与独立有效性门槛，旧退出态留在 `reopened_from` 里，因为绕过证据门槛的原地复活不可审计；冲突必须裁决而非靠权重稀释，`disputed`/`conflict_pending` 不能单方采信；自进化产出的 Procedure 必须标注并受限于其 held-out 评测集所属的领域，请求带域时只召回同域经验、不带域时只召回未标注经验，且 held-out 用例不得声明与场景不同的域，否则编程、量化、写作之间会互相污染、使"越用越好"退化为"越用越偏"。可检查的后果是：过期后默认检索返回零、显式开关下返回带 `advisory` 的条目、`knowledgeClaimReopen` 只把退出态改回 `candidate`、`activeProcedure` 对过期 release 返回空、`ExperienceContribution` 按 `domain` 过滤，以及 `lifecycle` 与 `domain_isolation` 两条确定性评测轴把这些行为固定为可复现的字节级断言。

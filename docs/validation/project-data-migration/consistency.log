@@ -1,0 +1,15 @@
+$ node --experimental-strip-types scripts/ci/check-consistency-falsifiable.ts
+(node:<pid>) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+baseline: consistent=true confirmed=7 unverifiable=0
+CAUGHT  handler advertises the assessed revision       -> ["mcp.assessed_revision_not_advertised"]
+CAUGHT  handler drops a declared version               -> ["mcp.advertised_versions"]
+CAUGHT  handler advertises an unknown version          -> ["mcp.advertised_versions"]
+CAUGHT  removed method is really gone but claimed present -> ["mcp.removed_methods_acknowledged"]
+CAUGHT  migration status silently changes              -> ["mcp.removed_methods_acknowledged"]
+CAUGHT  a mounted tool escapes classification          -> ["mcp.tool_tiers_mounted"]
+CAUGHT  server/discover quietly removed                -> ["mcp.discover_implemented"]
+CAUGHT  a resultType is emitted after all              -> ["mcp.no_result_type_emitted"]
+CAUGHT  the build starts claiming compliance           -> ["mcp.not_claiming_compliance"]
+
+falsifiable on 9/9 mutations

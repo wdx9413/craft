@@ -1,0 +1,82 @@
+import { realpathSync } from "node:fs";
+import { relative, isAbsolute, sep } from "node:path";
+import { text } from "../../common/craft-common-base/src/validation.ts";
+import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { payload } from "../../common/craft-common-base/src/digest.ts";
+import { experienceScenarioIsRetired } from "./scenario-catalog.ts";
+import { projectExperienceDirectory } from "../../core/project-experience-directory.ts";
+
+export function belongsToRetiredScenario(store: CraftStore, procedure: JsonObject): boolean {
+  const signature = procedure.scenario_signature as JsonObject | undefined;
+  const project = signature?.project as JsonObject | undefined;
+  const signatureProjectId = typeof project?.id === "string" ? project.id.replace(/^project:/u, "") : "";
+  const scope = typeof procedure.scope === "string" ? procedure.scope : "";
+  const projectId = (signatureProjectId || (scope.startsWith("project:") ? scope.slice("project:".length) : "")).replace(/^project:/u, "");
+  const scenarioKey = typeof signature?.scenario_key === "string" ? signature.scenario_key : "";
+  if (!/^[A-Za-z0-9_-]{1,96}$/u.test(projectId) || !scenarioKey) return false;
+  try {
+    const aliasDigest = typeof signature?.project_path_alias_digest === "string" ? signature.project_path_alias_digest : undefined;
+    const directory = projectExperienceDirectory(store, `project:${projectId}`, undefined, false, aliasDigest);
+    return experienceScenarioIsRetired(directory, projectId, scenarioKey);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("not registered")) return false;
+    if (error instanceof Error && error.message.includes("ambiguous")) return true;
+    throw error;
+  }
+}
+
+/** Publication is independent of the newest candidate. Pointers always pin a qualified record. */
+export function preserveProcedureRelease(store: CraftStore, current: JsonObject | null): void {
+  if (current?.routeable !== true || current.lifecycle !== "routeable") return;
+  const existing = store.find("experience_release", String(current.id));
+  if (existing?.record_version === current.version) return;
+  store.save("experience_release", String(current.id), { record_version: current.version, definition_digest: current.definition_digest, status: "active",
+    ...(typeof current.valid_until === "string" ? { valid_until: current.valid_until } : {}) });
+}
+
+/**
+ * Resolve the routable Procedure. An expired `valid_until` on the release makes
+ * the Procedure non-routeable; the record is kept (auditable, can be revived by
+ * a fresh release) rather than deleted. `now` lets callers pin the clock.
+ */
+export function activeProcedure(store: CraftStore, id: string, now: number = Date.now()): JsonObject | null {
+  const latest = store.get("experience_procedure", id);
+  if (belongsToRetiredScenario(store, latest)) return null;
+  if (latest.routeable === true && latest.lifecycle === "routeable") return validProcedureRelease(latest, now);
+  const release = store.find("experience_release", id);
+  if (!release || release.status !== "active") return null;
+  const active = store.get("experience_procedure", id, Number(release.record_version));
+  if (belongsToRetiredScenario(store, active)) return null;
+  // Failure of this same asset revokes it; a different candidate cannot displace it.
+  if (latest.definition_digest === active.definition_digest) return null;
+  if (typeof release.valid_until === "string" && Date.parse(release.valid_until) < now) return null;
+  return { ...active, scope_envelope: latest.scope_envelope };
+}
+
+function validProcedureRelease(procedure: JsonObject, now: number): JsonObject | null {
+  return typeof procedure.valid_until === "string" && Date.parse(procedure.valid_until) < now ? null : procedure;
+}
+
+export function updateProcedureRelease(store: CraftStore, latest: JsonObject): void {
+  if (latest.routeable === true && latest.lifecycle === "routeable") { preserveProcedureRelease(store, latest); return; }
+  const release = store.find("experience_release", String(latest.id));
+  if (release && release.definition_digest === latest.definition_digest && ["rejected", "rolled_back"].includes(String(latest.lifecycle)) && release.status !== "revoked")
+    store.save("experience_release", String(latest.id), { ...payload(release), status: "revoked" });
+}
+
+export function selectedProcedure(store: CraftStore, id: string, channel: unknown): JsonObject | null {
+  if (channel === undefined || channel === "current") return activeProcedure(store, id);
+  if (channel !== "test") throw new Error("Unsupported Procedure release_channel");
+  const candidate = store.get("experience_procedure", id);
+  return candidate.lifecycle === "candidate" ? candidate : null;
+}
+
+/** Writable candidates require a separate, checkpointed workspace owned by the test Work Loop. */
+export function assertProcedureTestIsolation(store: CraftStore, args: JsonObject, actualWorkspaceId?: unknown): void {
+  const testId = text(args.test_workspace_id, "test_workspace_id"), baselineId = text(args.baseline_workspace_id, "baseline_workspace_id");
+  if (testId === baselineId || actualWorkspaceId !== undefined && actualWorkspaceId !== testId) throw new Error("Test workspace isolation mismatch");
+  const test = store.get("workspace", testId), baseline = store.get("workspace", baselineId);
+  const testRoot = realpathSync(String(test.root_path)), baselineRoot = realpathSync(String(baseline.root_path));
+  const separate = (a: string, b: string) => { const delta = relative(a, b); return isAbsolute(delta) || delta === ".." || delta.startsWith(`..${sep}`); };
+  if (!separate(testRoot, baselineRoot) || !separate(baselineRoot, testRoot) || !test.latest_checkpoint_id || !baseline.latest_checkpoint_id) throw new Error("Test workspaces must be disjoint and checkpointed");
+}

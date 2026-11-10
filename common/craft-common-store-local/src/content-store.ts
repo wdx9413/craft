@@ -1,0 +1,527 @@
+import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { canonicalCandidatePath, ensureSessionStorageDirectory, isLegacySafeSessionId, sessionStorageDirectory, type CraftPaths } from "./paths.ts";
+
+export type ContentKind = "knowledge" | "memory" | "experience";
+/** Experience keeps human-readable procedures by format without splitting its fact ledger. */
+export type ExperienceFolder = "workflows" | "graphs" | "prompts";
+export type ContentStatus = "candidate" | "reviewed" | "active" | "disputed" | "superseded" | "expired" | "revoked";
+
+export interface ContentWriteInput {
+  kind: ContentKind;
+  record_id: string;
+  version: number;
+  scope: string;
+  status: ContentStatus | string;
+  sensitivity: string;
+  source_id: string;
+  body: string;
+  /** Human-readable label used only for the Markdown filename/frontmatter. */
+  title?: string;
+  /** Existing path used by source-aware migrations when a semantic rename is needed. */
+  current_path?: string;
+  /** Project checkout whose private Knowledge directory owns this content. */
+  project_root?: string;
+  /** Only Experience documents may select a managed, format-specific folder. */
+  folder?: ExperienceFolder;
+  /** Domain-owned scalar metadata that remains visible in the Markdown frontmatter. */
+  frontmatter?: Readonly<Record<string, string | number | boolean>>;
+}
+
+export interface ContentRef {
+  kind: ContentKind;
+  record_id: string;
+  version: number;
+  path: string;
+  digest: string;
+  bytes: number;
+  format: "markdown";
+  title: string;
+  /** Present on new references; callers may provide a legacy record's scope when reading. */
+  scope?: string;
+}
+
+export type ProjectKnowledgeContentDirectoryResolver = (scope: string, options: {
+  project_root?: string; reference_path?: string; create?: boolean;
+}) => string | null;
+
+export interface ContentManifest {
+  schema_version: "craft.content.v1";
+  record_kind: ContentKind;
+  record_id: string;
+  record_version: number;
+  scope: string;
+  status: string;
+  sensitivity: string;
+  source_id: string;
+  body_digest: string;
+  updated_at: string;
+  title?: string;
+  [key: string]: string | number | boolean | undefined;
+}
+
+export interface ContentReadResult { body: string; manifest: ContentManifest; }
+export interface ContentVerification { status: "verified" | "missing" | "drifted"; path: string; digest: string | null; }
+
+const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
+const SAFE_ID = /^[A-Za-z0-9._-]+$/u;
+
+function samePath(left: string, right: string): boolean { return relative(resolve(left), resolve(right)) === ""; }
+function isWithinPath(root: string, target: string): boolean {
+  const rel = relative(resolve(root), resolve(target));
+  return rel !== "" && !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+}
+
+function bodyDigest(body: string): string { return `sha256:${createHash("sha256").update(body, "utf8").digest("hex")}`; }
+export function validateContentBody(body: string): void {
+  if (typeof body !== "string" || !body.trim()) throw new Error("Content body must not be empty");
+  if (SECRET.test(body)) throw new Error("Content body must not contain credentials or secrets");
+}
+function quote(value: string): string { return JSON.stringify(value); }
+function parseScalar(value: string): string { try { return JSON.parse(value) as string; } catch { return value; } }
+
+function parseDocument(raw: string): { manifest: ContentManifest; body: string } {
+  const lines = raw.split(/\r?\n/u);
+  if (lines[0] !== "---") throw new Error("Content Markdown frontmatter is missing");
+  const end = lines.slice(1).findIndex((line) => line === "---");
+  if (end < 0) throw new Error("Content Markdown frontmatter is not closed");
+  const fields = new Map<string, string>();
+  for (const line of lines.slice(1, end + 1)) {
+    const separator = line.indexOf(":");
+    if (separator <= 0) throw new Error("Content Markdown frontmatter is invalid");
+    fields.set(line.slice(0, separator).trim(), parseScalar(line.slice(separator + 1).trim()));
+  }
+  const manifest = {
+    schema_version: fields.get("schema_version"), record_kind: fields.get("record_kind"), record_id: fields.get("record_id"),
+    record_version: Number(fields.get("record_version")), scope: fields.get("scope"), status: fields.get("status"),
+    sensitivity: fields.get("sensitivity"), source_id: fields.get("source_id"), body_digest: fields.get("body_digest"), updated_at: fields.get("updated_at"),
+  } as Partial<ContentManifest>;
+  if (manifest.schema_version !== "craft.content.v1" || !["knowledge", "memory", "experience"].includes(String(manifest.record_kind))
+    || !manifest.record_id || !Number.isSafeInteger(manifest.record_version) || !manifest.scope || !manifest.status
+    || !manifest.sensitivity || !manifest.source_id || !manifest.body_digest || !manifest.updated_at) {
+    throw new Error("Content Markdown frontmatter is incomplete");
+  }
+  for (const [key, value] of fields) {
+    if (key in manifest) continue;
+    if (!/^[a-z][a-z0-9_]*$/u.test(key) || !["string", "number", "boolean"].includes(typeof value)
+      || typeof value === "string" && SECRET.test(value)) throw new Error("Content Markdown frontmatter contains unsafe metadata");
+    (manifest as Record<string, unknown>)[key] = value;
+  }
+  return { manifest: manifest as ContentManifest, body: lines.slice(end + 2).join("\n") };
+}
+
+function safeFileName(id: string): string {
+  if (!id.trim() || id.includes("/") || id.includes("\\") || id.includes("..")) throw new Error("Content record_id is an unsafe identifier");
+  if (SAFE_ID.test(id)) return id;
+  const digest = createHash("sha256").update(id).digest("hex").slice(0, 12);
+  return `${id.replace(/[^A-Za-z0-9._-]/gu, "_")}-${digest}`;
+}
+
+function titleFromBody(body: string): string | undefined {
+  const heading = body.split(/\r?\n/u).find((line) => /^\s{0,3}#{1,6}\s+\S/u.test(line));
+  const first = heading ? heading.replace(/^\s{0,3}#{1,6}\s+/u, "") : body.split(/\r?\n/u).find((line) => line.trim());
+  if (!first) return undefined;
+  return first.trim().slice(0, 120);
+}
+
+export function contentTitle(body: string, title?: string, fallback = "untitled"): string {
+  const value = (title ?? titleFromBody(body) ?? fallback).normalize("NFKC").trim().replace(/[\r\n]+/gu, " ");
+  if (!value) throw new Error("Content title must not be empty");
+  if (SECRET.test(value)) throw new Error("Content title must not contain credentials or secrets");
+  return value.slice(0, 120);
+}
+
+function titleSlug(title: string): string {
+  const normalized = title
+    .replace(/[\\/]/gu, " ")
+    .replace(/[^\p{L}\p{N}._ -]/gu, " ")
+    .trim()
+    .replace(/\s+/gu, "-")
+    .replace(/-+/gu, "-")
+    .replace(/^[.-]+|[.-]+$/gu, "");
+  // Bound by encoded bytes: CJK characters can take three bytes each.
+  // The stable record hash in the filename preserves uniqueness after trim.
+  let slug = "";
+  for (const character of normalized) {
+    if (Buffer.byteLength(slug + character, "utf8") > 80) break;
+    slug += character;
+  }
+  return slug || "untitled";
+}
+
+function idSuffix(recordId: string): string {
+  const hash = createHash("sha256").update(recordId, "utf8").digest("hex").slice(0, 12);
+  return hash;
+}
+
+export class MarkdownContentStore {
+  readonly paths: CraftPaths;
+  #projectKnowledgeDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
+  #projectMemoryDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
+  #projectExperienceDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
+  #sessionMemoryDirectory: ((sessionId: string, writing: boolean) => string) | undefined;
+  #sessionMemoryWriteGuard: (<T>(sessionId: string, operation: () => T) => T) | undefined;
+  constructor(paths: CraftPaths) { this.paths = paths; }
+
+  setProjectKnowledgeDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
+    this.#projectKnowledgeDirectory = resolver;
+  }
+
+  setProjectMemoryDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
+    this.#projectMemoryDirectory = resolver;
+  }
+
+  setSessionMemoryDirectoryResolver(resolver: (sessionId: string, writing: boolean) => string): void {
+    this.#sessionMemoryDirectory = resolver;
+  }
+
+  setSessionMemoryWriteGuard(guard: <T>(sessionId: string, operation: () => T) => T): void {
+    this.#sessionMemoryWriteGuard = guard;
+  }
+
+  setProjectExperienceDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
+    this.#projectExperienceDirectory = resolver;
+  }
+
+  pathFor(kind: ContentKind, recordId: string, version?: number, folder?: ExperienceFolder, scope?: string, projectRoot?: string): string {
+    const directory = this.directory(kind, folder, scope, projectRoot, undefined, true);
+    return join(directory, `${safeFileName(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
+  }
+
+  /** Stable, human-readable path. The hash suffix keeps duplicate titles distinct. */
+  namedPathFor(kind: ContentKind, recordId: string, version: number | undefined, title: string, folder?: ExperienceFolder,
+    scope?: string, projectRoot?: string, referencePath?: string): string {
+    const directory = this.directory(kind, folder, scope, projectRoot, referencePath, true);
+    safeFileName(recordId);
+    return join(directory, `${titleSlug(title)}--${idSuffix(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
+  }
+
+  legacyPathFor(kind: ContentKind, recordId: string, version?: number): string {
+    const directory = join(this.paths.root, "content", kind, "md");
+    return join(directory, `${safeFileName(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
+  }
+
+  isCanonicalRef(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "scope">): boolean {
+    // Read compatibility may resolve a legacy project or session directory.
+    // Canonicality must always be judged against the current data-root target.
+    const directory = resolve(this.directory(ref.kind, undefined, ref.scope));
+    const target = resolve(ref.path);
+    const inDirectory = ref.kind === "experience"
+      ? isWithinPath(directory, target)
+      : samePath(dirname(target), directory);
+    return inDirectory && target.endsWith(`.v${ref.version}.md`);
+  }
+
+  async write(input: ContentWriteInput): Promise<ContentRef> {
+    return this.writeSync(input);
+  }
+
+  writeSync(input: ContentWriteInput): ContentRef {
+    return this.withVersionLock(input, () => this.writeUnlocked(input));
+  }
+
+  private writeUnlocked(input: ContentWriteInput): ContentRef {
+    if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
+    validateContentBody(input.body);
+    const title = contentTitle(input.body, input.title, input.record_id);
+    const path = this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder, input.scope, input.project_root); mkdirSync(resolve(path, ".."), { recursive: true });
+    const digest = bodyDigest(input.body);
+    const existingPath = this.findCanonicalPath(input.kind, input.record_id, input.version, input.scope, input.project_root);
+    try {
+      const existing = parseDocument(readFileSync(existingPath ?? path, "utf8"));
+      if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind) throw new Error("Content file identity conflict");
+      if (existing.manifest.scope !== input.scope) throw new Error("Content file scope conflict");
+      if (bodyDigest(existing.body) !== existing.manifest.body_digest) throw new Error("Content body digest drifted");
+      if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, existingPath!, digest, input.body, existing.manifest.title ?? title, input.scope);
+      throw new Error("Content version already exists with different body");
+    } catch (error) {
+      if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message)) throw error;
+    }
+    const raw = this.serialize(this.manifest(input, digest), input.body);
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, raw, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    try {
+      try { linkSync(temporary, path); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; return this.writeUnlocked(input); }
+    } finally { unlinkSync(temporary); }
+    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title, input.scope);
+  }
+
+  /** Relocate verified immutable content without rewriting its metadata or overwriting a competing version. */
+  relocateSync(ref: ContentRef, scope: string): ContentRef {
+    return this.withVersionLock({ kind: ref.kind, record_id: ref.record_id, version: ref.version, scope }, () => this.relocateUnlocked(ref, scope));
+  }
+
+  private relocateUnlocked(ref: ContentRef, scope: string): ContentRef {
+    const source = this.readCompatSync(ref, scope);
+    if (source.manifest.scope !== scope) throw new Error("Content migration scope drifted");
+    const target = this.namedPathFor(ref.kind, ref.record_id, ref.version, source.manifest.title ?? ref.record_id,
+      this.folderOf(ref.kind, ref.path), scope);
+    if (resolve(target) === resolve(ref.path)) return ref;
+    const existingPath = this.findCanonicalPath(ref.kind, ref.record_id, ref.version, scope);
+    if (existingPath && resolve(existingPath) !== resolve(target)) throw new Error("Content migration destination conflicts");
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    if (!lstatSync(dirname(target)).isDirectory()) throw new Error("Content migration destination directory must be regular");
+    const raw = readFileSync(ref.path);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, raw, { mode: 0o600, flag: "wx" });
+    try {
+      try { linkSync(temporary, target); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        if (!lstatSync(target).isFile()) throw new Error("Content migration destination must be a regular file");
+        if (!readFileSync(target).equals(raw)) throw new Error("Content migration destination conflicts");
+      }
+    } finally { unlinkSync(temporary); }
+    const result = { ...ref, path: target, scope };
+    this.readSync(result);
+    return result;
+  }
+
+  /** Replace the body of an existing canonical document without changing its
+   * identity or version. This is reserved for source-aware migrations: normal
+   * domain writes remain append-only and must create a new record version. */
+  rewriteSync(input: ContentWriteInput): ContentRef {
+    return this.withVersionLock(input, () => this.rewriteUnlocked(input));
+  }
+
+  private rewriteUnlocked(input: ContentWriteInput): ContentRef {
+    if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
+    validateContentBody(input.body);
+    const title = contentTitle(input.body, input.title, input.record_id);
+    const currentPath = input.current_path ?? this.findCanonicalPath(input.kind, input.record_id, input.version, input.scope, input.project_root) ?? this.pathFor(input.kind, input.record_id, input.version, input.folder, input.scope, input.project_root);
+    // Ordinary rewrites preserve the current path; source-aware migrations may
+    // explicitly pass current_path to opt into a semantic filename rename.
+    const path = input.current_path ? this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder ?? this.folderOf(input.kind, currentPath), input.scope, input.project_root, currentPath) : currentPath;
+    const existing = parseDocument(readFileSync(currentPath, "utf8"));
+    if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind
+      || existing.manifest.record_version !== input.version) throw new Error("Content rewrite identity conflict");
+    if (existing.manifest.scope !== input.scope) throw new Error("Content rewrite scope conflict");
+    if (bodyDigest(existing.body) !== existing.manifest.body_digest) throw new Error("Content body digest drifted");
+    if (resolve(currentPath) !== resolve(path) && lstatSync(path, { throwIfNoEntry: false })) throw new Error("Content rewrite destination conflicts");
+    const digest = bodyDigest(input.body);
+    const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(temporary, this.serialize(this.manifest(input, digest), input.body), { encoding: "utf8", mode: 0o600 });
+    renameSync(temporary, path);
+    if (resolve(currentPath) !== resolve(path)) unlinkSync(currentPath);
+    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title, input.scope);
+  }
+
+  async read(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">): Promise<ContentReadResult> {
+    if (!this.isCanonicalRef(ref)) throw new Error("Content reference path is outside the canonical directory");
+    const result = await this.readPath(ref.path);
+    if (result.manifest.record_id !== ref.record_id || result.manifest.record_kind !== ref.kind || result.manifest.record_version !== ref.version
+      || ref.scope !== undefined && result.manifest.scope !== ref.scope) throw new Error("Content reference metadata drifted");
+    if (result.manifest.body_digest !== ref.digest || bodyDigest(result.body) !== ref.digest) throw new Error("Content body digest drifted");
+    return result;
+  }
+
+  readSync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">): ContentReadResult {
+    if (!this.isCanonicalRef(ref)) throw new Error("Content reference path is outside the canonical directory");
+    const result = parseDocument(readFileSync(ref.path, "utf8"));
+    if (result.manifest.record_id !== ref.record_id || result.manifest.record_kind !== ref.kind || result.manifest.record_version !== ref.version
+      || ref.scope !== undefined && result.manifest.scope !== ref.scope) throw new Error("Content reference metadata drifted");
+    if (result.manifest.body_digest !== ref.digest || bodyDigest(result.body) !== ref.digest) throw new Error("Content body digest drifted");
+    return result;
+  }
+
+  /** Read a reference from the current location or the pre-v0.12.31 content
+   * tree. Legacy reads are still digest-checked and are only a compatibility
+   * bridge for migration; new writes always use the canonical domain path. */
+  readCompatSync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">, expectedScope?: string): ContentReadResult {
+    const scopedRef = ref.scope === undefined && expectedScope ? { ...ref, scope: expectedScope } : ref;
+    if (this.isCanonicalRef(scopedRef)) return this.readSync(scopedRef);
+    const globalDirectory = canonicalCandidatePath(this.directory(ref.kind));
+    const target = canonicalCandidatePath(scopedRef.path);
+    const isLegacySharedProjectRef = (scopedRef.kind === "knowledge" || scopedRef.kind === "memory" || scopedRef.kind === "experience") && scopedRef.scope?.startsWith("project:")
+      && (samePath(target, globalDirectory) || isWithinPath(globalDirectory, target));
+    const compatibilityDirectory = canonicalCandidatePath(this.directory(scopedRef.kind, undefined, scopedRef.scope, undefined, scopedRef.path, false));
+    const canonicalDirectory = canonicalCandidatePath(this.directory(scopedRef.kind, undefined, scopedRef.scope));
+    const withinScopedLegacyDirectory = scopedRef.kind === "experience"
+      ? isWithinPath(compatibilityDirectory, target)
+      : samePath(dirname(target), compatibilityDirectory);
+    const isScopedLegacyRef = scopedRef.scope?.startsWith("project:") || scopedRef.kind === "memory" && scopedRef.scope?.startsWith("session:")
+      ? compatibilityDirectory !== canonicalDirectory && withinScopedLegacyDirectory
+      : false;
+    if (!isLegacySharedProjectRef && !isScopedLegacyRef && !samePath(target, canonicalCandidatePath(this.legacyPathFor(scopedRef.kind, scopedRef.record_id, scopedRef.version)))) {
+      throw new Error("Content reference path is outside the canonical directory");
+    }
+    if (!lstatSync(scopedRef.path).isFile()) throw new Error("Legacy content path must use regular files and directories");
+    const result = parseDocument(readFileSync(scopedRef.path, "utf8"));
+    if (result.manifest.record_id !== scopedRef.record_id || result.manifest.record_kind !== scopedRef.kind || result.manifest.record_version !== scopedRef.version
+      || scopedRef.scope !== undefined && result.manifest.scope !== scopedRef.scope) throw new Error("Content reference metadata drifted");
+    if (result.manifest.body_digest !== scopedRef.digest || bodyDigest(result.body) !== scopedRef.digest) throw new Error("Content body digest drifted");
+    return result;
+  }
+
+  readUncheckedSync(path: string): ContentReadResult { return parseDocument(readFileSync(path, "utf8")); }
+
+  async verify(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">): Promise<ContentVerification> {
+    try { await this.read(ref); return { status: "verified", path: ref.path, digest: ref.digest }; }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { status: /ENOENT|no such file/iu.test(message) ? "missing" : "drifted", path: ref.path, digest: null };
+    }
+  }
+
+  verifySync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">): ContentVerification {
+    try { this.readSync(ref); return { status: "verified", path: ref.path, digest: ref.digest }; }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { status: /ENOENT|no such file/iu.test(message) ? "missing" : "drifted", path: ref.path, digest: null };
+    }
+  }
+
+  private async readPath(path: string): Promise<ContentReadResult> { return parseDocument(await readFile(path, "utf8")); }
+
+  private withVersionLock<T>(input: Pick<ContentWriteInput, "kind" | "record_id" | "version" | "scope" | "project_root">, operation: () => T): T {
+    if (input.kind === "memory" && input.scope.startsWith("session:") && this.#sessionMemoryWriteGuard) {
+      return this.#sessionMemoryWriteGuard(input.scope.slice("session:".length), () => this.withVersionLockUnguarded(input, operation));
+    }
+    return this.withVersionLockUnguarded(input, operation);
+  }
+
+  private withVersionLockUnguarded<T>(input: Pick<ContentWriteInput, "kind" | "record_id" | "version" | "scope" | "project_root">, operation: () => T): T {
+    const directory = this.directory(input.kind, undefined, input.scope, input.project_root, undefined, true);
+    const locks = join(directory, ".version-locks");
+    mkdirSync(locks, { recursive: true, mode: 0o700 });
+    const lockDirectory = lstatSync(locks);
+    if (lockDirectory.isSymbolicLink() || !lockDirectory.isDirectory()) throw new Error("Content version lock directory is unsafe");
+    const shard = createHash("sha256").update(JSON.stringify([input.kind, input.record_id, input.version])).digest("hex").slice(0, 2);
+    const file = join(locks, `${shard}.db`);
+    const existing = lstatSync(file, { throwIfNoEntry: false });
+    if (existing && (existing.isSymbolicLink() || !existing.isFile())) throw new Error("Content version lock file is unsafe");
+    const database = new DatabaseSync(file);
+    try {
+      database.exec("PRAGMA busy_timeout=0");
+      try { database.exec("BEGIN IMMEDIATE"); }
+      catch (error) {
+        if (error instanceof Error && /locked|busy/iu.test(error.message)) throw new Error("Content version is busy; retry", { cause: error });
+        throw error;
+      }
+      try { const result = operation(); database.exec("COMMIT"); return result; }
+      catch (error) { database.exec("ROLLBACK"); throw error; }
+    } finally { database.close(); }
+  }
+
+  private findCanonicalPath(kind: ContentKind, recordId: string, version: number, scope?: string, projectRoot?: string): string | null {
+    const directory = this.directory(kind, undefined, scope, projectRoot, undefined, true);
+    try {
+      const suffix = `--${idSuffix(recordId)}.v${version}.md`;
+      const matches = this.files(directory, kind === "experience", suffix);
+      if (matches.length > 1) throw new Error("Content version has multiple files");
+      for (const path of matches) {
+        try {
+          const manifest = parseDocument(readFileSync(path, "utf8")).manifest;
+          if (manifest.record_kind === kind && manifest.record_version === version) return path;
+          return path;
+        } catch {
+          // A matching filename is still returned so callers fail closed on malformed metadata.
+          return path;
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+    return null;
+  }
+
+  private files(directory: string, recursive: boolean, suffix: string): string[] {
+    const result: string[] = [];
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isFile() && entry.name.endsWith(suffix)) result.push(path);
+      else if (recursive && entry.isDirectory() && entry.name !== ".version-locks") result.push(...this.files(path, true, suffix));
+    }
+    return result;
+  }
+
+  private manifest(input: ContentWriteInput, digest: string): ContentManifest {
+    const base: ContentManifest = { schema_version: "craft.content.v1", record_kind: input.kind, record_id: input.record_id,
+      record_version: input.version, scope: input.scope, status: input.status, sensitivity: input.sensitivity, source_id: input.source_id,
+      body_digest: digest, updated_at: new Date().toISOString(), title: contentTitle(input.body, input.title, input.record_id) };
+    const protectedFields = new Set(Object.keys(base));
+    for (const [key, value] of Object.entries(input.frontmatter ?? {})) {
+      if (!/^[a-z][a-z0-9_]*$/u.test(key) || protectedFields.has(key)) throw new Error("Content frontmatter key is invalid or reserved");
+      if (typeof value === "string" && SECRET.test(value)) throw new Error("Content frontmatter must not contain credentials or secrets");
+      base[key] = value;
+    }
+    return base;
+  }
+
+  private ref(kind: ContentKind, recordId: string, version: number, path: string, digest: string, body: string, title: string, scope: string): ContentRef {
+    return { kind, record_id: recordId, version, path, digest, bytes: Buffer.byteLength(body, "utf8"), format: "markdown", title, scope };
+  }
+
+  private serialize(manifest: ContentManifest, body: string): string {
+    const lines = Object.entries(manifest).map(([key, value]) => `${key}: ${typeof value === "number" || typeof value === "boolean" ? value : quote(String(value))}`);
+    return `---\n${lines.join("\n")}\n---\n${body}`;
+  }
+
+  private directory(kind: ContentKind, folder?: ExperienceFolder, scope?: string, projectRoot?: string, referencePath?: string, writing = false): string {
+    if (kind === "knowledge" || kind === "memory") {
+      if (folder !== undefined) throw new Error("Only Experience content supports folders");
+      if (kind === "memory" && scope?.startsWith("project:")) {
+        const projectDirectory = this.#projectMemoryDirectory?.(scope, {
+          ...(projectRoot ? { project_root: projectRoot } : {}), ...(referencePath ? { reference_path: referencePath } : {}), ...(writing ? { create: true } : {}),
+        });
+        if (projectDirectory) return projectDirectory;
+        if (writing && this.#projectMemoryDirectory) throw new Error("Project Memory scope has no registered project root");
+      }
+      if (kind === "memory" && scope?.startsWith("session:")) {
+        const sessionId = scope.slice("session:".length);
+        if (!sessionId || Buffer.byteLength(sessionId, "utf8") > 65_536) throw new Error("session_id must be a non-empty identifier under 65536 UTF-8 bytes");
+        if (referencePath && !writing && isLegacySafeSessionId(sessionId)) {
+          // `join("/tmp", ...)` is drive-relative on Windows, so the comparison
+          // below must resolve it the same way `resolve(referencePath)` is.
+          const target = resolve(referencePath), legacyRoot = resolve("/tmp", ".craft_data", "memory");
+          const legacyDirectories = [sessionId, createHash("sha256").update(sessionId).digest("hex").slice(0, 32)]
+            .map(id => join(legacyRoot, id, "md"));
+          const legacy = legacyDirectories.find(directory => dirname(target) === directory);
+          if (legacy) return legacy;
+        }
+        const root = this.#sessionMemoryDirectory?.(sessionId, writing)
+          ?? join(writing ? ensureSessionStorageDirectory(this.paths, "craft-mcp", sessionId)
+            : sessionStorageDirectory(this.paths, "craft-mcp", sessionId), "memory", "md");
+        return root;
+      }
+      if (kind === "knowledge" && scope?.startsWith("project:")) {
+        const projectDirectory = this.#projectKnowledgeDirectory?.(scope, {
+          ...(projectRoot ? { project_root: projectRoot } : {}), ...(referencePath ? { reference_path: referencePath } : {}), ...(writing ? { create: true } : {}),
+        });
+        if (projectDirectory) return projectDirectory;
+        if (writing && this.#projectKnowledgeDirectory) throw new Error("Project Knowledge scope has no registered project root");
+      }
+      return kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir;
+    }
+    let directory = this.paths.experienceContentDir;
+    if (scope?.startsWith("project:")) {
+      const projectDirectory = this.#projectExperienceDirectory?.(scope, {
+        ...(projectRoot ? { project_root: projectRoot } : {}), ...(referencePath ? { reference_path: referencePath } : {}), ...(writing ? { create: true } : {}),
+      });
+      if (projectDirectory) directory = projectDirectory;
+      else if (writing && this.#projectExperienceDirectory) throw new Error("Project Experience scope has no registered project root");
+    }
+    if (folder === undefined) return directory;
+    if (!["workflows", "graphs", "prompts"].includes(folder)) throw new Error("Experience content folder is unsupported");
+    return join(directory, folder);
+  }
+
+  private folderOf(kind: ContentKind, path: string): ExperienceFolder | undefined {
+    if (kind !== "experience") return undefined;
+    const parts = resolve(path).split(sep), markdownIndex = parts.findIndex((part, index) => part === "md" && parts.slice(0, index).lastIndexOf("experience") >= 0);
+    const folder = parts[markdownIndex + 1];
+    return folder === "workflows" || folder === "graphs" || folder === "prompts" ? folder : undefined;
+  }
+}
+
+export function contentReference(value: unknown): value is ContentRef {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return (item.kind === "knowledge" || item.kind === "memory" || item.kind === "experience") && typeof item.record_id === "string" && Number.isSafeInteger(item.version)
+    && typeof item.path === "string" && typeof item.digest === "string" && item.format === "markdown";
+}

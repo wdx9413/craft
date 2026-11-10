@@ -1,0 +1,253 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
+import { McpServer } from "../core/mcp.ts";
+import { ActionGatewayKernel, AcceptanceGateKernel, A2AProtocolKernel, DurableWorkerKernel, ProviderRouterKernel } from "../core/runtime-completion.ts";
+import { digestJson } from "../core/digest.ts";
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "craft-runtime-completion-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  store.create("task", "task", { project_id: "project", title: "Task", goal: "Goal", status: "active" });
+  return { root, store, service: new CraftService(store) };
+}
+
+test("action gateway enforces workspace boundaries and approval", async () => {
+  const f = await fixture();
+  try {
+    const kernel = new ActionGatewayKernel(f.store);
+    const prepared = kernel.prepare({ action_id: "read", task_id: "task", workspace: f.root, operation: "workspace_read", input_digest: "sha256:i" });
+    assert.equal(kernel.prepare({ action_id: "read", task_id: "task", workspace: f.root, operation: "workspace_read", input_digest: "sha256:i" }).idempotent, true);
+    assert.throws(() => kernel.prepare({ action_id: "read", task_id: "task", workspace: f.root, operation: "workspace_read", input_digest: "sha256:x" }), /idempotency/);
+    await assert.rejects(() => kernel.execute({ action_id: "read", relative_path: "missing.txt" }), /ENOENT/);
+    await assert.rejects(() => kernel.execute({ action_id: prepared.action && (prepared.action as JsonObject).id, relative_path: "../escape" }), /escapes/);
+    await assert.rejects(() => kernel.execute({ action_id: prepared.action && (prepared.action as JsonObject).id, relative_path: "x", operation: "shell" }), /ENOENT/);
+    const file = join(f.root, "input.txt"); await (await import("node:fs/promises")).writeFile(file, "hello", "utf8");
+    const read = await kernel.execute({ action_id: prepared.action && (prepared.action as JsonObject).id, relative_path: "input.txt" });
+    assert.equal((read.result as JsonObject).content, "hello");
+    assert.equal((await kernel.execute({ action_id: "read", relative_path: "input.txt" })).idempotent, true);
+    assert.equal((kernel.get({ action_id: "read" }).action as JsonObject).status, "completed");
+
+    const write = kernel.prepare({ action_id: "write", task_id: "task", workspace: f.root, operation: "workspace_write", effect: "local_write", input_digest: "sha256:w" });
+    await assert.rejects(() => kernel.execute({ action_id: (write.action as JsonObject).id, relative_path: "out.txt", content: "x", approved: false }), /approval/);
+    const written = await kernel.execute({ action_id: "write", relative_path: "out.txt", content: "x", approved: true });
+    assert.equal((written.result as JsonObject).bytes, 1); assert.equal(await readFile(join(f.root, "out.txt"), "utf8"), "x");
+    assert.throws(() => kernel.prepare({ action_id: "bad-effect", task_id: "task", workspace: f.root, operation: "workspace_read", effect: "nope", input_digest: "sha256:b" }), /Unsupported action effect/);
+    await assert.rejects(() => kernel.execute({ action_id: (kernel.prepare({ action_id: "remote", task_id: "task", workspace: f.root, operation: "mcp_call", effect: "external_write", input_digest: "sha256:r" }).action as JsonObject).id, relative_path: "x", approved: true }), /requires an explicit/);
+    await assert.rejects(() => kernel.execute({ action_id: (kernel.prepare({ action_id: "unknown", task_id: "task", workspace: f.root, operation: "unknown", input_digest: "sha256:u" }).action as JsonObject).id, relative_path: "x" }), /Unsupported action operation/);
+  } finally { f.store.close(); }
+});
+
+test("acceptance, worker and provider kernels form a durable local control path", async () => {
+  const f = await fixture();
+  try {
+    const gate = new AcceptanceGateKernel(f.store);
+    const prepared = gate.prepare({ gate_id: "gate", task_id: "task", work_id: "work", acceptance_ref: "accept", required_artifact_ids: ["a"], required_evidence_ids: ["e"] });
+    assert.equal(gate.prepare({ gate_id: "gate", task_id: "task", work_id: "work", acceptance_ref: "accept", required_artifact_ids: ["a"], required_evidence_ids: ["e"] }).idempotent, true);
+    assert.throws(() => gate.prepare({ gate_id: "gate", task_id: "task", work_id: "work", acceptance_ref: "other" }), /idempotency/);
+    assert.throws(() => gate.outcome({ gate_id: "gate" }), /passed/);
+    assert.throws(() => gate.assess({ gate_id: "gate", verdict: "passed" }), /requires artifacts/);
+    assert.equal((gate.assess({ gate_id: "gate", verdict: "blocked" }).gate as JsonObject).status, "blocked");
+    assert.equal(gate.assess({ gate_id: "gate", verdict: "blocked" }).idempotent, true);
+    const gate2 = gate.prepare({ gate_id: "gate2", task_id: "task", work_id: "work2", acceptance_ref: "accept", required_artifact_ids: [], required_evidence_ids: [] });
+    assert.equal((gate.assess({ gate_id: "gate2", verdict: "passed", artifact_ids: ["a"], evidence_ids: ["e"], assessor: "human" }).gate as JsonObject).status, "passed");
+    assert.equal((gate.outcome({ gate_id: "gate2", summary: "accepted" }).outcome as JsonObject).verdict, "passed");
+    assert.equal(gate.outcome({ gate_id: "gate2" }).idempotent, true); assert.equal((gate.get({ gate_id: "gate2" }).gate as JsonObject).status, "passed");
+
+    const worker = new DurableWorkerKernel(f.store);
+    assert.equal((worker.configure({ worker_id: "w", lease_ttl_ms: 1 }).worker as JsonObject).status, "stopped");
+    worker.configure({ worker_id: "w", notification: "enabled" }); worker.start({ worker_id: "w" }); assert.equal(worker.start({ worker_id: "w" }).idempotent, true);
+    const job = worker.enqueue({ worker_id: "w", job_id: "j", task_id: "task", action: "accept" }); assert.equal(worker.enqueue({ worker_id: "w", job_id: "j", task_id: "task", action: "accept" }).idempotent, true);
+    assert.equal((worker.tick({ worker_id: "w", now: "2030-01-01T00:00:00Z" }).jobs as JsonObject[]).length, 1);
+    assert.equal((worker.recover({ worker_id: "w", now: "2030-01-01T00:01:00Z" }).recovered as JsonObject[]).length, 1);
+    worker.stop({ worker_id: "w" }); assert.equal(worker.stop({ worker_id: "w" }).idempotent, true); assert.equal(worker.tick({ worker_id: "w" }).skipped, true);
+    assert.equal((worker.get({ worker_id: "w" }).worker as JsonObject).status, "stopped"); assert.equal((job.job as JsonObject).status, "pending");
+
+    const router = new ProviderRouterKernel(f.store);
+    assert.throws(() => router.plan({ providers: [] }), /must not be empty/);
+    assert.throws(() => router.plan({ providers: ["a"], preferred: "b" }), /declared/);
+    const route = router.plan({ route_id: "route", providers: ["a", "b"], preferred: "a", task_id: "task" });
+    assert.equal(router.plan({ route_id: "route", providers: ["a", "b"], preferred: "a", task_id: "task" }).idempotent, true);
+    assert.throws(() => router.plan({ route_id: "route", providers: ["a"], preferred: "a" }), /idempotency/);
+    assert.throws(() => router.record({ route_id: "route", provider: "z" }), /not in/);
+    assert.equal((router.record({ route_id: "route", provider: "b", usage: { input: 1 } }).route as JsonObject).selected_provider, "b");
+    assert.equal((router.get({ route_id: (route.route as JsonObject).id }).route as JsonObject).status, "used");
+  } finally { f.store.close(); }
+});
+
+test("A2A standard operations are HTTPS-only and content-free", async () => {
+  const response = async () => ({ ok: true, status: 200, json: async () => ({ task_id: "remote", status: "working" }) }) as Response;
+  const fetchImpl = (async () => response()) as unknown as typeof fetch;
+  const kernel = new A2AProtocolKernel();
+  assert.equal((await kernel.sendMessage({ endpoint: "https://agent.test", message_digest: "sha256:m" }, fetchImpl)).operation, "message/send");
+  assert.equal((await kernel.streamMessage({ endpoint: "https://agent.test", message_digest: "sha256:m" }, fetchImpl)).streaming, true);
+  assert.equal((await kernel.listTasks({ endpoint: "https://agent.test" }, fetchImpl)).operation, "tasks/list");
+  await assert.rejects(() => kernel.sendMessage({ endpoint: "http://agent.test", message_digest: "sha256:m" }, fetchImpl), /HTTPS/);
+  const badFetch = (async () => ({ ok: false, status: 503, json: async () => ({}) })) as unknown as typeof fetch;
+  await assert.rejects(() => kernel.listTasks({ endpoint: "https://agent.test" }, badFetch), /HTTP 503/);
+  const defaults = async () => ({ ok: true, status: 200, json: async () => ({}) }) as Response;
+  const defaulted = await kernel.sendMessage({ endpoint: "https://agent.test", message_digest: "sha256:m" }, defaults as unknown as typeof fetch);
+  assert.equal(defaulted.task_id, null); assert.equal(defaulted.status, "accepted");
+});
+
+test("service and MCP expose the new runtime surface", async () => {
+  const f = await fixture();
+  try {
+    const service = f.service;
+    service.setInternalApprovalPolicy(() => "allow");
+    await writeFile(join(f.root, "model-input.txt"), "input", "utf8");
+    const invoke = (service as unknown as { invokeInternalAction: (action: string, args: JsonObject) => Promise<JsonObject> }).invokeInternalAction.bind(service);
+    assert.equal((await invoke("workspace_read", { task_id: "task", workspace: f.root, relative_path: "model-input.txt" })).result && true, true);
+    assert.equal((await invoke("workspace_write", { task_id: "task", workspace: f.root, relative_path: "model-output.txt", content: "output", approved: true })).result && true, true);
+    service.durableWorkerConfigure({ worker_id: "service-worker" }); service.durableWorkerStart({ worker_id: "service-worker" }); service.durableWorkerEnqueue({ worker_id: "service-worker", task_id: "task", action: "wake" }); service.durableWorkerTick({ worker_id: "service-worker" }); service.durableWorkerGet({ worker_id: "service-worker" }); service.durableWorkerStop({ worker_id: "service-worker" }); service.durableWorkerRecover({ worker_id: "service-worker" });
+    service.providerRoutePlan({ route_id: "service-route", providers: ["a"] }); service.providerRouteRecord({ route_id: "service-route", provider: "a" }); service.providerRouteGet({ route_id: "service-route" });
+    const mcp = new McpServer(service, "full");
+    for (const [name, args] of [["craft_action_gateway_prepare", { action_id: "mcp-action", task_id: "task", workspace: f.root, operation: "workspace_read", input_digest: "sha256:m" }], ["craft_action_gateway_execute", { action_id: "mcp-action", relative_path: "model-input.txt" }], ["craft_action_gateway_get", { action_id: "mcp-action" }], ["craft_acceptance_gate_prepare", { gate_id: "mcp-gate", task_id: "task", work_id: "mcp-work", acceptance_ref: "a" }], ["craft_acceptance_gate_assess", { gate_id: "mcp-gate", verdict: "failed" }], ["craft_acceptance_gate_get", { gate_id: "mcp-gate" }], ["craft_durable_worker_configure", { worker_id: "mcp-worker" }], ["craft_durable_worker_start", { worker_id: "mcp-worker" }], ["craft_durable_worker_stop", { worker_id: "mcp-worker" }], ["craft_durable_worker_enqueue", { worker_id: "mcp-worker", task_id: "task", action: "wake" }], ["craft_durable_worker_tick", { worker_id: "mcp-worker" }], ["craft_durable_worker_recover", { worker_id: "mcp-worker" }], ["craft_durable_worker_get", { worker_id: "mcp-worker" }], ["craft_provider_route_plan", { route_id: "mcp-route", providers: ["a"] }], ["craft_provider_route_record", { route_id: "mcp-route", provider: "a" }], ["craft_provider_route_get", { route_id: "mcp-route" }]] as [string, JsonObject][]) {
+      const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((result?.result as JsonObject).isError, false);
+    }
+    for (const [name, args] of [["craft_acceptance_gate_prepare", { gate_id: "mcp-gate-pass", task_id: "task", work_id: "mcp-work-pass", acceptance_ref: "a" }], ["craft_acceptance_gate_assess", { gate_id: "mcp-gate-pass", verdict: "passed", artifact_ids: ["a"], evidence_ids: ["e"] }], ["craft_acceptance_gate_outcome", { gate_id: "mcp-gate-pass" }]] as [string, JsonObject][]) {
+      const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((result?.result as JsonObject).isError, false);
+    }
+    for (const name of ["craft_a2a_message_send", "craft_a2a_message_stream", "craft_a2a_task_list"]) {
+      const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: { endpoint: "http://invalid", message_digest: "sha256:m" } } }); assert.equal((result?.result as JsonObject).isError, true);
+    }
+  } finally { f.store.close(); }
+});
+
+test("native filesystem, search, patch and approval are bounded", async () => {
+  const f = await fixture();
+  try {
+    f.service.setInternalApprovalPolicy(() => "allow");
+    await writeFile(join(f.root, "alpha.txt"), "alpha\nbeta\n", "utf8");
+    await writeFile(join(f.root, "beta.txt"), "beta only\n", "utf8");
+    const invoke = (f.service as unknown as { invokeInternalAction: (action: string, args: JsonObject) => Promise<JsonObject> }).invokeInternalAction.bind(f.service);
+    const listed = await invoke("workspace_list", { task_id: "task", workspace: f.root, depth: 1, max_entries: 10 });
+    assert.ok((listed.result as JsonObject).entries instanceof Array);
+    const searched = await invoke("workspace_search", { task_id: "task", workspace: f.root, query: "beta", glob: "*.txt", max_results: 10 });
+    assert.equal(((searched.result as JsonObject).matches as unknown[]).length, 2);
+    const before = await readFile(join(f.root, "alpha.txt"), "utf8");
+    const patched = await invoke("workspace_patch", { task_id: "task", workspace: f.root, relative_path: "alpha.txt",
+      expected_digest: digestJson(before), edits: [{ old_text: "beta", new_text: "gamma" }], approved: true });
+    assert.equal((patched.result as JsonObject).after_digest, digestJson("alpha\ngamma\n"));
+    await assert.rejects(() => invoke("workspace_patch", { task_id: "task", workspace: f.root, relative_path: "alpha.txt",
+      expected_digest: digestJson(before), edits: [{ old_text: "alpha", new_text: "x" }], approved: true }), /does not match/u);
+    const command = await invoke("command_run", { task_id: "task", workspace: f.root,
+      argv: [process.execPath, "-e", "process.stdout.write('ok')"], effect: "read_only", approved: true });
+    assert.equal((command.receipt as JsonObject).status, "completed");
+    const commandRun = f.store.get("command_run", String((command.receipt as JsonObject).run_id));
+    assert.equal(((commandRun.request as JsonObject).effect), "external_write");
+    assert.match(String((command.receipt as JsonObject).stdout), /ok/u);
+  } finally { f.store.close(); await (await import("node:fs/promises")).rm(f.root, { recursive: true, force: true }); }
+});
+
+test("desktop_action forwards a bounded agent-desktop command and gates input", async () => {
+  const f = await fixture();
+  try {
+    f.service.setInternalApprovalPolicy(() => "deny");
+    const script = join(f.root, "desktop-fixture.mjs");
+    await writeFile(script, "const [operation, ...rest] = process.argv.slice(2);"
+      + "process.stdout.write(JSON.stringify({ version: '2.5', ok: true, command: operation, args: rest, data: { operation, rest } }));", "utf8");
+    f.service.adapterManifestSave({ adapter_id: "agent-desktop", version: "1.0.0", kind: "command",
+      platforms: ["win32", "darwin", "linux"], entry: process.execPath, transport: "local",
+      capabilities: ["snapshot"], permissions: ["desktop_accessibility"], effects: ["read_only", "external_write"],
+      metadata: { command: process.execPath, args: [script] } });
+    const invoke = (f.service as unknown as { invokeInternalAction: (action: string, args: JsonObject) => Promise<JsonObject> }).invokeInternalAction.bind(f.service);
+    const observed = await invoke("desktop_action", { task_id: "task", operation: "snapshot", app: "Finder" });
+    const result = observed.result as JsonObject;
+    assert.equal((result.data as JsonObject).operation, "snapshot");
+    assert.ok((result.args as string[]).includes("--app"));
+    await assert.rejects(() => f.service.nativeTools.desktopAction({ task_id: "task", operation: "NOT A COMMAND" }), /invalid/u);
+    await assert.rejects(() => invoke("desktop_action", { task_id: "task", operation: "click", ref: "@s1:e1" }), /denied|approval/u);
+  } finally { f.store.close(); await (await import("node:fs/promises")).rm(f.root, { recursive: true, force: true }); }
+});
+
+test("host approval blocks writes until a human decision", async () => {
+  const f = await fixture();
+  try {
+    f.service.setInternalApprovalPolicy(() => "ask");
+    const invoke = (f.service as unknown as { invokeInternalAction: (action: string, args: JsonObject) => Promise<JsonObject> }).invokeInternalAction.bind(f.service);
+    const pending = invoke("workspace_write", { task_id: "task", workspace: f.root, relative_path: "ask.txt", content: "x" });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const approvals = f.service.internalApprovalBroker.pending();
+    assert.equal(approvals.length, 1);
+    f.service.internalApprovalBroker.decide(String(approvals[0]!.id), "accept");
+    const written = await pending;
+    assert.equal((written.result as JsonObject).bytes, 1);
+    assert.equal(await readFile(join(f.root, "ask.txt"), "utf8"), "x");
+  } finally { f.store.close(); await (await import("node:fs/promises")).rm(f.root, { recursive: true, force: true }); }
+});
+
+test("model supplied approved flag cannot approve its own workspace write", async () => {
+  const f = await fixture();
+  try {
+    const invoke = (f.service as unknown as { invokeInternalAction: (action: string, args: JsonObject) => Promise<JsonObject> }).invokeInternalAction.bind(f.service);
+    const pending = invoke("workspace_write", { task_id: "task", workspace: f.root, relative_path: "model-approved.txt", content: "x", approved: true });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(f.service.internalApprovalBroker.pending().length, 1);
+    await assert.rejects(() => readFile(join(f.root, "model-approved.txt"), "utf8"), { code: "ENOENT" });
+    const approval = f.service.internalApprovalBroker.pending()[0]!;
+    f.service.internalApprovalBroker.decide(String(approval.id), "decline");
+    await assert.rejects(pending, /denied/u);
+    await assert.rejects(() => readFile(join(f.root, "model-approved.txt"), "utf8"), { code: "ENOENT" });
+  } finally { f.store.close(); await (await import("node:fs/promises")).rm(f.root, { recursive: true, force: true }); }
+});
+
+test("command effect arguments cannot downgrade an arbitrary process to read only", async () => {
+  const f = await fixture();
+  try {
+    const marker = join(f.root, "command-marker.txt");
+    const invoke = (f.service as unknown as { invokeInternalAction: (action: string, args: JsonObject) => Promise<JsonObject> }).invokeInternalAction.bind(f.service);
+    const pending = invoke("command_run", { task_id: "task", workspace: f.root,
+      argv: [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'written')`],
+      effect: "read_only", approved: true });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const approval = f.service.internalApprovalBroker.pending()[0]!;
+    assert.ok(approval);
+    await assert.rejects(() => readFile(marker, "utf8"), { code: "ENOENT" });
+    f.service.internalApprovalBroker.decide(String(approval.id), "decline");
+    await assert.rejects(pending, /denied/u);
+    await assert.rejects(() => readFile(marker, "utf8"), { code: "ENOENT" });
+    await assert.rejects(() => invoke("command_run", { task_id: "task", workspace: f.root, argv: [process.execPath], effect: "invalid" }), /effect is unsupported/u);
+    const destructive = invoke("command_run", { task_id: "task", workspace: f.root, argv: [process.execPath], effect: "destructive" });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const destructiveApproval = f.service.internalApprovalBroker.pending()[0]!;
+    assert.equal(destructiveApproval.effect, "destructive");
+    f.service.internalApprovalBroker.decide(String(destructiveApproval.id), "decline");
+    await assert.rejects(destructive, /denied/u);
+    const undeclared = invoke("command_run", { task_id: "task", workspace: f.root, argv: [process.execPath] });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const undeclaredApproval = f.service.internalApprovalBroker.pending()[0]!;
+    assert.equal(undeclaredApproval.effect, "external_write");
+    f.service.internalApprovalBroker.decide(String(undeclaredApproval.id), "decline");
+    await assert.rejects(undeclared, /denied/u);
+  } finally { f.store.close(); await (await import("node:fs/promises")).rm(f.root, { recursive: true, force: true }); }
+});
+
+test("validates nullish and empty protocol inputs explicitly", async () => {
+  const f = await fixture();
+  try {
+    const action = new ActionGatewayKernel(f.store);
+    assert.throws(() => action.prepare({ task_id: null, workspace: f.root, operation: "workspace_read", input_digest: "sha256:x" }), /task_id/);
+    assert.throws(() => action.prepare({ task_id: "", workspace: f.root, operation: "workspace_read", input_digest: "sha256:x" }), /task_id/);
+    assert.throws(() => action.prepare({ task_id: "task", workspace: [], operation: "workspace_read", input_digest: "sha256:x" }), /workspace/);
+    assert.throws(() => action.prepare({ task_id: "task", workspace: f.root, operation: "workspace_read", input_digest: [] }), /input_digest/);
+    const prepared = action.prepare({ action_id: "branch-action", task_id: "task", workspace: f.root, operation: "workspace_read", input_digest: "sha256:branch", acceptance_ref: "accept" });
+    await assert.rejects(() => action.execute({ action_id: String((prepared.action as JsonObject).id), relative_path: "missing" }), /ENOENT/);
+    const gate = new AcceptanceGateKernel(f.store);
+    assert.throws(() => gate.prepare({ task_id: "task", work_id: "w", acceptance_ref: "a", required_artifact_ids: "bad" }), /array/);
+    assert.throws(() => gate.assess({ gate_id: "missing", verdict: "passed", artifact_ids: [], evidence_ids: [] }), /Unknown/);
+    const worker = new DurableWorkerKernel(f.store);
+    assert.throws(() => worker.enqueue({ worker_id: "w", task_id: "task", action: "" }), /action/);
+    assert.equal((worker.start({ worker_id: "auto-worker" }).worker as JsonObject).status, "running");
+    const router = new ProviderRouterKernel(f.store);
+    assert.throws(() => router.plan({ providers: ["a", "a"] }), /unique/);
+    assert.throws(() => router.plan({ providers: [null] }), /providers/);
+    const explicitRoute = router.plan({ route_id: "explicit-route", providers: ["a"], preferred: "a" });
+    assert.equal((router.record({ route_id: String((explicitRoute.route as JsonObject).id), provider: "a", status: "manual" }).route as JsonObject).status, "manual");
+  } finally { f.store.close(); }
+});

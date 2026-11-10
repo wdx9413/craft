@@ -1,0 +1,195 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import test from "node:test";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { resolvePythonAnalyzerPath, analyzePythonCheckpoint, analyzePythonControlFlow, analyzePythonDataFlow,
+  defaultPythonCommand, resetPythonExecutableCache, resolvePythonExecutable } from "../capability/craft-codebase/python-analysis.ts";
+import { combineLanguageAnalyses } from "../capability/craft-codebase/multi-language-analysis.ts";
+import { GRAPH_BUDGET } from "../capability/craft-codebase/graph-budget.ts";
+import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { pythonFileUnitDigest } from "../capability/craft-codebase/python-incremental.ts";
+
+const file = (content = "def f(): pass") => ({ path: "a.py", content, digest: createHash("sha256").update(content).digest("hex"), language: "py" });
+const graph = (language: string, nodes: JsonObject[], edges: JsonObject[] = [], diagnostics: JsonObject = {}) => ({
+  format: "craft-static-analysis-v1", analyzer: `${language}-static`, analyzer_version: "1", nodes, edges, diagnostics,
+});
+
+test("compiled Python adapter locates its own packaged resource without relying on the host entrypoint", () => {
+  const root = resolve("fixture-package"), expected = join(root, "capability", "craft-codebase", "analyzers", "analyze-python.py");
+  const module = pathToFileURL(join(root, "dist", "capability", "craft-codebase", "python-analysis.js")).href;
+  assert.equal(resolvePythonAnalyzerPath(resolve("isolated-project"), path => path === expected, module), expected);
+});
+
+test("Python interpreter discovery skips non-runnable launchers", () => {
+  assert.equal(defaultPythonCommand("win32"), "py");
+  assert.equal(defaultPythonCommand("linux"), "python3");
+  assert.equal(resolvePythonExecutable("linux", { CRAFT_PYTHON: "/opt/python" }), "/opt/python");
+
+  resetPythonExecutableCache();
+  const tried: string[] = [];
+  assert.equal(resolvePythonExecutable("win32", {}, command => { tried.push(command); }), "py");
+  assert.deepEqual(tried, ["py"]);
+
+  resetPythonExecutableCache();
+  const failed: string[] = [];
+  assert.equal(resolvePythonExecutable("win32", {}, command => { failed.push(command); throw new Error("missing"); }), "py");
+  assert.deepEqual(failed, ["py", "python", "python3"]);
+  resetPythonExecutableCache();
+});
+
+test("an injected Python executor keeps the platform default command", () => {
+  let commandPath = "", commandArgs: string[] = [];
+  analyzePythonCheckpoint([file()], { analyzerPath: "/worker", execute: (command, args) => {
+    commandPath = command;
+    commandArgs = args;
+    return JSON.stringify(graph("python", [node("f", "file")]));
+  } });
+  assert.equal(commandPath, defaultPythonCommand());
+  // `-I` ignores PYTHONUTF8; the argv flag is what keeps Windows stdin UTF-8.
+  assert.deepEqual(commandArgs.slice(0, 4), ["-I", "-X", "utf8", "/worker"]);
+});
+
+test("Python adapter replaces a caller-provided file-unit digest with a binding to the returned unit", () => {
+  const unit = { path: "a.py", source_digest: file().digest, analyzer: "python-ast-static", analyzer_version: "fixture", nodes: [], edges: [], class_methods: [],
+    unresolved_calls: 0, unresolved_imports: 0, unresolved_relations: 0, incremental_safe: true, budget_limited: false, unit_digest: "caller-provided" };
+  const result = analyzePythonCheckpoint([file()], { analyzerPath: "/worker", includeFileUnits: true,
+    execute: () => JSON.stringify({ ...graph("python", [node("f", "file")]), file_units: [unit] }) });
+  const returned = (result.analysis!.file_units as JsonObject[])[0]!;
+  assert.notEqual(returned.unit_digest, unit.unit_digest); assert.equal(returned.unit_digest, pythonFileUnitDigest(unit));
+  assert.equal(returned.path, unit.path); assert.equal(returned.source_digest, unit.source_digest);
+});
+
+test("missing-interpreter fallback units have verifiable digests and require global reanalysis", () => {
+  const result = analyzePythonCheckpoint([file()], { analyzerPath: "/worker", execute: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); } });
+  const unit = (result.analysis!.file_units as JsonObject[])[0]!;
+  assert.equal(typeof unit.unit_digest, "string"); assert.equal(unit.unit_digest, pythonFileUnitDigest(unit as Parameters<typeof pythonFileUnitDigest>[0]));
+  assert.equal(unit.incremental_safe, false); assert.equal(result.diagnostic!.status, "partial");
+});
+const node = (id: string, kind: string, language = "py", name = id): JsonObject => ({ id, kind, path: `${language}.py`, name, language, source_digest: "d", span: { start_offset: 0, end_offset: 0 } });
+
+test("Python adapter resolves packaged paths and handles empty, missing, oversized and valid analyses", () => {
+  const cwd = "/repo";
+  // Candidates are built with path.join, so the assertion must not hard-code a
+  // POSIX separator: on Windows the same candidate ends with backslashes.
+  const scripted = join("scripts", "codebase", "analyze-python.py");
+  const first = resolvePythonAnalyzerPath(cwd, path => path.endsWith(scripted));
+  assert(first?.endsWith(scripted));
+  assert(resolvePythonAnalyzerPath(cwd, path => path.includes(join("capability", "craft-codebase", "analyzers")))?.endsWith(join("analyzers", "analyze-python.py")));
+  assert.equal(resolvePythonAnalyzerPath(cwd, () => false), undefined);
+  assert.equal(resolvePythonAnalyzerPath(cwd, () => false, null), undefined);
+  const priorEntry = process.argv[1];
+  process.argv[1] = undefined as unknown as string;
+  try { assert.equal(resolvePythonAnalyzerPath(cwd, () => false), undefined); } finally { process.argv[1] = priorEntry!; }
+  assert.deepEqual(analyzePythonCheckpoint([]), {});
+  assert.equal(analyzePythonCheckpoint([file()], { cwd, fileExists: () => false, execute: () => "{}" }).diagnostic?.reason, "analyzer_not_packaged");
+  const oversized = file("x".repeat(24_000_001));
+  assert.equal(analyzePythonCheckpoint([oversized], { analyzerPath: "/worker" }).diagnostic?.reason, "input_budget_exceeded");
+  assert.equal(analyzePythonCheckpoint([file("😀".repeat(7_000_000))], { analyzerPath: "/worker" }).diagnostic?.reason, "input_budget_exceeded");
+  const valid = graph("python", [node("f", "file")]);
+  const result = analyzePythonCheckpoint([file()], { analyzerPath: "/worker", execute: () => JSON.stringify(valid) });
+  assert.equal(result.analysis?.analyzer, "python-static");
+  const unitResponse: JsonObject = graph("python", [node("f", "file")]); unitResponse.file_units = [];
+  const optionsResult = analyzePythonCheckpoint([file()], { analyzerPath: "/worker", includePaths: ["a.py"], includeFileUnits: true,
+    cachedFileUnits: [], execute: (_command, _args, input) => { assert.match(input, /cached_file_units/u); return JSON.stringify(unitResponse); } });
+  assert.deepEqual(optionsResult.analysis?.file_units, []);
+  const executed = analyzePythonCheckpoint([file()], { cwd: process.cwd() });
+  assert.equal(executed.analysis?.analyzer, "python-ast-static");
+});
+
+test("Python adapter bounds malformed responses and classifies subprocess failures without leaking output", () => {
+  const args = { analyzerPath: "/worker" };
+  assert.equal(analyzePythonCheckpoint([file()], { ...args, execute: () => "{" }).diagnostic?.reason, "analysis_failed");
+  assert.equal(analyzePythonCheckpoint([file()], { ...args, execute: () => JSON.stringify({ format: "wrong", nodes: [], edges: [] }) }).diagnostic?.reason, "invalid_analyzer_response");
+  assert.equal(analyzePythonCheckpoint([file()], { ...args, execute: () => "x".repeat(64_000_001) }).diagnostic?.reason, "output_budget_exceeded");
+  const error = (code: string) => Object.assign(new Error("sensitive stderr"), { code });
+  const fallback = analyzePythonCheckpoint([file()], { ...args, execute: () => { throw error("ENOENT"); } });
+  assert.equal(fallback.diagnostic?.reason, "python_runtime_unavailable_regex_fallback");
+  assert.equal(fallback.diagnostic?.status, "partial");
+  assert(fallback.analysis);
+  assert.equal(analyzePythonCheckpoint([file()], { ...args, execute: () => { throw error("ETIMEDOUT"); } }).diagnostic?.reason, "analysis_timed_out");
+  assert.equal(analyzePythonCheckpoint([file()], { ...args, execute: () => { throw error("EFAIL"); } }).diagnostic?.reason, "analysis_failed");
+});
+
+test("Python control-flow adapter validates bounded source-free responses and reports failures safely", () => {
+  const source = file("def route(): return 1");
+  const symbol = { id: "route-id", name: "route", startOffset: 4 };
+  const args = { analyzerPath: "/worker" };
+  const valid = { format: "craft-python-control-flow-v1", language: "python", status: "complete", blocks: [], edges: [], partial_reasons: [], source_content_included: false };
+  assert.equal(analyzePythonControlFlow(source, symbol, { cwd: "/repo", fileExists: () => false }).diagnostic?.reason, "analyzer_not_packaged");
+  assert.deepEqual(analyzePythonControlFlow(source, symbol, { ...args, execute: () => JSON.stringify(valid) }).result?.status, "complete");
+  for (const invalid of [{ ...valid, format: "wrong" }, { ...valid, language: "typescript" }, { ...valid, blocks: "wrong" },
+    { ...valid, edges: "wrong" }, { ...valid, partial_reasons: "wrong" }]) {
+    assert.equal(analyzePythonControlFlow(source, symbol, { ...args, execute: () => JSON.stringify(invalid) }).diagnostic?.reason, "invalid_control_flow_response");
+  }
+  assert.equal(analyzePythonControlFlow(source, symbol, { ...args, execute: () => "{" }).diagnostic?.reason, "analysis_failed");
+  assert.equal(analyzePythonControlFlow(source, symbol, { ...args, execute: () => "x".repeat(64_000_001) }).diagnostic?.reason, "output_budget_exceeded");
+  assert.equal(analyzePythonControlFlow(file("x".repeat(24_000_001)), symbol, args).diagnostic?.reason, "input_budget_exceeded");
+  const error = (code: string) => Object.assign(new Error("secret subprocess output"), { code });
+  assert.equal(analyzePythonControlFlow(source, symbol, { ...args, execute: () => { throw error("ENOENT"); } }).diagnostic?.reason, "python_runtime_unavailable");
+  assert.equal(analyzePythonControlFlow(source, symbol, { ...args, execute: () => { throw error("ETIMEDOUT"); } }).diagnostic?.reason, "analysis_timed_out");
+  assert.equal(analyzePythonControlFlow(source, symbol, { ...args, execute: () => { throw error("EFAIL"); } }).diagnostic?.reason, "analysis_failed");
+  const executed = analyzePythonControlFlow(source, symbol);
+  assert.equal(executed.result?.status, "complete");
+});
+
+test("Python data-flow adapter validates bounded responses and reports subprocess failures safely", () => {
+  const source = file("def route(value): return value");
+  const symbol = { id: "route-id", name: "route", startOffset: 4 };
+  const args = { analyzerPath: "/worker" };
+  const valid = { format: "craft-python-data-flow-v1", language: "python", status: "complete", candidates: [], definitions: [],
+    uses: [], flows: [], partial_reasons: [], source_content_included: false };
+  assert.equal(analyzePythonDataFlow(source, symbol, "value", { cwd: "/repo", fileExists: () => false }).diagnostic?.reason, "analyzer_not_packaged");
+  assert.equal(analyzePythonDataFlow(source, symbol, "value", { ...args, execute: (_command, _args, input) => {
+    assert.match(input, /data_flow_query/u); return JSON.stringify(valid);
+  } }).result?.status, "complete");
+  for (const invalid of [{ ...valid, format: "wrong" }, { ...valid, language: "typescript" }, { ...valid, candidates: "wrong" },
+    { ...valid, definitions: "wrong" }, { ...valid, uses: "wrong" }, { ...valid, flows: "wrong" }, { ...valid, partial_reasons: "wrong" }]) {
+    assert.equal(analyzePythonDataFlow(source, symbol, "value", { ...args, execute: () => JSON.stringify(invalid) }).diagnostic?.reason, "invalid_data_flow_response");
+  }
+  assert.equal(analyzePythonDataFlow(source, symbol, "value", { ...args, execute: () => "{" }).diagnostic?.reason, "analysis_failed");
+  assert.equal(analyzePythonDataFlow(source, symbol, "value", { ...args, execute: () => "x".repeat(64_000_001) }).diagnostic?.reason, "output_budget_exceeded");
+  assert.equal(analyzePythonDataFlow(file("x".repeat(24_000_001)), symbol, "value", args).diagnostic?.reason, "input_budget_exceeded");
+  const error = (code: string) => Object.assign(new Error("secret subprocess output"), { code });
+  assert.equal(analyzePythonDataFlow(source, symbol, "value", { ...args, execute: () => { throw error("ENOENT"); } }).diagnostic?.reason, "python_runtime_unavailable");
+  assert.equal(analyzePythonDataFlow(source, symbol, "value", { ...args, execute: () => { throw error("ETIMEDOUT"); } }).diagnostic?.reason, "analysis_timed_out");
+  assert.equal(analyzePythonDataFlow(source, symbol, "value", { ...args, execute: () => { throw error("EFAIL"); } }).diagnostic?.reason, "analysis_failed");
+  assert.equal(analyzePythonDataFlow(source, symbol, "value").result?.status, "complete");
+});
+
+test("language graph merge preserves file nodes, interleaves symbols and filters missing endpoints", () => {
+  assert.equal(combineLanguageAnalyses([]), undefined);
+  const pyFile = node("py-file", "file"), tsFile = node("ts-file", "file", "ts");
+  const pySymbol = node("py-symbol", "symbol", "py"), tsSymbol = node("ts-symbol", "symbol", "ts");
+  const edge = (from: string, to: string): JsonObject => ({ kind: "calls", from_node_id: from, to_node_id: to, source_span: { start_offset: 0, end_offset: 0 } });
+  const merged = combineLanguageAnalyses([graph("py", [pyFile, pySymbol], [edge("py-symbol", "py-file"), edge("missing", "py-file")], { budget_limited: true }),
+    graph("ts", [tsFile, tsSymbol], [edge("ts-symbol", "ts-file")])], [{ language: "java", reason: "no_adapter" }])!;
+  assert.equal(merged.analyzer, "multi-language-static");
+  assert.deepEqual((merged.nodes as JsonObject[]).map(item => item.id), ["py-file", "ts-file", "py-symbol", "ts-symbol"]);
+  assert.equal((merged.edges as JsonObject[]).length, 2);
+  assert.equal((merged.diagnostics as JsonObject).budget_limited, true);
+  assert.equal(((merged.diagnostics as JsonObject).degraded_languages as JsonObject[]).length, 1);
+  const clean: JsonObject = graph("go", [node("go-file", "file", "go")]); delete clean.diagnostics;
+  const cleanMerged = combineLanguageAnalyses([clean])!;
+  assert.equal((cleanMerged.diagnostics as JsonObject).budget_limited, false);
+  assert.deepEqual((cleanMerged.diagnostics as JsonObject).languages, [{ analyzer: "go-static", diagnostics: {} }]);
+  const explicit = graph("go", [node("go-file-2", "file", "go")], [], { budget_limited: false });
+  assert.equal((combineLanguageAnalyses([explicit])!.diagnostics as JsonObject).budget_limited, false);
+});
+
+test("language graph merge reports node and edge omissions and enforces required file nodes", () => {
+  assert.equal(combineLanguageAnalyses([{ nodes: [], edges: "invalid" }]), undefined);
+  const required = node("f", "file");
+  const symbols = Array.from({ length: GRAPH_BUDGET.maxNodes + 1 }, (_, index) => node(`s${index}`, "symbol"));
+  const bounded = combineLanguageAnalyses([graph("py", [required, ...symbols])])!;
+  assert.equal((bounded.diagnostics as JsonObject).budget_limited, true);
+  assert(Number((bounded.diagnostics as JsonObject).omitted_nodes) > 0);
+  const largeSymbol = node("large", "symbol"); largeSymbol.name = "x".repeat(GRAPH_BUDGET.maxImportBytes + 1);
+  const charBounded = combineLanguageAnalyses([graph("py", [required, largeSymbol])])!;
+  assert(Number((charBounded.diagnostics as JsonObject).omitted_nodes) > 0);
+  const largeEdges = Array.from({ length: GRAPH_BUDGET.maxEdges + 1 }, () => ({ kind: "calls", from_node_id: "s0", to_node_id: "s0", source_span: { start_offset: 0, end_offset: 0 } }));
+  const edgeBounded = combineLanguageAnalyses([graph("py", [required, node("s0", "symbol")], largeEdges)])!;
+  assert(Number((edgeBounded.diagnostics as JsonObject).omitted_edges) > 0);
+  const enormousFile = node("huge", "file"); enormousFile.name = "x".repeat(GRAPH_BUDGET.maxImportBytes + 1);
+  assert.throws(() => combineLanguageAnalyses([graph("py", [enormousFile])]), /Required file nodes/);
+});

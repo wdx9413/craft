@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "query": "DataWorkflowDao getDataWorkflow workflow by key and version",
+      "path": "d-forge-common/src/main/java/com/xiaoju/uemc/dforgecommon/dao/DataWorkflowDao.java",
+      "name": "getDataWorkflow"
+    },
+    {
+      "query": "DataWorkflowServiceImpl dataDetail workflow detail lookup by key and version",
+      "path": "d-forge-config-server/src/main/java/com/xiaoju/uemc/dforgeconfig/service/impl/DataWorkflowServiceImpl.java",
+      "name": "dataDetail"
+    },
+    {
+      "query": "DataWorkflowServiceImpl dataDetail 工作流详情按 key 和版本查询",
+      "path": "d-forge-config-server/src/main/java/com/xiaoju/uemc/dforgeconfig/service/impl/DataWorkflowServiceImpl.java",
+      "name": "dataDetail",
+      "language": "zh-en"
+    }
+  ],
+  "call_graph_cases": [
+    {
+      "target_path": "d-forge-common/src/main/java/com/xiaoju/uemc/dforgecommon/dao/DataWorkflowDao.java",
+      "target_name": "getDataWorkflow",
+      "callers": [
+        {
+          "path": "d-forge-config-server/src/main/java/com/xiaoju/uemc/dforgeconfig/service/impl/DataWorkflowServiceImpl.java",
+          "name": "dataDetail"
+        },
+        {
+          "path": "d-forge-config-server/src/main/java/com/xiaoju/uemc/dforgeconfig/service/impl/SimuTaskServiceImpl.java",
+          "name": "callbackWorkflowResult"
+        }
+      ]
+    }
+  ],
+  "impact_cases": [
+    {
+      "target_path": "d-forge-config-server/src/main/java/com/xiaoju/uemc/dforgeconfig/service/impl/DataWorkflowServiceImpl.java",
+      "target_name": "dataDetail",
+      "direction": "outgoing",
+      "relation_kind": "calls",
+      "max_depth": 2,
+      "nodes": [
+        { "path": "d-forge-common/src/main/java/com/xiaoju/uemc/dforgecommon/constant/DForgeException.java", "name": "DForgeException" },
+        { "path": "d-forge-common/src/main/java/com/xiaoju/uemc/dforgecommon/dao/DataWorkflowDao.java", "name": "getByFlowId" },
+        { "path": "d-forge-common/src/main/java/com/xiaoju/uemc/dforgecommon/dao/DataWorkflowDao.java", "name": "getDataWorkflow" },
+        { "path": "d-forge-common/src/main/java/com/xiaoju/uemc/dforgecommon/dao/DataWorkflowDao.java", "name": "getWorkflowByKey" },
+        { "path": "d-forge-common/src/main/java/com/xiaoju/uemc/dforgecommon/dao/OperatorNodeDao.java", "name": "getNodeConfigByWorkflowKey" },
+        { "path": "d-forge-common/src/main/java/com/xiaoju/uemc/dforgecommon/rpc/redis/RedisInvoker.java", "name": "get" },
+        { "path": "d-forge-common/src/main/java/com/xiaoju/uemc/dforgecommon/filter/DForgeContextInfoHolder.java", "name": "getUserInfo" },
+        { "path": "d-forge-common/src/main/java/com/xiaoju/uemc/dforgecommon/utils/JsonUtils.java", "name": "string2Obj" },
+        { "path": "d-forge-config-server/src/main/java/com/xiaoju/uemc/dforgeconfig/pojo/vo/WorkflowDataDetailVO.java", "name": "buildWorkflowDataDetailVO" },
+        { "path": "d-forge-config-server/src/main/java/com/xiaoju/uemc/dforgeconfig/service/impl/DataWorkflowServiceImpl.java", "name": "convertToNodeConfigVO" }
+      ]
+    }
+  ]
+}

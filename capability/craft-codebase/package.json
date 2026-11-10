@@ -1,0 +1,49 @@
+{
+  "name": "@craft/capability-codebase",
+  "version": "0.20.3",
+  "description": "Craft internal read-only codebase structure capability",
+  "type": "module",
+  "main": "./dist/capability.js",
+  "exports": {
+    ".": {
+      "types": "./dist/capability.d.ts",
+      "default": "./dist/capability.js"
+    },
+    "./ownership": {
+      "types": "./dist/ownership.d.ts",
+      "default": "./dist/ownership.js"
+    },
+    "./codebase-index": {
+      "types": "./dist/codebase-index.d.ts",
+      "default": "./dist/codebase-index.js"
+    },
+    "./package.json": "./package.json",
+    "./context-search": {
+      "types": "./dist/context-search.d.ts",
+      "default": "./dist/context-search.js"
+    },
+    "./repository-onboarding": {
+      "types": "./dist/repository-onboarding.d.ts",
+      "default": "./dist/repository-onboarding.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "license": "MIT",
+  "types": "./dist/capability.d.ts",
+  "dependencies": {
+    "craft-common-store-local": "0.20.3",
+    "craft-common-base": "0.20.3",
+    "craft-common-log": "0.20.3",
+    "typescript": ">=5.8 <7"
+  },
+  "engines": {
+    "node": ">=23"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "scope": "local synthetic lifecycle, cold process with persistent isolated datastore",
+  "node": "v23.11.0",
+  "platform": "darwin",
+  "bundle": "dist/plugin/craft-codex-hook.cjs",
+  "bundle_sha256": "d0515a2ab9c08f0383078313b8f90ffef49397e7945ca14f66f19d2dab2249f6",
+  "started_at": "2026-10-30T07:34:49.470Z",
+  "finished_at": "2026-10-30T07:36:11.895Z",
+  "summary": {
+    "SessionStart": {
+      "samples": 100,
+      "p50_ms": 76,
+      "p95_ms": 89,
+      "p99_ms": 104,
+      "max_ms": 115,
+      "target_met": true
+    },
+    "UserPromptSubmit": {
+      "samples": 100,
+      "p50_ms": 169,
+      "p95_ms": 204,
+      "p99_ms": 233,
+      "max_ms": 237,
+      "target_met": true
+    },
+    "PostToolUse.noop": {
+      "samples": 100,
+      "p50_ms": 74,
+      "p95_ms": 84,
+      "p99_ms": 91,
+      "max_ms": 108,
+      "target_met": true
+    },
+    "PostToolUse.edit": {
+      "samples": 100,
+      "p50_ms": 141,
+      "p95_ms": 171,
+      "p99_ms": 203,
+      "max_ms": 240,
+      "target_met": true
+    },
+    "Stop": {
+      "samples": 100,
+      "p50_ms": 175,
+      "p95_ms": 230,
+      "p99_ms": 270,
+      "max_ms": 350,
+      "target_met": true
+    },
+    "SessionEnd": {
+      "samples": 100,
+      "p50_ms": 168,
+      "p95_ms": 206,
+      "p99_ms": 232,
+      "max_ms": 339,
+      "target_met": true
+    }
+  },
+  "sequential_isolated_burst_comparison": {
+    "baseline": {
+      "bundle_sha256": "9510307f4942a7320275f5c70081956ab68fd7e4cef83a30b126bcdebcc73109",
+      "bundle_bytes": 14896028,
+      "samples": 16,
+      "p50_ms": 965,
+      "p95_ms": 988,
+      "max_ms": 988
+    },
+    "candidate": {
+      "bundle_sha256": "d0515a2ab9c08f0383078313b8f90ffef49397e7945ca14f66f19d2dab2249f6",
+      "bundle_bytes": 4902391,
+      "samples": 16,
+      "p50_ms": 396,
+      "p95_ms": 434,
+      "max_ms": 434
+    }
+  },
+  "compiler_asset_sha256": "569177652966bd528c319171c7dd22860dbf72bde116cbc4f644f1d02bb12e39",
+  "limitations": [
+    "Synthetic empty repository with a preinitialized isolated datastore; not populated-project or production latency.",
+    "One separate isolated 16-way burst per bundle; not a production P99 estimate.",
+    "Compiler remains shipped separately; bundle-size reduction is not removal of semantic features."
+  ]
+}

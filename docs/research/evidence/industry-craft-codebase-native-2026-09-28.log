@@ -1,0 +1,67 @@
+(node:81244) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:81244) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ strict MCP: each standalone resolves its own member, scope, gate and aggregate budget without hooks (69.106375ms)
+✔ Knowledge search fails closed without scope and separates candidate inspection from Context (36.9605ms)
+✔ Experience accepts array contracts over MCP and remains candidate until quality gates (24.187167ms)
+✔ Codebase alone can declare, checkpoint, activate, query and refresh changed paths (41.131375ms)
+✔ Hook observations never mistake command success, old edits or session identity for verified task success (69.170667ms)
+✔ external code analyzers import only checkpoint-bound UTF-16 facts for Java, Python and Go (36.063875ms)
+✔ memory transitions reject stale writes and repeat without adding versions (16.8905ms)
+✔ Context feedback pins the exact receipt without mutating source status or crossing members (16.98ms)
+✔ explicit verification intake validates sequence and outcome while retaining host-attested provenance (16.092625ms)
+✔ Knowledge source digest drift invalidates reviewed claims (16.279708ms)
+✔ Codebase bootstrap recovers an interrupted declaration and exposes unavailable freshness (16.796459ms)
+✔ Hook verification before any edit is observable but cannot establish a verified change (15.117458ms)
+✔ craft-codebase is an internal non-context Capability with an owned read-only surface (15.328542ms)
+✔ craft-codebase is explicit, snapshot-pinned, content-free, and exposes structural queries (36.505292ms)
+✔ craft-codebase rejects stale, inactive, unsafe, malformed, and ambiguous inputs without fallback (28.403292ms)
+✔ craft-codebase checks checkpoint bytes and never follows a snapshot symlink (15.192542ms)
+✔ craft-codebase rejects malformed checkpoint ownership and unsafe source paths (13.53925ms)
+✔ craft-codebase is reachable only from full MCP and does not widen published component surfaces (28.41775ms)
+✔ explicit analyzer choices preserve the heuristic fallback without accepting unknown analyzers (36.360792ms)
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (11.412417ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (13.424625ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (18.417916ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (22.381334ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (14.202542ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (7.682375ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (13.674625ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.759417ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (9.078292ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (19.100125ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (21.891958ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (280.704875ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (17.91725ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1244.482916ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2396.523375ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (44.016041ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (255.33275ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (11.434209ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (21.603458ms)
+✔ default BM25 retrieves Chinese words and mixed code identifiers without punctuation artifacts (0.278917ms)
+ℹ tests 39
+ℹ suites 0
+ℹ pass 39
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5819.442208
+ℹ start of coverage report
+ℹ ---------------------------------------------------------------------
+ℹ file                 | line % | branch % | funcs % | uncovered lines
+ℹ ---------------------------------------------------------------------
+ℹ capability           |        |          |         | 
+ℹ  craft-codebase      |        |          |         | 
+ℹ   capability.ts      | 100.00 |   100.00 |  100.00 | 
+ℹ   codebase-index.ts  | 100.00 |   100.00 |  100.00 | 
+ℹ   ownership.ts       | 100.00 |   100.00 |  100.00 | 
+ℹ core                 |        |          |         | 
+ℹ  application         |        |          |         | 
+ℹ   use-cases          |        |          |         | 
+ℹ    codebase.ts       | 100.00 |   100.00 |  100.00 | 
+ℹ ---------------------------------------------------------------------
+ℹ all files            | 100.00 |   100.00 |  100.00 | 
+ℹ ---------------------------------------------------------------------
+ℹ end of coverage report

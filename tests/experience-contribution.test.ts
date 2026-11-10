@@ -1,0 +1,215 @@
+import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
+import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
+import { stableDigest as digest } from "../common/craft-common-base/src/digest.ts";
+import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
+import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
+import { ContextResolutionKernel } from "../core/context-resolution.ts";
+import type { ContextContributionProvider } from "../core/capability-protocol.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
+import { contextAssetRef } from "../common/craft-common-base/src/context-assets.ts";
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "craft-experience-contribution-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  store.create("scope_alias", "project-p", { status: "active", scope: { kind: "project", id: "project:p" },
+    alias_kind: "path", alias: root, alias_digest: digest(root) });
+  const core: Record<string, unknown> = { [CORE_KERNELS.store]: store, [CORE_KERNELS.modelProviders]: PROVIDER_CATALOG };
+  return { root, store, core, contribution: new ExperienceContribution(store) };
+}
+async function close(f: { store: CraftStore; root: string }) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+const request = (query: string, overrides: Partial<{ max_items: number; max_chars: number }> = {}) => ({
+  query, scope_kind: "project" as const, scope_id: "p", max_items: 5, max_chars: 4_000, ...overrides,
+});
+
+function procedure(store: CraftStore, args: { id: string; title: string; trigger: string; kind?: "workflow" | "graph" | "prompt"; lifecycle?: string; scope?: string; domain?: string }): JsonObject {
+  const kind = args.kind ?? "workflow";
+  const scope = args.scope ?? "project:p";
+  ensureProjectScope(store, scope);
+  const ref = store.contentStore.writeSync({
+    kind: "experience", record_id: args.id, version: 1, title: args.title, folder: kind === "workflow" ? "workflows" : kind === "graph" ? "graphs" : "prompts",
+    scope, status: args.lifecycle ?? "routeable", sensitivity: "internal", source_id: "fixture", body: `# ${args.title}\n\nUse this verified procedure.`,
+  });
+  return store.create("experience_procedure", args.id, {
+    procedure_kind: kind, scope, trigger: args.trigger, title: args.title,
+    acceptance_ref: "acceptance:fixture", scenario_signature: { project: "p", target_class: "fixture", ...(args.domain ? { domain: args.domain } : {}) },
+    lifecycle: args.lifecycle ?? "routeable", routeable: (args.lifecycle ?? "routeable") === "routeable", content_ref: ref, content_digest: ref.digest,
+  });
+}
+
+function ensureProjectScope(store: CraftStore, scope: string): void {
+  if (!scope.startsWith("project:")) return;
+  const id = scope.slice("project:".length);
+  if (store.list("scope_alias", 10_000, item => item.alias_kind === "path" && (item.scope as JsonObject | undefined)?.id === `project:${id}`).length) return;
+  const projectRoot = join(store.paths.root, `fixture-project-${id}`); mkdirSync(projectRoot, { recursive: true });
+  store.create("scope_alias", `fixture-project-${id}`, { status: "active", scope: { kind: "project", id: `project:${id}` },
+    alias_kind: "path", alias: projectRoot, alias_digest: digest(projectRoot) });
+}
+
+test("Experience is a Context member, but only routeable Procedure projections are injected", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("experience_pattern", "hidden-pattern", { scope: { kind: "project", id: "p" }, scenario_key: "coding.verification", status: "diagnostic_only", content_free: true });
+    procedure(f.store, { id: "verified", title: "Terminal verification", trigger: "verification" });
+    const contributed = await f.contribution.contribute(request("verification"));
+    assert.equal(contributed.member, "experience");
+    assert.equal(contributed.items.length, 1);
+    const item = contributed.items[0]!;
+    assert.equal(item.kind, "experience_procedure");
+    assert.equal(item.procedure_id, "verified");
+    assert.equal(item.content, undefined);
+    assert.match(String(item.content_digest), /^sha256:/u);
+    assert.equal(JSON.stringify(contributed).includes("hidden-pattern"), false);
+  } finally { await close(f); }
+});
+
+test("Experience honors scope, query and budget without falling back to diagnostic history", async () => {
+  const f = await fixture();
+  try {
+    procedure(f.store, { id: "a", title: "Rollback one", trigger: "rollback" });
+    procedure(f.store, { id: "b", title: "Rollback two", trigger: "rollback" });
+    procedure(f.store, { id: "other", title: "Other", trigger: "rollback", scope: "project:other" });
+    const all = await f.contribution.contribute(request("rollback"));
+    assert.deepEqual(all.items.map((item) => item.procedure_id), ["a", "b"]);
+    assert.equal(all.omitted_count, 0);
+    const bounded = await f.contribution.contribute(request("rollback", { max_items: 1 }));
+    assert.equal(bounded.items.length, 1);
+    assert.equal(bounded.omitted_count, 1);
+    const tooSmall = await f.contribution.contribute(request("rollback", { max_chars: 1 }));
+    assert.deepEqual(tooSmall.items, []);
+    assert.equal(tooSmall.omitted_count, 2);
+    assert.deepEqual((await f.contribution.contribute(request("!!!"))).items, []);
+  } finally { await close(f); }
+});
+
+test("Experience keeps an exact required Procedure in its bounded shortlist", async () => {
+  const f = await fixture();
+  try {
+    procedure(f.store, { id: "a", title: "Rollback one", trigger: "rollback" });
+    procedure(f.store, { id: "b", title: "Rollback two", trigger: "rollback" });
+    const target = (await f.contribution.contribute(request("rollback"))).items.find(item => item.procedure_id === "b")!;
+    const selected = await f.contribution.contribute({ ...request("rollback", { max_items: 1 }), candidate_mode: true,
+      required_refs: [contextAssetRef("experience", target, target.scope as JsonObject)] });
+    assert.deepEqual(selected.items.map(item => item.procedure_id), ["b"]);
+  } finally { await close(f); }
+});
+
+test("Experience candidate shortlist ranks a late matching Procedure before the cap", async () => {
+  const f = await fixture();
+  try {
+    for (let index = 0; index < 25; index += 1) procedure(f.store, {
+      id: `a-${String(index).padStart(2, "0")}`, title: "Generic procedure", trigger: "ordinary task",
+    });
+    procedure(f.store, { id: "z-target", title: "Precise task", trigger: "needle verification" });
+    const selected = await f.contribution.contribute({ ...request("needle", { max_items: 24, max_chars: 100_000 }), candidate_mode: true });
+    assert.equal(selected.items.length, 24);
+    assert.equal(selected.items[0]?.procedure_id, "z-target");
+    assert.equal(selected.omitted_count, 2);
+  } finally { await close(f); }
+});
+
+test("Experience reaches Context Resolution beside Knowledge and remains replayable", async () => {
+  const f = await fixture();
+  try {
+    procedure(f.store, { id: "reachable", title: "Rollback", trigger: "rollback" });
+    const { contributed } = buildCapabilityRegistry(CRAFT_CAPABILITIES, f.core);
+    const kernel = new ContextResolutionKernel(f.store, contributed);
+    const resolved = await kernel.resolve({ query: "rollback", scope_kind: "project", scope_id: "p" });
+    const material = resolved.contributions as Array<{ member: string; items: JsonObject[] }>;
+    assert.equal(material.find((item) => item.member === "experience")!.items[0]!.procedure_id, "reachable");
+    const receipt = resolved.receipt as { contributions: Array<{ member: string; item_count: number }>; content_free: boolean };
+    assert.equal(receipt.contributions.find((item) => item.member === "experience")!.item_count, 1);
+    assert.equal(receipt.content_free, true);
+    assert.equal(JSON.stringify(receipt).includes("Rollback"), false);
+  } finally { await close(f); }
+});
+
+test("Context retrieval handles Experience text fallbacks only when each field is present", async () => {
+  const f = await fixture();
+  try {
+    const records = [
+      f.store.create("experience_procedure", "content-fallback", { scope: "project:p", procedure_kind: "workflow", content: "alpha content" }),
+      f.store.create("experience_procedure", "trigger-fallback", { scope: "project:p", procedure_kind: "workflow", trigger: "alpha trigger" }),
+      f.store.create("experience_procedure", "empty-fallback", { scope: "project:p", procedure_kind: "workflow" }),
+    ];
+    const items = records.map(record => ({ ...record, procedure_id: record.id, procedure_version: record.version }));
+    const provider: ContextContributionProvider = { member: "experience", async contribute() {
+      return { member: "experience", items, receipt_id: "experience-fallbacks", omitted_count: 0 };
+    } };
+    const kernel = new ContextResolutionKernel(f.store, [provider]);
+    const resolved = await kernel.resolve({ ...request("alpha"), members: ["experience"], required_refs: items.map(item => ({
+      member: "experience", id: item.procedure_id, version: item.procedure_version,
+    })) });
+    const projected = (resolved.contributions as JsonObject[]).flatMap(part => part.items as JsonObject[]);
+    assert.equal(projected.length, 3);
+  } finally { await close(f); }
+});
+
+test("Fresh or candidate-only Experience produces an empty Context contribution", async () => {
+  const f = await fixture();
+  try {
+    procedure(f.store, { id: "candidate", title: "Candidate", trigger: "anything", lifecycle: "candidate" });
+    assert.deepEqual(await f.contribution.contribute(request("anything")), { member: "experience", items: [], receipt_id: "experience_contribution_none", omitted_count: 0,
+      diagnostics: { scoped_procedure_count: 1, has_draft: false, routeable_count: 0, candidate_count: 1, reason: "no_promoted_release", next_tool: "craft_experience_graph_inspect", next_action: "diagnose", execution_started: false } });
+    const empty = await f.contribution.contribute({ ...request("anything"), scope_id: "empty" });
+    assert.equal((empty.diagnostics as JsonObject).reason, "no_accessible_procedure_in_scope");
+    ensureProjectScope(f.store, "project:draft-only");
+    f.store.create("experience_graph_draft", "draft-only", { scope: "project:draft-only", lifecycle: "draft" });
+    const draft = await f.contribution.contribute({ ...request("anything"), scope_id: "draft-only" });
+    assert.equal((draft.diagnostics as JsonObject).reason, "draft_not_submitted");
+  } finally { await close(f); }
+});
+
+test("Experience describes a routeable Graph with its checked subscenario routes", async () => {
+  const f = await fixture();
+  try {
+    const definitionRef = new ProcedureDefinitionStore(f.store).write({
+      schema_version: "craft.procedure.v1", procedure_id: "graph-routes", procedure_version: 1, kind: "graph", scope: "project:p",
+      trigger: "graph route", preconditions: [], allowed_effects: ["read_only"], acceptance_ref: "acceptance:graph",
+      failure_disposition: "stop", scenario_signature: { project: "p", target_class: "fixture" }, evidence_ids: [],
+      proposal_ref: { id: "proposal", version: 1 }, definition: { graph_control: { subscenarios: [
+        { id: "review", title: "Review", entry_id: "start", exit_id: "done" },
+      ] } },
+    }, "Graph routes");
+    f.store.create("experience_procedure", "graph-routes", { procedure_kind: "graph", scope: "project:p", trigger: "graph route",
+      title: "Graph routes", acceptance_ref: "acceptance:graph", scenario_signature: { project: "p", target_class: "fixture" },
+      lifecycle: "routeable", routeable: true, entrypoints: [{ id: "start", routes: [] }], definition_ref: definitionRef, definition_digest: definitionRef.digest });
+    const contributed = await f.contribution.contribute(request("graph"));
+    assert.equal(contributed.items.length, 1);
+    assert.equal(contributed.items[0]!.host_next_step, "match_graph_then_plan_and_bind");
+    assert.match(String(contributed.items[0]!.retrieval_text), /Review/u);
+  } finally { await close(f); }
+});
+
+test("Experience candidate enumeration fails closed above its scope bound", async () => {
+  const f = await fixture();
+  try {
+    f.store.createBatch(Array.from({ length: 10_001 }, (_, index) => ({ kind: "experience_procedure", id: `bounded-${index}`,
+      payload: { scope: "project:p", lifecycle: "routeable", routeable: true } })));
+    await assert.rejects(f.contribution.contribute(request("anything")), /candidate budget exceeded/u);
+  } finally { await close(f); }
+});
+
+test("Experience routing keeps a procedure inside its evaluated domain", async () => {
+  const f = await fixture();
+  try {
+    procedure(f.store, { id: "coding-proc", title: "Coding", trigger: "refactor module", domain: "coding" });
+    procedure(f.store, { id: "quant-proc", title: "Quant", trigger: "refactor module", domain: "quant" });
+    procedure(f.store, { id: "untagged-proc", title: "Untagged", trigger: "refactor module" });
+    const coding = await f.contribution.contribute({ ...request("refactor"), domain: "coding" });
+    assert.deepEqual(coding.items.map(item => item.procedure_id), ["coding-proc"]);
+    const quant = await f.contribution.contribute({ ...request("refactor"), domain: "quant" });
+    assert.deepEqual(quant.items.map(item => item.procedure_id), ["quant-proc"]);
+    // No domain filter only sees untagged procedures, so a stale untagged lesson
+    // cannot silently apply to a domain-aware task either.
+    const untagged = await f.contribution.contribute(request("refactor"));
+    assert.deepEqual(untagged.items.map(item => item.procedure_id), ["untagged-proc"]);
+  } finally { await close(f); }
+});

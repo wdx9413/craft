@@ -1,0 +1,305 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { craftPaths, CraftService, VERSION, CraftStore, WorkbenchWebApp, workbenchBridge } from "../core/runtime-api.ts";
+import type { JsonObject } from "../core/infrastructure/store.ts";
+import { beginHookRuntimeDiagnostic } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
+import { LocalWorkbenchServer } from "../core/workbench-server.ts";
+
+test("explicitly mounted ES modules are served without a per-file allowlist entry", async (t) => {
+  const f = await fixture();
+  t.after(() => f.store.close());
+  await writeFile(path.join(f.root, "index.html"), "<main>Workbench</main>");
+  await writeFile(path.join(f.root, "ui.js"), "export const answer = 42;");
+  await writeFile(path.join(f.root, "mode-pages.js"), "export const pages = [];");
+  await writeFile(path.join(f.root, "app.css"), ":root { color: red; }");
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173", { workbenchDir: f.root });
+  for (const [route, type] of [
+    ["/ui.js", "application/javascript; charset=utf-8"],
+    ["/workbench/ui.js", "application/javascript; charset=utf-8"],
+    ["/workbench/mode-pages.js", "application/javascript; charset=utf-8"],
+    ["/app.css", "text/css; charset=utf-8"],
+    ["/workbench/app.css", "text/css; charset=utf-8"],
+  ] as const) {
+    const response = app.handle({ method: "GET", path: route });
+    assert.equal(response.status, 200, route);
+    assert.equal(response.contentType, type, route);
+  }
+  // A single safe basename only. URL normalization resolves `/workbench/../ui.js`
+  // to the legitimate `/ui.js`; what must never happen is reading a file outside
+  // the mounted directory or with an unregistered extension.
+  for (const route of ["/workbench/%2e%2e%2fui.js", "/workbench/ui.js.map", "/workbench/nested/ui.js", "/workbench/.env", "/workbench/secret.txt"]) {
+    assert.equal(app.handle({ method: "GET", path: route }).status, 404, route);
+  }
+});
+
+async function fixture() {
+  const root = await mkdtemp(path.join(tmpdir(), "craft-workbench-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  return { root, store, service: new CraftService(store) };
+}
+
+test("model discovery is authenticated and runs through the async route", async (t) => {
+  const f = await fixture();
+  t.after(() => f.store.close());
+  const app = new WorkbenchWebApp(f.service, "discovery-token", "http://127.0.0.1:4173");
+  assert.equal((await app.handleAsync({ method: "POST", path: "/api/config/models/discover", token: "wrong", body: "{}" })).status, 401);
+  const previous = process.env.LOCAL_MODEL_KEY;
+  process.env.LOCAL_MODEL_KEY = "x";
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ data: [{ id: "discovered-model" }] });
+  try {
+    const response = await app.handleAsync({ method: "POST", path: "/api/config/models/discover", token: "discovery-token", origin: "http://127.0.0.1:4173", body: JSON.stringify({ baseUrl: "https://api.example.test/v1", protocol: "openai-compatible", apiKeyEnv: "LOCAL_MODEL_KEY" }) });
+    assert.equal(response.status, 200);
+    assert.deepEqual(JSON.parse(response.body).models, ["discovered-model"]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previous === undefined) delete process.env.LOCAL_MODEL_KEY; else process.env.LOCAL_MODEL_KEY = previous;
+  }
+});
+
+test("Workbench exposes authenticated bounded Hook diagnostics without source content", async (t) => {
+  const f = await fixture();
+  t.after(() => f.store.close());
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  beginHookRuntimeDiagnostic({ data_root: f.store.paths.root, request_id: "timed-out-request", member: "context", event: "UserPromptSubmit",
+    session_id: "private-session", wall_clock: () => "2026-11-07T10:00:00.000Z" });
+  const failed = beginHookRuntimeDiagnostic({ data_root: f.store.paths.root, request_id: "failed-request", member: "datasec", event: "PreToolUse",
+    wall_clock: () => "2026-11-07T10:01:00.000Z" });
+  failed.finish({ outcome: "failed", error_code: "STORAGE_BUSY", handler_ms: 10 });
+
+  assert.equal(app.handle({ method: "GET", path: "/api/workbench/hook-diagnostics" }).status, 401);
+  assert.equal(app.handle({ method: "GET", path: "/api/workbench/hook-diagnostics", token: "secret", origin: "https://evil.example" }).status, 403);
+  assert.equal(app.handle({ method: "GET", path: "/api/workbench/hook-diagnostics?limit=101", token: "secret" }).status, 422);
+  const response = app.handle({ method: "GET", path: "/api/workbench/hook-diagnostics?limit=5", token: "secret" });
+  const result = JSON.parse(response.body) as { items: Array<Record<string, unknown>>; partial: boolean };
+  assert.equal(response.status, 200);
+  assert.equal(result.partial, false);
+  assert.deepEqual(result.items.map(item => ({ member: item.member, status: item.status })), [
+    { member: "datasec", status: "completed" }, { member: "context", status: "unmatched_start" },
+  ]);
+  assert.equal(result.items[0]!.error_code, "STORAGE_BUSY");
+  assert(!response.body.includes("private-session"));
+});
+
+test("core serves no UI by default and accepts an explicit presentation mount", async (t) => {
+  const f = await fixture();
+  t.after(() => f.store.close());
+  await writeFile(path.join(f.root, "index.html"), "<main>External presentation</main>");
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  assert.equal(app.workbenchDir, null);
+  for (const route of ["/", "/workbench", "/workbench/app.js", "/app.css"]) {
+    assert.equal(app.handle({ method: "GET", path: route }).status, 404);
+  }
+  const mounted = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173", { workbenchDir: f.root });
+  assert.equal(mounted.handle({ method: "GET", path: "/" }).body, "<main>External presentation</main>");
+  assert.equal(mounted.handle({ method: "GET", path: "/workbench/app.js" }).status, 404);
+  assert.equal(mounted.handle({ method: "GET", path: "/workbench/missing.js" }).status, 404);
+  assert.equal(new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173", { workbenchDir: null }).workbenchDir, null);
+  assert.equal(workbenchBridge(f.service), workbenchBridge(f.service));
+  const server = new LocalWorkbenchServer(f.service, "secret", { workbenchDir: f.root });
+  t.after(() => server.close());
+  const { url } = await server.start(0);
+  assert.equal(await (await fetch(url)).text(), "<main>External presentation</main>");
+  assert.equal((await fetch(new URL("/api/home", url))).status, 401);
+});
+
+test("Craft Workbench projects model, project, connector and source reads over the same-origin API", async () => {
+  const f = await fixture();
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  const get = (requestPath: string) => app.handle({ method: "GET", path: requestPath, token: "secret" });
+  const post = (requestPath: string, body: unknown) => app.handle({ method: "POST", path: requestPath, token: "secret", body: JSON.stringify(body) });
+
+  assert.equal(JSON.parse(get("/api/workbench/summary").body).version, VERSION);
+  f.store.create("memory_item", "studio-memory", { task_id: "studio-task", kind: "decision", content: "Keep observations local", scope: "task", status: "active" });
+  f.store.create("memory_item", "other-task-memory", { task_id: "another-task", kind: "decision", content: "Other task only", scope: "task", status: "active" });
+  f.store.create("workflow", "studio-workflow", { name: "Observe", status: "active" });
+  f.store.create("workflow_run", "studio-workflow-run", { task_id: "studio-task", workflow_id: "studio-workflow", status: "completed" });
+  assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory&task_id=studio-task").body) as { items: unknown[] }).items.length, 1);
+  assert.equal((JSON.parse(get("/api/workbench/resources?kind=workflows&task_id=studio-task").body) as { workflows: unknown[] }).workflows.length, 1);
+  assert.equal(get("/api/workbench/resources?kind=nope").status, 422);
+  assert.equal(post("/api/workbench/plugins", { manifest: { name: "Local helper", version: "1.0.0", description: "A locally installed descriptor" } }).status, 201);
+  assert.equal(post("/api/workbench/plugins", { manifest: { name: "Cross-host helper", version: "1.0.0", kind: "skill", hosts: ["codex", "claude"] }, target_hosts: ["claude"] }).status, 201);
+  assert.equal(post("/api/workbench/plugins", { manifest: { name: "Bad target", version: "1.0.0", hosts: ["codex"] }, target_hosts: ["claude"] }).status, 422);
+  const plugins = (JSON.parse(get("/api/workbench/resources?kind=plugins").body) as { items: Array<Record<string, unknown>> }).items;
+  assert.equal(plugins.length, 2);
+  assert.deepEqual(plugins.find((item) => item.name === "Local helper")?.target_hosts, ["craft"]);
+  assert.deepEqual(plugins.find((item) => item.name === "Cross-host helper")?.hosts, ["codex", "claude"]);
+  assert.deepEqual(plugins.find((item) => item.name === "Cross-host helper")?.target_hosts, ["claude"]);
+  assert.equal(post("/api/workbench/skills", { name: "release-note", description: "Write release notes", content: "---\nname: release-note\n---\nWrite release notes." }).status, 201);
+  assert.equal((JSON.parse(get("/api/workbench/resources?kind=skills").body) as { items: unknown[] }).items.length, 1);
+  assert.equal(post("/api/workbench/memory", { kind: "fact", scope: "user", content: "Keep the work local" }).status, 201);
+  assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory").body) as { items: unknown[] }).items.length, 1);
+  assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory&task_id=studio-task").body) as { items: unknown[] }).items.length, 1);
+  assert.equal(post("/api/workbench/memory/studio-memory/retire", {}).status, 200);
+  assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory").body) as { items: unknown[] }).items.length, 1);
+  assert.equal(post("/api/workbench/knowledge/claims", { kind: "rule", content: "Review external plugins before use", scope: "global" }).status, 201);
+  assert.equal(post("/api/workbench/workflows", { name: "Local review", description: "Review a local change", inputs: [], steps: [] }).status, 201);
+
+  const models = JSON.parse(get("/api/models").body) as { count: number; providers: Array<Record<string, unknown>> };
+  assert.equal(models.count >= 8, true);
+  assert.equal(models.providers.some((item) => item.provider === "deepseek"), true);
+  const deepseek = JSON.parse(get("/api/models/deepseek?tier=frontier").body) as Record<string, unknown>;
+  assert.equal((deepseek.selection as Record<string, unknown>).model, "deepseek-reasoner");
+  assert.equal(JSON.parse(get("/api/models/deepseek").body).selection, undefined);
+  assert.equal(get("/api/models/nope").status, 422);
+  assert.equal(post("/api/config/models", { id: "Local Model", name: "Local Model", protocol: "openai-compatible", baseUrl: "https://example.test/v1", model: "local", apiKeyEnv: "LOCAL_MODEL_KEY", supportsTools: false }).status, 201);
+  assert.equal((JSON.parse(get("/api/config/models").body) as { models: unknown[] }).models.length, 1);
+  assert.equal(app.handle({ method: "PATCH", path: "/api/config/models/local-model", token: "secret", body: JSON.stringify({ name: "Updated", protocol: "anthropic", baseUrl: "https://example.test/v1", model: "updated", apiKeyEnv: "LOCAL_MODEL_KEY", supportsTools: true }) }).status, 200);
+  assert.equal(app.handle({ method: "DELETE", path: "/api/config/models/local-model", token: "secret" }).status, 200);
+  const saved = JSON.parse(post("/api/model-profiles", { profile_id: "studio-deepseek-standard", provider: "deepseek", tier: "standard" }).body) as Record<string, unknown>;
+  assert.equal((saved.profile as Record<string, unknown>).provider, "deepseek");
+  assert.equal((saved.readiness as Record<string, unknown>).status, "needs_enablement");
+  assert.equal((JSON.parse(get("/api/model-profiles").body) as { profiles: unknown[] }).profiles.length, 1);
+  assert.equal((JSON.parse(get("/api/model-profiles?limit=5").body) as { profiles: unknown[] }).profiles.length, 1);
+  assert.equal(get("/api/model-profiles?limit=0").status, 422);
+
+  assert.equal((JSON.parse(get("/api/projects").body) as { projects: unknown[] }).projects.length, 0);
+  assert.equal(post("/api/projects", { project_id: "studio-pilot", name: "Studio Pilot" }).status, 201);
+  const snapshot = JSON.parse(get("/api/projects/studio-pilot").body) as Record<string, unknown>;
+  assert.equal((snapshot.brain as Record<string, unknown>).project_id, "studio-pilot");
+  assert.equal(snapshot.next_action, "define_goal");
+  assert.equal(post("/api/projects/studio-pilot/goals", { title: "Ship the Studio shell" }).status, 201);
+  assert.equal(post("/api/projects/studio-pilot/decisions", { title: "Keep it local", rationale: "no remote writes", chosen_ref: "local-first" }).status, 201);
+  assert.equal(post("/api/projects/studio-pilot/materials", { name: "Spec", uri: "file:///spec.md", content_digest: "sha256:spec" }).status, 201);
+  assert.equal(post("/api/projects/studio-pilot/experiences", { name: "Checkpoint first", pattern: "checkpoint before every write" }).status, 201);
+  assert.equal(post("/api/projects/studio-pilot/outcomes", { verdict: "delivered", summary: "shell shipped", evidence_ids: [], artifact_ids: [] }).status, 201);
+  const after = JSON.parse(get("/api/projects/studio-pilot?limit=5").body) as Record<string, unknown[]>;
+  assert.equal(after.goals.length, 1); assert.equal(after.materials.length, 1); assert.equal(after.outcomes.length, 1);
+  assert.equal((JSON.parse(get("/api/projects").body) as { projects: unknown[] }).projects.length, 1);
+  assert.equal(get("/api/projects?limit=0").status, 422);
+
+  assert.equal((JSON.parse(get("/api/connectors").body) as { connectors: unknown[] }).connectors.length, 0);
+  const registered = JSON.parse(post("/api/connectors", { connector_id: "studio-plugins", kind: "github_skill", name: "Craft plugin market",
+    endpoint: "https://github.com/wdx9413/craft", approved: true, approval_ref: "studio-user" }).body) as Record<string, unknown>;
+  assert.equal((registered.connector as Record<string, unknown>).kind, "github_skill");
+  const discovered = JSON.parse(post("/api/connectors/studio-plugins/discover", { assets: [
+    { logical_id: "craft-route", name: "craft-route", asset_type: "skill", effect: "read_only" }] }).body) as { assets: Array<Record<string, unknown>> };
+  assert.equal(discovered.assets.length, 1);
+  assert.equal((JSON.parse(get("/api/connectors?limit=10").body) as { assets: unknown[] }).assets.length, 1);
+  assert.equal(post(`/api/connector-assets/${String(discovered.assets[0].id)}/approve`, { approval_ref: "studio-user" }).status, 200);
+  assert.equal(post("/api/connectors/studio-plugins/status", { active: false }).status, 200);
+  assert.equal(post("/api/connectors/studio-plugins/status", { active: true }).status, 200);
+  assert.equal(post("/api/connectors/studio-plugins/revoke", { reason: "rotated to a new source" }).status, 200);
+  assert.equal(get("/api/connectors?limit=0").status, 422);
+
+  assert.equal((JSON.parse(get("/api/sources").body) as { sources: unknown[] }).sources.length, 0);
+  const mounted = await app.handleAsync({ method: "POST", path: "/api/sources", token: "secret", origin: "http://127.0.0.1:4173",
+    body: JSON.stringify({ path: f.root, label: "studio skills", scan: false }) });
+  assert.equal(mounted.status, 201);
+  assert.equal((JSON.parse(get("/api/sources").body) as { sources: unknown[] }).sources.length, 1);
+  f.store.close();
+});
+
+test("plugin tool calls recheck the enabled workspace binding at execution time", async () => {
+  const f = await fixture();
+  try {
+    const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+    const workspace = (f.service.workspaceResolveOrCreate({ root_path: f.root }) as JsonObject).workspace as JsonObject;
+    const plugin = (f.service.workbenchPluginInstall({ manifest: { name: "reader", version: "1.0.0", hosts: ["craft"], workbench: {
+      schemaVersion: 1, advancedTools: [{ id: "memory", title: "Search memory", tool: "craft_memory_search" }],
+    } } }) as JsonObject).plugin as JsonObject;
+    f.service.workspacePluginSet({ workspace_id: workspace.id, plugin_id: plugin.id, status: "enabled" });
+    const path = `/api/workbench/plugins/${plugin.id}/tools/memory/call`;
+    const request = { workspace_id: workspace.id, args: { query: "memory", scope: `workspace:${workspace.id}`, max_items: 5 } };
+    const active = await app.handleAsync({ method: "POST", path, token: "secret", body: JSON.stringify(request) });
+    assert.equal(active.status, 200, active.body);
+    f.service.workspacePluginSet({ workspace_id: workspace.id, plugin_id: plugin.id, status: "disabled" });
+    const stale = await app.handleAsync({ method: "POST", path, token: "secret", body: JSON.stringify(request) });
+    assert.equal(stale.status, 422);
+    assert.match(JSON.parse(stale.body).error, /plugin tool is unavailable/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("the Studio bridge forwards a bounded craft_ call behind the same guards as the Workbench", async () => {
+  const f = await fixture();
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  const call = (body: unknown, token = "secret", origin?: string) => app.handleAsync({ method: "POST", path: "/api/workbench/call", token, origin, body: JSON.stringify(body) });
+
+  assert.equal((await call({ tool: "craft_info" }, "secret", "https://evil.example")).status, 403);
+  assert.equal((await call({ tool: "craft_info" }, "wrong")).status, 401);
+  assert.equal((await call({ tool: "source_list" })).status, 422);
+  assert.equal((await call({ tool: "craft_not_a_tool" })).status, 422);
+  assert.equal((await call({ tool: "craft_info", args: [] })).status, 422);
+  const info = await call({ tool: "craft_info" });
+  assert.equal(info.status, 200); assert.equal(JSON.parse(info.body).version, VERSION);
+  assert.equal(JSON.parse((await call({ tool: "craft_info", args: {} })).body).version, VERSION);
+  assert.equal((await app.handleAsync({ method: "POST", path: "/api/sources", token: "secret", body: "{" })).status, 400);
+  assert.equal((await app.handleAsync({ method: "GET", path: "/health" })).status, 200);
+
+  const server = new LocalWorkbenchServer(f.service, "network-token"); const started = await server.start(0); const origin = started.url.split("/#")[0];
+  try {
+    assert.equal((await fetch(`${origin}/workbench`)).status, 404);
+    assert.equal((await fetch(`${origin}/api/workbench/call`, { method: "POST", headers: { authorization: "Bearer network-token", origin }, body: JSON.stringify({ tool: "craft_info" }) })).status, 200);
+  } finally { await server.close(); f.store.close(); }
+});
+
+test("Studio exposes task conversation behind the same token and origin gates", async () => {
+  const f = await fixture();
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  const secretName = "CRAFT_STUDIO_TASK_KEY";
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env[secretName];
+  try {
+    const task = f.service.taskOpen({ title: "Conversation", goal: "Keep context", model_id: "missing-model" }).task as Record<string, unknown>;
+    const endpoint = `/api/tasks/${String(task.id)}/messages`;
+    assert.equal((await app.handleAsync({ method: "POST", path: endpoint, token: "wrong", body: JSON.stringify({ content: "hello" }) })).status, 401);
+    assert.equal((await app.handleAsync({ method: "POST", path: endpoint, token: "secret", origin: "https://evil.example", body: JSON.stringify({ content: "hello" }) })).status, 403);
+    const rejected = await app.handleAsync({ method: "POST", path: endpoint, token: "secret", body: JSON.stringify({ content: "hello" }) });
+    assert.equal(rejected.status, 422); assert.match(rejected.body, /no longer configured/);
+    // With a configured model and a stubbed transport the same route records the
+    // turn and answers 201, which is the path the Studio thread view depends on.
+    f.service.modelAdd({ id: "local", name: "Local", protocol: "openai-compatible", baseUrl: "https://api.example.test/v1",
+      model: "gpt-local", apiKeyEnv: secretName, supportsTools: false });
+    process.env[secretName] = "studio-secret";
+    const configured = f.service.taskOpen({ title: "Conversation", goal: "Keep context", model_id: "local" }).task as Record<string, unknown>;
+    const configuredEndpoint = `/api/tasks/${String(configured.id)}/messages`;
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      model: "gpt-local", choices: [{ message: { content: "A safe next step." } }], usage: { prompt_tokens: 2, completion_tokens: 4 } }), { status: 200 })) as typeof fetch;
+    const sent = await app.handleAsync({ method: "POST", path: configuredEndpoint, token: "secret", body: JSON.stringify({ content: "What next?" }) });
+    assert.equal(sent.status, 201); assert.match(sent.body, /A safe next step\./);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env[secretName]; else process.env[secretName] = originalKey;
+    f.store.close();
+  }
+});
+
+test("Studio compatibility facades still route every write through governed kernels", async () => {
+  const f = await fixture();
+  try {
+    const service = f.service;
+    const proposed = service.workbenchMemorySave({ memory_id: "studio-ledger-memory", kind: "preference", scope: "user", content: "Prefer concise reports" });
+    const candidate = proposed.candidate as Record<string, unknown>;
+    assert.equal(candidate.status, "candidate");
+    const reviewed = service.workbenchMemoryReview({ candidate_id: candidate.id, decision: "reject", reviewer: "studio-reviewer", reason: "awaiting explicit preference confirmation" });
+    assert.equal((reviewed.candidate as Record<string, unknown>).status, "rejected");
+    f.store.create("memory_item", "studio-retire-memory", { kind: "preference", scope: "user", content: "Retire me", status: "active" });
+    const retired = service.workbenchMemoryRetire({ memory_id: "studio-retire-memory" });
+    assert.equal((retired.memory as Record<string, unknown>).status, "expired");
+
+    const claim = service.workbenchKnowledgeClaimSave({ kind: "fact", content: "Studio writes are candidate-first", scope: "global" });
+    assert.equal((claim.claim as Record<string, unknown>).status, "candidate");
+    const workflow = service.workbenchWorkflowSave({ workflow_id: "studio-compat-workflow", name: "Compat", steps: [{ id: "inspect", type: "action", side_effect: "read_only", action: "inspect" }] });
+    assert.equal((workflow.workflow as Record<string, unknown>).lifecycle, "draft");
+    assert.equal((workflow.workflow as Record<string, unknown>).graph !== undefined, true);
+
+    const legacy = service.workbenchMemoryCompatSave({ kind: "fact", scope: "user", content: "Legacy facade" });
+    assert.equal((legacy.memory as Record<string, unknown>).status, "active");
+    const compatClaim = service.workbenchKnowledgeCompatSave({ content: "Legacy knowledge facade", scope: "global" }).claim as Record<string, unknown>;
+    assert.equal(compatClaim.status, "candidate");
+    const compatEvidenceId = (compatClaim.evidence_ids as string[])[0]!;
+    const compatEvidenceHeader = JSON.parse(String(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='evidence' AND id=?").get(compatEvidenceId)!.payload_json)) as Record<string, unknown>;
+    assert.deepEqual((compatEvidenceHeader._knowledge_partition as Record<string, unknown>).scope, { kind: "global", id: "global" });
+    assert.equal((compatEvidenceHeader._knowledge_partition as Record<string, unknown>).file, f.store.paths.knowledgeDatabaseFile);
+    assert.equal((service.workbenchWorkflowCompatSave({ workflow_id: "studio-legacy-workflow", name: "Legacy", steps: [] }) as Record<string, unknown>).lifecycle, "draft");
+    f.store.create("memory_item", "compat-previous", { kind: "preference", scope: "user", task_id: "task", workspace_id: "workspace", applies_to: ["old"], content: "Old preference", status: "active" });
+    const superseded = service.workbenchMemoryCompatSave({ memory_id: "compat-previous", content: "Updated preference", applies_to: ["new"] });
+    assert.equal((superseded.memory as Record<string, unknown>).status, "active");
+    assert.throws(() => service.workbenchSkillSave({ name: "too-large", content: "x".repeat(48_001) }), /48,000/);
+    service.workbenchSkillSave({ skill_id: "skill-update", name: "Skill", content: "one" });
+    assert.equal((service.workbenchSkillSave({ skill_id: "skill-update", name: "Skill", content: "two" }).skill as Record<string, unknown>).previous_version, 1);
+  } finally { f.store.close(); }
+});

@@ -1,0 +1,195 @@
+{
+  "date": "2026-09-27",
+  "baseline": "start-of-task dirty workspace snapshot; preserves pre-existing changes",
+  "measurement": "Istanbul c8 changed executable lines and branch paths using difflib against task snapshot; new module additionally passed native Node 100 percent line/function/branch gate",
+  "files": [
+    {
+      "file": "core/mcp/tool-catalog.ts",
+      "changed_executable_lines": 2,
+      "covered_lines": 2,
+      "branch_paths": 0,
+      "covered_branch_paths": 0,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "core/mcp/tool-schema.ts",
+      "changed_executable_lines": 2,
+      "covered_lines": 2,
+      "branch_paths": 0,
+      "covered_branch_paths": 0,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "core/application/craft-service.ts",
+      "changed_executable_lines": 4,
+      "covered_lines": 4,
+      "branch_paths": 1,
+      "covered_branch_paths": 1,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "core/application/use-cases/durable-experience.ts",
+      "changed_executable_lines": 1,
+      "covered_lines": 1,
+      "branch_paths": 1,
+      "covered_branch_paths": 1,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "core/application/use-cases/kernel-delegates.ts",
+      "changed_executable_lines": 1,
+      "covered_lines": 1,
+      "branch_paths": 0,
+      "covered_branch_paths": 0,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "core/application/actions/action-handlers.ts",
+      "changed_executable_lines": 1,
+      "covered_lines": 1,
+      "branch_paths": 1,
+      "covered_branch_paths": 1,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "core/interfaces/mcp/surface-registry.ts",
+      "changed_executable_lines": 1,
+      "covered_lines": 1,
+      "branch_paths": 0,
+      "covered_branch_paths": 0,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "capability/craft-experience/workflow-evolution.ts",
+      "changed_executable_lines": 8,
+      "covered_lines": 8,
+      "branch_paths": 17,
+      "covered_branch_paths": 17,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "capability/craft-experience/procedure-automation.ts",
+      "changed_executable_lines": 1,
+      "covered_lines": 1,
+      "branch_paths": 1,
+      "covered_branch_paths": 1,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "capability/craft-experience/contribution.ts",
+      "changed_executable_lines": 2,
+      "covered_lines": 2,
+      "branch_paths": 5,
+      "covered_branch_paths": 5,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "capability/craft-experience/procedure-projection.ts",
+      "changed_executable_lines": 19,
+      "covered_lines": 19,
+      "branch_paths": 32,
+      "covered_branch_paths": 32,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "scripts/smoke/component-conformance.ts",
+      "changed_executable_lines": 14,
+      "covered_lines": 14,
+      "branch_paths": 2,
+      "covered_branch_paths": 2,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    },
+    {
+      "file": "capability/craft-experience/procedure-composition.ts",
+      "changed_executable_lines": 153,
+      "covered_lines": 153,
+      "branch_paths": 117,
+      "covered_branch_paths": 117,
+      "uncovered_lines": [],
+      "uncovered_branches": []
+    }
+  ],
+  "tests": {
+    "focused": 76,
+    "passed": 76,
+    "failed": 0
+  },
+  "stdio": {
+    "artifact_sha256": "d4019e15effe0e7b33d54f8740a0d558a86ced46838adbabf3918b8549c6ce22",
+    "reports": [
+      {
+        "product": "knowledge",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 17,
+        "host_session_verified": false
+      },
+      {
+        "product": "memory",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 9,
+        "host_session_verified": false
+      },
+      {
+        "product": "experience",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 18,
+        "calls": 35,
+        "host_session_verified": false
+      },
+      {
+        "product": "codebase",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 12,
+        "calls": 8,
+        "host_session_verified": false
+      }
+    ]
+  },
+  "host_sessions_verified": false,
+  "deployed": false,
+  "distribution": {
+    "marketplace_tests": {
+      "passed": 2,
+      "failed": 0
+    },
+    "installer_tests": {
+      "passed": 7,
+      "failed": 0
+    },
+    "source_and_marketplace_stdio_match": true,
+    "installer_incremental": {
+      "file": "craft-common-use/init.mjs",
+      "changed_executable_lines": 22,
+      "covered_lines": 22,
+      "branch_paths": 25,
+      "covered_branch_paths": 25
+    },
+    "skill_reference_installed_and_repaired": true
+  }
+}

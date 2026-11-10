@@ -1,0 +1,4 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["./*.ts", "../../bin/craft-datasec-hook.ts", "../../tests/craft-datasec.test.ts"]
+}

@@ -1,0 +1,173 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { McpServer } from "../core/mcp.ts";
+import { VerificationPlane } from "../core/verification-plane.ts";
+import { CraftService } from "../core/service.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "craft-verification-plane-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  store.create("evidence", "confirmed", { confidence: "confirmed", summary: "independent deterministic check" });
+  store.create("evidence", "bounded", { confidence: "bounded", summary: "bounded integration observation" });
+  return { root, store, plane: new VerificationPlane(store) };
+}
+
+async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+
+function recordAll(f: Awaited<ReturnType<typeof fixture>>, verification: JsonObject, status: "passed" | "failed" = "passed") {
+  for (const check of verification.checks as JsonObject[]) {
+    f.plane.record({ verification_id: verification.id, check_id: check.id, status, summary: `${String(check.kind)} observed`, evidence_ids: ["confirmed"], environment_fingerprint: "env:one" });
+  }
+}
+
+const candidateBinding = { budget_fingerprint: "budget:one", input_fingerprint: "input:one", model_fingerprint: "model:one", acceptance_fingerprint: "accept:one", host: "codex" };
+function qualification(f: Awaited<ReturnType<typeof fixture>>, id: string, changeRef: string, conclusion: string, overrides: JsonObject = {}) {
+  const pilot = f.store.create("reference_pilot", `pilot-${id}`, { host: "codex" });
+  return f.store.create("release_qualification", id, { pilot_id: pilot.id, pilot_version: pilot.version, candidate_ref: changeRef, environment_fingerprint: "env:one", ...candidateBinding, lifecycle: "completed", conclusion, ...overrides });
+}
+
+test("derives a deterministic risk-matched verification plan without executing a Host", async () => {
+  const f = await fixture();
+  try {
+    const first = f.plane.plan({ verification_id: "read-change", change_ref: "git:abc", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one", content_stored: false });
+    const plan = first.verification as JsonObject;
+    assert.equal(first.idempotent, false);
+    assert.equal(plan.risk_level, "moderate");
+    assert.deepEqual((plan.checks as JsonObject[]).map((item) => item.kind), ["contract", "deterministic_e2e", "state_machine"]);
+    assert.equal(plan.execution_authority, "none");
+    assert.equal(f.plane.plan({ verification_id: "read-change", change_ref: "git:abc", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one", content_stored: false }).idempotent, true);
+    assert.throws(() => f.plane.plan({ verification_id: "read-change", change_ref: "git:changed", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one", content_stored: false }), /idempotency/);
+    assert.throws(() => f.plane.plan({ change_ref: "raw prompt", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one", content_stored: true }), /content-free/);
+  } finally { await close(f); }
+});
+
+test("escalates verification strength but never permits a caller to weaken write, Host, or candidate checks", async () => {
+  const f = await fixture();
+  try {
+    const result = f.plane.plan({ verification_id: "high-change", change_ref: "git:def", change_kinds: ["host", "policy"], effects: ["external_write"], candidate_change: true, requires_real_host: true, requested_risk_level: "low", environment_fingerprint: "env:one", content_stored: false });
+    const verification = result.verification as JsonObject;
+    assert.equal(verification.risk_level, "critical");
+    assert.deepEqual((verification.checks as JsonObject[]).map((item) => item.kind), ["contract", "deterministic_e2e", "state_machine", "adversarial", "recovery", "host_conformance", "eval_campaign", "release_qualification"]);
+    assert.equal(verification.risk_escalated, true);
+  } finally { await close(f); }
+});
+
+test("records only planned, evidence-backed, same-environment verification receipts and distinguishes rejection from missing proof", async () => {
+  const f = await fixture();
+  try {
+    const verification = f.plane.plan({ verification_id: "write-change", change_ref: "git:ghi", change_kinds: ["code"], effects: ["local_write"], environment_fingerprint: "env:one", content_stored: false }).verification as JsonObject;
+    const checks = verification.checks as JsonObject[];
+    assert.throws(() => f.plane.record({ verification_id: verification.id, check_id: "other", status: "passed", summary: "wrong", evidence_ids: ["confirmed"], environment_fingerprint: "env:one" }), /not planned/);
+    assert.throws(() => f.plane.record({ verification_id: verification.id, check_id: checks[0]!.id, status: "passed", summary: "wrong environment", evidence_ids: ["confirmed"], environment_fingerprint: "env:two" }), /environment/);
+    assert.throws(() => f.plane.record({ verification_id: verification.id, check_id: checks[0]!.id, status: "passed", summary: "unverified", evidence_ids: ["missing"], environment_fingerprint: "env:one" }), /Unknown evidence/);
+    const first = f.plane.record({ verification_id: verification.id, check_id: checks[0]!.id, status: "passed", summary: "contract passed", evidence_ids: ["confirmed"], environment_fingerprint: "env:one" });
+    assert.equal(first.idempotent, false);
+    assert.equal(f.plane.record({ verification_id: verification.id, check_id: checks[0]!.id, status: "passed", summary: "contract passed", evidence_ids: ["confirmed"], environment_fingerprint: "env:one" }).idempotent, true);
+    assert.equal(f.plane.assess({ verification_id: verification.id }).verdict, "inconclusive");
+    f.plane.record({ verification_id: verification.id, check_id: checks[1]!.id, status: "failed", summary: "state mismatch", evidence_ids: ["bounded"], environment_fingerprint: "env:one" });
+    assert.equal(f.plane.assess({ verification_id: verification.id }).verdict, "rejected");
+  } finally { await close(f); }
+});
+
+test("requires an eligible release qualification before a candidate verification can be eligible", async () => {
+  const f = await fixture();
+  try {
+    const verification = f.plane.plan({ verification_id: "candidate-change", change_ref: "candidate:one", change_kinds: ["harness"], effects: ["read_only"], candidate_change: true, environment_fingerprint: "env:one", content_stored: false, ...candidateBinding }).verification as JsonObject;
+    recordAll(f, verification);
+    assert.equal(f.plane.assess({ verification_id: verification.id }).verdict, "inconclusive");
+    qualification(f, "rejected-qualification", "candidate:one", "rejected");
+    assert.equal(f.plane.assess({ verification_id: verification.id, release_qualification_id: "rejected-qualification" }).verdict, "rejected");
+    qualification(f, "eligible-qualification", "candidate:one", "eligible");
+    const assessed = f.plane.assess({ verification_id: verification.id, release_qualification_id: "eligible-qualification" });
+    assert.equal(assessed.verdict, "eligible");
+    assert.equal((assessed.assessment as JsonObject).release_qualification_id, "eligible-qualification");
+  } finally { await close(f); }
+});
+
+test("candidate verification refuses qualifications from another candidate, environment, budget, input, model, acceptance or Host", async () => {
+  const f = await fixture();
+  try {
+    const plan = f.plane.plan({ change_ref: "candidate:bound", change_kinds: ["harness"], effects: ["read_only"], candidate_change: true, environment_fingerprint: "env:one", ...candidateBinding }).verification as JsonObject;
+    recordAll(f, plan);
+    for (const [field, value] of Object.entries({ candidate_ref: "other", environment_fingerprint: "env:other", budget_fingerprint: "budget:other", input_fingerprint: "input:other", model_fingerprint: "model:other", acceptance_fingerprint: "accept:other" })) {
+      const q = qualification(f, `wrong-${field}`, "candidate:bound", "eligible", { [field]: value });
+      const assessment = f.plane.assess({ verification_id: plan.id, release_qualification_id: q.id });
+      assert.equal(assessment.verdict, "inconclusive", field);
+      assert.equal((assessment.assessment as JsonObject).qualification_bound, false);
+    }
+    const wrongHost = qualification(f, "wrong-host", "candidate:bound", "eligible");
+    const pilot = f.store.get("reference_pilot", String(wrongHost.pilot_id));
+    f.store.save("reference_pilot", String(pilot.id), { host: "claude" });
+    assert.equal(f.plane.assess({ verification_id: plan.id, release_qualification_id: wrongHost.id }).verdict, "inconclusive");
+    const valid = qualification(f, "valid-bound", "candidate:bound", "eligible");
+    assert.equal(f.plane.assess({ verification_id: plan.id, release_qualification_id: valid.id }).verdict, "eligible");
+  } finally { await close(f); }
+});
+
+test("exposes the VerificationPlane through the public CraftService seam", async () => {
+  const f = await fixture();
+  try {
+    const service = new CraftService(f.store);
+    const verification = service.verificationPlan({ verification_id: "service-change", change_ref: "git:jkl", change_kinds: ["plugin"], effects: ["read_only"], environment_fingerprint: "env:one", content_stored: false }).verification as JsonObject;
+    for (const check of verification.checks as JsonObject[]) service.verificationReceiptRecord({ verification_id: verification.id, check_id: check.id, status: "passed", summary: "checked", evidence_ids: ["confirmed"], environment_fingerprint: "env:one" });
+    assert.equal(service.verificationAssess({ verification_id: verification.id }).verdict, "eligible");
+    assert.equal((service.verificationGet({ verification_id: verification.id }).verification as JsonObject).id, verification.id);
+  } finally { await close(f); }
+});
+
+test("verification planning mounts on the generic quality surface and its Skill-quality compatibility alias", async () => {
+  const f = await fixture();
+  try {
+    const service = new CraftService(f.store); const core = new McpServer(service, "core"); const quality = new McpServer(service, "component-quality"); const compatibility = new McpServer(service, "component-skill-quality");
+    assert(core.tools.some((tool) => tool.name === "craft_verification_get"));
+    assert(!core.tools.some((tool) => tool.name === "craft_verification_plan"));
+    assert(quality.tools.some((tool) => tool.name === "craft_verification_plan"));
+    assert(compatibility.tools.some((tool) => tool.name === "craft_verification_plan"));
+    const response = await quality.handle({ id: "plan", method: "tools/call", params: { name: "craft_verification_plan", arguments: { verification_id: "mcp-change", change_ref: "git:mcp", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one", content_stored: false } } });
+    assert.equal((response?.result as JsonObject).isError, false);
+    const blocked = await core.handle({ id: "blocked", method: "tools/call", params: { name: "craft_verification_plan", arguments: {} } });
+    assert.equal((blocked?.error as JsonObject).code, -32602);
+  } finally { await close(f); }
+});
+
+test("keeps validation, idempotency conflicts, and defensive branches evidence-backed", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("evidence", "unverified", { confidence: "unverified" });
+    assert.equal((f.plane.plan({ verification_id: "docs", change_ref: "git:docs", change_kinds: ["docs"], effects: ["read_only"], environment_fingerprint: "env:one" }).verification as JsonObject).risk_level, "low");
+    assert.equal((f.plane.plan({ verification_id: "version", change_ref: "git:version", change_kinds: ["version"], effects: ["read_only"], environment_fingerprint: "env:one", requested_risk_level: "high" }).verification as JsonObject).risk_level, "high");
+    assert.equal((f.plane.plan({ verification_id: "local", change_ref: "git:local", change_kinds: ["data"], effects: ["local_write"], environment_fingerprint: "env:one" }).verification as JsonObject).risk_level, "high");
+    assert.equal((f.plane.plan({ verification_id: "host", change_ref: "git:host", change_kinds: ["host"], effects: ["destructive"], environment_fingerprint: "env:one" }).verification as JsonObject).risk_level, "critical");
+    assert.match(String((f.plane.plan({ change_ref: "git:generated", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one" }).verification as JsonObject).id), /^verification_/);
+    assert.throws(() => f.plane.plan({ change_ref: " ", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env" }), /must not be empty/);
+    assert.throws(() => f.plane.plan({ change_ref: "x", change_kinds: [], effects: ["read_only"], environment_fingerprint: "env" }), /non-empty/);
+    assert.throws(() => f.plane.plan({ change_ref: "x", change_kinds: ["code", "code"], effects: ["read_only"], environment_fingerprint: "env" }), /unique/);
+    assert.throws(() => f.plane.plan({ change_ref: "x", change_kinds: ["unknown"], effects: ["read_only"], environment_fingerprint: "env" }), /unsupported kind/);
+    assert.throws(() => f.plane.plan({ change_ref: "x", change_kinds: ["code"], effects: ["unknown"], environment_fingerprint: "env" }), /unsupported effect/);
+    assert.throws(() => f.plane.plan({ change_ref: "x", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env", candidate_change: "yes" }), /boolean/);
+    assert.throws(() => f.plane.plan({ change_ref: "x", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env", requested_risk_level: "other" }), /requested_risk_level/);
+
+    const verification = f.plane.plan({ verification_id: "defensive", change_ref: "git:defensive", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one" }).verification as JsonObject;
+    const check = (verification.checks as JsonObject[])[0]!;
+    assert.throws(() => f.plane.record({ verification_id: verification.id, check_id: check.id, status: "other", summary: "bad", environment_fingerprint: "env:one" }), /unsupported/);
+    assert.throws(() => f.plane.record({ verification_id: verification.id, check_id: check.id, status: "passed", summary: "missing proof", environment_fingerprint: "env:one" }), /requires Evidence/);
+    assert.throws(() => f.plane.record({ verification_id: verification.id, check_id: check.id, status: "passed", summary: "weak proof", evidence_ids: ["unverified"], environment_fingerprint: "env:one" }), /confirmed or bounded/);
+    f.plane.record({ receipt_id: "first", verification_id: verification.id, check_id: check.id, status: "passed", summary: "good", evidence_ids: ["confirmed"], environment_fingerprint: "env:one" });
+    assert.throws(() => f.plane.record({ receipt_id: "first", verification_id: verification.id, check_id: check.id, status: "passed", summary: "changed", evidence_ids: ["confirmed"], environment_fingerprint: "env:one" }), /idempotency/);
+    assert.throws(() => f.plane.record({ receipt_id: "second", verification_id: verification.id, check_id: check.id, status: "passed", summary: "again", evidence_ids: ["confirmed"], environment_fingerprint: "env:one" }), /already has a Receipt/);
+
+    const direct = f.plane.plan({ verification_id: "direct", change_ref: "git:direct", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one" }).verification as JsonObject;
+    f.plane.record({ verification_id: direct.id, check_id: "contract", status: "inconclusive", summary: "direct planned id", environment_fingerprint: "env:one" });
+
+    const candidate = f.plane.plan({ verification_id: "assess-idempotency", change_ref: "candidate:two", change_kinds: ["harness"], effects: ["read_only"], candidate_change: true, environment_fingerprint: "env:one", ...candidateBinding }).verification as JsonObject;
+    recordAll(f, candidate); qualification(f, "qualification-a", "candidate:two", "eligible"); qualification(f, "qualification-b", "candidate:two", "inconclusive");
+    assert.equal(f.plane.assess({ assessment_id: "fixed", verification_id: candidate.id, release_qualification_id: "qualification-a" }).idempotent, false);
+    assert.equal(f.plane.assess({ assessment_id: "fixed", verification_id: candidate.id, release_qualification_id: "qualification-a" }).idempotent, true);
+    assert.throws(() => f.plane.assess({ assessment_id: "fixed", verification_id: candidate.id, release_qualification_id: "qualification-b" }), /idempotency/);
+  } finally { await close(f); }
+});

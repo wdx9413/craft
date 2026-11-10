@@ -1,0 +1,107 @@
+import { createHash, randomUUID } from "node:crypto";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
+
+
+
+
+function unique(value: unknown, name: string, exact?: number): string[] {
+  if (!Array.isArray(value) || !value.length) throw new Error(`${name} must be a non-empty array`);
+  const values = value.map((item) => text(item, name));
+  if (new Set(values).size !== values.length) throw new Error(`${name} must contain unique values`);
+  if (exact !== undefined && values.length !== exact) throw new Error(`${name} must contain exactly ${exact} values`);
+  return values.sort();
+}
+function integer(value: unknown, name: string, minimum: number, maximum: number): number { const result = Number(value); if (!Number.isInteger(result) || result < minimum || result > maximum) throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`); return result; }
+
+/**
+ * A small product-proof protocol. It does not execute a model; it makes a
+ * real Host session and an independent observed outcome mandatory before a
+ * Harness result can count. A plan may pin one Host (the normal paired setup)
+ * or two Hosts for replication. The five-trial promotion rule is intentionally
+ * strict; 3–4 trial experiments remain diagnostic/inconclusive.
+ */
+export class RuntimeAcceptanceKernel {
+  readonly store: CraftStore;
+  constructor(store: CraftStore) { this.store = store; }
+
+  plan(args: JsonObject): JsonObject {
+    const caseIds = unique(args.case_ids, "case_ids", 2); const hostIds = unique(args.host_ids, "host_ids");
+    if (hostIds.length > 2) throw new Error("host_ids must contain one or two Hosts");
+    const trials = integer(args.trials_per_pair, "trials_per_pair", 3, 5);
+    const identity = { case_ids: caseIds, host_ids: hostIds, baseline_harness: text(args.baseline_harness, "baseline_harness"), candidate_harness: text(args.candidate_harness, "candidate_harness"), environment_fingerprint: text(args.environment_fingerprint, "environment_fingerprint"), budget_fingerprint: text(args.budget_fingerprint, "budget_fingerprint"), trials_per_pair: trials, observer_kind: text(args.observer_kind, "observer_kind") };
+    if (identity.baseline_harness === identity.candidate_harness) throw new Error("Runtime acceptance candidate must differ from baseline");
+    const planId = String(args.plan_id ?? `runtime_acceptance_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("runtime_acceptance_plan", planId); const planDigest = digestJson(identity);
+    if (existing) { if (existing.plan_digest !== planDigest) throw new Error("Runtime acceptance plan idempotency conflict"); return { plan: existing, idempotent: true }; }
+    return { plan: this.store.create("runtime_acceptance_plan", planId, { ...identity, plan_digest: planDigest, status: "collecting", raw_case_content_stored: false }), idempotent: false };
+  }
+
+  record(args: JsonObject): JsonObject {
+    const plan = this.store.get("runtime_acceptance_plan", text(args.plan_id, "plan_id")); if (plan.status !== "collecting") throw new Error("Runtime acceptance plan is not collecting observations");
+    const hostId = text(args.host_id, "host_id"); if (!(plan.host_ids as string[]).includes(hostId)) throw new Error("Runtime acceptance Host is not in the plan");
+    const caseId = text(args.case_id, "case_id"); if (!(plan.case_ids as string[]).includes(caseId)) throw new Error("Runtime acceptance Case is not in the plan");
+    const arm = text(args.arm, "arm"); if (arm !== "baseline" && arm !== "candidate") throw new Error("Runtime acceptance arm is unsupported");
+    const harness = arm === "baseline" ? plan.baseline_harness : plan.candidate_harness; if (text(args.harness, "harness") !== harness) throw new Error("Runtime acceptance Harness does not match the selected arm");
+    const trialIndex = integer(args.trial_index, "trial_index", 1, Number(plan.trials_per_pair));
+    if (text(args.environment_fingerprint, "environment_fingerprint") !== plan.environment_fingerprint || text(args.budget_fingerprint, "budget_fingerprint") !== plan.budget_fingerprint) throw new Error("Runtime acceptance environment or budget does not match");
+    const session = this.store.get("host_session", text(args.host_session_id, "host_session_id")); if (session.host_id !== hostId || session.environment_fingerprint !== plan.environment_fingerprint) throw new Error("Runtime acceptance Host Session does not match");
+    const observation = this.store.get("outcome_observation", text(args.observation_id, "observation_id"));
+    if (observation.trace_id !== session.trace_id || observation.host_id !== hostId || observation.observer_kind !== plan.observer_kind || observation.observer_id === hostId) throw new Error("Runtime acceptance Outcome Observation is not independent or does not match the Host Session");
+    const identity = { plan_id: plan.id, plan_version: plan.version, host_id: hostId, case_id: caseId, arm, harness, trial_index: trialIndex, host_session_id: session.id, host_session_version: session.version, observation_id: observation.id, observation_version: observation.version, verdict: observation.verdict };
+    const recordId = String(args.record_id ?? `runtime_acceptance_record_${plan.id}_${hostId}_${caseId}_${arm}_${trialIndex}`); const recordDigest = digestJson(identity); const existing = this.store.find("runtime_acceptance_record", recordId);
+    if (existing) { if (existing.record_digest !== recordDigest) throw new Error("Runtime acceptance record idempotency conflict"); return { record: existing, idempotent: true }; }
+    const duplicate = this.store.list("runtime_acceptance_record", 10_000, (item) => item.plan_id === plan.id && item.host_id === hostId && item.case_id === caseId && item.arm === arm && item.trial_index === trialIndex)[0];
+    if (duplicate) throw new Error("Runtime acceptance slot is already recorded");
+    return { record: this.store.create("runtime_acceptance_record", recordId, { ...identity, record_digest: recordDigest }), idempotent: false };
+  }
+
+  evaluate(args: JsonObject): JsonObject {
+    const plan = this.store.get("runtime_acceptance_plan", text(args.plan_id, "plan_id")); const records = this.store.list("runtime_acceptance_record", 10_000, (item) => item.plan_id === plan.id);
+    const sessions = new Set<string>(), observations = new Set<string>();
+    for (const record of records) {
+      const session = typeof record.host_session_id === "string" ? this.store.find("host_session", record.host_session_id) : null;
+      const observation = typeof record.observation_id === "string" ? this.store.find("outcome_observation", record.observation_id) : null;
+      if (!session || !observation || session.version !== record.host_session_version || observation.version !== record.observation_version
+        || session.host_id !== record.host_id || session.environment_fingerprint !== plan.environment_fingerprint
+        || observation.trace_id !== session.trace_id || observation.host_id !== record.host_id || observation.observer_kind !== plan.observer_kind
+        || observation.observer_id === record.host_id || observation.verdict !== record.verdict) throw new Error("Runtime acceptance evidence changed or is unbound");
+      if (sessions.has(String(session.id)) || observations.has(String(observation.id))) throw new Error("Runtime acceptance requires distinct sessions and observations");
+      sessions.add(String(session.id)); observations.add(String(observation.id));
+    }
+    const pairs = (plan.host_ids as string[]).flatMap((host) => (plan.case_ids as string[]).flatMap((caseId) => Array.from({ length: Number(plan.trials_per_pair) }, (_, index) => ({ host, caseId, trial: index + 1 }))));
+    let candidateWins = 0; let baselineWins = 0; let ties = 0; let incomplete = 0;
+    for (const pair of pairs) {
+      const select = (arm: string) => records.find((record) => record.host_id === pair.host && record.case_id === pair.caseId && record.trial_index === pair.trial && record.arm === arm);
+      const baseline = select("baseline"); const candidate = select("candidate");
+      if (!baseline || !candidate) { incomplete += 1; continue; }
+      const basePassed = baseline.verdict === "passed"; const candidatePassed = candidate.verdict === "passed";
+      if (candidatePassed && !basePassed) candidateWins += 1; else if (basePassed && !candidatePassed) baselineWins += 1; else ties += 1;
+    }
+    const total = pairs.length; const complete = incomplete === 0; const strictProof = Number(plan.trials_per_pair) === 5 && candidateWins === total && baselineWins === 0;
+    // Harness names are supplied by the caller; the current Host records do not
+    // attest the executed asset version or code snapshot. A winning comparison
+    // is therefore diagnostic until that binding can be verified.
+    const status = !complete ? "inconclusive" : strictProof ? "inconclusive" : baselineWins >= candidateWins ? "rejected" : "inconclusive";
+    const evaluationId = String(args.evaluation_id ?? `runtime_acceptance_evaluation_${plan.id}`); const identity = { plan_id: plan.id, total_pairs: total, candidate_wins: candidateWins, baseline_wins: baselineWins, ties, incomplete, status };
+    const existing = this.store.find("runtime_acceptance_evaluation", evaluationId); const evaluationDigest = digestJson(identity);
+    if (existing) { if (existing.evaluation_digest !== evaluationDigest) throw new Error("Runtime acceptance evaluation idempotency conflict"); return { evaluation: existing, idempotent: true }; }
+    const evaluation = this.store.create("runtime_acceptance_evaluation", evaluationId, { ...identity, evaluation_digest: evaluationDigest, candidate_default_activation_permitted: false,
+      candidate_execution_binding: "unverified", ...(strictProof ? { inconclusive_reason: "candidate_execution_binding_unverified" } : {}) });
+    const saved = this.store.save("runtime_acceptance_plan", String(plan.id), { ...payload(plan), status: "evaluated", latest_evaluation_id: evaluation.id });
+    return { plan: saved, evaluation, idempotent: false };
+  }
+
+  get(args: JsonObject): JsonObject {
+    const plan = this.store.get("runtime_acceptance_plan", text(args.plan_id, "plan_id"));
+    const evaluation = plan.latest_evaluation_id ? this.store.get("runtime_acceptance_evaluation", String(plan.latest_evaluation_id)) : null;
+    // Older records can claim eligibility without binding the executed version.
+    // Project the current gate without rewriting the historical audit record.
+    const current = evaluation ? { ...evaluation, recorded_status: evaluation.status,
+      status: evaluation.status === "eligible" ? "inconclusive" : evaluation.status,
+      candidate_default_activation_permitted: false, candidate_execution_binding: "unverified",
+      ...(evaluation.status === "eligible" ? { inconclusive_reason: "candidate_execution_binding_unverified" } : {}) } : null;
+    return { plan, records: this.store.list("runtime_acceptance_record", 10_000, (item) => item.plan_id === plan.id), evaluation: current };
+  }
+}

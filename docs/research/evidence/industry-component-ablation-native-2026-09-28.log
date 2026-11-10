@@ -1,0 +1,41 @@
+(node:81031) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:81031) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (33.66575ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (14.624291ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (23.17175ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (22.496041ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (12.517542ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (30.178416ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (22.570958ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.682583ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (16.563ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (14.97975ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (20.77775ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (255.411166ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (18.980958ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1631.718583ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2320.876459ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (44.551292ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (250.381167ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (11.591416ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (35.831625ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5494.099916
+ℹ start of coverage report
+ℹ ------------------------------------------------------------------------
+ℹ file                    | line % | branch % | funcs % | uncovered lines
+ℹ ------------------------------------------------------------------------
+ℹ scripts                 |        |          |         | 
+ℹ  eval                   |        |          |         | 
+ℹ   component-ablation.ts | 100.00 |   100.00 |  100.00 | 
+ℹ ------------------------------------------------------------------------
+ℹ all files               | 100.00 |   100.00 |  100.00 | 
+ℹ ------------------------------------------------------------------------
+ℹ end of coverage report

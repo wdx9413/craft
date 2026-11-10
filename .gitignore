@@ -1,0 +1,61 @@
+.craft_data/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+# Python-era scaffolding from before the Node-only runtime; kept out of Git so a
+# local copy cannot be mistaken for part of the product.
+/br-tools/
+tests/.tmp/
+tests/.validation-deps/
+.coverage
+coverage.json
+# c8's report directory is `coverage/` at the root of the ignored set, and the
+# pattern below matches a directory of that name at any depth -- which also
+# swallowed `scripts/coverage/`, where the gate code lives. It was therefore
+# never committed, so a fresh clone had no way to run its own coverage gate.
+coverage/
+!scripts/coverage/
+!scripts/coverage/**
+htmlcov/
+build/
+/dist/
+/common/*/dist/
+/capability/craft-*/dist/
+/.serena/
+/adapters/deepseek-harness/dist/
+.test-install/
+node_modules/
+.node-coverage/
+.coverage-raw/
+# Ad-hoc V8 dump directories and console dumps written while investigating
+# coverage gaps (`--test-coverage-directory=cov-*`). Local scratch only.
+cov-*/
+.cov*.txt
+.workbuddy/
+.workbuddy-ai/
+.tmp-*
+.DS_Store
+
+# `pack-plugin` regenerates these from `dist/plugin` on every `pnpm build`; only
+# plugin metadata stays tracked.
+/plugins/*/dist/
+/plugins/*/skills/
+
+# Credentials. Craft can import a desktop credential file, so a stray `.env` or key
+# in the working tree is a realistic accident. The secret detectors in
+# `src/federation.ts` and `src/materialization.ts` only run on specific data paths,
+# so they are not a substitute for this.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+.netrc
+credentials.json
+credentials.yaml
+credentials.yml
+*.lcov
