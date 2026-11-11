@@ -94,3 +94,16 @@ test("远端协议没有 token 时诚实失败，不静默吞掉", async () => {
   const adapter = new RemoteContextSyncAdapter(target, {} as NodeJS.ProcessEnv, (async () => { throw new Error("should not fetch"); }) as never);
   await assert.rejects(() => adapter.put(contextSyncDocument(target, { kind: "knowledge", name: "a.md", digest: "", updatedAt: "" }, "x")), /CTX_TOKEN/u);
 });
+
+test("本地 adapter 拒绝写到 remoteRoot 之外或含路径穿越的 key", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-sync-escape-"));
+  try {
+    const target = normalizeContextSync({ enabled: true, protocol: "local_dir", endpoint: root });
+    const adapter = new LocalDirContextSyncAdapter(target);
+    await assert.rejects(() => adapter.put({ key: "other/place/a.md", body: "x", digest: "sha256:x" }), /out-of-root key/u);
+    await assert.rejects(() => adapter.put({ key: "craft_data/knowledge/../../escape.md", body: "x", digest: "sha256:x" }), /out-of-root key/u);
+    // 正常 key 仍可写。
+    await adapter.put({ key: "craft_data/knowledge/ok.md", body: "ok", digest: "sha256:ok" });
+    assert.equal(existsSync(join(root, "craft_data", "knowledge", "ok.md")), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

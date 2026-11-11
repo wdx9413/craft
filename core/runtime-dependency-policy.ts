@@ -1,4 +1,5 @@
 import { loadSettingsSync, type CraftSettings, type RuntimeDependencyConfig } from "./settings.ts";
+import { PLUGIN_HOST_PRIORITY } from "./plugin-adapters.ts";
 
 /**
  * Craft 内核默认只使用自己配置好的模型（settings.json 的 models）。
@@ -14,7 +15,8 @@ export interface RuntimeDependencyPolicy {
   pluginAdapterPriority: readonly ("codex" | "claude" | "dsh" | "pi" | "craft" | "generic")[];
 }
 
-export const DEFAULT_PLUGIN_ADAPTER_PRIORITY = ["codex", "claude", "dsh", "pi", "craft", "generic"] as const;
+/** 唯一来源是 plugin-adapters；此处只做别名，避免两处顺序漂移。 */
+export const DEFAULT_PLUGIN_ADAPTER_PRIORITY = PLUGIN_HOST_PRIORITY;
 
 export function runtimeDependencyPolicy(settings: CraftSettings = loadSettingsSync()): RuntimeDependencyPolicy {
   const raw: RuntimeDependencyConfig = settings.runtimeDependencies;

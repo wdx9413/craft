@@ -325,3 +325,12 @@ _Avoid_: 自动发布、A/B 结论
 - Recovery Evidence：绑定一次失败回执及当前目标状态的安全重试证据。
 - Parallel Group：Route 内明确声明的独立只读步骤集合，全部验收后汇合。
 - Retrieval Evaluation Run：实际对固定语料与标注查询执行检索产生的结果，区别于调用方报告的指标。
+
+### 插件与外部存储补充术语
+
+- **Plugin Contribution**：插件在 manifest 中声明的、经校验后进入 Craft 的贡献，包括 Workbench 页面、上下文动作、高级工具、主题、Skill、适配器与 Mod 草稿。贡献是声明，不是执行权。
+- **Workbench Page**：插件贡献的只读展示面。`declarative` 用固定组件白名单渲染；`sandboxed` 是插件目录内的静态 HTML，在无同源权限的 iframe 中运行。两者都不能绕过审批直接写入。
+- **Plugin Mod**：插件声明的认知约束，安装时只能是 `draft`，必须经操作者批准才可能 `active`；它与自进化产生的 Mod 共用注入链路，但来源不同、不参与影子回归。
+- **Host Adapter Priority**：同一插件声明多个宿主时的一次性解析顺序 `codex > claude > dsh > pi > craft > generic`；只解析一次，不并行安装。
+- **Context Sync**：把本地权威的 Knowledge / Memory / Experience 以 Markdown 镜像到外部目录或远端存储的单向备份。本地是唯一事实来源，远端不参与裁决；冲突策略固定为 `local_wins` / `remote_wins` / `manual`。
+- **Runtime Dependency Policy**：Craft 默认只使用配给自身的模型，不把 Codex / Claude / DSH CLI 当执行宿主；外部 CLI 仅作为插件清单来源，原生驱动需要显式开关。

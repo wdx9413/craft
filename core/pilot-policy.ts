@@ -7,7 +7,6 @@ import type { JsonObject } from "./infrastructure/store.ts";
  * 等 Host，但领航员 intake、路由与派发不得把任务交给它们。
  */
 export const PILOT_CRAFT_ONLY_HOSTS = ["craft", "craft-internal"] as const;
-export const PILOT_FORBIDDEN_HOSTS = ["codex", "codex-cli", "claude", "claude-code", "dsh", "agent-desktop"] as const;
 
 export type PilotPolicyViolation = {
   code: "PILOT_CRAFT_ONLY";

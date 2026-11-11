@@ -4186,6 +4186,10 @@ export class CraftService extends ServiceFoundation {
     // 否则一次 resync 就会把宿主未发布的改动静默带进 Craft。
     const diskManifestPath = typeof plugin.plugin_root === "string" ? join(plugin.plugin_root, "plugin.json") : null;
     if (diskManifestPath && existsSync(diskManifestPath)) {
+      // 与安装路径一致地限界：不读任意大文件，也不跟随符号链接逃逸插件目录。
+      const stat = statSync(diskManifestPath);
+      if (!stat.isFile()) throw new Error("plugin.json must be a regular file");
+      if (stat.size > 64 * 1024) throw new Error("plugin.json exceeds 64 KiB");
       const disk = JSON.parse(readFileSync(diskManifestPath, "utf8")) as JsonObject;
       if (valueDigest(assertNoSecret(JSON.stringify(disk), "manifest")) !== digest && args.allow_manifest_change !== true) {
       throw new Error("stored manifest differs from disk; pass allow_manifest_change to accept the new digest");

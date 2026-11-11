@@ -52,6 +52,12 @@ export class LocalDirContextSyncAdapter implements ContextSyncAdapter {
     return out;
   }
   async put(document: ContextSyncDocument): Promise<boolean> {
+    // 远端返回的 key 可能被篡改；只允许写到本次同步根之下，且不含路径穿越。
+    const root = `${this.target.remoteRoot.replace(/^\/+|\/+$/gu, "")}/`;
+    const key = document.key.replaceAll("\\", "/");
+    if (!key.startsWith(root) || key.split("/").includes("..")) {
+      throw new Error(`context sync refused an out-of-root key: ${key}`);
+    }
     const file = join(this.root, document.key);
     const existed = existsSync(file);
     const previous = existed ? readFileSync(file, "utf8") : null;
