@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Craft">
+  <!-- 有界回路：不闭合圆角菱形 + 三节点，替代旧的大写 C 字母标记。 -->
+  <g fill="none" stroke="#1a1a1a" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 26 230 128 128 230 26 128Z" opacity=".28"/>
+    <path d="M128 26 230 128 128 230"/>
+  </g>
+  <g fill="#1a1a1a">
+    <circle cx="128" cy="70" r="15"/>
+    <circle cx="186" cy="128" r="15"/>
+    <circle cx="128" cy="186" r="15"/>
+  </g>
+  <path d="M128 85v86M143 128h28" fill="none" stroke="#1a1a1a" stroke-width="14" stroke-linecap="round"/>
+</svg>
