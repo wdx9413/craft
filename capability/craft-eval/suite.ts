@@ -9,7 +9,7 @@
  * Where a case cannot be observed, it is recorded as `inconclusive` — never as a
  * pass and never as a failure — and the report says so.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +30,11 @@ import { askTrial, EVAL_MODEL, EVAL_PROVIDER, evaluationCredentialMissing, type 
 import { ARITHMETIC } from "./cases.ts";
 import { CraftStore } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";
+import { saveSettingsSync } from "../../core/settings.ts";
+import { assertPilotCraftOnly } from "../../core/pilot-policy.ts";
+import { normalizeContextSync } from "../../core/context-sync-protocol.ts";
+import { contextSyncAdapter, contextSyncDocument, runContextSync } from "../../core/context-sync-adapter.ts";
+import { GitHubIssueSourceAdapter } from "../../core/message-github-source.ts";
 import { CraftService } from "../../core/service.ts";
 import { checkFor, evalCases, MEMORY_SUPPLY_FACT } from "../../core/eval-cases.ts";
 import { runPairedValueCases } from "./paired-value-runs.ts";
@@ -747,6 +752,136 @@ try {
 } finally {
   domainStore.close();
 }
+
+// ------------------------------------------------- plugin contribution
+// A host manifest's Workbench/Mod declarations must import as validated drafts.
+const pluginStore = await new CraftStore(craftPaths(join(root, "plugin-contribution"))).open();
+const pluginService = new CraftService(pluginStore);
+try {
+  const installed = pluginService.workbenchPluginInstall({ plugin_id: "eval-plugin",
+    manifest: { name: "eval-plugin", version: "1.0.0", hosts: ["craft"],
+      workbench: { schemaVersion: 1, pages: [{ id: "home", title: "Home", kind: "declarative", schema: "./home.json" }] },
+      mods: [{ id: "style", name: "Style", body: "Prefer concise answers.", scope_kind: "global" }] } }) as Json;
+  const plugin = installed.plugin as Json;
+  const modIds = (plugin.imported_mod_ids as string[]) ?? [];
+  if (inScope("plugin_contribution.workbench_page_imported")) try {
+    equals("plugin_contribution.workbench_page_imported", ((plugin.workbench_pages as Json[]) ?? []).length, "1");
+  } catch (error) { unobserved("plugin_contribution.workbench_page_imported", (error as Error).message); }
+
+  if (inScope("plugin_contribution.mod_is_draft_only")) try {
+    const mod = pluginStore.find("mod", modIds[0] ?? "");
+    equals("plugin_contribution.mod_is_draft_only", `${String(mod?.status) ?? "missing"}:${String(mod?.enabled) ?? "missing"}`, "draft:false");
+  } catch (error) { unobserved("plugin_contribution.mod_is_draft_only", (error as Error).message); }
+
+  if (inScope("plugin_contribution.unapproved_mod_not_injected")) try {
+    const overlay = pluginService.mods.modSystemOverlay({ kind: "global", id: "global" }, "worker", ["eval-plugin"]);
+    equals("plugin_contribution.unapproved_mod_not_injected", overlay.includes("Prefer concise answers."), "false");
+  } catch (error) { unobserved("plugin_contribution.unapproved_mod_not_injected", (error as Error).message); }
+} finally {
+  pluginStore.close();
+}
+
+// ------------------------------------------------------ pilot boundary
+// The navigator is Craft-only; the error code and the accepted value are bytes.
+if (inScope("pilot_boundary.external_cli_refused")) try {
+  let code = "none";
+  try { assertPilotCraftOnly("codex-cli"); } catch (error) { code = String((error as { code?: unknown }).code ?? "none"); }
+  equals("pilot_boundary.external_cli_refused", code, "PILOT_CRAFT_ONLY");
+} catch (error) { unobserved("pilot_boundary.external_cli_refused", (error as Error).message); }
+
+if (inScope("pilot_boundary.craft_accepted")) try {
+  equals("pilot_boundary.craft_accepted", assertPilotCraftOnly("craft-internal"), "craft");
+} catch (error) { unobserved("pilot_boundary.craft_accepted", (error as Error).message); }
+
+// ------------------------------------------------------- external sync
+// Local records are authoritative; the mirror is bounded by its root.
+const syncRoot = mkdtempSync(join(tmpdir(), "craft-eval-sync-"));
+try {
+  const syncTarget = normalizeContextSync({ enabled: true, protocol: "local_dir", endpoint: syncRoot });
+  const syncAdapter = contextSyncAdapter(syncTarget);
+  if (inScope("external_sync.out_of_root_key_refused")) try {
+    let refused = false;
+    try { await syncAdapter.put({ key: "outside/place.md", body: "x", digest: "sha256:x" }); }
+    catch { refused = true; }
+    equals("external_sync.out_of_root_key_refused", refused, "true");
+  } catch (error) { unobserved("external_sync.out_of_root_key_refused", (error as Error).message); }
+
+  const syncDoc = (body: string) => contextSyncDocument(syncTarget, { kind: "memory", name: "m1.md", digest: "", updatedAt: "" }, body);
+  const syncFile = join(syncRoot, "craft_data", "memory", "m1.md");
+  if (inScope("external_sync.local_wins_overwrites")) try {
+    mkdirSync(join(syncRoot, "craft_data", "memory"), { recursive: true });
+    writeFileSync(syncFile, "remote old", "utf8");
+    await runContextSync(normalizeContextSync({ enabled: true, protocol: "local_dir", endpoint: syncRoot, conflict: "local_wins" }), [syncDoc("local new")]);
+    equals("external_sync.local_wins_overwrites", readFileSync(syncFile, "utf8"), "local new");
+  } catch (error) { unobserved("external_sync.local_wins_overwrites", (error as Error).message); }
+
+  if (inScope("external_sync.remote_wins_skips")) try {
+    writeFileSync(syncFile, "remote old again", "utf8");
+    const status = await runContextSync(normalizeContextSync({ enabled: true, protocol: "local_dir", endpoint: syncRoot, conflict: "remote_wins" }), [syncDoc("local new")]);
+    equals("external_sync.remote_wins_skips", status.pushed, "0");
+  } catch (error) { unobserved("external_sync.remote_wins_skips", (error as Error).message); }
+} finally {
+  rmSync(syncRoot, { recursive: true, force: true });
+}
+
+// -------------------------------------------------- runtime dependency
+// Default model list excludes host-managed auth; the explicit switch restores it.
+const runtimeStore = await new CraftStore(craftPaths(join(root, "runtime-dependency"))).open();
+try {
+  if (inScope("runtime_dependency.no_implicit_host_auth")) try {
+    const service = new CraftService(runtimeStore);
+    equals("runtime_dependency.no_implicit_host_auth",
+      service.modelProviders.some((provider) => provider.provider === "codex-cli"), "false");
+  } catch (error) { unobserved("runtime_dependency.no_implicit_host_auth", (error as Error).message); }
+
+  if (inScope("runtime_dependency.explicit_opt_in_restores")) try {
+    saveSettingsSync({ runtimeDependencies: { hostManagedAuthProvider: true } }, runtimeStore.paths);
+    const service = new CraftService(runtimeStore);
+    equals("runtime_dependency.explicit_opt_in_restores",
+      service.modelProviders.some((provider) => provider.provider === "codex-cli"), "true");
+  } catch (error) { unobserved("runtime_dependency.explicit_opt_in_restores", (error as Error).message); }
+} finally {
+  runtimeStore.close();
+}
+
+// ------------------------------------------------------ message source
+// Pull-only ingestion dedups across restarts and issues no outbound request.
+const messageRoot = mkdtempSync(join(tmpdir(), "craft-eval-message-"));
+try {
+  const messageStore = await new CraftStore(craftPaths(join(messageRoot, "data"))).open();
+  try {
+    const drop = join(messageRoot, "drop"); mkdirSync(drop, { recursive: true });
+    writeFileSync(join(drop, "a.json"), JSON.stringify({ from: "alice", subject: "hi", summary: "s" }), "utf8");
+    const service = new CraftService(messageStore);
+    if (inScope("message_source.pull_dedups_across_restart")) try {
+      const first = await service.messagePoll({ drop_dirs: [drop] });
+      // A second service instance models a restart: the store, not the adapter
+      // instance, must remember what was already ingested.
+      const restarted = new CraftService(messageStore);
+      const second = await restarted.messagePoll({ drop_dirs: [drop] });
+      equals("message_source.pull_dedups_across_restart", `${first.ingested}:${second.ingested}`, "1:0");
+    } catch (error) { unobserved("message_source.pull_dedups_across_restart", (error as Error).message); }
+  } finally {
+    messageStore.close();
+  }
+} finally {
+  rmSync(messageRoot, { recursive: true, force: true });
+}
+
+if (inScope("message_source.never_sends_outbound")) try {
+  // Count real transport calls: a pull source must only issue GET and must not
+  // perform any write/send method.
+  const methods: string[] = [];
+  const countingFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    methods.push(String(init?.method ?? "GET").toUpperCase());
+    return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const github = new GitHubIssueSourceAdapter({ repo: "eval/craft", fetchImpl: countingFetch,
+    env: { GITHUB_TOKEN: "eval-token" } as NodeJS.ProcessEnv });
+  await github.poll();
+  const writes = methods.filter((method) => method !== "GET").length;
+  equals("message_source.never_sends_outbound", `${methods.length > 0 ? "observed" : "none"}:${writes}`, "observed:0");
+} catch (error) { unobserved("message_source.never_sends_outbound", (error as Error).message); }
 
 // ----------------------------------------------------------------- report
 store.close();
