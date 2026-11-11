@@ -76,6 +76,7 @@ import { resolveContextDirectory } from "../context-directory.ts";
 import { ModRegistry, type ModScopeKind } from "../mod-registry.ts";
 import { MessageInbox } from "../message-inbox.ts";
 import { MessageListener, LocalDropAdapter, type SourceAdapter } from "../message-listener.ts";
+import { GitHubIssueSourceAdapter } from "../message-github-source.ts";
 import { PluginDiscovery } from "../plugin-discovery.ts";
 import { EvaluationRunCoordinator } from "./coordinators/evaluation-runs.ts";
 import { CognitiveSearchCoordinator } from "./coordinators/cognitive-search.ts";
@@ -541,11 +542,20 @@ export class CraftService extends ServiceFoundation {
    * 一源失败不影响其余源，错误随报告返回而非抛出。
    */
   async messagePoll(args: JsonObject = {}): Promise<JsonObject> {
-    const dropDirs = (args.drop_dirs ?? []) as unknown[];
+    const configured = loadSettingsSync(this.store.paths).messageSources;
+    const dropDirs = (args.drop_dirs ?? configured.dropDirs) as unknown[];
     const adapters: SourceAdapter[] = [];
     for (const entry of dropDirs) {
       if (typeof entry !== "string" || !entry.trim()) continue;
       adapters.push(new LocalDropAdapter(entry.trim()));
+    }
+    const repos = (args.github_repos ?? configured.githubRepos) as unknown[];
+    for (const entry of repos) {
+      if (typeof entry !== "string" || !entry.trim()) continue;
+      adapters.push(new GitHubIssueSourceAdapter({
+        repo: entry.trim(), apiBaseUrl: configured.githubApiBaseUrl,
+        tokenEnv: configured.githubTokenEnv, state: configured.githubState,
+      }));
     }
     if (adapters.length === 0) return { reports: [], note: "no message sources configured" };
     // Dedup must survive across polls/restarts: a fresh adapter's in-memory seen

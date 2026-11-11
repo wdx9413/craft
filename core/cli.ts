@@ -575,7 +575,19 @@ async function dispatchMain(args: string[]): Promise<void> {
         result = await service.messagePoll({ drop_dirs: dropDirs });
       }
       else if (args[0] === "worker") {
-        const runFileAcceptance = () => runBuiltinAcceptanceTicks(service); const worker = new LocalMaintenanceWorker(new MaintenanceKernel(service), paths, { afterTick: runFileAcceptance });
+        const runFileAcceptance = () => runBuiltinAcceptanceTicks(service);
+        // 定时消息拉取：只有 settings.messageSources.enabled 打开且到达
+        // intervalMs 才轮询；纯工程、0 Token，一源失败由 messagePoll 按源上报。
+        let lastMessagePollAt = 0;
+        const pollConfiguredMessages = async () => {
+          const sources = loadSettingsSync(paths).messageSources;
+          if (!sources.enabled) return;
+          const now = Date.now();
+          if (now - lastMessagePollAt < sources.intervalMs) return;
+          lastMessagePollAt = now;
+          await service.messagePoll();
+        };
+        const worker = new LocalMaintenanceWorker(new MaintenanceKernel(service), paths, { afterTick: async () => { await runFileAcceptance(); await pollConfiguredMessages(); } });
         if (args[1] === "tick") result = { maintenance: new MaintenanceKernel(service).tick(), acceptance: await runFileAcceptance() };
         else if (args[1] === "status") result = await worker.status();
         else if (args[1] === "run") {

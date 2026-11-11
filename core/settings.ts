@@ -59,6 +59,7 @@ export interface CraftSettings {
     // workbench never shows the one-time wizard again; a reset clears it.
     onboarding: { completedAt: string | null; workspaceId: string | null; skippedAt?: string | null } };
   capabilities: { autoInstall: boolean; defaults: string[]; installed: string[]; disabled: string[] };
+  messageSources: MessageSourceConfig;
   lastProvider: string;
   runtime: { maxSteps: number; maxTokens: number };
   models: CraftModelConfig[];
@@ -73,7 +74,18 @@ export type CraftSettingsPatch = Partial<Pick<CraftSettings, "locale" | "theme" 
   models?: CraftModelConfig[];
   privacy?: Partial<CraftSettings["privacy"]>;
   capabilities?: Partial<CraftSettings["capabilities"]>;
+  messageSources?: Partial<CraftSettings["messageSources"]>;
 };
+
+export interface MessageSourceConfig {
+  enabled: boolean;
+  intervalMs: number;
+  dropDirs: string[];
+  githubRepos: string[];
+  githubApiBaseUrl: string;
+  githubTokenEnv: string;
+  githubState: "issues" | "pull_requests" | "all";
+}
 
 function number(value: unknown, name: string, fallback: number, min: number, max: number): number {
   if (value === undefined) return fallback;
@@ -178,6 +190,7 @@ export function defaultSettings(paths = craftPaths()): CraftSettings {
       pilotConcurrency: 3,
       onboarding: { completedAt: null, workspaceId: null, skippedAt: null } }, lastProvider: "",
       capabilities: { autoInstall: true, defaults: ["craft-context", "craft-datasec"], installed: [], disabled: [] },
+    messageSources: { enabled: false, intervalMs: 60_000, dropDirs: [], githubRepos: [], githubApiBaseUrl: "https://api.github.com", githubTokenEnv: "GITHUB_TOKEN", githubState: "issues" },
     runtime: { maxSteps: 32, maxTokens: 12000 },
     models: [], privacy: { telemetry: false }, updatedAt: new Date(0).toISOString() };
 }
@@ -237,7 +250,30 @@ export function normalizeSettings(value: unknown, paths = craftPaths()): CraftSe
     runtime: { maxSteps: number(runtime.maxSteps, "runtime.maxSteps", 32, 1, 10000), maxTokens: number(runtime.maxTokens, "runtime.maxTokens", 12000, 1, 100000000) },
     models: normalizeModels(input.models),
     capabilities: normalizeCapabilities(input.capabilities),
+    messageSources: normalizeMessageSources(input.messageSources),
     privacy: { telemetry: boolean(privacy.telemetry, "privacy.telemetry", false) }, updatedAt };
+}
+
+function normalizeMessageSources(value: unknown): MessageSourceConfig {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const state = input.githubState === undefined ? "issues" : text(input.githubState, "messageSources.githubState", "issues");
+  if (!["issues", "pull_requests", "all"].includes(state)) throw new Error("messageSources.githubState must be issues, pull_requests or all");
+  const apiBaseUrl = input.githubApiBaseUrl === undefined ? "https://api.github.com" : text(input.githubApiBaseUrl, "messageSources.githubApiBaseUrl", "https://api.github.com");
+  let parsedUrl: URL;
+  try { parsedUrl = new URL(apiBaseUrl); } catch { throw new Error("messageSources.githubApiBaseUrl must be a valid HTTP(S) URL"); }
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) throw new Error("messageSources.githubApiBaseUrl must be HTTP(S)");
+  const tokenEnv = input.githubTokenEnv === undefined ? "GITHUB_TOKEN" : text(input.githubTokenEnv, "messageSources.githubTokenEnv", "GITHUB_TOKEN");
+  if (!/^[A-Z_][A-Z0-9_]*$/u.test(tokenEnv)) throw new Error("messageSources.githubTokenEnv must be an environment variable name");
+  return {
+    enabled: input.enabled === undefined ? false : boolean(input.enabled, "messageSources.enabled", false),
+    intervalMs: number(input.intervalMs, "messageSources.intervalMs", 60_000, 1_000, 3_600_000),
+    dropDirs: normalizeStringArray(input.dropDirs, "messageSources.dropDirs", []),
+    githubRepos: normalizeStringArray(input.githubRepos, "messageSources.githubRepos", [])
+      .map((repo) => { if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repo)) throw new Error("messageSources.githubRepos entries must be owner/repo"); return repo; }),
+    githubApiBaseUrl: apiBaseUrl.replace(/\/+$/u, ""),
+    githubTokenEnv: tokenEnv,
+    githubState: state as MessageSourceConfig["githubState"],
+  };
 }
 
 function normalizeCapabilities(value: unknown): CraftSettings["capabilities"] {
@@ -275,6 +311,7 @@ export async function saveSettings(patch: CraftSettingsPatch, paths = craftPaths
     workbench: { ...current.workbench, ...(patch.workbench ?? {}) }, runtime: { ...current.runtime, ...(patch.runtime ?? {}) },
     models: [current.models, patch.models][Number(patch.models !== undefined)],
     capabilities: { ...current.capabilities, ...(patch.capabilities ?? {}) },
+    messageSources: { ...current.messageSources, ...(patch.messageSources ?? {}) },
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths);
   await atomicPrivateJson(paths.settingsFile, next); return next;
 }
@@ -299,6 +336,7 @@ export function saveSettingsSync(patch: CraftSettingsPatch, paths = craftPaths()
     workbench: { ...current.workbench, ...(patch.workbench ?? {}) }, runtime: { ...current.runtime, ...(patch.runtime ?? {}) },
     models: patch.models !== undefined ? patch.models : current.models,
     capabilities: { ...current.capabilities, ...(patch.capabilities ?? {}) },
+    messageSources: { ...current.messageSources, ...(patch.messageSources ?? {}) },
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths); syncWrite(paths.settingsFile, next); return next;
 }
 

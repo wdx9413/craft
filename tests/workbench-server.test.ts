@@ -1100,9 +1100,11 @@ test("Workbench exposes pilot session and route reassignment over HTTP", async (
     const routed = call("POST", `/api/pilot/tasks/${encodeURIComponent(taskId)}/route`, { session_id: sessionId, executor_template: "craft-internal", reason: "local", confidence: 0.8 });
     assert.equal(routed.status, 201);
     const routeId = JSON.parse(routed.body).route.id as string;
-    const reassigned = call("POST", `/api/pilot/routes/${encodeURIComponent(routeId)}/reassign`, { executor_template: "codex-cli", reason: "tool", confidence: 0.9 });
+    const forbiddenReassign = call("POST", `/api/pilot/routes/${encodeURIComponent(routeId)}/reassign`, { executor_template: "codex-cli", reason: "tool", confidence: 0.9 });
+    assert.equal(forbiddenReassign.status >= 400, true);
+    const reassigned = call("POST", `/api/pilot/routes/${encodeURIComponent(routeId)}/reassign`, { executor_template: "craft", reason: "craft only", confidence: 0.9 });
     assert.equal(reassigned.status, 200);
-    assert.equal(JSON.parse(reassigned.body).route.executor_template, "codex-cli");
+    assert.equal(JSON.parse(reassigned.body).route.executor_template, "craft");
     assert.equal(call("GET", `/api/pilot/sessions/${encodeURIComponent(sessionId)}/queue`).status, 200);
     const scheduled = call("POST", `/api/pilot/sessions/${encodeURIComponent(sessionId)}/schedule`);
     assert.equal(scheduled.status, 200);
@@ -1111,7 +1113,7 @@ test("Workbench exposes pilot session and route reassignment over HTTP", async (
     // Supervise on a fresh route: create a second routed task and run the gate over it.
     call("POST", "/api/supervisor-profiles", { supervisor_profile_id: "sp", name: "S", deterministic_rules: [{ id: "r", condition: "ci_failed", action: "pause" }] });
     const t2 = JSON.parse(call("POST", "/api/tasks", { title: "Q", goal: "q" }).body).task.id as string;
-    const r2 = JSON.parse(call("POST", `/api/pilot/tasks/${encodeURIComponent(t2)}/route`, { session_id: sessionId, executor_template: "e", reason: "r", confidence: 0.5 }).body).route.id as string;
+    const r2 = JSON.parse(call("POST", `/api/pilot/tasks/${encodeURIComponent(t2)}/route`, { session_id: sessionId, executor_template: "craft", reason: "r", confidence: 0.5 }).body).route.id as string;
     const superv = call("POST", `/api/pilot/routes/${encodeURIComponent(r2)}/supervise`, { supervisor_profile_id: "sp", signals: { ci_failed: true } });
     assert.equal(superv.status, 200);
     assert.equal(JSON.parse(superv.body).verdict, "pause");
@@ -1182,30 +1184,22 @@ test("Workbench dispatches deterministic Pilot routes through an installed agent
     const opened = await call("POST", "/api/pilot/sessions", { input: "worker", workspace_id: workspace.id });
     const sessionId = JSON.parse(opened.body).session.id as string;
     assert.equal((await app.handleAsync({ method: "POST", path: `/api/workbench/pilot-sessions/${encodeURIComponent(sessionId)}/dispatch` })).status, 401);
-    const auto = await call("POST", `/api/pilot/sessions/${encodeURIComponent(sessionId)}/turns/auto`, {
+    const rejected = await call("POST", `/api/pilot/sessions/${encodeURIComponent(sessionId)}/turns/auto`, {
       input: "完成一项实现", executor: "codex", executors: ["codex"], workspace_id: workspace.id,
     });
-    assert.equal(auto.status, 201);
-    const dispatched = await call("POST", `/api/workbench/pilot-sessions/${encodeURIComponent(sessionId)}/dispatch`, { permission: "ask" });
-    assert.equal(dispatched.status, 202);
-    const body = JSON.parse(dispatched.body);
-    assert.equal(body.workers.length, 1);
-    assert.equal(body.workers[0].state, "started", JSON.stringify(body.workers[0]));
-    assert.equal(body.workers[0].link_id, "link-1");
-    assert.equal(body.status.progress.stage, "working");
-    assert.deepEqual(calls.map((value) => value.split(":")[0]), ["create", "send"]);
-    assert.equal((await call("POST", `/api/pilot/sessions/${encodeURIComponent(sessionId)}/reconcile`)).status, 200);
-
-    await call("POST", `/api/pilot/sessions/${encodeURIComponent(sessionId)}/turns/auto`, {
-      input: "第二项实现", executor: "codex", executors: ["codex"], workspace_id: workspace.id,
+    assert.equal(rejected.status >= 400, true, "领航员必须拒绝 Codex 等外部 CLI");
+    assert.match(rejected.body, /Craft|PILOT_CRAFT_ONLY/u);
+    const auto = await call("POST", `/api/pilot/sessions/${encodeURIComponent(sessionId)}/turns/auto`, {
+      input: "完成一项实现", executor: "craft", executors: ["craft"], workspace_id: workspace.id,
     });
-    fail = true;
+    assert.equal(auto.status, 201);
+    // 未配置 Craft 模型时派发如实失败，失败观测仍按既有治理链路留存。
     const failed = await call("POST", `/api/workbench/pilot-sessions/${encodeURIComponent(sessionId)}/dispatch`, { permission: "ask" });
     assert.equal(failed.status, 202);
     const failedBody = JSON.parse(failed.body);
     assert.equal(failedBody.workers[0].state, "failed");
-    assert.match(failedBody.workers[0].error, /CLI missing/u);
     assert.equal(failedBody.status.progress.stage, "needs_attention");
+    assert.equal(calls.length, 0, "外部 CLI 不应被领航员调用");
     // The failure leaves a trace a person can attribute; it does not invent a cause.
     const observations = JSON.parse((await call("GET", "/api/workbench/pilot/failure-observations")).body).items as JsonObject[];
     assert.ok(observations.length >= 1, "terminal failure is captured for attribution");

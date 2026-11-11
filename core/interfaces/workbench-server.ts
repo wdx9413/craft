@@ -19,6 +19,9 @@ import { DshWorkbenchRuns } from "./dsh-workbench-runs.ts";
 import { dshRunRoute } from "./dsh-workbench-api.ts";
 import { resolveDshLaunch } from "../dsh-executable.ts";
 import { loadSettingsSync } from "../settings.ts";
+import { assertPilotCraftOnly, enforcePilotSplitCraftOnly } from "../pilot-policy.ts";
+import { craftPaths } from "../infrastructure/paths.ts";
+import { storedSecretNames, writeSecret } from "../secrets-store.ts";
 import { detectAgentDesktop, registerAgentDesktopAdapter } from "./agent-desktop-adapter.ts";
 import { INTERNAL_ONLY_TOOLS } from "../internal-host-driver.ts";
 import { queryHookRuntimeDiagnostics } from "./hook-runtime-query.ts";
@@ -244,16 +247,31 @@ export class WorkbenchWebApp {
       if (request.method === "GET" && path.startsWith("/api/supervisor-profiles/")) return json(200, this.service.supervisorProfileGet({ supervisor_profile_id: decodeURIComponent(path.slice(25)) }));
       if (path.startsWith("/api/pilot/")) {
         const segment = path.slice("/api/pilot/".length).split("/").map((part) => decodeURIComponent(part));
+        // 领航员产品边界：所有 intake/routing 请求在进入通用 kernel 前
+        // 统一收敛为 Craft；外部 CLI 名称一律 fail-closed。
+        const guardPilotBody = (body: JsonObject): JsonObject => {
+          const guarded: JsonObject = { ...body };
+          if (guarded.executor !== undefined && guarded.executor !== null && guarded.executor !== "auto") {
+            guarded.executor = assertPilotCraftOnly(guarded.executor, "executor");
+          } else delete guarded.executor;
+          if (guarded.executors !== undefined) {
+            const executors = Array.isArray(guarded.executors) ? guarded.executors as unknown[] : [];
+            guarded.executors = executors.length ? executors.map((item) => assertPilotCraftOnly(item, "executors[]")) : ["craft"];
+          }
+          if (guarded.executor_template !== undefined) guarded.executor_template = assertPilotCraftOnly(guarded.executor_template);
+          if (guarded.split !== undefined) guarded.split = enforcePilotSplitCraftOnly(guarded.split);
+          return guarded;
+        };
         if (request.method === "POST" && path === "/api/pilot/sessions") return json(201, this.service.pilotSessionOpen(bodyObject(request.body)));
         if (request.method === "GET" && segment[0] === "sessions" && segment.length === 2) return json(200, this.service.pilotSessionGet({ session_id: segment[1] }));
         if (request.method === "POST" && segment[0] === "sessions" && segment.length === 3 && segment[2] === "close") return json(200, this.service.pilotSessionClose({ session_id: segment[1] }));
-        if (request.method === "POST" && segment[0] === "sessions" && segment.length === 3 && segment[2] === "turns") return json(201, this.service.pilotTurnSubmit({ ...bodyObject(request.body), session_id: segment[1] }));
-        if (request.method === "POST" && segment[0] === "sessions" && segment.length === 4 && segment[2] === "turns" && segment[3] === "auto") return json(201, this.service.pilotTurnAuto({ ...bodyObject(request.body), session_id: segment[1] }));
+        if (request.method === "POST" && segment[0] === "sessions" && segment.length === 3 && segment[2] === "turns") return json(201, this.service.pilotTurnSubmit({ ...guardPilotBody(bodyObject(request.body)), session_id: segment[1] }));
+        if (request.method === "POST" && segment[0] === "sessions" && segment.length === 4 && segment[2] === "turns" && segment[3] === "auto") return json(201, this.service.pilotTurnAuto({ ...guardPilotBody(bodyObject(request.body)), session_id: segment[1] }));
         if (request.method === "GET" && segment[0] === "sessions" && segment.length === 3 && segment[2] === "status") return json(200, this.service.pilotSessionStatus({ session_id: segment[1] }));
         if (request.method === "POST" && segment[0] === "sessions" && segment.length === 3 && segment[2] === "reconcile") return json(200, this.service.pilotSessionReconcile({ session_id: segment[1] }));
         if (request.method === "POST" && segment[0] === "sessions" && segment.length === 3 && segment[2] === "review") return json(201, this.service.pilotReview({ ...bodyObject(request.body), session_id: segment[1] }));
-        if (request.method === "POST" && segment[0] === "tasks" && segment.length === 3 && segment[2] === "route") return json(201, this.service.pilotTaskRoute({ ...bodyObject(request.body), task_id: segment[1] }));
-        if (request.method === "POST" && segment[0] === "routes" && segment.length === 3 && segment[2] === "reassign") return json(200, this.service.pilotTaskReassign({ ...bodyObject(request.body), route_id: segment[1] }));
+        if (request.method === "POST" && segment[0] === "tasks" && segment.length === 3 && segment[2] === "route") return json(201, this.service.pilotTaskRoute({ ...guardPilotBody(bodyObject(request.body)), task_id: segment[1] }));
+        if (request.method === "POST" && segment[0] === "routes" && segment.length === 3 && segment[2] === "reassign") return json(200, this.service.pilotTaskReassign({ ...guardPilotBody(bodyObject(request.body)), route_id: segment[1] }));
         if (request.method === "POST" && segment[0] === "routes" && segment.length === 3 && segment[2] === "start") return json(200, this.service.pilotRouteStart({ route_id: segment[1] }));
         if (request.method === "GET" && segment[0] === "sessions" && segment.length === 3 && segment[2] === "queue") return json(200, this.service.pilotQueue({ session_id: segment[1] }));
         if (request.method === "POST" && segment[0] === "sessions" && segment.length === 3 && segment[2] === "schedule") return json(200, this.service.pilotSchedule({ session_id: segment[1] }));
@@ -697,6 +715,27 @@ export class WorkbenchWebApp {
    */
   async handleAsync(request: WebRequest): Promise<WebResponse> {
     const url = new URL(request.path, this.origin); const path = url.pathname;
+    // API keys typed in the Workbench live in an owner-only secrets.json. The
+    // GET never returns a value, only which env-var names are configured.
+    if (path === "/api/settings/secrets") {
+      if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
+      if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
+      if (request.method === "GET") return json(200, {
+        names: storedSecretNames(craftPaths()),
+        precedence: "environment variables win over a stored key",
+      });
+      if (request.method === "PUT") {
+        try {
+          const body = bodyObject(request.body);
+          const envName = text(body.env, "env");
+          const key = typeof body.key === "string" ? body.key : "";
+          await writeSecret(craftPaths(), envName, key);
+          if (key.trim()) process.env[envName] = key.trim(); else delete process.env[envName];
+          return json(200, { ok: true, env: envName, configured: Boolean(key.trim()) });
+        } catch (error) { return failure(error); }
+      }
+      return json(404, { error: "Not found" });
+    }
     if (request.method === "POST" && path === "/api/config/models/discover") {
       if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
       if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
@@ -825,10 +864,11 @@ export class WorkbenchWebApp {
         const workers = await Promise.all(admitted.map(async (route): Promise<JsonObject> => {
           const routeId = String(route.id);
           const providerRaw = String(route.executor_template);
-          const provider = providerRaw === "codex-cli" ? "codex" : providerRaw === "claude-code" ? "claude"
-            : providerRaw === "craft-internal" ? "craft" : providerRaw;
+          // 领航员硬边界：即使历史 route 记录被外部写入或篡改，派发前仍
+          // fail-closed，不把任务交给 Codex/Claude/DSH 等外部 CLI。
+          const provider = assertPilotCraftOnly(providerRaw, "pilot route executor_template");
           try {
-            if (!new Set(["craft", "codex", "claude", "dsh"]).has(provider)) throw new Error("executor is not an installed agent provider");
+            if (provider !== "craft") throw new Error("pilot dispatch is Craft-only");
             const task = this.service.store.get("task", String(route.task_id));
             const workspaceId = typeof task.workspace_id === "string" ? task.workspace_id : "";
             const workspaceRecord = workspaceId ? this.service.store.get("workspace", workspaceId) : null;
