@@ -604,6 +604,10 @@ export class WorkbenchWebApp {
         const splitAt = rest.indexOf("/pages/");
         return json(200, this.service.workbenchPluginPage({ plugin_id: decodeURIComponent(rest.slice(0, splitAt)), page_id: decodeURIComponent(rest.slice(splitAt + "/pages/".length)), workspace_id: queryValue(url, "workspace_id") }));
       }
+      if (request.method === "POST" && path.startsWith("/api/workbench/plugins/") && path.endsWith("/resync")) {
+        const pluginId = decodeURIComponent(path.slice("/api/workbench/plugins/".length, -"/resync".length));
+        return json(200, this.service.workbenchPluginResync({ plugin_id: pluginId, allow_manifest_change: bodyObject(request.body).allow_manifest_change === true }));
+      }
       // Uninstall is a delete so it cannot be mistaken for the install verbs
       // above; the version query is the one the caller was shown.
       if (request.method === "DELETE" && path.startsWith("/api/workbench/plugins/") && !path.endsWith("/install")) {

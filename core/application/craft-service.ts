@@ -31,7 +31,7 @@ import { contextMirrorDocument } from "../context-mirror.ts";
 import { normalizeContextSync, contextSyncProjection, CONTEXT_SYNC_KINDS, type ContextSyncKind } from "../context-sync-protocol.ts";
 import { contextSyncAdapter, contextSyncDocument, runContextSync } from "../context-sync-adapter.ts";
 import { isCraftCompatibleManifest, normalizePluginManifest } from "../plugin-adapters.ts";
-import { normalizeWorkbenchContribution, normalizePluginMods, readDeclarativePage } from "../plugin-workbench.ts";
+import { normalizeWorkbenchContribution, normalizePluginMods, readDeclarativePage, readSandboxedEntry } from "../plugin-workbench.ts";
 import { CapabilityLoader } from "../capability-loader.ts";
 import { buildChatRequest, createFetchTransport, publicModel, specFromConfig, type ChatMessage } from "../model-gateway.ts";
 import { sanitizeModelEgressRequest } from "../model-egress-security.ts";
@@ -4100,21 +4100,22 @@ export class CraftService extends ServiceFoundation {
     const unsupportedHooks = Object.hasOwn(manifest, "hooks");
     // Declarative workbench pages are validated at install time and loaded on
     // demand; an invalid contribution is rejected rather than stored.
+    // hooks 只是本导入路径不注册的部分，不应连坐丢弃其余贡献。
     // 宿主扩展位（Claude ui/panels、Codex interface/extensions）先归一化，
     // 再走同一份 Workbench 校验；未声明时为空贡献。
-    const workbenchManifest = unsupportedHooks ? null : normalized.workbench;
-    const workbenchContribution = unsupportedHooks || !workbenchManifest
+    const workbenchManifest = normalized.workbench;
+    const workbenchContribution = !workbenchManifest
       ? { pages: [], context_actions: [], advanced_tools: [], themes: [], notes: [] }
       : normalizeWorkbenchContribution({ workbench: workbenchManifest });
     // 插件声明的 Mod 只能落成 draft，等待审批/影子测试；不自动激活。
-    const pluginMods = unsupportedHooks ? { mods: [], notes: [] } : normalizePluginMods(manifest);
+    const pluginMods = normalizePluginMods(manifest);
     const mappedAdapterIds: string[] = [];
     const mappedSkillIds: string[] = [];
-    for (const draft of unsupportedHooks ? [] : normalized.adapters) {
+    for (const draft of normalized.adapters) {
       const adapter = this.adapterManifestSave({ ...draft, version: packageVersion });
       mappedAdapterIds.push(String((adapter.manifest as JsonObject).adapter_id ?? (adapter.manifest as JsonObject).id));
     }
-    for (const draft of unsupportedHooks ? [] : normalized.skills) {
+    for (const draft of normalized.skills) {
       if (!this.store.find("studio_skill", draft.skill_id)) {
         this.store.create("studio_skill", draft.skill_id, { name: draft.name, description: draft.description, content: draft.content,
           content_digest: valueDigest(draft.content), source: "plugin_manifest", status: "active", edited_by: "plugin_adapter" });
@@ -4122,21 +4123,10 @@ export class CraftService extends ServiceFoundation {
       mappedSkillIds.push(draft.skill_id);
     }
     const notes = [...normalized.notes];
-    if (unsupportedHooks) notes.push("插件声明了 Hook；此导入路径尚不支持，所有贡献保持未启用");
+    if (unsupportedHooks) notes.push("插件声明了 Hook；本导入路径不注册 Hook，页面/Mod/技能等其余贡献仍可用");
     notes.push(...workbenchContribution.notes);
     notes.push(...pluginMods.notes);
     if (normalized.requires_plugin_root && !pluginRoot) notes.push("参数含插件根目录占位符；请补 plugin_root 后再运行");
-    let runtimeStatus: string;
-    if (mappedAdapterIds.length) runtimeStatus = "mapped_adapter";
-    else if (mappedSkillIds.length) runtimeStatus = "mapped_skill";
-    else if (targetHosts.includes("dsh")) runtimeStatus = "unsupported";
-    else runtimeStatus = notes.length ? "unsupported" : "descriptor_only";
-    let unsupportedReason: string | null = notes.length ? notes.join("; ") : null;
-    if (!unsupportedReason && runtimeStatus === "unsupported") {
-      unsupportedReason = pluginKind === "agent_provider"
-        ? "DSH agent providers are available through the DSH ACP session, not the Craft native tool surface"
-        : "Only CLI/MCP tool plugins map to Craft adapters; Cordis tool plugins require the DSH plugin host installer";
-    }
     const pluginId = String(args.plugin_id ?? id("studio_plugin"));
     const importedMods: JsonObject[] = [];
     for (const draft of pluginMods.mods) {
@@ -4148,6 +4138,21 @@ export class CraftService extends ServiceFoundation {
       } catch (error) {
         notes.push(`Mod ${draft.id} 未能导入：${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+    let runtimeStatus: string;
+    if (mappedAdapterIds.length) runtimeStatus = "mapped_adapter";
+    else if (mappedSkillIds.length) runtimeStatus = "mapped_skill";
+    else if (targetHosts.includes("dsh")) runtimeStatus = "unsupported";
+    // 只有「没有任何可映射贡献」才是 unsupported；hooks/路径占位等提示性 note
+    // 不应把页面、Mod、主题一起判死。
+    else runtimeStatus = (workbenchContribution.pages.length || workbenchContribution.themes.length
+      || workbenchContribution.context_actions.length || workbenchContribution.advanced_tools.length
+      || importedMods.length) ? "descriptor_only" : (notes.length ? "unsupported" : "descriptor_only");
+    let unsupportedReason: string | null = runtimeStatus === "unsupported" && notes.length ? notes.join("; ") : null;
+    if (!unsupportedReason && runtimeStatus === "unsupported") {
+      unsupportedReason = pluginKind === "agent_provider"
+        ? "DSH agent providers are available through the DSH ACP session, not the Craft native tool surface"
+        : "Only CLI/MCP tool plugins map to Craft adapters; Cordis tool plugins require the DSH plugin host installer";
     }
     return { plugin: this.store.create("studio_plugin", pluginId, {
       name, package_version: packageVersion, description, manifest, manifest_digest: valueDigest(encoded),
@@ -4163,6 +4168,70 @@ export class CraftService extends ServiceFoundation {
       imported_mod_ids: importedMods.map((item) => item.id),
       adapter_notes: notes, unsupported_reason: unsupportedReason,
     }) };
+  }
+  /**
+   * Re-run the host->Craft normalization for an installed plugin.
+   *
+   * Host manifests evolve (new pages, new Mod drafts, new skills); a one-shot
+   * install would drift. The resync is idempotent: the manifest must be
+   * byte-identical or explicitly bumped, existing Mod drafts are reused, and
+   * declarative/sandbox pages/themes are refreshed from the same validated path.
+   */
+  workbenchPluginResync(args: JsonObject): JsonObject {
+    const plugin = this.store.get("studio_plugin", text(args.plugin_id, "plugin_id"));
+    const manifest = object(plugin.manifest, "plugin.manifest");
+    const encoded = assertNoSecret(JSON.stringify(manifest), "manifest");
+    const digest = valueDigest(encoded);
+    // 磁盘上的 plugin.json 是宿主侧的真实来源；它与安装快照不同时必须显式确认，
+    // 否则一次 resync 就会把宿主未发布的改动静默带进 Craft。
+    const diskManifestPath = typeof plugin.plugin_root === "string" ? join(plugin.plugin_root, "plugin.json") : null;
+    if (diskManifestPath && existsSync(diskManifestPath)) {
+      const disk = JSON.parse(readFileSync(diskManifestPath, "utf8")) as JsonObject;
+      if (valueDigest(assertNoSecret(JSON.stringify(disk), "manifest")) !== digest && args.allow_manifest_change !== true) {
+      throw new Error("stored manifest differs from disk; pass allow_manifest_change to accept the new digest");
+      }
+    }
+    const hosts = Array.isArray(plugin.hosts) ? plugin.hosts as string[] : [];
+    const pluginRoot = typeof plugin.plugin_root === "string" ? plugin.plugin_root : null;
+    const normalized = normalizePluginManifest(manifest, hosts, pluginRoot);
+    const workbenchManifest = normalized.workbench;
+    const workbenchContribution = !workbenchManifest
+      ? { pages: [], context_actions: [], advanced_tools: [], themes: [], notes: [] }
+      : normalizeWorkbenchContribution({ workbench: workbenchManifest });
+    const pluginMods = normalizePluginMods(manifest);
+    const newSkillIds: string[] = [];
+    for (const draft of normalized.skills) {
+      if (!this.store.find("studio_skill", draft.skill_id)) {
+        this.store.create("studio_skill", draft.skill_id, { name: draft.name, description: draft.description, content: draft.content,
+          content_digest: valueDigest(draft.content), source: "plugin_manifest", status: "active", edited_by: "plugin_adapter" });
+      }
+      newSkillIds.push(draft.skill_id);
+    }
+    const existingModIds = Array.isArray(plugin.imported_mod_ids) ? plugin.imported_mod_ids as string[] : [];
+    const importedModIds = [...existingModIds];
+    let modsCreated = 0;
+    for (const draft of pluginMods.mods) {
+      const modId = `plugin_${plugin.id}_${draft.id}`;
+      if (existingModIds.includes(modId)) continue;
+      try {
+        const created = this.mods.create({ id: modId, name: draft.name, body: draft.body,
+          scope_kind: draft.scope_kind, scope_id: draft.scope_id, applies_to: draft.applies_to, plugin_id: plugin.id });
+        importedModIds.push(created.id);
+        modsCreated += 1;
+      } catch { /* a duplicate id already exists; keep it rather than overwrite */ }
+    }
+    const mappedSkillIds = [...new Set([...(Array.isArray(plugin.mapped_skill_ids) ? plugin.mapped_skill_ids as string[] : []), ...newSkillIds])];
+    const saved = this.store.save("studio_plugin", String(plugin.id), { ...plugin,
+      workbench_pages: workbenchContribution.pages,
+      workbench_context_actions: workbenchContribution.context_actions,
+      workbench_advanced_tools: workbenchContribution.advanced_tools,
+      workbench_themes: workbenchContribution.themes,
+      workbench_protocol: workbenchManifest ? "craft.workbench.v1" : null,
+      workbench_source_format: workbenchManifest ? normalized.source_format : null,
+      mapped_skill_ids: mappedSkillIds,
+      imported_mod_ids: importedModIds,
+      resynced_at: new Date().toISOString() });
+    return { plugin: saved, mods_created: modsCreated, pages: workbenchContribution.pages.length, skills: newSkillIds.length };
   }
   /** List the declarative/sandbox page contributions a plugin declared. Metadata only. */
   workbenchPluginPages(args: JsonObject): JsonObject {
@@ -4235,7 +4304,8 @@ export class CraftService extends ServiceFoundation {
       const schema = readDeclarativePage(typeof plugin.plugin_root === "string" ? plugin.plugin_root : null, String(page.schema));
       return { plugin_id: plugin.id, page, schema };
     }
-    return { plugin_id: plugin.id, page, sandbox: { kind: "sandboxed", milestone: 2, entry: null } };
+    const sandboxed = readSandboxedEntry(typeof plugin.plugin_root === "string" ? plugin.plugin_root : null, String(page.entry ?? ""));
+    return { plugin_id: plugin.id, page, sandbox: { kind: "sandboxed", entry: sandboxed.entry, html: sandboxed.html } };
   }
   /** Enable or disable one plugin for one workspace. */
   workspacePluginSet(args: JsonObject): JsonObject {
@@ -4358,8 +4428,18 @@ export class CraftService extends ServiceFoundation {
       removedSkills.push(skillId);
     }
     const removed = this.store.remove("studio_plugin", pluginId);
+    // 插件声明的 Mod 属于插件；卸载时只删除仍是 draft 的条目。已经 active 的
+    // Mod 可能已进入 Worker 上下文，保留并标记来源，交由操作者显式 revoke。
+    const removedMods: string[] = [], keptMods: string[] = [];
+    for (const modId of idsOf(plugin.imported_mod_ids)) {
+      const mod = this.store.find("mod", modId);
+      if (!mod) continue;
+      if (String(mod.plugin_id ?? "") !== pluginId || mod.status !== "draft") { keptMods.push(modId); continue; }
+      this.store.remove("mod", modId);
+      removedMods.push(modId);
+    }
     return { plugin_id: pluginId, removed: removed > 0, removed_adapters: removedAdapters, kept_adapters: keptAdapters,
-      removed_skills: removedSkills, kept_skills: keptSkills };
+      removed_skills: removedSkills, kept_skills: keptSkills, removed_mods: removedMods, kept_mods: keptMods };
   }
   /** Save a user-uploaded SKILL.md as local, inspectable instruction content. */
   workbenchSkillSave(args: JsonObject): JsonObject {

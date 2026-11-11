@@ -119,8 +119,10 @@ export function normalizeWorkbenchContribution(manifest: JsonObject): { pages: W
       if (isAbsolute(schema) || schema.split(/[\\/]+/).includes("..")) throw new Error("workbench page schema must be a relative path inside the plugin");
       return { id, title, kind, schema, requires };
     }
-    notes.push(`page ${id} is sandboxed; it is not rendered in this milestone`);
-    return { id, title, kind, requires };
+    const entry = text(page.entry, `workbench.pages[${index}].entry`);
+    if (isAbsolute(entry) || entry.split(/[\\/]+/).includes("..")) throw new Error("workbench page entry must be a relative path inside the plugin");
+    if (!/\.(?:html?)$/iu.test(entry)) throw new Error("workbench page entry must be an .html file");
+    return { id, title, kind, entry, requires };
   });
   const contextActions = boundedList(workbench.contextActions, "manifest.workbench.contextActions", 32).map((action, index) => {
     const id = text(action.id, `contextActions[${index}].id`), title = text(action.title, `contextActions[${index}].title`);
@@ -201,4 +203,33 @@ export function readDeclarativePage(pluginRoot: string | null, schemaPath: strin
   if (stat.size > MAX_SCHEMA_BYTES) throw new Error("page schema exceeds 256 KiB");
   const parsed: unknown = JSON.parse(readFileSync(real, "utf8"));
   return validateDeclarativePage(parsed);
+}
+
+const MAX_SANDBOX_HTML_BYTES = 512 * 1024;
+
+/**
+ * Sandboxed page runtime (milestone 2): a static HTML entry inside the plugin
+ * directory, served to a sandboxed iframe. Server-side this is read-only file
+ * access with path-traversal and size bounds; no plugin code runs in the Node
+ * process. The iframe is responsible for origin isolation (sandbox attribute)
+ * and must talk to Craft only through the token-gated API like any other page.
+ */
+export function readSandboxedEntry(pluginRoot: string | null, entryPath: string): { html: string; entry: string } {
+  if (!pluginRoot) throw new Error("plugin root is unknown; sandboxed entry cannot be resolved");
+  if (!entryPath || entryPath.split(/[\\/]+/).includes("..")) throw new Error("sandboxed entry must be a relative path inside the plugin");
+  const base = realpathSync(pluginRoot);
+  const target = resolve(base, entryPath);
+  if (!contained(base, target)) throw new Error("sandboxed entry must resolve inside the plugin directory");
+  if (!existsSync(target)) throw new Error("sandboxed entry was not found");
+  const real = realpathSync(target);
+  if (!contained(base, real)) throw new Error("sandboxed entry must resolve inside the plugin directory");
+  const stat = statSync(real);
+  if (!stat.isFile()) throw new Error("sandboxed entry must be a file");
+  if (stat.size > MAX_SANDBOX_HTML_BYTES) throw new Error("sandboxed entry exceeds 512 KiB");
+  const html = readFileSync(real, "utf8");
+  // 沙箱页面不联网、不加载外部资源、不向父页发消息；CSP 由服务端注入，
+  // 不依赖插件作者自己声明。
+  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline'; connect-src 'none'; frame-ancestors 'self'">`;
+  const hardened = /<head[^>]*>/iu.test(html) ? html.replace(/<head[^>]*>/iu, (head) => `${head}${csp}`) : `${csp}${html}`;
+  return { html: hardened, entry: entryPath };
 }

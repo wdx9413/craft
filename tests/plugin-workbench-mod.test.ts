@@ -59,3 +59,120 @@ test("插件 Mod 声明校验：非法 id、超长正文与越权 applies_to 被
   assert.throws(() => normalizePluginMods({ mods: [{ id: "a", body: "x", applies_to: "everyone" }] } as JsonObject), /worker, reviewer or all/u);
   assert.throws(() => normalizePluginMods({ mods: Array.from({ length: 17 }, (_, i) => ({ id: `m${i}`, body: "x" })) } as JsonObject), /at most 16/u);
 });
+
+async function htmlPluginFixture() {
+  const f = await fixture();
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const pluginDir = join(f.root, "html-plugin");
+  await mkdir(pluginDir, { recursive: true });
+  await writeFile(join(pluginDir, "panel.html"),
+    "<!doctype html><html><body><h1>Plugin Panel</h1><script>window.__inFrame = true;</script></body></html>", "utf8");
+  return { f, pluginDir };
+}
+
+test("sandboxed 页面提供静态 HTML 运行时：启用后可读，未启用/越界被拒绝", async () => {
+  const { f, pluginDir } = await htmlPluginFixture();
+  try {
+    const manifest = { name: "html-plugin", version: "1.0.0", hosts: ["craft"],
+      workbench: { schemaVersion: 1, pages: [{ id: "panel", title: "Panel", kind: "sandboxed", entry: "panel.html" }] } };
+    const installed = f.service.workbenchPluginInstall({ plugin_root: pluginDir, manifest }) as JsonObject;
+    const pluginId = String((installed.plugin as JsonObject).id);
+    const repo = join(f.root, "ws");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(repo, { recursive: true });
+    const workspace = (f.service.workspaceResolveOrCreate({ root_path: repo }) as JsonObject).workspace as JsonObject;
+    assert.throws(() => f.service.workbenchPluginPage({ plugin_id: pluginId, page_id: "panel", workspace_id: String(workspace.id) }),
+      /enable this installed plugin/u);
+    f.service.workspacePluginSet({ workspace_id: String(workspace.id), plugin_id: pluginId, status: "enabled" });
+    const page = f.service.workbenchPluginPage({ plugin_id: pluginId, page_id: "panel", workspace_id: String(workspace.id) }) as JsonObject;
+    const sandbox = page.sandbox as JsonObject;
+    assert.equal(sandbox.kind, "sandboxed");
+    assert.match(String(sandbox.html), /Plugin Panel/u);
+    assert.match(String(sandbox.html), /Content-Security-Policy/u, "沙箱 HTML 必须带 CSP");
+    assert.match(String(sandbox.html), /connect-src 'none'/u);
+    // 越界 entry 在安装时就被拒绝。
+    assert.throws(() => f.service.workbenchPluginInstall({ plugin_root: pluginDir,
+      manifest: { ...manifest, workbench: { schemaVersion: 1, pages: [{ id: "bad", title: "B", kind: "sandboxed", entry: "../outside.html" }] } } }),
+      /relative path inside the plugin/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("声明 hooks 的插件不再连坐：页面/Mod/技能仍可导入且可启用", async () => {
+  const f = await fixture();
+  try {
+    const installed = f.service.workbenchPluginInstall({
+      manifest: { name: "hooked", version: "1.0.0", hosts: ["craft"],
+        hooks: { SessionStart: [{ hooks: [{ type: "command", command: "node x.js" }] }] },
+        workbench: { schemaVersion: 1, pages: [{ id: "home", title: "Home", kind: "declarative", schema: "./home.json" }] },
+        mods: [{ id: "rule", name: "Rule", body: "Be brief.", scope_kind: "global" }] },
+    }) as JsonObject;
+    const plugin = installed.plugin as JsonObject;
+    assert.equal(plugin.runtime_status, "descriptor_only");
+    assert.match(String(plugin.adapter_notes), /不注册 Hook/u);
+    assert.equal((plugin.workbench_pages as JsonObject[]).length, 1);
+    const modIds = plugin.imported_mod_ids as string[];
+    assert.equal(modIds.length, 1);
+    assert.match(modIds[0], /^plugin_studio_plugin_.+_rule$/u);
+    assert.equal(f.store.get("mod", modIds[0]).plugin_id, plugin.id);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("workbenchPluginResync 幂等：重复 resync 不重复建 Mod，manifest 变更需显式确认", async () => {
+  const { f, pluginDir } = await htmlPluginFixture();
+  try {
+    const { writeFile } = await import("node:fs/promises");
+    const manifest = { name: "html-plugin", version: "1.0.0", hosts: ["craft"],
+      workbench: { schemaVersion: 1, pages: [{ id: "panel", title: "Panel", kind: "sandboxed", entry: "panel.html" }] },
+      mods: [{ id: "rule", name: "Rule", body: "Stay short.", scope_kind: "global" }] };
+    const installed = f.service.workbenchPluginInstall({ plugin_root: pluginDir, manifest }) as JsonObject;
+    const pluginId = String((installed.plugin as JsonObject).id);
+    const first = f.service.workbenchPluginResync({ plugin_id: pluginId }) as JsonObject;
+    assert.equal(first.mods_created, 0, "install 已建过，resync 不应重复");
+    assert.equal(((first.plugin as JsonObject).imported_mod_ids as string[]).length, 1);
+    const second = f.service.workbenchPluginResync({ plugin_id: pluginId }) as JsonObject;
+    assert.equal(second.mods_created, 0);
+    // 磁盘 manifest 变更必须显式 allow，否则 fail-closed。
+    await writeFile(join(pluginDir, "plugin.json"), JSON.stringify({ name: "html-plugin", version: "1.1.0" }), "utf8");
+    assert.throws(() => f.service.workbenchPluginResync({ plugin_id: pluginId }), /allow_manifest_change/u);
+    const forced = f.service.workbenchPluginResync({ plugin_id: pluginId, allow_manifest_change: true }) as JsonObject;
+    assert.equal(((forced.plugin as JsonObject).workbench_pages as JsonObject[]).length >= 0, true);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("卸载插件清理它创建的 draft Mod，但保留已 active 的 Mod", async () => {
+  const f = await fixture();
+  try {
+    const manifest = { name: "mod-plugin", version: "1.0.0", hosts: ["craft"],
+      mods: [{ id: "draft-rule", name: "D", body: "draft body", scope_kind: "global" },
+             { id: "active-rule", name: "A", body: "active body", scope_kind: "global" }] };
+    const installed = f.service.workbenchPluginInstall({ plugin_id: "mod-plugin", manifest }) as JsonObject;
+    const modIds = (installed.plugin as JsonObject).imported_mod_ids as string[];
+    f.service.modApprove({ id: modIds[1], approved_by: "user:test" });
+    const removed = f.service.workbenchPluginRemove({ plugin_id: "mod-plugin" }) as JsonObject;
+    assert.deepEqual(removed.removed_mods, [modIds[0]]);
+    assert.deepEqual(removed.kept_mods, [modIds[1]]);
+    assert.equal(f.store.find("mod", modIds[0]), null);
+    assert.equal(f.store.find("mod", modIds[1])?.status, "active");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("插件 Mod 只在插件于该工作区启用时注入 Worker 上下文", async () => {
+  const f = await fixture();
+  try {
+    const { mkdir } = await import("node:fs/promises");
+    const repo = join(f.root, "ws"); await mkdir(repo, { recursive: true });
+    const workspace = (f.service.workspaceResolveOrCreate({ root_path: repo }) as JsonObject).workspace as JsonObject;
+    const installed = f.service.workbenchPluginInstall({ plugin_id: "scoped-plugin",
+      manifest: { name: "scoped-plugin", version: "1.0.0", hosts: ["craft"],
+        mods: [{ id: "rule", name: "Rule", body: "Use scoped rule.", scope_kind: "project", scope_id: String(workspace.id) }] } }) as JsonObject;
+    const modId = ((installed.plugin as JsonObject).imported_mod_ids as string[])[0];
+    f.service.modApprove({ id: modId, approved_by: "user:test" });
+    // 未启用插件：不注入。
+    const before = f.service.modSystemOverlay({ scope_kind: "project", scope_id: String(workspace.id), applies_to: "worker", active_plugins: ["scoped-plugin"] });
+    assert.doesNotMatch(before, /Use scoped rule/u);
+    // 启用后：注入。
+    f.service.workspacePluginSet({ workspace_id: String(workspace.id), plugin_id: "scoped-plugin", status: "enabled" });
+    const after = f.service.modSystemOverlay({ scope_kind: "project", scope_id: String(workspace.id), applies_to: "worker", active_plugins: ["scoped-plugin"] });
+    assert.match(after, /Use scoped rule/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});

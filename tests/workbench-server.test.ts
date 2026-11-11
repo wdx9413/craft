@@ -993,7 +993,7 @@ test("Workbench uninstalls a plugin with what it created, and leaves anything el
   assert.ok(f.store.find("studio_plugin", String(installed.id)));
   const removed = JSON.parse(call("DELETE", `/api/workbench/plugins/${String(installed.id)}`).body);
   assert.deepEqual(removed, { plugin_id: installed.id, removed: true, removed_adapters: [adapterId], kept_adapters: [],
-    removed_skills: [skillId], kept_skills: [] });
+    removed_skills: [skillId], kept_skills: [], removed_mods: [], kept_mods: [] });
   assert.equal(f.store.find("studio_plugin", String(installed.id)), null);
   assert.equal(f.store.find("adapter_manifest", adapterId), null);
   assert.equal(f.store.find("studio_skill", skillId), null);
