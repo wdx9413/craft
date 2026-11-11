@@ -235,9 +235,10 @@ test("the new capability surfaces are reachable over MCP and stay read-only", as
   };
   try {
     const providers = await call("craft_model_provider_list", {});
-    assert.equal(providers.count, 2);
+    // 默认不再把 host-managed auth（codex-cli）补进用户显式注入的模型列表。
+    assert.equal(providers.count, 1);
     assert.equal((providers.providers as JsonObject[]).find(item => item.provider === "demo")?.configured, false);
-    assert.equal((providers.providers as JsonObject[]).find(item => item.provider === "codex-cli")?.configured, true);
+    assert.equal((providers.providers as JsonObject[]).some(item => item.provider === "codex-cli"), false);
 
     const described = await call("craft_model_provider_get", { provider: "demo", tier: "frontier" });
     assert.equal((described.selection as JsonObject).model, "demo-std");

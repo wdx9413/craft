@@ -60,6 +60,7 @@ export interface CraftSettings {
     onboarding: { completedAt: string | null; workspaceId: string | null; skippedAt?: string | null } };
   capabilities: { autoInstall: boolean; defaults: string[]; installed: string[]; disabled: string[] };
   messageSources: MessageSourceConfig;
+  runtimeDependencies: RuntimeDependencyConfig;
   lastProvider: string;
   runtime: { maxSteps: number; maxTokens: number };
   models: CraftModelConfig[];
@@ -75,7 +76,14 @@ export type CraftSettingsPatch = Partial<Pick<CraftSettings, "locale" | "theme" 
   privacy?: Partial<CraftSettings["privacy"]>;
   capabilities?: Partial<CraftSettings["capabilities"]>;
   messageSources?: Partial<CraftSettings["messageSources"]>;
+  runtimeDependencies?: Partial<CraftSettings["runtimeDependencies"]>;
 };
+
+export interface RuntimeDependencyConfig {
+  externalCliDrivers: boolean;
+  hostManagedAuthProvider: boolean;
+  configuredModelOnly: boolean;
+}
 
 export interface MessageSourceConfig {
   enabled: boolean;
@@ -191,6 +199,7 @@ export function defaultSettings(paths = craftPaths()): CraftSettings {
       onboarding: { completedAt: null, workspaceId: null, skippedAt: null } }, lastProvider: "",
       capabilities: { autoInstall: true, defaults: ["craft-context", "craft-datasec"], installed: [], disabled: [] },
     messageSources: { enabled: false, intervalMs: 60_000, dropDirs: [], githubRepos: [], githubApiBaseUrl: "https://api.github.com", githubTokenEnv: "GITHUB_TOKEN", githubState: "issues" },
+    runtimeDependencies: { externalCliDrivers: false, hostManagedAuthProvider: false, configuredModelOnly: true },
     runtime: { maxSteps: 32, maxTokens: 12000 },
     models: [], privacy: { telemetry: false }, updatedAt: new Date(0).toISOString() };
 }
@@ -251,7 +260,17 @@ export function normalizeSettings(value: unknown, paths = craftPaths()): CraftSe
     models: normalizeModels(input.models),
     capabilities: normalizeCapabilities(input.capabilities),
     messageSources: normalizeMessageSources(input.messageSources),
+    runtimeDependencies: normalizeRuntimeDependencies(input.runtimeDependencies),
     privacy: { telemetry: boolean(privacy.telemetry, "privacy.telemetry", false) }, updatedAt };
+}
+
+function normalizeRuntimeDependencies(value: unknown): RuntimeDependencyConfig {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return {
+    externalCliDrivers: input.externalCliDrivers === undefined ? false : boolean(input.externalCliDrivers, "runtimeDependencies.externalCliDrivers", false),
+    hostManagedAuthProvider: input.hostManagedAuthProvider === undefined ? false : boolean(input.hostManagedAuthProvider, "runtimeDependencies.hostManagedAuthProvider", false),
+    configuredModelOnly: input.configuredModelOnly === undefined ? true : boolean(input.configuredModelOnly, "runtimeDependencies.configuredModelOnly", true),
+  };
 }
 
 function normalizeMessageSources(value: unknown): MessageSourceConfig {
@@ -312,6 +331,7 @@ export async function saveSettings(patch: CraftSettingsPatch, paths = craftPaths
     models: [current.models, patch.models][Number(patch.models !== undefined)],
     capabilities: { ...current.capabilities, ...(patch.capabilities ?? {}) },
     messageSources: { ...current.messageSources, ...(patch.messageSources ?? {}) },
+    runtimeDependencies: { ...current.runtimeDependencies, ...(patch.runtimeDependencies ?? {}) },
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths);
   await atomicPrivateJson(paths.settingsFile, next); return next;
 }
@@ -337,6 +357,7 @@ export function saveSettingsSync(patch: CraftSettingsPatch, paths = craftPaths()
     models: patch.models !== undefined ? patch.models : current.models,
     capabilities: { ...current.capabilities, ...(patch.capabilities ?? {}) },
     messageSources: { ...current.messageSources, ...(patch.messageSources ?? {}) },
+    runtimeDependencies: { ...current.runtimeDependencies, ...(patch.runtimeDependencies ?? {}) },
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths); syncWrite(paths.settingsFile, next); return next;
 }
 

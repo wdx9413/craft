@@ -9,6 +9,19 @@ import type { JsonObject } from "./infrastructure/store.ts";
 export type PluginSourceFormat = "claude" | "codex" | "dsh" | "craft" | "generic";
 export type PluginAdapterKind = "mcp" | "command";
 
+/** 多宿主插件只解析一次；优先 Codex 清单，其次 Claude、DSH、Pi、Craft。 */
+export const PLUGIN_HOST_PRIORITY = ["codex", "claude", "dsh", "pi", "craft", "generic"] as const;
+export type PluginHost = typeof PLUGIN_HOST_PRIORITY[number];
+
+export function pluginHostOrder(hosts: readonly string[]): PluginHost[] {
+  const declared = new Set(hosts.map((host) => String(host).trim().toLowerCase()));
+  return PLUGIN_HOST_PRIORITY.filter((host) => declared.has(host));
+}
+
+export function preferredPluginHost(hosts: readonly string[]): PluginHost | null {
+  return pluginHostOrder(hosts)[0] ?? null;
+}
+
 export interface PluginAdapterDraft {
   adapter_id: string;
   kind: PluginAdapterKind;
@@ -40,8 +53,9 @@ export function pluginSlug(value: string, fallback = "plugin"): string {
 }
 
 export function pluginSourceFormat(hosts: readonly string[]): PluginSourceFormat {
-  for (const host of hosts) if (host === "claude" || host === "codex" || host === "dsh") return host;
-  return hosts.includes("craft") ? "craft" : "generic";
+  const preferred = preferredPluginHost(hosts);
+  if (preferred === "claude" || preferred === "codex" || preferred === "dsh") return preferred;
+  return preferred === "craft" ? "craft" : "generic";
 }
 
 function asObject(value: unknown): JsonObject | null {

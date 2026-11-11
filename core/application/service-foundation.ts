@@ -49,6 +49,7 @@ import { canonicalToolCatalog } from "../mcp/canonical-tools.ts";
 import { MetricsKernel } from "../metrics.ts";
 import { PROVIDER_CATALOG, specsFromModels, type ModelProviderSpec, type ModelTransport } from "../model-gateway.ts";
 import { loadSettingsSync, saveSettingsSync, type CraftSettings } from "../settings.ts";
+import { runtimeDependencyPolicy } from "../runtime-dependency-policy.ts";
 import type { HostDriver } from "../host-driver.ts";
 import type { KnowledgeBoundLaunchKernel } from "../../capability/craft-knowledge/knowledge-bound-launch.ts";
 import type { KnowledgeWorkbenchKernel } from "../../capability/craft-knowledge/knowledge-workbench.ts";
@@ -493,19 +494,24 @@ export abstract class ServiceFoundation {
     this.home = new HomeKernel(store, this.attention); this.codexHost = new CodexHostKernel(store);
     this.claudeHost = new ClaudeHostKernel(store);
     this.hostProfiles = mergeHostProfiles([...(hostProfiles ?? [])]);
-    const configuredModels = specsFromModels(loadSettingsSync(store.paths).models);
-    // The catalog is a safe, keyless discovery fallback. A saved configuration
-    // takes precedence after restart, while a first-run Studio can still load
-    // far enough to guide the user through adding one.
-    const codexHostProvider = PROVIDER_CATALOG.filter((provider) => provider.provider === "codex-cli");
-    this.modelProviders = modelProviders && modelProviders.length ? [...modelProviders, ...codexHostProvider.filter((host) => !modelProviders.some((provider) => provider.provider === host.provider))]
-      : configuredModels.length ? [...configuredModels, ...codexHostProvider]
-        : PROVIDER_CATALOG;
+    const settings = loadSettingsSync(store.paths);
+    const policy = runtimeDependencyPolicy(settings);
+    const configuredModels = specsFromModels(settings.models);
+    // 默认只使用「配给 Craft 的模型」：settings.models 或显式注入的 modelProviders。
+    // 内置目录仅作为无配置时的可发现兜底；CLI host-managed auth 只在显式开关下注入。
+    const catalog = policy.hostManagedAuthProvider ? PROVIDER_CATALOG : PROVIDER_CATALOG.filter((provider) => provider.host_managed_auth !== true);
+    const hostManaged = policy.hostManagedAuthProvider ? PROVIDER_CATALOG.filter((provider) => provider.host_managed_auth === true) : [];
+    this.modelProviders = modelProviders && modelProviders.length ? [...modelProviders, ...hostManaged.filter((host) => !modelProviders.some((provider) => provider.provider === host.provider))]
+      : configuredModels.length ? [...configuredModels, ...hostManaged]
+        : catalog;
     this.modelTransport = modelTransport;
     this.internalHost = new InternalHostDriver(store, { providers: this.modelProviders, transport: modelTransport,
       toolCatalog: () => canonicalToolCatalog(),
       dispatchable: () => this.dispatchableInternalActions(),
       invokeAction: (action, args, signal) => this.invokeInternalAction(action, args, signal) });
+    // 保留全部驱动注册以兼容既有 Work Launch 契约（显式 host 参数）；
+    // 「默认不依赖」由领航员硬门禁 + 模型侧不注入 host-managed auth +
+    // runtimeDependencyPolicy 共同保证，默认任务路径只走 internal。
     const drivers: [string, HostDriver][] = [
       ["codex-cli", this.codexHost],
       ["claude-code", this.claudeHost],
