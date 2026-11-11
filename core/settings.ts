@@ -58,6 +58,7 @@ export interface CraftSettings {
     // First-run guidance (model/workspace setup). Once completedAt is set the
     // workbench never shows the one-time wizard again; a reset clears it.
     onboarding: { completedAt: string | null; workspaceId: string | null; skippedAt?: string | null } };
+  capabilities: { autoInstall: boolean; defaults: string[]; installed: string[]; disabled: string[] };
   lastProvider: string;
   runtime: { maxSteps: number; maxTokens: number };
   models: CraftModelConfig[];
@@ -71,6 +72,7 @@ export type CraftSettingsPatch = Partial<Pick<CraftSettings, "locale" | "theme" 
   runtime?: Partial<CraftSettings["runtime"]>;
   models?: CraftModelConfig[];
   privacy?: Partial<CraftSettings["privacy"]>;
+  capabilities?: Partial<CraftSettings["capabilities"]>;
 };
 
 function number(value: unknown, name: string, fallback: number, min: number, max: number): number {
@@ -175,6 +177,7 @@ export function defaultSettings(paths = craftPaths()): CraftSettings {
       browserMode: "system", defaultPermission: "ask", contextStorage: normalizeContextStorage(undefined), operator: "",
       pilotConcurrency: 3,
       onboarding: { completedAt: null, workspaceId: null, skippedAt: null } }, lastProvider: "",
+      capabilities: { autoInstall: true, defaults: ["craft-context", "craft-datasec"], installed: [], disabled: [] },
     runtime: { maxSteps: 32, maxTokens: 12000 },
     models: [], privacy: { telemetry: false }, updatedAt: new Date(0).toISOString() };
 }
@@ -233,7 +236,28 @@ export function normalizeSettings(value: unknown, paths = craftPaths()): CraftSe
     lastProvider,
     runtime: { maxSteps: number(runtime.maxSteps, "runtime.maxSteps", 32, 1, 10000), maxTokens: number(runtime.maxTokens, "runtime.maxTokens", 12000, 1, 100000000) },
     models: normalizeModels(input.models),
+    capabilities: normalizeCapabilities(input.capabilities),
     privacy: { telemetry: boolean(privacy.telemetry, "privacy.telemetry", false) }, updatedAt };
+}
+
+function normalizeCapabilities(value: unknown): CraftSettings["capabilities"] {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const autoInstall = input.autoInstall === undefined ? true : boolean(input.autoInstall, "capabilities.autoInstall", true);
+  const defaults = normalizeStringArray(input.defaults, "capabilities.defaults", ["craft-context", "craft-datasec"]);
+  const installed = normalizeStringArray(input.installed, "capabilities.installed", []);
+  const disabled = normalizeStringArray(input.disabled, "capabilities.disabled", []);
+  return { autoInstall, defaults, installed, disabled };
+}
+
+function normalizeStringArray(value: unknown, name: string, fallback: string[]): string[] {
+  if (value === undefined || value === null) return fallback.slice();
+  if (!Array.isArray(value)) throw new Error(`${name} must be an array of capability ids`);
+  const out = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string" || !item.trim()) throw new Error(`${name} items must be non-empty strings`);
+    out.add(item.trim());
+  }
+  return [...out];
 }
 
 export async function loadSettings(paths = craftPaths()): Promise<CraftSettings> {
@@ -250,6 +274,7 @@ export async function saveSettings(patch: CraftSettingsPatch, paths = craftPaths
   const next = normalizeSettings({ ...current, ...patch,
     workbench: { ...current.workbench, ...(patch.workbench ?? {}) }, runtime: { ...current.runtime, ...(patch.runtime ?? {}) },
     models: [current.models, patch.models][Number(patch.models !== undefined)],
+    capabilities: { ...current.capabilities, ...(patch.capabilities ?? {}) },
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths);
   await atomicPrivateJson(paths.settingsFile, next); return next;
 }
@@ -273,6 +298,7 @@ export function saveSettingsSync(patch: CraftSettingsPatch, paths = craftPaths()
   const current = loadSettingsSync(paths); const next = normalizeSettings({ ...current, ...patch,
     workbench: { ...current.workbench, ...(patch.workbench ?? {}) }, runtime: { ...current.runtime, ...(patch.runtime ?? {}) },
     models: patch.models !== undefined ? patch.models : current.models,
+    capabilities: { ...current.capabilities, ...(patch.capabilities ?? {}) },
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths); syncWrite(paths.settingsFile, next); return next;
 }
 

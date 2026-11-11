@@ -48,7 +48,7 @@ import { InternalHostDriver } from "../internal-host-driver.ts";
 import { canonicalToolCatalog } from "../mcp/canonical-tools.ts";
 import { MetricsKernel } from "../metrics.ts";
 import { PROVIDER_CATALOG, specsFromModels, type ModelProviderSpec, type ModelTransport } from "../model-gateway.ts";
-import { loadSettingsSync } from "../settings.ts";
+import { loadSettingsSync, saveSettingsSync, type CraftSettings } from "../settings.ts";
 import type { HostDriver } from "../host-driver.ts";
 import type { KnowledgeBoundLaunchKernel } from "../../capability/craft-knowledge/knowledge-bound-launch.ts";
 import type { KnowledgeWorkbenchKernel } from "../../capability/craft-knowledge/knowledge-workbench.ts";
@@ -375,6 +375,7 @@ export abstract class ServiceFoundation {
   readonly a2aDelegation: A2ADelegationKernel;
   readonly autonomousRuntime: AutonomousRuntimeKernel;
   readonly capabilityLifecycle: CapabilityLifecycleKernel;
+  capabilityDefaults: CraftSettings["capabilities"];
   readonly memoryConsolidation: MemoryConsolidationKernel;
   readonly contentMigration: ContentMigrationKernel;
   readonly traceReviews: TraceReviewKernel;
@@ -623,6 +624,8 @@ export abstract class ServiceFoundation {
     this.a2aDelegation = new A2ADelegationKernel(store);
     this.autonomousRuntime = new AutonomousRuntimeKernel(store);
     this.capabilityLifecycle = new CapabilityLifecycleKernel(store);
+    this.capabilityDefaults = loadSettingsSync(store.paths).capabilities;
+    if (this.capabilityDefaults.autoInstall) this.installCapabilityDefaults();
     this.memoryConsolidation = new MemoryConsolidationKernel(store);
     this.traceReviews = new TraceReviewKernel(store);
     this.memoryMaintenance = new MemoryMaintenanceKernel(store);
@@ -686,6 +689,28 @@ export abstract class ServiceFoundation {
       this.stateWorkspace, this.workspaceObserver, this.changeSets, this.projectBrain, this.lineage, this.hydration);
     this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
+  }
+
+  /**
+   * Install the declared default capabilities that are neither installed nor
+   * explicitly disabled in settings. This runs at boot, is idempotent, and
+   * writes only lifecycle records — never grants execution authority.
+   */
+  installCapabilityDefaults(): void {
+    const { defaults, installed, disabled } = this.capabilityDefaults;
+    const added: string[] = [];
+    for (const name of defaults) {
+      if (installed.includes(name) || disabled.includes(name)) continue;
+      this.capabilityLifecycle.register({
+        capability_id: name, name, source: `marketplace:${name}`, effect: "read_only",
+      });
+      this.capabilityLifecycle.install({ capability_id: name });
+      added.push(name);
+    }
+    if (added.length) {
+      const updated = saveSettingsSync({ capabilities: { installed: [...installed, ...added] } }, this.store.paths);
+      this.capabilityDefaults = updated.capabilities;
+    }
   }
 
   // Implemented by the public facade after the corresponding domain method exists.

@@ -59,3 +59,7 @@ credentials.json
 credentials.yaml
 credentials.yml
 *.lcov
+
+# Local engineering-skill tracker (setup-matt-pocock-skills writes issues here).
+# Specs/tickets are per-user work state, not release artifacts.
+.scratch/

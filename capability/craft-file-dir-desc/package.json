@@ -1,0 +1,18 @@
+{
+  "name": "@craft/capability-file-dir-desc",
+  "version": "0.20.4",
+  "private": true,
+  "description": "Self-evolving registry that maps directories to human-readable semantic descriptions",
+  "type": "module",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "craft-common-store-local": "0.20.4",
+    "craft-common-base": "0.20.4"
+  },
+  "engines": {
+    "node": ">=23"
+  }
+}

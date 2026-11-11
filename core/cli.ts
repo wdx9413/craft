@@ -20,7 +20,7 @@ import { runBuiltinAcceptanceTicks } from "./acceptance-worker.ts";
 import { LocalWorkbenchServer } from "./workbench-server.ts";
 import { LocalSupervisor, SupervisorClient } from "./supervisor.ts";
 import { openBrowser } from "./browser.ts";
-import { loadSettingsSync } from "./settings.ts";
+import { loadSettingsSync, saveSettingsSync } from "./settings.ts";
 import { VERSION } from "./service.ts";
 import { credentialStatus, createFetchTransport, providerFromConfig } from "./model-gateway.ts";
 import { hydrateSecretsIntoEnv } from "./secrets-store.ts";
@@ -55,6 +55,11 @@ Usage:
   craft source list             List capability directories
   craft source scan [id]        Incrementally scan sources
   craft capability search <q>   Search indexed capabilities
+  craft capability list         List default, installed and disabled capabilities
+  craft capability install <id> Install and record a capability as a default
+  craft capability disable <id> Disable a capability and persist the choice
+  craft capability enable <id>  Re-enable a previously disabled capability
+  craft capability uninstall <id>  Retire a capability and record it as disabled
   craft semantic configure ...  Configure optional OpenAI-compatible embeddings
   craft semantic disable         Disable semantic retrieval and use keywords only
   craft semantic status          Show semantic retrieval health
@@ -476,6 +481,43 @@ async function dispatchMain(args: string[]): Promise<void> {
       else if (args[0] === "source" && args[1] === "list") result = service.sourceList();
       else if (args[0] === "source" && args[1] === "scan") result = await service.sourceScan({ source_id: args[2] });
       else if (args[0] === "capability" && args[1] === "search") result = await service.capabilitySearch({ query: args.slice(2).join(" ") });
+      else if (args[0] === "capability" && ["disable", "enable", "uninstall", "install", "list"].includes(args[1] ?? "")) {
+        const name = args[2];
+        const action = args[1]!;
+        const settings = loadSettingsSync(paths);
+        const { defaults, installed, disabled } = settings.capabilities;
+        if (action === "list") {
+          result = { ...settings.capabilities, lifecycle: service.capabilityLifecycleList() };
+        } else {
+          if (!name) throw new Error(`capability ${action} requires a capability id`);
+          if (action === "disable" || action === "uninstall") {
+            const next = saveSettingsSync({ capabilities: {
+              installed: installed.filter(item => item !== name),
+              disabled: disabled.includes(name) ? disabled : [...disabled, name],
+            } }, paths);
+            if (action === "disable") service.capabilityLifecycleDisable({ capability_id: name, reason: "user_disabled" });
+            else service.capabilityLifecycleRetire({ capability_id: name, reason: "user_uninstalled" });
+            result = { name, action, capabilities: next.capabilities };
+          } else if (action === "enable") {
+            const next = saveSettingsSync({ capabilities: {
+              disabled: disabled.filter(item => item !== name),
+              installed: installed.includes(name) ? installed : [...installed, name],
+            } }, paths);
+            service.capabilityLifecycleInstall({ capability_id: name });
+            service.capabilityLifecycleActivate({ capability_id: name });
+            result = { name, action, capabilities: next.capabilities };
+          } else {
+            const next = saveSettingsSync({ capabilities: {
+              installed: installed.includes(name) ? installed : [...installed, name],
+              disabled: disabled.filter(item => item !== name),
+              defaults: defaults.includes(name) ? defaults : [...defaults, name],
+            } }, paths);
+            service.capabilityLifecycleRegister({ capability_id: name, name, source: `marketplace:${name}`, effect: "read_only" });
+            service.capabilityLifecycleInstall({ capability_id: name });
+            result = { name, action, capabilities: next.capabilities };
+          }
+        }
+      }
       else if (args[0] === "task" && args[1] === "list") result = service.taskList({});
       else if (args[0] === "kit" && args[1] === "list") result = service.capabilityKitList({});
       else if (args[0] === "kit" && args[1] === "install-builtins") result = service.capabilityKitInstallBuiltins();
