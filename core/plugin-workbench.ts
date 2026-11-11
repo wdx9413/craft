@@ -40,6 +40,50 @@ export type WorkbenchPage = {
 export type WorkbenchContextAction = { id: string; title: string; contexts: string[]; target: "memory" | "knowledge" | "workflows" };
 export type WorkbenchTheme = { id: string; title: string; tokens: Record<string, string> };
 
+/**
+ * 插件可声明 Mod（认知约束），但只能生成 `draft`。
+ *
+ * 生命周期与自进化共用一条：draft → 审批/影子测试 → active。插件永远不能
+ * 直接激活 Mod，也不能跳过 `FORBIDDEN_MOD_PHRASES` 检查；这保证「自进化依赖
+ * Mod」的链路不会因为一个第三方插件而被绕过。
+ */
+export type PluginModDraft = {
+  id: string; name: string; body: string; applies_to: "worker" | "reviewer" | "all";
+  scope_kind: "global" | "project" | "task"; scope_id: string;
+};
+
+const MAX_PLUGIN_MODS = 16;
+const MAX_MOD_BODY = 8_000;
+
+export function normalizePluginMods(manifest: JsonObject): { mods: PluginModDraft[]; notes: string[] } {
+  const raw = manifest.mods;
+  if (raw === undefined) return { mods: [], notes: [] };
+  if (!Array.isArray(raw) || raw.length > MAX_PLUGIN_MODS) throw new Error(`manifest.mods must be an array of at most ${MAX_PLUGIN_MODS}`);
+  const notes: string[] = [];
+  const seen = new Set<string>();
+  const mods = raw.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`manifest.mods[${index}] must be an object`);
+    const entry = item as JsonObject;
+    const id = text(entry.id, `manifest.mods[${index}].id`);
+    if (!/^[a-z][a-z0-9_.-]{0,63}$/u.test(id)) throw new Error("plugin mod id is invalid");
+    if (seen.has(id)) throw new Error("plugin mod ids must be unique");
+    seen.add(id);
+    const body = text(entry.body, `manifest.mods[${index}].body`);
+    if (body.length > MAX_MOD_BODY) throw new Error("plugin mod body is too long");
+    const appliesTo = entry.applies_to === undefined ? "worker" : text(entry.applies_to, `manifest.mods[${index}].applies_to`);
+    if (!["worker", "reviewer", "all"].includes(appliesTo)) throw new Error("plugin mod applies_to must be worker, reviewer or all");
+    const scopeKind = entry.scope_kind === undefined ? "project" : text(entry.scope_kind, `manifest.mods[${index}].scope_kind`);
+    if (!["global", "project", "task"].includes(scopeKind)) throw new Error("plugin mod scope_kind must be global, project or task");
+    if (scopeKind !== "global" && (entry.scope_id === undefined || entry.scope_id === null || entry.scope_id === "")) notes.push(`Mod ${id} 需要 scope_id；安装后保持 draft 直到指定范围`);
+    return {
+      id, name: typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : id, body,
+      applies_to: appliesTo as PluginModDraft["applies_to"], scope_kind: scopeKind as PluginModDraft["scope_kind"],
+      scope_id: typeof entry.scope_id === "string" && entry.scope_id.trim() ? entry.scope_id.trim() : "global",
+    };
+  });
+  return { mods, notes };
+}
+
 function boundedList(value: unknown, name: string, max: number): JsonObject[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > max) throw new Error(`${name} must be an array of at most ${max}`);

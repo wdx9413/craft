@@ -42,6 +42,36 @@ export interface NormalizedPlugin {
   skills: PluginSkillDraft[];
   notes: string[];
   requires_plugin_root: boolean;
+  /** 从宿主扩展位提取出的标准 workbench 块；未声明时为 null。 */
+  workbench: JsonObject | null;
+}
+
+/**
+ * 不同宿主的 Workbench/UI 扩展位置不同：
+ * - Craft/DSH 直接写 `workbench`
+ * - Claude 常见 `ui` / `panels`
+ * - Codex 常见 `interface` / `extensions.openai.ui`
+ * 适配层把它们收敛成同一个标准块，交给 `normalizeWorkbenchContribution` 校验。
+ */
+const WORKBENCH_EXTENSION_PATHS: ReadonlyArray<readonly string[]> = [
+  ["workbench"],
+  ["ui"],
+  ["panels"],
+  ["interface"],
+  ["extensions", "openai", "ui"],
+  ["extensions", "ui"],
+];
+
+export function extractWorkbenchContribution(manifest: JsonObject): JsonObject | null {
+  for (const path of WORKBENCH_EXTENSION_PATHS) {
+    let cursor: unknown = manifest;
+    for (const segment of path) cursor = asObject(cursor)?.[segment];
+    const candidate = asObject(cursor);
+    if (!candidate) continue;
+    // 只接受声明了 schemaVersion 的块，避免把任意宿主 UI 配置误当作页面协议。
+    if (candidate.schemaVersion === 1) return candidate;
+  }
+  return null;
 }
 
 const ROOT_TOKENS = ["${CLAUDE_PLUGIN_ROOT}", "${CODEX_PLUGIN_ROOT}", "${DSH_PLUGIN_ROOT}", "${PLUGIN_ROOT}"];
@@ -186,5 +216,6 @@ export function normalizePluginManifest(manifest: JsonObject, hosts: readonly st
     }
   }
 
-  return { source_format: sourceFormat, adapters, skills, notes, requires_plugin_root: requiresPluginRoot };
+  return { source_format: sourceFormat, adapters, skills, notes, requires_plugin_root: requiresPluginRoot,
+    workbench: extractWorkbenchContribution(manifest) };
 }

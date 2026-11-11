@@ -31,7 +31,7 @@ import { contextMirrorDocument } from "../context-mirror.ts";
 import { normalizeContextSync, contextSyncProjection, CONTEXT_SYNC_KINDS, type ContextSyncKind } from "../context-sync-protocol.ts";
 import { contextSyncAdapter, contextSyncDocument, runContextSync } from "../context-sync-adapter.ts";
 import { isCraftCompatibleManifest, normalizePluginManifest } from "../plugin-adapters.ts";
-import { normalizeWorkbenchContribution, readDeclarativePage } from "../plugin-workbench.ts";
+import { normalizeWorkbenchContribution, normalizePluginMods, readDeclarativePage } from "../plugin-workbench.ts";
 import { CapabilityLoader } from "../capability-loader.ts";
 import { buildChatRequest, createFetchTransport, publicModel, specFromConfig, type ChatMessage } from "../model-gateway.ts";
 import { sanitizeModelEgressRequest } from "../model-egress-security.ts";
@@ -4100,8 +4100,14 @@ export class CraftService extends ServiceFoundation {
     const unsupportedHooks = Object.hasOwn(manifest, "hooks");
     // Declarative workbench pages are validated at install time and loaded on
     // demand; an invalid contribution is rejected rather than stored.
-    const workbenchContribution = unsupportedHooks
-      ? { pages: [], context_actions: [], advanced_tools: [], themes: [], notes: [] } : normalizeWorkbenchContribution(manifest);
+    // 宿主扩展位（Claude ui/panels、Codex interface/extensions）先归一化，
+    // 再走同一份 Workbench 校验；未声明时为空贡献。
+    const workbenchManifest = unsupportedHooks ? null : normalized.workbench;
+    const workbenchContribution = unsupportedHooks || !workbenchManifest
+      ? { pages: [], context_actions: [], advanced_tools: [], themes: [], notes: [] }
+      : normalizeWorkbenchContribution({ workbench: workbenchManifest });
+    // 插件声明的 Mod 只能落成 draft，等待审批/影子测试；不自动激活。
+    const pluginMods = unsupportedHooks ? { mods: [], notes: [] } : normalizePluginMods(manifest);
     const mappedAdapterIds: string[] = [];
     const mappedSkillIds: string[] = [];
     for (const draft of unsupportedHooks ? [] : normalized.adapters) {
@@ -4118,6 +4124,7 @@ export class CraftService extends ServiceFoundation {
     const notes = [...normalized.notes];
     if (unsupportedHooks) notes.push("插件声明了 Hook；此导入路径尚不支持，所有贡献保持未启用");
     notes.push(...workbenchContribution.notes);
+    notes.push(...pluginMods.notes);
     if (normalized.requires_plugin_root && !pluginRoot) notes.push("参数含插件根目录占位符；请补 plugin_root 后再运行");
     let runtimeStatus: string;
     if (mappedAdapterIds.length) runtimeStatus = "mapped_adapter";
@@ -4130,7 +4137,19 @@ export class CraftService extends ServiceFoundation {
         ? "DSH agent providers are available through the DSH ACP session, not the Craft native tool surface"
         : "Only CLI/MCP tool plugins map to Craft adapters; Cordis tool plugins require the DSH plugin host installer";
     }
-    return { plugin: this.store.create("studio_plugin", String(args.plugin_id ?? id("studio_plugin")), {
+    const pluginId = String(args.plugin_id ?? id("studio_plugin"));
+    const importedMods: JsonObject[] = [];
+    for (const draft of pluginMods.mods) {
+      try {
+        const created = this.mods.create({ id: `plugin_${pluginId}_${draft.id}`, name: draft.name, body: draft.body,
+          scope_kind: draft.scope_kind, scope_id: draft.scope_id, applies_to: draft.applies_to,
+          plugin_id: pluginId });
+        importedMods.push({ id: created.id, status: created.status });
+      } catch (error) {
+        notes.push(`Mod ${draft.id} 未能导入：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return { plugin: this.store.create("studio_plugin", pluginId, {
       name, package_version: packageVersion, description, manifest, manifest_digest: valueDigest(encoded),
       plugin_kind: pluginKind, hosts, target_hosts: targetHosts,
       plugin_root: pluginRoot, workbench_pages: workbenchContribution.pages,
@@ -4139,6 +4158,9 @@ export class CraftService extends ServiceFoundation {
       mapped_skill_ids: mappedSkillIds, workbench_context_actions: workbenchContribution.context_actions,
       workbench_advanced_tools: workbenchContribution.advanced_tools, workbench_themes: workbenchContribution.themes,
       requires_plugin_root: normalized.requires_plugin_root && !pluginRoot,
+      workbench_protocol: workbenchManifest ? "craft.workbench.v1" : null,
+      workbench_source_format: workbenchManifest ? normalized.source_format : null,
+      imported_mod_ids: importedMods.map((item) => item.id),
       adapter_notes: notes, unsupported_reason: unsupportedReason,
     }) };
   }
