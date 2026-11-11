@@ -27,6 +27,9 @@ import { publishSkill, rollbackSkillPublication } from "../skill-publisher.ts";
 import { loadConfig } from "../config.ts";
 import { normalizeModelPricing, loadSettingsSync, markOnboardingComplete, publicSettings, resetOnboarding, resetSettingsSync, saveSettingsSync, type ContextStorageConfig, type CraftSettingsPatch, type CraftModelConfig, type ModelProtocol } from "../settings.ts";
 import { CONTEXT_RECORD_KINDS, contextMirrorEntry, contextMirrorStatuses, contextMirrorWrite, type ContextMirrorEntry, type ContextRecordKind } from "../context-mirror.ts";
+import { contextMirrorDocument } from "../context-mirror.ts";
+import { normalizeContextSync, contextSyncProjection, CONTEXT_SYNC_KINDS, type ContextSyncKind } from "../context-sync-protocol.ts";
+import { contextSyncAdapter, contextSyncDocument, runContextSync } from "../context-sync-adapter.ts";
 import { isCraftCompatibleManifest, normalizePluginManifest } from "../plugin-adapters.ts";
 import { normalizeWorkbenchContribution, readDeclarativePage } from "../plugin-workbench.ts";
 import { CapabilityLoader } from "../capability-loader.ts";
@@ -4012,6 +4015,23 @@ export class CraftService extends ServiceFoundation {
     if (!(CONTEXT_RECORD_KINDS as readonly string[]).includes(kind)) throw new Error("kind must be memory, knowledge or experience");
     const entries = this.contextMirrorEntries(kind as ContextRecordKind);
     return { kind, entries: entries.length, ...contextMirrorWrite(loadSettingsSync(this.store.paths), kind as ContextRecordKind, entries) };
+  }
+  /** 外部知识库/云盘单向备份：本地权威，远端只是 Markdown 镜像。 */
+  async contextSyncRun(args: JsonObject = {}): Promise<JsonObject> {
+    const settings = loadSettingsSync(this.store.paths);
+    const target = normalizeContextSync({ ...settings.contextSync, ...(args.override && typeof args.override === "object" ? args.override as JsonObject : {}) });
+    if (!target.enabled) return { target: contextSyncProjection(target), status: { ok: true, detail: "context sync is disabled", pushed: 0, pulled: 0, conflicts: 0 } };
+    const kinds: ContextSyncKind[] = target.kinds.length ? target.kinds : [...CONTEXT_SYNC_KINDS];
+    const documents = kinds.flatMap((kind) => this.contextMirrorEntries(kind).map((entry) => {
+      const body = contextMirrorDocument(kind, entry);
+      const slug = String(entry.id).replace(/[^A-Za-z0-9._-]+/gu, "-").replace(/^-+|-+$/gu, "").slice(0, 96) || "record";
+      return contextSyncDocument(target, { kind, name: `${slug}.md`, digest: "", updatedAt: "" }, body);
+    }));
+    const status = await runContextSync(target, documents, contextSyncAdapter(target));
+    return { target: contextSyncProjection(target), status, documents: documents.length };
+  }
+  contextSyncView(): JsonObject {
+    return { target: contextSyncProjection(loadSettingsSync(this.store.paths).contextSync), local_authoritative: true };
   }
   private contextMirrorEntity(result: JsonObject, keys: string[]): JsonObject | null {
     for (const key of keys) {

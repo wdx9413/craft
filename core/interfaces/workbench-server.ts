@@ -20,7 +20,6 @@ import { dshRunRoute } from "./dsh-workbench-api.ts";
 import { resolveDshLaunch } from "../dsh-executable.ts";
 import { loadSettingsSync } from "../settings.ts";
 import { assertPilotCraftOnly, enforcePilotSplitCraftOnly } from "../pilot-policy.ts";
-import { craftPaths } from "../infrastructure/paths.ts";
 import { storedSecretNames, writeSecret } from "../secrets-store.ts";
 import { detectAgentDesktop, registerAgentDesktopAdapter } from "./agent-desktop-adapter.ts";
 import { INTERNAL_ONLY_TOOLS } from "../internal-host-driver.ts";
@@ -721,7 +720,7 @@ export class WorkbenchWebApp {
       if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
       if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
       if (request.method === "GET") return json(200, {
-        names: storedSecretNames(craftPaths()),
+        names: storedSecretNames(this.service.store.paths),
         precedence: "environment variables win over a stored key",
       });
       if (request.method === "PUT") {
@@ -729,7 +728,7 @@ export class WorkbenchWebApp {
           const body = bodyObject(request.body);
           const envName = text(body.env, "env");
           const key = typeof body.key === "string" ? body.key : "";
-          await writeSecret(craftPaths(), envName, key);
+          await writeSecret(this.service.store.paths, envName, key);
           if (key.trim()) process.env[envName] = key.trim(); else delete process.env[envName];
           return json(200, { ok: true, env: envName, configured: Boolean(key.trim()) });
         } catch (error) { return failure(error); }

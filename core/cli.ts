@@ -579,6 +579,7 @@ async function dispatchMain(args: string[]): Promise<void> {
         // 定时消息拉取：只有 settings.messageSources.enabled 打开且到达
         // intervalMs 才轮询；纯工程、0 Token，一源失败由 messagePoll 按源上报。
         let lastMessagePollAt = 0;
+        let lastContextSyncAt = 0;
         const pollConfiguredMessages = async () => {
           const sources = loadSettingsSync(paths).messageSources;
           if (!sources.enabled) return;
@@ -587,7 +588,17 @@ async function dispatchMain(args: string[]): Promise<void> {
           lastMessagePollAt = now;
           await service.messagePoll();
         };
-        const worker = new LocalMaintenanceWorker(new MaintenanceKernel(service), paths, { afterTick: async () => { await runFileAcceptance(); await pollConfiguredMessages(); } });
+        const syncConfiguredContext = async () => {
+          const sync = loadSettingsSync(paths).contextSync;
+          if (!sync.enabled) return;
+          const now = Date.now();
+          if (now - lastContextSyncAt < sync.intervalMs) return;
+          lastContextSyncAt = now;
+          await service.contextSyncRun();
+        };
+        const worker = new LocalMaintenanceWorker(new MaintenanceKernel(service), paths, { afterTick: async () => {
+          await runFileAcceptance(); await pollConfiguredMessages(); await syncConfiguredContext();
+        } });
         if (args[1] === "tick") result = { maintenance: new MaintenanceKernel(service).tick(), acceptance: await runFileAcceptance() };
         else if (args[1] === "status") result = await worker.status();
         else if (args[1] === "run") {

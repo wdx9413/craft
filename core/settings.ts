@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { atomicPrivateJson, craftPaths, ensureLayout, type CraftPaths } from "./infrastructure/paths.ts";
+import { DEFAULT_CONTEXT_SYNC, normalizeContextSync, type ContextSyncTarget } from "./context-sync-protocol.ts";
 
 export type ModelProtocol = "openai-compatible" | "anthropic";
 
@@ -61,6 +62,7 @@ export interface CraftSettings {
   capabilities: { autoInstall: boolean; defaults: string[]; installed: string[]; disabled: string[] };
   messageSources: MessageSourceConfig;
   runtimeDependencies: RuntimeDependencyConfig;
+  contextSync: ContextSyncTarget;
   lastProvider: string;
   runtime: { maxSteps: number; maxTokens: number };
   models: CraftModelConfig[];
@@ -77,6 +79,7 @@ export type CraftSettingsPatch = Partial<Pick<CraftSettings, "locale" | "theme" 
   capabilities?: Partial<CraftSettings["capabilities"]>;
   messageSources?: Partial<CraftSettings["messageSources"]>;
   runtimeDependencies?: Partial<CraftSettings["runtimeDependencies"]>;
+  contextSync?: Partial<CraftSettings["contextSync"]>;
 };
 
 export interface RuntimeDependencyConfig {
@@ -200,6 +203,7 @@ export function defaultSettings(paths = craftPaths()): CraftSettings {
       capabilities: { autoInstall: true, defaults: ["craft-context", "craft-datasec"], installed: [], disabled: [] },
     messageSources: { enabled: false, intervalMs: 60_000, dropDirs: [], githubRepos: [], githubApiBaseUrl: "https://api.github.com", githubTokenEnv: "GITHUB_TOKEN", githubState: "issues" },
     runtimeDependencies: { externalCliDrivers: false, hostManagedAuthProvider: false, configuredModelOnly: true },
+    contextSync: { ...DEFAULT_CONTEXT_SYNC },
     runtime: { maxSteps: 32, maxTokens: 12000 },
     models: [], privacy: { telemetry: false }, updatedAt: new Date(0).toISOString() };
 }
@@ -261,6 +265,7 @@ export function normalizeSettings(value: unknown, paths = craftPaths()): CraftSe
     capabilities: normalizeCapabilities(input.capabilities),
     messageSources: normalizeMessageSources(input.messageSources),
     runtimeDependencies: normalizeRuntimeDependencies(input.runtimeDependencies),
+    contextSync: normalizeContextSync(input.contextSync),
     privacy: { telemetry: boolean(privacy.telemetry, "privacy.telemetry", false) }, updatedAt };
 }
 
@@ -332,6 +337,7 @@ export async function saveSettings(patch: CraftSettingsPatch, paths = craftPaths
     capabilities: { ...current.capabilities, ...(patch.capabilities ?? {}) },
     messageSources: { ...current.messageSources, ...(patch.messageSources ?? {}) },
     runtimeDependencies: { ...current.runtimeDependencies, ...(patch.runtimeDependencies ?? {}) },
+    contextSync: { ...current.contextSync, ...(patch.contextSync ?? {}) },
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths);
   await atomicPrivateJson(paths.settingsFile, next); return next;
 }
@@ -358,6 +364,7 @@ export function saveSettingsSync(patch: CraftSettingsPatch, paths = craftPaths()
     capabilities: { ...current.capabilities, ...(patch.capabilities ?? {}) },
     messageSources: { ...current.messageSources, ...(patch.messageSources ?? {}) },
     runtimeDependencies: { ...current.runtimeDependencies, ...(patch.runtimeDependencies ?? {}) },
+    contextSync: { ...current.contextSync, ...(patch.contextSync ?? {}) },
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths); syncWrite(paths.settingsFile, next); return next;
 }
 
