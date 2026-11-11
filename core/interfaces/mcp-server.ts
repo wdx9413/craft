@@ -331,9 +331,10 @@ export class McpServer {
 function safeFailure(error: unknown): JsonObject {
   if (!error || typeof error !== "object") return { error_code: "INTERNAL_ERROR", stage: "dispatch", details: {} };
   const value = error as { code?: unknown; stage?: unknown; safeDetails?: unknown };
-  const code = value.code === "ERR_SQLITE_ERROR" && operationErrorCode(error) === "STORAGE_BUSY"
-    ? "STORAGE_BUSY" : typeof value.code === "string" ? value.code : "INTERNAL_ERROR";
+  const classified = typeof value.code === "string" ? value.code : operationErrorCode(error);
+  const code = classified === "ERR_SQLITE_ERROR" && operationErrorCode(error) === "STORAGE_BUSY"
+    ? "STORAGE_BUSY" : classified;
   const stage = typeof value.stage === "string" ? value.stage : "dispatch";
   const details = value.safeDetails && typeof value.safeDetails === "object" && !Array.isArray(value.safeDetails) ? value.safeDetails as JsonObject : {};
-  return { error_code: code, stage, details };
+  return { error_code: code, stage, details, message: error instanceof Error ? error.message : String(error) };
 }

@@ -27,3 +27,15 @@ _Avoid_: Active Scenario
 **Project-scoped correction**:
 An explicit user correction that immediately applies to relevant work in one project, can be inspected and revoked, and does not silently become a global preference.
 _Avoid_: Global personalization
+
+**Minimal Sufficient Context**:
+A bounded projection that preserves verifiable references, versions, digests, constraints and omission reasons first, then expands source bodies on demand.
+_Avoid_: Full-text recall, global prompt, maximal context
+
+**Governed Learning Loop**:
+The evidence-gated chain from sanitized observations to independently verified task effects, Signoff, Canary and a rollback target.
+_Avoid_: Self-modifying Agent, automatic publication
+
+**Readiness Doctor**:
+A content-free readiness projection that separates configured state from observed Host execution, worker state, Context usage and learning outcomes.
+_Avoid_: Health check, installation proof

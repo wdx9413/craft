@@ -85,6 +85,19 @@
       "branches": true
     },
     {
+      "name": "context-readiness-doctor",
+      "include": [
+        "core/context-readiness-doctor.ts",
+        "core/capability-iteration-plan.ts",
+        "core/capability-iteration-gaps.ts",
+        "core/context-usage-statusline.ts",
+        "core/codebase-lsp-readiness.ts"
+      ],
+      "tests": [
+        "tests/context-readiness-doctor.test.ts"
+      ]
+    },
+    {
       "name": "context-directory",
       "include": ["core/context-directory.ts"],
       "tests": ["tests/context-directory.test.ts"],

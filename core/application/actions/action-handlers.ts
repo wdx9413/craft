@@ -7,6 +7,11 @@ import { createWorkHandlers } from "./work-handlers.ts";
 import { createEvaluationHandlers } from "./evaluation-handlers.ts";
 import { createWorkspaceHandlers } from "./workspace-handlers.ts";
 import { verifyCodexSessionEvidenceInput } from "../../codex-session-archive.ts";
+import { buildCapabilityIterationPlan } from "../../capability-iteration-plan.ts";
+import { capabilityIterationGaps } from "../../capability-iteration-gaps.ts";
+import { contextUsageStatusline } from "../../context-usage-statusline.ts";
+import { codebaseLspReadiness } from "../../codebase-lsp-readiness.ts";
+import { lspCommandIsAbsolute } from "../../codebase-lsp-readiness.ts";
 
 /** Caller identity is local; transport construction does not change internal dispatch. */
 export function createActionHandlers(service: CraftService, mountedComponent?: ComponentName): McpHandlerGroup {
@@ -22,6 +27,12 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       ...createWorkspaceHandlers(service),
       craft_info: (a) => service.info(a),
       craft_context_tools_discover: service.contextToolsDiscover.bind(service),
+      craft_context_doctor: service.contextReadinessDoctor.bind(service),
+      craft_capability_iteration_plan: (args) => buildCapabilityIterationPlan(service.store, args),
+      craft_capability_iteration_gaps: (args) => capabilityIterationGaps(service.store, args),
+      craft_context_usage_statusline: (args) => contextUsageStatusline(service.store, args),
+      craft_lsp_readiness: (args) => ({ ...codebaseLspReadiness(service.store, args),
+        ...(args.command === undefined ? {} : { command_is_absolute: lspCommandIsAbsolute(args.command) }) }),
       craft_context_directory_resolve: (a) => service.contextDirectoryResolve(a),
       craft_context_open: (a) => service.contextOpen(a),
       craft_context_routing_render: service.contextExtensionsRenderRouting.bind(service),

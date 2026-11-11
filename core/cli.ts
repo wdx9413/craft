@@ -23,7 +23,9 @@ import { openBrowser } from "./browser.ts";
 import { loadSettingsSync } from "./settings.ts";
 import { VERSION } from "./service.ts";
 import { credentialStatus, createFetchTransport, providerFromConfig } from "./model-gateway.ts";
+import { hydrateSecretsIntoEnv } from "./secrets-store.ts";
 import { digestJson } from "./digest.ts";
+import { contextReadinessDoctor } from "./context-readiness-doctor.ts";
 
 
 
@@ -34,7 +36,7 @@ Usage:
   craft init [options]          Configure Craft
   craft config show             Print redacted configuration
   craft config language <tag>   Set generated Knowledge and Experience text language
-  craft doctor                  Check runtime, credentials, storage, and adapters
+  craft doctor                  Check runtime, credentials, storage, adapters, and readiness facts
   craft migrate history [--apply]
                                 Plan (default) or explicitly apply legacy Knowledge/Experience repair
   craft storage-backup --output <new-directory>   Back up the data directory for maintenance
@@ -238,6 +240,12 @@ function publicConfig(config: Awaited<ReturnType<typeof loadConfig>>): unknown {
 
 async function doctor(paths: ReturnType<typeof craftPaths>): Promise<JsonObject> {
   const config = await loadConfig(paths);
+  const store = await new CraftStore(paths).open();
+  let activation: JsonObject, readiness: JsonObject;
+  try {
+    activation = new CraftService(store).activationProofDoctor({});
+    readiness = contextReadinessDoctor(store);
+  } finally { store.close(); }
   const result: JsonObject = {
     version: VERSION,
     node: process.versions.node,
@@ -245,13 +253,12 @@ async function doctor(paths: ReturnType<typeof craftPaths>): Promise<JsonObject>
     initialized: Boolean(config),
     data_root: paths.root,
   };
-  const activation = await activationDoctor(paths);
-  if (!config) return { ...result, activation, status: "needs_init", next: "craft init --mode agent --runtime direct-api ..." };
+  if (!config) return { ...result, activation, readiness, status: "needs_init", next: "craft init --mode agent --runtime direct-api ..." };
   const runtime = config.runtime;
   const provider = runtime.provider ? providerFromConfig(runtime.provider) : null;
   return { ...result, runtime: runtime.kind, provider: provider ? { ...credentialStatus(provider), model: runtime.provider?.model } : null,
     storage: { database: paths.databaseFile, exists: await fileExists(paths.databaseFile) },
-    activation,
+    activation, readiness,
     status: runtime.kind === "direct-api" && provider && credentialStatus(provider).configured ? "ready" : "needs_configuration",
     next: runtime.kind === "direct-api" ? "craft run --goal \"...\"" : "craft init --mode agent --runtime direct-api ..." };
 }
@@ -259,8 +266,12 @@ async function doctor(paths: ReturnType<typeof craftPaths>): Promise<JsonObject>
 /** Read only already-persisted Host proof; doctor never pretends config is execution. */
 async function activationDoctor(paths: ReturnType<typeof craftPaths>): Promise<JsonObject> {
   if (!await fileExists(paths.databaseFile)) return { status: "storage_unavailable", reason: "no_local_store" };
+  return withDoctorStore(paths, store => new CraftService(store).activationProofDoctor({}));
+}
+
+async function withDoctorStore<T>(paths: ReturnType<typeof craftPaths>, run: (store: CraftStore) => T): Promise<T> {
   const store = await new CraftStore(paths).open();
-  try { return new CraftService(store).activationProofDoctor({}); }
+  try { return run(store); }
   finally { store.close(); }
 }
 
@@ -385,6 +396,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 
 async function dispatchMain(args: string[]): Promise<void> {
   const paths = craftPaths();
+  // Keys pasted in the Workbench live in an owner-only secrets.json; make them
+  // visible to the model gateway once, without ever overriding a real env var.
+  hydrateSecretsIntoEnv(paths);
   if (args.includes("--help") || args.includes("-h")) {
     stdout.write(HELP);
     return;

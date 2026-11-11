@@ -78,6 +78,7 @@ const schemaFor = (name: string): JsonObject => {
 const ENUMS_BY_TOOL: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
   craft_context_tools_discover: { intent: CONTEXT_TOOL_INTENTS },
   craft_context_open: { response_detail: ["compact", "full"] },
+  craft_context_correction_list: { status: ["pending_review", "confirmed", "dismissed", "resolved", "decided"] },
 };
 
 // Domain contracts override the legacy name heuristic. Keep ambiguous names local
@@ -208,6 +209,12 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_context_health: {},
   craft_context_routing_render: { client: "string" },
   craft_context_correction_list: { status: "string", member: "string", limit: "integer" },
+  craft_context_tools_discover: { limit: "integer" },
+  craft_context_doctor: { project_root: "string", session_id: "string", surface: "string" },
+  craft_capability_iteration_plan: { project_scope_id: "string", project_root: "string", records: "array", asset_ids: "array", allowed_effects: "array", subject_id: "string", subject_version: "integer", case_ids: "array", baseline_id: "string", candidate_id: "string", environment_digest: "string", budget_digest: "string", grader_version: "string", input: "object" },
+  craft_capability_iteration_gaps: { project_scope_id: "string", project_root: "string", session_id: "string", surface: "string" },
+  craft_context_usage_statusline: { session_id: "string", session_host: "string" },
+  craft_lsp_readiness: { files: "array", languages: "array", command: "string" },
   craft_context_correction_decide: { task_id: "string", decision: "string", reason: "string", now: "string" },
   craft_codebase_symbol_usage_record: { index_id: "string", symbol_id: "string", outcome: "string", now: "string" },
   craft_codebase_symbol_usage_get: { index_id: "string" },

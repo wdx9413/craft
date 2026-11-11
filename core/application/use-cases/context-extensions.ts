@@ -1,6 +1,7 @@
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
 import { ContextExtensionsKernel } from "../../context-extensions.ts";
+import { contextReadinessDoctor } from "../../context-readiness-doctor.ts";
 
 declare module "../craft-service.ts" {
   interface CraftService {
@@ -14,6 +15,7 @@ declare module "../craft-service.ts" {
     contextExtensionsGetResume(args: JsonObject): JsonObject;
     contextExtensionsResolveResume(args: JsonObject): JsonObject;
     contextExtensionsStats(args: JsonObject): JsonObject;
+    contextReadinessDoctor(args: JsonObject): JsonObject;
     contextExtensionsHealth(args: JsonObject): JsonObject;
     contextExtensionsListCorrections(args: JsonObject): JsonObject;
     contextExtensionsDecideCorrection(args: JsonObject): JsonObject;
@@ -35,6 +37,7 @@ export function installContextExtensionsMethods(serviceClass: typeof CraftServic
   serviceClass.prototype.contextExtensionsGetResume = function (args) { return kernel(this).getResume(args); };
   serviceClass.prototype.contextExtensionsResolveResume = function (args) { return kernel(this).resolveResume(args); };
   serviceClass.prototype.contextExtensionsStats = function (args) { return kernel(this).stats(args); };
+  serviceClass.prototype.contextReadinessDoctor = function (args) { return contextReadinessDoctor(this.store, args); };
   serviceClass.prototype.contextExtensionsHealth = function (args) { return kernel(this).health(args); };
   serviceClass.prototype.contextExtensionsListCorrections = function (args) { return kernel(this).listCorrections(args); };
   serviceClass.prototype.contextExtensionsDecideCorrection = function (args) { return kernel(this).decideCorrection(args); };

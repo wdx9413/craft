@@ -37,6 +37,15 @@ _Avoid_: 误以为 Codex 插件会隐式再启动一个 Codex CLI
 **Context**：面向当前模型/Host 的受限投影，不是事实存储。它可以引用 history、knowledge、memory、experience 和当前 state，但每次装载必须经过 Context Resolution 并留下 Receipt。
 _Avoid_: 把 Context 当成 Memory、知识库或全局提示词
 
+**Minimal Sufficient Context（最小充分 Context）**：在固定预算内优先保留可寻址、可验证且能改变当前决策的引用、版本、digest、约束和遗漏原因；正文与源码只在命中后二次读取。它不是把更多材料塞进上下文，也不以 `max_chars` 充当真实 token 上限。
+_Avoid_: 最小上下文、全量召回、正文堆砌
+
+**Governed Learning Loop（治理式学习闭环）**：由脱敏观察、独立证据、受控任务效果、候选、Signoff、Canary 与可回滚默认版本组成的学习链。它不是模型自行改写自身、自动发布或把单次成功当成收益证明。
+_Avoid_: 自进化、自动晋升、自动发布
+
+**Readiness Doctor（闭环 Doctor）**：一个只读、无正文的运行态投影，区分配置存在、Hook 执行证明、worker 锁/游标、上下文注入、反馈归因与学习资产存量。它不是健康检查，也不能把插件已安装当作当前任务已使用。
+_Avoid_: 健康检查、安装检测、执行证明生成器
+
 **State**：需要被观察、比较和恢复的事实，分为 Control State（Task/Run/Operation/Lease/Checkpoint）与 World State（Workspace、Artifact、外部状态的摘要）。Context 可以引用 State，但 State 不由模型上下文拥有。
 _Avoid_: 把聊天历史或 State Snapshot 当成完整备份
 
