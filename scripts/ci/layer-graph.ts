@@ -5,15 +5,12 @@ export type SourceMap = Readonly<Record<string, string>>;
 export type LayerFinding = { kind: "upward" | "frontend" | "cycle" | "unresolved"; path: string[] };
 
 function rank(path: string): number {
-  // CLI is a stable public transport entry. Eval suite is a harness, not a kernel.
-  if (path.startsWith("common/craft-common-store-local/")) return -3;
-  if (path.startsWith("common/craft-common-base/")) return -2;
-  if (path.startsWith("common/craft-common-log/")) return -1;
+  // CLI is a stable public transport entry.
   if (path === "core/cli.ts") return 3;
   if (path.startsWith("core/infrastructure/")) return 0;
   if (path.startsWith("core/application/")) return 2;
   if (path.startsWith("core/interfaces/")) return 3;
-  if (path.startsWith("core/") || path.startsWith("capability/")) return 1;
+  if (path.startsWith("core/")) return 1;
   return 4;
 }
 
