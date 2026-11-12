@@ -18,7 +18,7 @@ importers:
         specifier: 0.20.4
         version: link:../craft-capability/capability/craft-codebase
       '@craft/capability-datasec':
-        specifier: workspace:*
+        specifier: 0.1.6
         version: link:../craft-capability/capability/craft-datasec
       '@craft/capability-experience':
         specifier: 0.20.4
@@ -42,7 +42,7 @@ importers:
         specifier: 0.20.4
         version: link:../craft-common/packages/craft-common-store-local
       craft-eval:
-        specifier: workspace:*
+        specifier: 0.7.2
         version: link:../craft-eval
       tesseract.js:
         specifier: ^7.0.0
@@ -78,6 +78,7 @@ importers:
       craft-common-store-local:
         specifier: 0.20.4
         version: link:../../../craft-common/packages/craft-common-store-local
+    devDependencies:
       typescript:
         specifier: '>=5.8 <7'
         version: 6.0.3
@@ -142,7 +143,7 @@ importers:
   ../craft-common/packages/craft-common-base:
     dependencies:
       craft-common-store-local:
-        specifier: workspace:*
+        specifier: 0.20.4
         version: link:../craft-common-store-local
     devDependencies:
       '@types/node':
@@ -155,10 +156,10 @@ importers:
   ../craft-common/packages/craft-common-log:
     dependencies:
       craft-common-base:
-        specifier: workspace:*
+        specifier: 0.20.4
         version: link:../craft-common-base
       craft-common-store-local:
-        specifier: workspace:*
+        specifier: 0.20.4
         version: link:../craft-common-store-local
     devDependencies:
       '@types/node':
@@ -178,6 +179,13 @@ importers:
         version: 6.0.3
 
   ../craft-eval:
+    dependencies:
+      craft-common-base:
+        specifier: 0.20.4
+        version: link:../craft-common/packages/craft-common-base
+      craft-common-store-local:
+        specifier: 0.20.4
+        version: link:../craft-common/packages/craft-common-store-local
     devDependencies:
       '@types/node':
         specifier: ^26.6.5
