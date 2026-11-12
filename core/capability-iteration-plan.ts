@@ -127,7 +127,10 @@ function input(args: JsonObject): JsonObject { return args.input && typeof args.
 
 export function buildCapabilityIterationPlan(store: CraftStore, args: JsonObject = {}): JsonObject {
   const values = input(args);
-  const projectScope = stringValue(values.project_scope_id, "project_scope_id");
+  // Same default as capabilityIterationGaps: an omitted scope means "global".
+  // Two entry points of one family must not disagree about whether it is required.
+  const projectScope = values.project_scope_id === undefined || values.project_scope_id === null || values.project_scope_id === ""
+    ? "global" : stringValue(values.project_scope_id, "project_scope_id");
   const projectRoot = optionalString(values.project_root, "project_root");
   const suppliedRecords = values.records;
   if (suppliedRecords !== undefined && (!Array.isArray(suppliedRecords) || suppliedRecords.length > MAX_ITEMS)) throw new Error("records must contain at most 100 items");

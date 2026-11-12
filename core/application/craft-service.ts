@@ -3879,7 +3879,10 @@ export class CraftService extends ServiceFoundation {
     const kind = text(args.kind, "kind");
     const limit = finiteInteger(args.limit, "limit", 100, 1, 200);
     const taskId = args.task_id === undefined ? null : text(args.task_id, "task_id");
-    const scope = typeof args.scope === "string" && args.scope ? args.scope : "global";
+    // An omitted scope means "everything the caller may see", not "global only".
+    // Defaulting to `global` silently hid every project-scoped memory from the
+    // page while the ledger write itself succeeded.
+    const scope = typeof args.scope === "string" && args.scope ? args.scope : undefined;
     if (kind === "memory") {
       const includeHistory = args.include_history === true;
       const items = this.store.list("memory_item", limit, (item) =>
