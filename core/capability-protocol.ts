@@ -1,1 +1,1 @@
-export * from "../common/craft-common-base/src/capability-protocol.ts";
+export * from 'craft-common-base/capability-protocol';

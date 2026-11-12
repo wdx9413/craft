@@ -1,8 +1,8 @@
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { object, text } from "./validation.ts";
 import { stableDigest } from "./digest.ts";
-import { contextAssetKey } from "../common/craft-common-base/src/context-assets.ts";
-import { scopeAccess, scopeAllows, scopeEnvelope, scopeFromKey } from "../common/craft-common-base/src/scope-policy.ts";
+import { contextAssetKey } from 'craft-common-base/context-assets';
+import { scopeAccess, scopeAllows, scopeEnvelope, scopeFromKey } from 'craft-common-base/scope-policy';
 
 export type HostDiscoveryMode = "full_mcp" | "native_deferred";
 export type GraphCandidatePort = { edit(args: JsonObject): JsonObject; inspect(args: JsonObject): JsonObject };

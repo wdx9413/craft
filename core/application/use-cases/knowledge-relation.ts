@@ -1,5 +1,5 @@
 import type { CraftService } from "../craft-service.ts";
-import { knowledgeLineageImpact } from "../../../capability/craft-knowledge/knowledge-lineage-impact.ts";
+import { knowledgeLineageImpact } from '@craft/capability-knowledge/knowledge-lineage-impact';
 
 export function installKnowledgeRelationMethods(serviceClass: typeof CraftService): void {
   serviceClass.prototype.relationSave = function (args) { return this.knowledgeRelations.relate(args); };

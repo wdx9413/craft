@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { repositoryFiles } from "../../capability/craft-codebase/repository-files.ts";
-import { analyzePythonCheckpoint } from "../../capability/craft-codebase/python-analysis.ts";
-import { planPythonIncremental } from "../../capability/craft-codebase/python-incremental.ts";
-import type { PythonFileUnit } from "../../capability/craft-codebase/python-incremental.ts";
+import { repositoryFiles } from '@craft/capability-codebase/repository-files';
+import { analyzePythonCheckpoint } from '@craft/capability-codebase/python-analysis';
+import { planPythonIncremental } from '@craft/capability-codebase/python-incremental';
+import type { PythonFileUnit } from '@craft/capability-codebase/python-incremental';
 
 const source = repositoryFiles(process.cwd());
 assert.equal(source.state, "ready");

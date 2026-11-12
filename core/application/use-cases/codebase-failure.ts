@@ -1,4 +1,4 @@
-import { operationErrorCode } from "../../../common/craft-common-log/src/operation.ts";
+import { operationErrorCode } from 'craft-common-log/operation';
 import { CraftOperationError } from "../../operation-error.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
 

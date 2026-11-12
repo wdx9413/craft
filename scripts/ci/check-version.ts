@@ -43,8 +43,7 @@ const versionSource = await readFile(resolve(root, "core/version.ts"), "utf8");
 const match = versionSource.match(/CRAFT_RELEASE_VERSION = "([^"]+)"/u);
 if (match?.[1] !== packageVersion) throw new Error(`core/version.ts CRAFT_RELEASE_VERSION differs from package.json ${packageVersion}`);
 
-for (const path of ["common/craft-common-store-local/package.json", "common/craft-common-base/package.json", "common/craft-common-log/package.json",
-  "capability/craft-knowledge/package.json", "capability/craft-memory/package.json", "capability/craft-experience/package.json", "capability/craft-codebase/package.json", "adapters/deepseek-harness/package.json"]) {
+for (const path of ["adapters/deepseek-harness/package.json"]) {
   const component = await json(path);
   if (component.version !== packageVersion) throw new Error(`${path} version ${String(component.version)} differs from package.json ${packageVersion}`);
   const peers = (component.peerDependencies ?? {}) as Record<string, unknown>;

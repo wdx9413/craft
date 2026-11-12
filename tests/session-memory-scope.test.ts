@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { CraftStore, JsonObject } from "../core/infrastructure/store.ts";
 import { hostSessionMemoryArgs } from "../core/application/use-cases/session-memory-scope.ts";
-import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
+import { sessionStorageScopeId } from 'craft-common-store-local/paths';
 
 test("Host session Memory scope is partitioned and bound without changing other scopes", () => {
   const project: JsonObject = { scope_kind: "project", scope_id: "p" };

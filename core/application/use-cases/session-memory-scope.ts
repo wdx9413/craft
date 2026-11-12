@@ -1,5 +1,5 @@
 import type { CraftStore, JsonObject } from "../../infrastructure/store.ts";
-import { sessionStorageScopeId } from "../../../common/craft-common-store-local/src/paths.ts";
+import { sessionStorageScopeId } from 'craft-common-store-local/paths';
 
 /** Turn an explicit Host session into its private Memory partition key. */
 export function hostSessionMemoryArgs(args: JsonObject, store?: CraftStore): JsonObject {

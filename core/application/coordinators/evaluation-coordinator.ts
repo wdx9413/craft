@@ -1,7 +1,7 @@
 import type { CraftStore } from "../../infrastructure/store.ts";
 import type { AcceptanceGateKernel, ProviderRouterKernel } from "../../runtime-completion.ts";
 import type { EvalCampaignKernel } from "../../eval-campaign.ts";
-import type { EvaluationModelProfileKernel } from "../../../capability/craft-experience/evaluation-model-profile.ts";
+import type { EvaluationModelProfileKernel } from '@craft/capability-experience/evaluation-model-profile';
 import type { EvaluationOperationsKernel } from "../../evaluation-operations.ts";
 import type { CostLedgerKernel } from "../../cost-ledger.ts";
 import type { DomainEvaluatorKernel } from "../../domain-evaluator.ts";

@@ -4,7 +4,7 @@ import { linkDirectory, supportsFileSymlinks } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { EngineeringEvaluationRunner, loadEngineeringEvaluationCases, validateEvaluationCommand, workspaceSnapshotDigest } from "../capability/engineering-evaluation-runner.ts";
+import { EngineeringEvaluationRunner, loadEngineeringEvaluationCases, validateEvaluationCommand, workspaceSnapshotDigest } from "../core/application/engineering-evaluation-runner.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { CraftService } from "../core/service.ts";

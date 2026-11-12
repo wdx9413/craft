@@ -11,7 +11,7 @@ import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory, ses
 import { defaultSettings } from "../../core/settings.ts";
 import { projectIdentityFromRoot } from "../../core/scope-identity.ts";
 import { stableDigest } from "../../core/digest.ts";
-import { AUTOMATIC_SIGNOFF_POLICY } from "../../capability/craft-experience/scenario-evaluation.ts";
+import { AUTOMATIC_SIGNOFF_POLICY } from '@craft/capability-experience/scenario-evaluation';
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 
 const sourceMcpEntrypoint = process.env.CRAFT_SMOKE_MCP_ENTRYPOINT?.trim();

@@ -1,9 +1,9 @@
 import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS } from "../../tool-plane.ts";
 import type { Tool } from "../../mcp/tool-schema.ts";
-import { EXPERIENCE_COMPONENT } from "../../../capability/craft-experience/ownership.ts";
-import { KNOWLEDGE_COMPONENT, KNOWLEDGE_CONTEXT_SOURCE } from "../../../capability/craft-knowledge/ownership.ts";
-import { MEMORY_COMPONENT, MEMORY_CONTEXT_SOURCE } from "../../../capability/craft-memory/ownership.ts";
-import { CODEBASE_OWNS } from "../../../capability/craft-codebase/ownership.ts";
+import { EXPERIENCE_COMPONENT } from '@craft/capability-experience/ownership';
+import { KNOWLEDGE_COMPONENT, KNOWLEDGE_CONTEXT_SOURCE } from '@craft/capability-knowledge/ownership';
+import { MEMORY_COMPONENT, MEMORY_CONTEXT_SOURCE } from '@craft/capability-memory/ownership';
+import { CODEBASE_OWNS } from '@craft/capability-codebase/ownership';
 
 // Tool surfaces are a bounded projection over the canonical tool catalog. The
 // registry owns only names and matching rules; execution remains in McpServer.

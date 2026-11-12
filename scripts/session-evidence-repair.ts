@@ -1,6 +1,6 @@
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { applySessionEvidencePage } from "../capability/craft-knowledge/session-evidence-repair.ts";
+import { applySessionEvidencePage } from '@craft/capability-knowledge/session-evidence-repair';
 import { preflightSessionEvidencePage } from "../core/session-evidence-repair-preflight.ts";
 
 const args = process.argv.slice(2);

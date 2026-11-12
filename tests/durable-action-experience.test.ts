@@ -9,7 +9,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { DurableActionLoopKernel } from "../core/durable-action-loop.ts";
-import { ExperienceLedgerKernel } from "../capability/craft-experience/experience-ledger.ts";
+import { ExperienceLedgerKernel } from '@craft/capability-experience/experience-ledger';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-durable-experience-")); const projectRoot = join(root, "project"), otherProjectRoot = join(root, "other-project"); await mkdir(projectRoot); await mkdir(otherProjectRoot); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);

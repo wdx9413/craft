@@ -7,7 +7,7 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { ContextWorkingSetKernel } from "../core/context-working-set.ts";
-import { ContextBudgetError, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from "../common/craft-common-base/src/context-assets.ts";
+import { ContextBudgetError, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from 'craft-common-base/context-assets';
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-working-set-budget-"));

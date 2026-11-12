@@ -8,10 +8,10 @@ import { join } from "node:path";
 import test from "node:test";
 import { canonicalCandidatePath, craftPaths, ensureProjectStorageDirectory, ensureSessionStorageDirectory, existingProjectStorageDirectory,
   isLegacySafeSessionId, parseSessionStorageScopeId, projectStorageDirectory, projectStorageIdentity, sessionStorageDirectory,
-  sessionStorageDirectoryForScopeId, sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
-import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
-import { sqliteBusyTimeoutMs, sqliteTraceBusyTimeoutMs } from "../common/craft-common-store-local/src/sqlite-busy-timeout.ts";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
+  sessionStorageDirectoryForScopeId, sessionStorageScopeId } from 'craft-common-store-local/paths';
+import { CraftStore } from 'craft-common-store-local/store';
+import { sqliteBusyTimeoutMs, sqliteTraceBusyTimeoutMs } from 'craft-common-store-local/sqlite-busy-timeout';
+import { stableDigest } from 'craft-common-base/digest';
 
 test("SQLite contention timeout is short only inside Craft Hook subprocesses", () => {
   assert.equal(sqliteBusyTimeoutMs(), process.env.CRAFT_HOOK_MODE === "1" ? 100 : 15_000);

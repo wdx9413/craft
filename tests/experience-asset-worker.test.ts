@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { startExperienceAssetWorker } from "../core/interfaces/experience-asset-worker.ts";
-import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
+import { ProcedureDefinitionStore } from '@craft/capability-experience/procedure-definition';
 import { fixture } from "./helpers/procedure-invocation-fixture.ts";
 
 test("asset worker defers work, prevents reentry, contains failures and stops", async () => {

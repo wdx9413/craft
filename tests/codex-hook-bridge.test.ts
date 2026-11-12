@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { activeProcedure } from "../capability/craft-experience/procedure-release.ts";
+import { activeProcedure } from '@craft/capability-experience/procedure-release';
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
@@ -18,7 +18,7 @@ import { projectExperienceDirectory } from "../core/project-experience-directory
 import { sanitizedExperienceTaskGoal } from "../core/codex-hook-bridge.ts";
 import { codexTaskGoalDigest } from "../core/codex-task-prose.ts";
 import { estimateTokens } from "../core/token-budget.ts";
-import { contextAssetRef } from "../common/craft-common-base/src/context-assets.ts";
+import { contextAssetRef } from 'craft-common-base/context-assets';
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture(models?: ReturnType<typeof defaultSettings>["models"]) {
@@ -1924,7 +1924,7 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
     const directScope = (directContext.receipt as JsonObject).scope as JsonObject;
     const directProjectId = String(directScope.id).replace(/^project:/u, "");
     const directExperienceDir = localExperienceDir(f);
-    const { recordExperienceScenario, retireExperienceScenario } = await import("../capability/craft-experience/scenario-catalog.ts");
+    const { recordExperienceScenario, retireExperienceScenario } = await import("@craft/capability-experience/scenario-catalog");
     recordExperienceScenario({ experience_dir: directExperienceDir, project_id: directProjectId, scenario_key: "unknown.fine",
       observation_id: "seed-unknown-fine", verified_task_id: "seed-unknown-fine" });
     retireExperienceScenario({ experience_dir: directExperienceDir, project_id: directProjectId, scenario_key: "unknown.fine",

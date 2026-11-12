@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { retrievalExcerpt } from "../common/craft-common-base/src/retrieval-excerpt.ts";
+import { retrievalExcerpt } from 'craft-common-base/retrieval-excerpt';
 
 test("short retrieval content remains complete", () => {
   assert.deepEqual(retrievalExcerpt("短事实。", "事实", 10), {

@@ -1,4 +1,4 @@
-import { latestMemoryConfirmation } from "../capability/craft-memory/memory-governance.ts";
+import { latestMemoryConfirmation } from '@craft/capability-memory/memory-governance';
 import { createHash, randomUUID } from "node:crypto";
 import { optionalScope } from "./validation.ts";
 import { scopeAccess, scopeAllows, scopeEnvelope, sourceAllows } from "./scope-policy.ts";

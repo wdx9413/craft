@@ -9,8 +9,8 @@ import { CraftService } from "../core/service.ts";
 import { payload, stableDigest } from "../core/digest.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { ContextAccessChangedError, ContextReadGuard, assertContextReadCurrent } from "../core/context-access-guard.ts";
-import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
-import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
+import { KnowledgeContribution } from '@craft/capability-knowledge/contribution';
+import { ExperienceContribution } from '@craft/capability-experience/contribution';
 
 const scope = { scope_kind: "project", scope_id: "race" };
 const owner = { principal_id: "owner", tenant_id: "tenant" };

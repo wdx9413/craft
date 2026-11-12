@@ -1,13 +1,16 @@
 packages:
   - adapters/deepseek-harness
   - adapters/dsh-plugin-host
-  - common/craft-common-store-local
-  - common/craft-common-base
-  - common/craft-common-log
-  - capability/craft-knowledge
-  - capability/craft-memory
-  - capability/craft-experience
-  - capability/craft-codebase
+  # Shared sources live in sibling repositories; the in-tree copies were
+  # removed so a change can never drift between two identical trees.
+  - ../craft-common/packages/*
+  - ../craft-capability/capability/craft-knowledge
+  - ../craft-capability/capability/craft-memory
+  - ../craft-capability/capability/craft-experience
+  - ../craft-capability/capability/craft-codebase
+  - ../craft-capability/capability/craft-datasec
+  - ../craft-capability/capability/craft-file-dir-desc
+  - ../craft-eval
 autoInstallPeers: false
 # Internal packages are built here and bundled into the distributable runtime.
 linkWorkspacePackages: true

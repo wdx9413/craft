@@ -8,9 +8,9 @@ import { syncBuiltinESMExports } from "node:module";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
-import { repositoryFiles } from "../capability/craft-codebase/repository-files.ts";
-import { codeContextCandidates } from "../capability/craft-codebase/context-search.ts";
-import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
+import { repositoryFiles } from '@craft/capability-codebase/repository-files';
+import { codeContextCandidates } from '@craft/capability-codebase/context-search';
+import { ProjectAnalysisCache } from '@craft/capability-codebase/project-analysis-cache';
 
 test("repository discovery accepts legal paths beginning with two dots", () => {
   const root = mkdtempSync(join(tmpdir(), "craft-dot-path-"));

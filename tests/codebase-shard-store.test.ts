@@ -11,7 +11,7 @@ import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { migrateCodebaseGraphShards } from "../scripts/codebase-graph-shard-migration.ts";
 import { compactCentralDb } from "../scripts/compact-central-db.ts";
-import { CodebaseShardStore, type GraphRow } from "../common/craft-common-store-local/src/codebase-shards.ts";
+import { CodebaseShardStore, type GraphRow } from 'craft-common-store-local/codebase-shards';
 
 test("Codebase shard reads do not initialize a malformed database and can later write through a separate connection", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-codebase-shard-read-only-"));

@@ -6,19 +6,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
-import { withoutOperationPersistence } from "../common/craft-common-log/src/operation.ts";
+import { withoutOperationPersistence } from 'craft-common-log/operation';
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
-import { contextAssetRef, contextAssetKey, contextAssetMatches, requiredContextRef } from "../common/craft-common-base/src/context-assets.ts";
+import { contextAssetRef, contextAssetKey, contextAssetMatches, requiredContextRef } from 'craft-common-base/context-assets';
 import { ContextWorkingSetKernel } from "../core/context-working-set.ts";
-import { codeContextCandidates, codeQueryTerms } from "../capability/craft-codebase/context-search.ts";
+import { codeContextCandidates, codeQueryTerms } from '@craft/capability-codebase/context-search';
 import { discoverContextTools } from "../core/mcp/context-tools.ts";
 import { toolParamTypeLists } from "../core/mcp/tool-schema.ts";
 import { TOOLS } from "../core/mcp.ts";
-import { ProcedurePlanner } from "../capability/craft-experience/procedure-composition.ts";
-import { activeProcedure, preserveProcedureRelease, selectedProcedure, updateProcedureRelease } from "../capability/craft-experience/procedure-release.ts";
+import { ProcedurePlanner } from '@craft/capability-experience/procedure-composition';
+import { activeProcedure, preserveProcedureRelease, selectedProcedure, updateProcedureRelease } from '@craft/capability-experience/procedure-release';
 import { fixture as invocationFixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
-import { KnowledgeClaimGovernance } from "../capability/craft-knowledge/claim-governance.ts";
+import { KnowledgeClaimGovernance } from '@craft/capability-knowledge/claim-governance';
 import { stableDigest, payload } from "../core/digest.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
@@ -305,7 +305,7 @@ test("required Knowledge and Memory refs do not depend on lexical relevance", as
 });
 
 test("Graph matching recommends named routes and explains missing material without execution", async () => {
-  const { matchGraphRoutes } = await import("../capability/craft-experience/graph-matching.ts");
+  const { matchGraphRoutes } = await import("@craft/capability-experience/graph-matching");
   const definition = { graph_control: { entries: [{ id: "review", title: "code review", required_inputs: ["diff"], preconditions: ["approved"] }], subscenarios: [{ id: "review", entry_id: "review", exit_id: "reviewed" }, { id: "alternate", entry_id: "review", exit_id: "reviewed" }] } };
   const missing = matchGraphRoutes(definition, "review"); assert.equal((missing.routes as JsonObject[])[0]!.ready_to_plan, false);
   const ready = matchGraphRoutes(definition, "review", ["diff"]); assert.equal((ready.routes as JsonObject[])[0]!.ready_to_plan, true); assert.equal(ready.execution_authorized, false);
@@ -407,7 +407,7 @@ test("Knowledge claim governance rejects historical scope drift and repairs lega
 });
 
 test("Memory capture SDK preserves policy-off, conflict and governed commit contracts", async () => {
-  const { MemoryCapture } = await import("../capability/craft-memory/memory-capture.ts");
+  const { MemoryCapture } = await import("@craft/capability-memory/memory-capture");
   const f = await fixture();
   try {
     const capture = new MemoryCapture(f.service.memoryGovernance, () => f.service.knowledgeMemoryInstallBuiltins(), args => f.service.evidenceRecord(args));
@@ -427,7 +427,7 @@ test("Memory capture SDK preserves policy-off, conflict and governed commit cont
 });
 
 test("current release revocation preserves its different test candidate and prevents new plans", async () => {
-  const { ProcedureStore } = await import("../capability/craft-experience/procedure-projection.ts");
+  const { ProcedureStore } = await import("@craft/capability-experience/procedure-projection");
   const f = await invocationFixture();
   try {
     const p = f.create(), procedures = new ProcedureStore(f.store);
@@ -472,7 +472,7 @@ test("Graph inspect matching uses the selected release and rejects malformed inp
 });
 
 test("writable candidate tests require disjoint checkpointed workspaces bound to their Work Loop", async () => {
-  const { assertProcedureTestIsolation } = await import("../capability/craft-experience/procedure-release.ts");
+  const { assertProcedureTestIsolation } = await import("@craft/capability-experience/procedure-release");
   const f = await invocationFixture();
   try {
     const p = f.create(); const candidate = f.service.procedureConfigurationSave({ procedure_id: p.id, scope, title: "test", procedure_kind: "workflow", scenario_id: "review", definition: spec(), expected_version: p.version }).procedure as JsonObject;
@@ -604,7 +604,7 @@ test("empty and previously emitted Context refs do not wait for the primary writ
 });
 
 test("Procedure get and disabled Skill export can materialize the qualified release beside a test candidate", async () => {
-  const { ProcedureStore } = await import("../capability/craft-experience/procedure-projection.ts");
+  const { ProcedureStore } = await import("@craft/capability-experience/procedure-projection");
   const f = await invocationFixture();
   try {
     const p = f.create(), procedures = new ProcedureStore(f.store);

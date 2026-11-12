@@ -12,8 +12,8 @@ import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { payload, stableDigest } from "./digest.ts";
 import { text } from "./validation.ts";
 import { contentReference, type ContentRef } from "./infrastructure/content-store.ts";
-import { updateKnowledgeScenarioClaim } from "../capability/craft-knowledge/scenario-catalog.ts";
-import { scopeFromKey } from "../common/craft-common-base/src/scope-policy.ts";
+import { updateKnowledgeScenarioClaim } from '@craft/capability-knowledge/scenario-catalog';
+import { scopeFromKey } from 'craft-common-base/scope-policy';
 import { knowledgeDirectoryForScope } from "./project-knowledge-content.ts";
 import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationEvidence, knowledgeEvaluationSourceMatches, knowledgeTaskEffectEvidenceVerified } from "./knowledge-evaluation-provenance.ts";
 

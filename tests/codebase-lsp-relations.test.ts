@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import test from "node:test";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { collectLspRelations, isCheckpointRelativePath, selectLspRelationSymbols } from "../capability/craft-codebase/lsp-relations.ts";
+import { collectLspRelations, isCheckpointRelativePath, selectLspRelationSymbols } from '@craft/capability-codebase/lsp-relations';
 
 const cwd = "/workspace", path = "src/a.js", uri = pathToFileURL(`${cwd}/${path}`).href;
 const content = "function target() {}\nfunction caller(){ target(); }\n";

@@ -1,7 +1,7 @@
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
 import { payload, stableDigest } from "../../digest.ts";
-import { completeExperienceScenarioClassificationRequest, createExperienceScenarioClassificationRequest, experienceScenarioCanClassify, experienceScenarioIsRetired, getExperienceScenarioClassificationRequest, listExperienceScenarios, proposeExperienceScenarioMigration, recordExperienceScenario, retireExperienceScenario, validateExperienceScenarioDefinition } from "../../../capability/craft-experience/scenario-catalog.ts";
+import { completeExperienceScenarioClassificationRequest, createExperienceScenarioClassificationRequest, experienceScenarioCanClassify, experienceScenarioIsRetired, getExperienceScenarioClassificationRequest, listExperienceScenarios, proposeExperienceScenarioMigration, recordExperienceScenario, retireExperienceScenario, validateExperienceScenarioDefinition } from '@craft/capability-experience/scenario-catalog';
 import { projectExperienceDirectory, projectPathAliasDigest } from "../../project-experience-directory.ts";
 import { codexTaskGoalDigest } from "../../codex-task-prose.ts";
 

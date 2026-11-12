@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { craftPaths, parseSessionStorageScopeId, sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
-import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { craftPaths, parseSessionStorageScopeId, sessionStorageScopeId } from 'craft-common-store-local/paths';
+import { CraftStore } from 'craft-common-store-local/store';
 
 const args = process.argv.slice(2);
 if (args.some(arg => arg !== "--apply" && !/^--(?:data-root|backup)=.+$/u.test(arg))

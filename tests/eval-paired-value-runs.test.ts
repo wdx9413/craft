@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runPairedValueCases } from "../capability/craft-eval/paired-value-runs.ts";
-import type { EvalTrial } from "../capability/craft-eval/model.ts";
+import { runPairedValueCases } from "craft-eval/paired-value-runs";
+import type { EvalTrial } from "craft-eval/model";
 import {
   CONTEXT_SUPPLY_MARKER, MEMORY_SUPPLY_FACT, MEMORY_SUPPLY_MARKER, PROACTIVE_SCENARIOS,
   proactivePrompt,

@@ -5,7 +5,7 @@ import { supportsFileSymlinks } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ensureProjectDataGitExcluded } from "../capability/craft-codebase/project-data-git-exclude.ts";
+import { ensureProjectDataGitExcluded } from '@craft/capability-codebase/project-data-git-exclude';
 
 function repository(): string {
   const root = mkdtempSync(join(tmpdir(), "craft-project-ignore-"));

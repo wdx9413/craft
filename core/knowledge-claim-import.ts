@@ -1,4 +1,4 @@
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import type { JsonObject } from 'craft-common-store-local/store';
 
 /** Portable annotations are history; managed promotion authority is local. */
 export function portableKnowledgeClaimForImport(payload: JsonObject): JsonObject {

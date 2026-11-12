@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, constants, copyFileSync, createReadStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, linkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, parse, relative, resolve, sep } from "node:path";
-import { ensureProjectStorageDirectory, projectStorageIdentity, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { ensureProjectStorageDirectory, projectStorageIdentity, type CraftPaths } from 'craft-common-store-local/paths';
 import type { LegacyRepositoryStorageEntry } from "./legacy-repository-storage-preflight.ts";
 
 type FileEntry = { path: string; size_bytes: number; digest: string; capability: string; target_path: string };

@@ -1,5 +1,5 @@
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
-import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { craftPaths } from 'craft-common-store-local/paths';
+import { CraftStore } from 'craft-common-store-local/store';
 import { ContextStoragePreflightReader } from "../core/context-storage-preflight.ts";
 
 const args = process.argv.slice(2);

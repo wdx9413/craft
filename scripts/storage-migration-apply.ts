@@ -1,5 +1,5 @@
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
-import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { craftPaths } from 'craft-common-store-local/paths';
+import { CraftStore } from 'craft-common-store-local/store';
 import { legacySessionMemoryInventory, legacySessionMemoryPreflight } from "../core/legacy-session-memory-preflight.ts";
 import { quarantineLegacySessionMemory } from "../core/legacy-session-memory-quarantine.ts";
 import { StorageMigrationPreflightReader } from "../core/storage-migration-preflight.ts";

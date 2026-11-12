@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { planTypeScriptIncremental } from "../capability/craft-codebase/typescript-incremental.ts";
-import { typeScriptFileUnitDigest, TYPESCRIPT_ANALYZER_VERSION, type TypeScriptFileUnit } from "../capability/craft-codebase/typescript-analysis.ts";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
-import type { RepositoryFile } from "../capability/craft-codebase/repository-files.ts";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { planTypeScriptIncremental } from '@craft/capability-codebase/typescript-incremental';
+import { typeScriptFileUnitDigest, TYPESCRIPT_ANALYZER_VERSION, type TypeScriptFileUnit } from '@craft/capability-codebase/typescript-analysis';
+import { stableDigest } from 'craft-common-base/digest';
+import type { RepositoryFile } from '@craft/capability-codebase/repository-files';
+import type { JsonObject } from 'craft-common-store-local/store';
 
 const files: RepositoryFile[] = [
   { path: "a.ts", content: "export const a = 1", digest: "a1", language: "ts" },

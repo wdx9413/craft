@@ -1,9 +1,9 @@
-import { activeProcedure } from "../../../capability/craft-experience/procedure-release.ts";
+import { activeProcedure } from '@craft/capability-experience/procedure-release';
 import type { CraftStore, JsonObject } from "../../infrastructure/store.ts";
 import { payload, stableDigest } from "../../digest.ts";
 import { object, text } from "../../validation.ts";
 import { scopeAccess, scopeAllows, scopeEnvelope, scopeFromKey } from "../../scope-policy.ts";
-import { ProcedureDefinitionStore, procedureDefinitionRef } from "../../../capability/craft-experience/procedure-definition.ts";
+import { ProcedureDefinitionStore, procedureDefinitionRef } from '@craft/capability-experience/procedure-definition';
 
 type Command = (args: JsonObject) => JsonObject;
 const KINDS: Record<string, string[]> = { knowledge: ["knowledge_claim", "knowledge_source", "knowledge_document"], memory: ["memory_ledger", "memory_candidate"], experience: ["experience_procedure", "workflow_design"], codebase: ["codebase_index"] };

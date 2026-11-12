@@ -1,13 +1,13 @@
-import { experienceGraphTemplate } from "../capability/craft-experience/procedure-templates.ts";
+import { experienceGraphTemplate } from '@craft/capability-experience/procedure-templates';
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
 import { payload, stableDigest } from "../core/digest.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { McpServer } from "../core/mcp.ts";
-import { ProcedureStore } from "../capability/craft-experience/procedure-projection.ts";
-import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
-import { validateGraphControl, selectGraph } from "../capability/craft-experience/procedure-graph.ts";
+import { ProcedureStore } from '@craft/capability-experience/procedure-projection';
+import { ProcedureDefinitionStore } from '@craft/capability-experience/procedure-definition';
+import { validateGraphControl, selectGraph } from '@craft/capability-experience/procedure-graph';
 
 export function graph(): JsonObject { return experienceGraphTemplate("internet-product-engineering"); }
 
@@ -278,7 +278,7 @@ test("evidence-backed graph proposals use the runtime contract and cannot silent
 });
 
 test("graph compilation enforces child bindings, public outputs, total expansion and unsupported nested control graphs", async () => {
-  const { ProcedureDefinitionStore } = await import("../capability/craft-experience/procedure-definition.ts");
+  const { ProcedureDefinitionStore } = await import("@craft/capability-experience/procedure-definition");
   const f = await fixture(); let seq = 0;
   function routeable(value: JsonObject) {
     const id = `direct-graph-${++seq}`;

@@ -10,7 +10,6 @@ function rank(path: string): number {
   if (path.startsWith("common/craft-common-base/")) return -2;
   if (path.startsWith("common/craft-common-log/")) return -1;
   if (path === "core/cli.ts") return 3;
-  if (path.startsWith("capability/craft-eval/")) return 4;
   if (path.startsWith("core/infrastructure/")) return 0;
   if (path.startsWith("core/application/")) return 2;
   if (path.startsWith("core/interfaces/")) return 3;

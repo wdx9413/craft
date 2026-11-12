@@ -1,4 +1,4 @@
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
+import { stableDigest } from 'craft-common-base/digest';
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 
 const TASK_LEDGER_SCHEMA = "craft.governed-learning-task-ledger.v1";

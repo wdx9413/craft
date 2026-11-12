@@ -6,13 +6,13 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { validateReadOnlyEvaluationSteps, validateScenarioEvaluation, AUTOMATIC_SIGNOFF_POLICY } from "../capability/craft-experience/scenario-evaluation.ts";
+import { validateReadOnlyEvaluationSteps, validateScenarioEvaluation, AUTOMATIC_SIGNOFF_POLICY } from '@craft/capability-experience/scenario-evaluation';
 import { projectIdentityFromRoot } from "../core/scope-identity.ts";
 import { CraftService } from "../core/service.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "../core/digest.ts";
-import { ExperienceLearningEvaluation } from "../capability/craft-experience/learning-evaluation.ts";
+import { ExperienceLearningEvaluation } from '@craft/capability-experience/learning-evaluation';
 import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
 
 function set(cases: JsonObject[], independent = false): JsonObject {

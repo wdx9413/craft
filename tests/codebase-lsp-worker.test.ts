@@ -3,7 +3,7 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { lspWorkerFailure, runCodebaseLspWorker, runCodebaseLspWorkerSafely } from "../capability/craft-codebase/lsp-worker.ts";
+import { lspWorkerFailure, runCodebaseLspWorker, runCodebaseLspWorkerSafely } from '@craft/capability-codebase/lsp-worker';
 
 test("bundled MCP worker runs the configured language server against bounded snapshot documents", () => {
   const content = "class Example {}\n";

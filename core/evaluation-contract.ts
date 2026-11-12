@@ -1,1 +1,1 @@
-export * from "../common/craft-common-log/src/evaluation-contract.ts";
+export * from 'craft-common-log/evaluation-contract';

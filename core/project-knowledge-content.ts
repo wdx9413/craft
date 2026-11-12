@@ -1,9 +1,9 @@
 import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { CraftStore, JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import type { CraftStore, JsonObject } from 'craft-common-store-local/store';
 import { stableDigest } from "./digest.ts";
 import { scopeFromKey } from "./scope-policy.ts";
-import { canonicalCandidatePath, ensureProjectStorageDirectory, existingProjectStorageDirectory, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { canonicalCandidatePath, ensureProjectStorageDirectory, existingProjectStorageDirectory, projectStorageDirectory } from 'craft-common-store-local/paths';
 
 export interface ProjectKnowledgeDirectoryOptions {
   readonly project_root?: string;

@@ -8,7 +8,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { CapabilityKitRuntime } from "../core/capability-kit-runtime.ts";
 import { createStoreControlAuthority, type ControlHostBinding } from "../core/application/control-authority.ts";
-import { createControlSession } from "../capability/control-session.ts";
+import { createControlSession } from "../core/control-session.ts";
 import { payload, stableDigest } from "../core/digest.ts";
 
 async function fixture() {

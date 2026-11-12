@@ -14,7 +14,7 @@ import {
   planLegacyPromotion,
   rankWithDecay,
   shouldProposeMemory
-} from "../capability/craft-memory/memory-signals.ts";
+} from '@craft/capability-memory/memory-signals';
 
 test("decays a memory by age with a half-life rather than a cutoff", () => {
   const fresh = memoryDecayWeight({ confirmed_at: "2026-01-01T00:00:00Z", now: "2026-01-01T00:00:00Z" });

@@ -6,7 +6,7 @@ import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts"
 import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
 import { ContextResolutionKernel } from "../../core/context-resolution.ts";
-import { ExperienceContribution } from "../../capability/craft-experience/contribution.ts";
+import { ExperienceContribution } from '@craft/capability-experience/contribution';
 
 /**
  * Runtime smoke for the governed experience loop:

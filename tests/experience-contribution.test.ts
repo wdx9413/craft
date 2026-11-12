@@ -4,9 +4,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
-import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
-import { stableDigest as digest } from "../common/craft-common-base/src/digest.ts";
+import { ExperienceContribution } from '@craft/capability-experience/contribution';
+import { ProcedureDefinitionStore } from '@craft/capability-experience/procedure-definition';
+import { stableDigest as digest } from 'craft-common-base/digest';
 import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
 import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
@@ -14,7 +14,7 @@ import type { ContextContributionProvider } from "../core/capability-protocol.ts
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
-import { contextAssetRef } from "../common/craft-common-base/src/context-assets.ts";
+import { contextAssetRef } from 'craft-common-base/context-assets';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-contribution-"));

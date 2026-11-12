@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { type CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
-import { payload, stableDigest } from "../core/digest.ts";
+import { type CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { payload, stableDigest } from "./digest.ts";
 
 export type ControlScope = { task_id: string; activation_id: string; target_id: string };
 /** Supplied by the trusted Host, never by tool-call arguments. Includes current Policy and permission state. */

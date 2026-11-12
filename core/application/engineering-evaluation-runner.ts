@@ -14,7 +14,7 @@ import { digestJson, payload } from "../digest.ts";
 import type { CraftService } from "../application/craft-service.ts";
 import type { CraftStore, JsonObject } from "../infrastructure/store.ts";
 import { executeHostProcess, type HostExecutor } from "../host-driver.ts";
-import { VERIFIED_EVALUATION_RECEIPT_KIND, type ProgramCheck } from "../../capability/verified-evaluation-receipt.ts";
+import { VERIFIED_EVALUATION_RECEIPT_KIND, type ProgramCheck } from "../../core/verified-evaluation-receipt.ts";
 
 export type EvaluationCommand = readonly ["node", ...string[]];
 

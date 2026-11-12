@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { payload, stableDigest } from "./digest.ts";
-import { scopeEnvelope } from "../common/craft-common-base/src/scope-policy.ts";
+import { scopeEnvelope } from 'craft-common-base/scope-policy';
 import { text, type ScopeRef } from "./validation.ts";
-import { MarkdownContentStore, validateContentBody, type ContentRef } from "../common/craft-common-store-local/src/content-store.ts";
+import { MarkdownContentStore, validateContentBody, type ContentRef } from 'craft-common-store-local/content-store';
 import { projectKnowledgeContentDirectory } from "./project-knowledge-content.ts";
 
 type Ref = { kind: string; id: string; version: number };

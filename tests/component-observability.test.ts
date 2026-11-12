@@ -7,10 +7,10 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { TraceKernel } from "../core/trace-kernel.ts";
 import { ComponentTraceKernel } from "../core/component-trace.ts";
-import { observeOperation } from "../common/craft-common-log/src/index.ts";
+import { observeOperation } from 'craft-common-log/index';
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
-import { toOtlpTrace } from "../common/craft-common-log/src/otlp.ts";
+import { toOtlpTrace } from 'craft-common-log/otlp';
 import { DatabaseSync } from "node:sqlite";
 
 async function fixture() {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { CraftStore, JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
+import type { CraftStore, JsonObject } from 'craft-common-store-local/store';
+import { stableDigest } from 'craft-common-base/digest';
 
 const VERDICTS = new Set(["accepted", "rejected", "unknown"]);
 const REJECTED = ["证伪", "失败", "无改善", "无效", "负贡献", "淘汰", "跑输", "更差", "反而", "不可用", "推翻", "已否决"];

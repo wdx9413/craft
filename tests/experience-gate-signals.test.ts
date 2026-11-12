@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { experienceGatePenalty, experienceGatePenaltyFromGates } from "../capability/craft-experience/gate-signals.ts";
-import type { CraftStore, JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { experienceGatePenalty, experienceGatePenaltyFromGates } from '@craft/capability-experience/gate-signals';
+import type { CraftStore, JsonObject } from 'craft-common-store-local/store';
 
 test("gate penalties are neutral for empty ids, clean gates and unrelated procedures", () => {
   assert.equal(experienceGatePenaltyFromGates([], []).size, 0);

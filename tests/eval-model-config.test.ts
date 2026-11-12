@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluationProviderConfig } from "../capability/craft-eval/model.ts";
+import { evaluationProviderConfig } from "craft-eval/model";
 
 test("the evaluation gateway defaults to local WorkBuddy and can be redirected", () => {
   const fallback = evaluationProviderConfig({});

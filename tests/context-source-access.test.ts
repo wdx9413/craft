@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
-import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
+import { KnowledgeContribution } from '@craft/capability-knowledge/contribution';
 import { payload } from "../core/digest.ts";
 import { sourceAllows } from "../core/scope-policy.ts";
 import { McpServer } from "../core/mcp.ts";

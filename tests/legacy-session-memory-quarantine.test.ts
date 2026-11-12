@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { hostname, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { craftPaths, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { craftPaths, type CraftPaths } from 'craft-common-store-local/paths';
 import type { LegacySessionMemoryEntry } from "../core/legacy-session-memory-preflight.ts";
 import { quarantineLegacySessionMemory } from "../core/legacy-session-memory-quarantine.ts";
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { legacyFieldAbsent } from "../capability/craft-memory/memory-legacy-field.ts";
-import type { CraftStore, JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { legacyFieldAbsent } from '@craft/capability-memory/memory-legacy-field';
+import type { CraftStore, JsonObject } from 'craft-common-store-local/store';
 
 const storeWithHistory = (rows: JsonObject[]): CraftStore =>
   ({ history: () => rows }) as unknown as CraftStore;

@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import type { JsonObject } from 'craft-common-store-local/store';
 
 /** Availability is separate from semantic conformance and full-project coverage. */
 export function codebaseAdapterPreflight(commands: Record<string, string[]> = {

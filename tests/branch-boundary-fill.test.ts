@@ -13,7 +13,7 @@ import { McpRegistryKernel } from "../core/mcp-registry.ts";
 import { RuntimeAcceptanceKernel } from "../core/runtime-acceptance.ts";
 import { LongTaskWorkerKernel } from "../core/long-task-worker.ts";
 import { MemoryGovernanceKernel } from "../core/memory-governance.ts";
-import { ProjectBrainKernel } from "../capability/craft-knowledge/project-brain.ts";
+import { ProjectBrainKernel } from '@craft/capability-knowledge/project-brain';
 import { WorkSessionKernel } from "../core/work-session.ts";
 import { WorkflowDagKernel } from "../core/workflow-dag.ts";
 import { RuntimeTruthKernel } from "../core/runtime-truth-kernel.ts";
@@ -21,7 +21,7 @@ import { VerifiedAutonomousWorkKernel } from "../core/verified-autonomous-work.t
 import { WebOperationKernel } from "../core/web-operation.ts";
 import { RemoteRuntimeKernel } from "../core/remote-runtime.ts";
 import { TaskStateKernel } from "../core/task-state.ts";
-import { ProjectKnowledgeKernel } from "../capability/craft-knowledge/project-knowledge.ts";
+import { ProjectKnowledgeKernel } from '@craft/capability-knowledge/project-knowledge';
 import { SupplyChainAttestationKernel } from "../core/supply-chain-attestation.ts";
 import { ActionGatewayKernel, AcceptanceGateKernel, ProviderRouterKernel } from "../core/runtime-completion.ts";
 import { RuntimeAssuranceKernel } from "../core/runtime-assurance.ts";

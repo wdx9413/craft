@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { relationDiagnosticsSummary } from "../capability/craft-codebase/codebase-index.ts";
+import { relationDiagnosticsSummary } from '@craft/capability-codebase/codebase-index';
 
 const combined = {
   languages: [

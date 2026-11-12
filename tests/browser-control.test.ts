@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createContext, runInContext } from "node:vm";
 import { createBrowserControlAdapter } from "../adapters/browser-control.ts";
-import type { ControlAction } from "../capability/control-session.ts";
+import type { ControlAction } from "../core/control-session.ts";
 
 function fixture() {
   let contextId = 1, calls = 0, closes = 0, mode = "", takeover = false, epoch = false;

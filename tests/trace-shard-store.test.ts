@@ -12,7 +12,7 @@ import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { TraceKernel } from "../core/trace-kernel.ts";
 import { migrateTraceStorage } from "../scripts/trace-storage-migration.ts";
-import { TraceShardStore, type TraceRecordRow } from "../common/craft-common-store-local/src/trace-shards.ts";
+import { TraceShardStore, type TraceRecordRow } from 'craft-common-store-local/trace-shards';
 
 test("Trace reads tolerate an uncommitted first schema and re-read after the writer commits", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-trace-schema-race-")), shards = new TraceShardStore(root);

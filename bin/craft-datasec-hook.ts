@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { resolve, join } from "node:path";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { beginHookRuntimeDiagnostic, type HookRuntimeTiming } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
-import { blankResult, FAILURE, handleHook, hidden, type Event, type HookInput, type Host } from "../capability/craft-datasec/hook.ts";
-import { enabledBuiltinRules, type Rule } from "../capability/craft-datasec/rules.ts";
+import { blankResult, FAILURE, handleHook, hidden, type Event, type HookInput, type Host } from '@craft/capability-datasec/hook';
+import { enabledBuiltinRules, type Rule } from '@craft/capability-datasec/rules';
 
 export interface HookCliResult { exitCode: number; stdout?: string; stderr?: string }
 

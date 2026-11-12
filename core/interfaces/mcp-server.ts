@@ -14,10 +14,10 @@ import { componentForSurface, surfaceToolNames as resolveSurfaceToolNames } from
 import { createActionHandlers } from "../application/actions/action-handlers.ts";
 import type { McpHandler } from "./mcp/handler-types.js";
 import { ComponentTraceKernel, type ComponentTraceResult } from "../component-trace.ts";
-import { JsonlTelemetryJournal, observeOperation, operationErrorCode, withoutOperationPersistence, type OperationEvent } from "../../common/craft-common-log/src/index.ts";
+import { JsonlTelemetryJournal, observeOperation, operationErrorCode, withoutOperationPersistence, type OperationEvent } from 'craft-common-log/index';
 import { validateJsonSchema, type JsonValue } from "../json-schema.ts";
 import { CraftOperationError } from "../operation-error.ts";
-import { DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from "../../common/craft-common-base/src/context-assets.ts";
+import { DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from 'craft-common-base/context-assets';
 import { CONTEXT_ROUTED_TOOL_NAMES } from "../mcp/context-tools.ts";
 import { formatContextResponse, resolveContextResponseDetail } from "../context-response-projection.ts";
 export { COMPONENT_SURFACES, COMPONENT_SURFACE_NAMES, DOMAIN_SURFACE_NAMES, SURFACE_NAMES, SURFACE_RULES, domainSurfaceOf } from "./mcp/surface-registry.ts";

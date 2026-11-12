@@ -10,7 +10,7 @@ import test from "node:test";
 import { ScopeIdentityKernel, projectIdentityFromRoot } from "../core/scope-identity.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
+import { sessionStorageScopeId } from 'craft-common-store-local/paths';
 
 test("explicit child scope does not inherit parent or sibling scopes", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-explicit-child-"));

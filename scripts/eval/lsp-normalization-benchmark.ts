@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
-import { normalizeLspSymbols } from "../../capability/craft-codebase/lsp-adapter.ts";
-import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { normalizeLspSymbols } from '@craft/capability-codebase/lsp-adapter';
+import type { JsonObject } from 'craft-common-store-local/store';
 
 const documents = Array.from({ length: 100 }, (_, file) => {
   const content = Array.from({ length: 100 }, (_, symbol) => `symbol${symbol}`).join("\n");

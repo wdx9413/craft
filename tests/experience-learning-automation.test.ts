@@ -3,7 +3,7 @@ import test from "node:test";
 import { fixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "../core/digest.ts";
-import { AUTOMATIC_SIGNOFF_POLICY } from "../capability/craft-experience/scenario-evaluation.ts";
+import { AUTOMATIC_SIGNOFF_POLICY } from '@craft/capability-experience/scenario-evaluation';
 import { McpServer } from "../core/mcp.ts";
 
 function evidence(f: Awaited<ReturnType<typeof fixture>>, dispatch: JsonObject, status = "passed", extra: JsonObject = {}): string {

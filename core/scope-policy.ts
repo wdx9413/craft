@@ -1,1 +1,1 @@
-export * from "../common/craft-common-base/src/scope-policy.ts";
+export * from 'craft-common-base/scope-policy';

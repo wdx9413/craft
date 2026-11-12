@@ -6,9 +6,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
-import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import type { JsonObject } from 'craft-common-store-local/store';
+import { ProjectAnalysisCache } from '@craft/capability-codebase/project-analysis-cache';
+import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory } from 'craft-common-store-local/paths';
 
 test("project analysis caches are workspace-bound, atomic, digest-checked and removable", () => {
   const root = mkdtempSync(join(tmpdir(), "craft-project-analysis-cache-"));
@@ -132,8 +132,8 @@ test("parallel processes can publish the same cold analysis cache without a shar
   try {
     const project = join(root, "project"), data = join(root, "data");
     mkdirSync(project); mkdirSync(data);
-    const moduleUrl = pathToFileURL(resolve(import.meta.dirname, "../capability/craft-codebase/project-analysis-cache.ts")).href;
-    const pathsUrl = pathToFileURL(resolve(import.meta.dirname, "../common/craft-common-store-local/src/paths.ts")).href;
+    const moduleUrl = import.meta.resolve("@craft/capability-codebase/project-analysis-cache");
+    const pathsUrl = import.meta.resolve("craft-common-store-local/paths");
     const script = `import { ProjectAnalysisCache } from ${JSON.stringify(moduleUrl)}; import { craftPaths } from ${JSON.stringify(pathsUrl)}; new ProjectAnalysisCache(process.argv[1], "workspace-race", craftPaths(process.argv[2])).save("codebase_file_analysis", "codebase_file_0123456789abcdef01234567", { path: "src/race.ts", source_digest: "same", nodes: [] });`;
     const run = () => new Promise<void>((resolveRun, rejectRun) => {
       const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script, project, data], { stdio: ["ignore", "ignore", "pipe"] });

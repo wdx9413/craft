@@ -4,11 +4,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import type { JsonObject } from 'craft-common-store-local/store';
 import { checkpointManifestDigest, readGitEvaluationState } from "../eval/codebase-evaluation-provenance.ts";
-import { CODEBASE_LSP_CONFIG } from "../../capability/craft-codebase/lsp-config.ts";
-import { ProjectGraphStore } from "../../capability/craft-codebase/project-graph-store.ts";
-import { repositoryFiles } from "../../capability/craft-codebase/repository-files.ts";
+import { CODEBASE_LSP_CONFIG } from '@craft/capability-codebase/lsp-config';
+import { ProjectGraphStore } from '@craft/capability-codebase/project-graph-store';
+import { repositoryFiles } from '@craft/capability-codebase/repository-files';
 import { CraftStore } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";

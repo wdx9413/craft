@@ -9,7 +9,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { craftPaths } from 'craft-common-store-local/paths';
 import { legacyRepositoryStoragePreflight } from "../core/legacy-repository-storage-preflight.ts";
 import { migrateLegacyRepositoryStorage } from "../core/legacy-repository-storage-migration.ts";
 

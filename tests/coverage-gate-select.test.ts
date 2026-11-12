@@ -3,7 +3,7 @@ import test from "node:test";
 import { parseGroupArguments, selectGateGroups, type SelectableGroup } from "../scripts/coverage/coverage-gate-select.ts";
 
 const groups: SelectableGroup[] = [
-  { name: "eval-comparator", include: ["capability/craft-eval/compare-run-reports.ts"], tests: ["t1"] },
+  { name: "eval-comparator", include: ["core/eval-suite.ts"], tests: ["t1"] },
   { name: "knowledge-lineage-impact", include: ["capability/craft-knowledge/knowledge-lineage-impact.ts"], tests: ["t2"] },
   { name: "eval-suite", include: ["core/eval-suite.ts", "core/eval-cases.ts"], tests: ["t3"] },
 ];

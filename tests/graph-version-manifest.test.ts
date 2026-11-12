@@ -6,9 +6,9 @@ import { dirname, join } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { parse } from "yaml";
 import { fixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
-import { experienceGraphTemplate } from "../capability/craft-experience/procedure-templates.ts";
-import { syncGraphVersionManifest } from "../capability/craft-experience/graph-version-manifest.ts";
-import { ProcedureStore } from "../capability/craft-experience/procedure-projection.ts";
+import { experienceGraphTemplate } from '@craft/capability-experience/procedure-templates';
+import { syncGraphVersionManifest } from '@craft/capability-experience/graph-version-manifest';
+import { ProcedureStore } from '@craft/capability-experience/procedure-projection';
 import type { JsonObject } from "../core/infrastructure/store.ts";
 
 test("two-field YAML follows candidate, promotion, failed evaluation and historical reads using content versions", async () => {

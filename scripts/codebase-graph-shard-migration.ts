@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
-import { CodebaseShardStore, type GraphRow } from "../common/craft-common-store-local/src/codebase-shards.ts";
+import { craftPaths } from 'craft-common-store-local/paths';
+import { CodebaseShardStore, type GraphRow } from 'craft-common-store-local/codebase-shards';
 
 const KINDS = "'codebase_index_shard','codebase_index_edge_route'";
 

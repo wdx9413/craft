@@ -1,8 +1,8 @@
-import { observeOperation } from "../common/craft-common-log/src/index.ts";
-import { ContextBudget, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from "../common/craft-common-base/src/context-assets.ts";
-import { EVAL_DOMAINS, type EvalDomain } from "../common/craft-common-base/src/capability-protocol.ts";
-import { MemoryContribution } from "../capability/craft-memory/contribution.ts";
-import { retrievalExcerpt } from "../common/craft-common-base/src/retrieval-excerpt.ts";
+import { observeOperation } from 'craft-common-log/index';
+import { ContextBudget, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from 'craft-common-base/context-assets';
+import { EVAL_DOMAINS, type EvalDomain } from 'craft-common-base/capability-protocol';
+import { MemoryContribution } from '@craft/capability-memory/contribution';
+import { retrievalExcerpt } from 'craft-common-base/retrieval-excerpt';
 import { ContextReadGuard } from "./context-access-guard.ts";
 /**
  * The context plane: retrieving accumulated material into a bounded, reproducible pack.
@@ -38,7 +38,7 @@ import { CONTEXT_MEMBERS, type ContextContribution, type ContextContributionProv
 import { ScopeIdentityKernel } from "./scope-identity.ts";
 import { KeywordRetrievalPort, OpenAiCompatibleEmbeddingRetrievalPort } from "./retrieval-port.ts";
 import { scopeAccess, sourceAllows } from "./scope-policy.ts";
-import { contextAssetMatches, contextAssetRef, requiredContextRef } from "../common/craft-common-base/src/context-assets.ts";
+import { contextAssetMatches, contextAssetRef, requiredContextRef } from 'craft-common-base/context-assets';
 
 const STRATEGIES = new Set(["keyword", "vector", "hybrid"]);
 const SECRET_KEY = /(?:api[_-]?key|authorization|cookie|password|secret|token)/iu;

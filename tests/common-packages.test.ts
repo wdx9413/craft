@@ -7,14 +7,14 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { CraftTelemetry, JsonlTelemetryJournal, StoreTelemetrySink, telemetryEvent, toOtlpTrace, exportOtlp, observeOperation, withoutOperationPersistence, currentOperation, operationErrorCode, operationResultStatus, operationEventId, observeMethods, observedKernel, type OperationEvent } from "../common/craft-common-log/src/index.ts";
-import { CraftStore, type JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { CraftTelemetry, JsonlTelemetryJournal, StoreTelemetrySink, telemetryEvent, toOtlpTrace, exportOtlp, observeOperation, withoutOperationPersistence, currentOperation, operationErrorCode, operationResultStatus, operationEventId, observeMethods, observedKernel, type OperationEvent } from 'craft-common-log/index';
+import { CraftStore, type JsonObject } from 'craft-common-store-local/store';
+import { craftPaths } from 'craft-common-store-local/paths';
 import { ComponentTraceKernel } from "../core/component-trace.ts";
 import { TraceKernel } from "../core/trace-kernel.ts";
-import { EvaluationContractKernel } from "../common/craft-common-log/src/evaluation-contract.ts";
-import { ContextBudget, ContextBudgetError, contextAssetKey, contextAssetMatches, contextAssetRef, requiredContextRef } from "../common/craft-common-base/src/context-assets.ts";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
+import { EvaluationContractKernel } from 'craft-common-log/evaluation-contract';
+import { ContextBudget, ContextBudgetError, contextAssetKey, contextAssetMatches, contextAssetRef, requiredContextRef } from 'craft-common-base/context-assets';
+import { stableDigest } from 'craft-common-base/digest';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -395,7 +395,7 @@ test("third-party telemetry runs from packages without a Store or capability reg
   try {
     const nodeModules = join(dir, "node_modules");
     for (const name of ["craft-common-store-local", "craft-common-base", "craft-common-log"]) {
-      const source = join(root, "common", name); const target = join(nodeModules, name);
+      const source = join(root, "..", "craft-common", "packages", name); const target = join(nodeModules, name);
       await mkdir(target, { recursive: true });
       await cp(join(source, "dist"), join(target, "dist"), { recursive: true });
       await cp(join(source, "package.json"), join(target, "package.json"));
@@ -420,13 +420,13 @@ test("each capability package loads and registers outside the harness checkout",
     const nodeModules = join(dir, "node_modules");
     await mkdir(nodeModules, { recursive: true });
     for (const name of ["craft-common-store-local", "craft-common-base", "craft-common-log"]) {
-      const source = join(root, "common", name); const target = join(nodeModules, name);
+      const source = join(root, "..", "craft-common", "packages", name); const target = join(nodeModules, name);
       await mkdir(target, { recursive: true });
       await cp(join(source, "dist"), join(target, "dist"), { recursive: true });
       await cp(join(source, "package.json"), join(target, "package.json"));
     }
     for (const name of ["knowledge", "memory", "experience", "codebase"]) {
-      const source = join(root, "capability", `craft-${name}`); const target = join(nodeModules, "@craft", `capability-${name}`);
+      const source = join(root, "..", "craft-capability", "capability", `craft-${name}`); const target = join(nodeModules, "@craft", `capability-${name}`);
       await mkdir(target, { recursive: true });
       await cp(join(source, "dist"), join(target, "dist"), { recursive: true });
       await cp(join(source, "package.json"), join(target, "package.json"));
@@ -471,8 +471,8 @@ test("published tarball contents typecheck and run outside the monorepo", async 
   try {
     const nodeModules = join(dir, "node_modules");
     await mkdir(nodeModules, { recursive: true });
-    for (const relative of ["common/craft-common-store-local", "common/craft-common-base", "common/craft-common-log",
-      "capability/craft-knowledge", "capability/craft-memory", "capability/craft-experience", "capability/craft-codebase"]) {
+    for (const relative of ["../craft-common/packages/craft-common-store-local", "../craft-common/packages/craft-common-base", "../craft-common/packages/craft-common-log",
+      "../craft-capability/capability/craft-knowledge", "../craft-capability/capability/craft-memory", "../craft-capability/capability/craft-experience", "../craft-capability/capability/craft-codebase"]) {
       const sourceDir = join(root, relative);
       const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
       const npmCommand = process.platform === "win32" ? process.execPath : "npm";

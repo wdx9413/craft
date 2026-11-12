@@ -1,1 +1,1 @@
-export { MemoryGovernanceKernel } from "../capability/craft-memory/memory-governance.ts";
+export { MemoryGovernanceKernel } from '@craft/capability-memory/memory-governance';

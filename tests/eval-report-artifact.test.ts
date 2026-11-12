@@ -13,7 +13,7 @@ test("a report is written only on request, never overwrites, and carries no cred
   // `datasec` is a kernel-only scope: no model is needed, so this check is
   // offline and fast. It still exercises the real CLI report path.
   const run = (extra: string[] = []) => execFileSync(process.execPath,
-    ["--experimental-strip-types", "capability/craft-eval/suite.ts", "datasec", ...extra],
+    ["--experimental-strip-types", "node_modules/craft-eval/dist/src/suite.js", "datasec", ...extra],
     { cwd: process.cwd(), encoding: "utf8", env: { ...process.env, CRAFT_EVAL_BASE_URL: "" } });
 
   const withoutReport = run();
@@ -64,7 +64,7 @@ test("missing --report value fails fast rather than writing to a guessed path", 
   let failed = false;
   try {
     execFileSync(process.execPath,
-      ["--experimental-strip-types", "capability/craft-eval/suite.ts", "datasec", "--report"],
+      ["--experimental-strip-types", "node_modules/craft-eval/dist/src/suite.js", "datasec", "--report"],
       { cwd: process.cwd(), encoding: "utf8", env: { ...process.env, CRAFT_EVAL_BASE_URL: "" } });
   } catch { failed = true; }
   assert.equal(failed, true);

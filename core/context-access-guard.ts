@@ -1,1 +1,1 @@
-export * from "../common/craft-common-store-local/src/context-access-guard.ts";
+export * from 'craft-common-store-local/context-access-guard';

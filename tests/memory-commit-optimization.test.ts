@@ -4,10 +4,10 @@ import { mkdtempSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { CraftStore, type JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
-import { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
-import { MemoryGovernanceKernel, latestMemoryConfirmation } from "../capability/craft-memory/memory-governance.ts";
+import { CraftStore, type JsonObject } from 'craft-common-store-local/store';
+import { craftPaths } from 'craft-common-store-local/paths';
+import { MemoryLedgerKernel } from '@craft/capability-memory/memory-ledger';
+import { MemoryGovernanceKernel, latestMemoryConfirmation } from '@craft/capability-memory/memory-governance';
 import { MemoryMaintenanceKernel } from "../core/memory-maintenance.ts";
 
 async function fixture() {
@@ -75,7 +75,7 @@ test("supersession and candidate association roll back together; orphan content 
 test("two processes share one candidate commit identity", async () => {
   const f = await fixture(); try {
     f.candidate();
-    const script = `import { CraftStore } from './common/craft-common-store-local/src/store.ts'; import { craftPaths } from './common/craft-common-store-local/src/paths.ts'; import { MemoryLedgerKernel } from './capability/craft-memory/memory-ledger.ts'; import { MemoryGovernanceKernel } from './capability/craft-memory/memory-governance.ts'; const s=await new CraftStore(craftPaths(process.argv[1])).open(); const g=new MemoryGovernanceKernel(s,new MemoryLedgerKernel(s)); process.stdout.write(JSON.stringify(g.remember({candidate_id:'c'}).memory.id));s.close();`;
+    const script = `import { CraftStore } from 'craft-common-store-local/store'; import { craftPaths } from 'craft-common-store-local/paths'; import { MemoryLedgerKernel } from '@craft/capability-memory/memory-ledger'; import { MemoryGovernanceKernel } from '@craft/capability-memory/memory-governance'; const s=await new CraftStore(craftPaths(process.argv[1])).open(); const g=new MemoryGovernanceKernel(s,new MemoryLedgerKernel(s)); process.stdout.write(JSON.stringify(g.remember({candidate_id:'c'}).memory.id));s.close();`;
     const run = () => new Promise<string>((resolve, reject) => { const child = spawn(process.execPath, ["--input-type=module", "-e", script, f.root]); let out = "", err = ""; child.stdout.on("data", data => out += data); child.stderr.on("data", data => err += data); child.on("error", reject); child.on("exit", code => code === 0 ? resolve(out) : reject(new Error(err))); });
     const [a, b] = await Promise.all([run(), run()]); assert.equal(a, b); assert.equal(f.store.count("memory_ledger"), 1);
   } finally { f.close(); }
@@ -181,10 +181,10 @@ test("two independent processes confirm one exact Memory revision in a single pu
     const args = { memory_id: memory.id, expected_version: memory.version, explicit_consent: true, evidence_ids: ["e"], scope_kind: "project", scope_id: "p" };
     const script = `
       import assert from 'node:assert/strict';
-      import {CraftStore} from './common/craft-common-store-local/src/store.ts';
-      import {craftPaths} from './common/craft-common-store-local/src/paths.ts';
-      import {MemoryGovernanceKernel} from './capability/craft-memory/memory-governance.ts';
-      import {MemoryLedgerKernel} from './capability/craft-memory/memory-ledger.ts';
+      import {CraftStore} from 'craft-common-store-local/store';
+      import {craftPaths} from 'craft-common-store-local/paths';
+      import {MemoryGovernanceKernel} from '@craft/capability-memory/memory-governance';
+      import {MemoryLedgerKernel} from '@craft/capability-memory/memory-ledger';
       import {DatabaseSync} from 'node:sqlite';
       const store=await new CraftStore(craftPaths(process.argv[1])).open();
       const ledger=new MemoryLedgerKernel(store), governance=new MemoryGovernanceKernel(store,ledger);

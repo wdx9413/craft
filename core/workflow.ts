@@ -1,1 +1,1 @@
-export * from "../common/craft-common-base/src/workflow.ts";
+export * from 'craft-common-base/workflow';

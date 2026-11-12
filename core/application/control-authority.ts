@@ -1,6 +1,6 @@
 import type { CraftStore, JsonObject } from "../infrastructure/store.ts";
 import { stableDigest } from "../digest.ts";
-import type { ControlAuthority, ControlGrant, ControlScope } from "../../capability/control-session.ts";
+import type { ControlAuthority, ControlGrant, ControlScope } from "../../core/control-session.ts";
 
 /** Host-only binding. Never deserialize this configuration from an MCP action. */
 export type ControlHostBinding = Omit<ControlGrant, "activation_version" | "policy_digest" | "capability_digest"> & {

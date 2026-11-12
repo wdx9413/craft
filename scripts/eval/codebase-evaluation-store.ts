@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { digestEvaluationMaterial } from "./codebase-evaluation-provenance.ts";
-import { craftPaths, ensureProjectStorageDirectory, type CraftPaths } from "../../common/craft-common-store-local/src/paths.ts";
+import { craftPaths, ensureProjectStorageDirectory, type CraftPaths } from 'craft-common-store-local/paths';
 
 export type CodebaseEvaluationInputKind = "evaluation_suites" | "evaluation_configs";
 

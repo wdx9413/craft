@@ -1,17 +1,17 @@
-import { observeOperation } from "../../../common/craft-common-log/src/index.ts";
+import { observeOperation } from 'craft-common-log/index';
 import { assertContextReadCurrent } from "../../context-access-guard.ts";
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
 import { stableDigest } from "../../digest.ts";
-import { repositoryRoot } from "../../../capability/craft-codebase/repository-files.ts";
-import { ContextBudget, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS, contextAssetMatches, contextAssetRef, requiredContextRef } from "../../../common/craft-common-base/src/context-assets.ts";
+import { repositoryRoot } from '@craft/capability-codebase/repository-files';
+import { ContextBudget, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS, contextAssetMatches, contextAssetRef, requiredContextRef } from 'craft-common-base/context-assets';
 import { estimateTokens } from "../../token-budget.ts";
 import { CraftOperationError } from "../../operation-error.ts";
 import { codebaseFailureDiagnostic } from "./codebase-failure.ts";
-import { operationErrorCode } from "../../../common/craft-common-log/src/operation.ts";
+import { operationErrorCode } from 'craft-common-log/operation';
 
-export { ensureRepository } from "../../../capability/craft-codebase/repository-onboarding.ts";
-import { ensureRepository } from "../../../capability/craft-codebase/repository-onboarding.ts";
+export { ensureRepository } from '@craft/capability-codebase/repository-onboarding';
+import { ensureRepository } from '@craft/capability-codebase/repository-onboarding';
 
 export async function openContext(service: CraftService, args: JsonObject): Promise<JsonObject> {
   if (typeof args.query !== "string" || !args.query.trim()) throw new CraftOperationError("INVALID_INPUT", "input_validation", "query must not be empty", { field: "query" });

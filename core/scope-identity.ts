@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
-import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
+import { sessionStorageScopeId } from 'craft-common-store-local/paths';
 import { canonicalJson, payload, stableDigest } from "./digest.ts";
 import type { ScopeRef } from "./validation.ts";
 import { projectDataInventory } from "./project-data-inventory.ts";

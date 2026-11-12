@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { A2ATransportKernel } from "../core/a2a-transport.ts";
 import { OrgSyncKernel } from "../core/org-sync.ts";
-import { ProjectKnowledgeKernel } from "../capability/craft-knowledge/project-knowledge.ts";
+import { ProjectKnowledgeKernel } from '@craft/capability-knowledge/project-knowledge';
 import { StateWorkspaceKernel, kind } from "../core/state-workspace.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";

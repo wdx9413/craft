@@ -11,7 +11,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { CognitiveSearchCoordinator } from "../core/application/coordinators/cognitive-search.ts";
 import { stableDigest } from "../core/digest.ts";
-import { projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { projectStorageDirectory } from 'craft-common-store-local/paths';
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() {

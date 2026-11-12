@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { languageIdForFile, readTrustedLspConfig, type TrustedLspAdapter } from "../capability/craft-codebase/lsp-config.ts";
+import { languageIdForFile, readTrustedLspConfig, type TrustedLspAdapter } from '@craft/capability-codebase/lsp-config';
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 
 const MAX_FILES = 50_000;

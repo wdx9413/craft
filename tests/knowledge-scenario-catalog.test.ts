@@ -6,8 +6,8 @@ import { linkDirectory } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { knowledgeScenarioCanClassify, knowledgeScenarioIsActive, listKnowledgeScenarios, proposeKnowledgeScenarioMigration, recordKnowledgeScenario, retireKnowledgeScenario, updateKnowledgeScenarioClaim, validateKnowledgeScenarioDefinition } from "../capability/craft-knowledge/scenario-catalog.ts";
+import type { JsonObject } from 'craft-common-store-local/store';
+import { knowledgeScenarioCanClassify, knowledgeScenarioIsActive, listKnowledgeScenarios, proposeKnowledgeScenarioMigration, recordKnowledgeScenario, retireKnowledgeScenario, updateKnowledgeScenarioClaim, validateKnowledgeScenarioDefinition } from '@craft/capability-knowledge/scenario-catalog';
 
 const args = { project_id: "project-a", scenario_key: "engineering.build.typescript", coarse_scenario_key: "engineering.build",
   claim_id: "claim-a", source_id: "source-a", evidence_ids: ["evidence-a"], status: "candidate" as const,

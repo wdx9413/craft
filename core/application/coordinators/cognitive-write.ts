@@ -1,7 +1,7 @@
-import { KnowledgeClaimGovernance } from "../../../capability/craft-knowledge/claim-governance.ts";
-import { MemoryCapture } from "../../../capability/craft-memory/memory-capture.ts";
+import { KnowledgeClaimGovernance } from '@craft/capability-knowledge/claim-governance';
+import { MemoryCapture } from '@craft/capability-memory/memory-capture';
 import type { CraftStore, JsonObject } from "../../infrastructure/store.ts";
-import type { KnowledgeSourceRegistry } from "../../../capability/craft-knowledge/knowledge-source-registry.ts";
+import type { KnowledgeSourceRegistry } from '@craft/capability-knowledge/knowledge-source-registry';
 import type { MemoryGovernanceKernel } from "../../memory-governance.ts";
 import { text } from "../../validation.ts";
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { analyzeTypeScript } from "../capability/craft-codebase/typescript-analysis.ts";
+import { analyzeTypeScript } from '@craft/capability-codebase/typescript-analysis';
 
 const file = (path: string, content: string) =>
   ({ path, content, digest: createHash("sha256").update(content).digest("hex"), language: "typescript" });

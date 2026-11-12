@@ -1,7 +1,7 @@
 import type { CraftService } from "../../core/service.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import { stableDigest } from "../../core/digest.ts";
-import { contextAssetKey } from "../../common/craft-common-base/src/context-assets.ts";
+import { contextAssetKey } from 'craft-common-base/context-assets';
 
 /** Public preparation creates an actual TaskRun, HostSession and Context Open without starting a Host. */
 export async function prepareContextEvaluationRun(service: CraftService, root: string, id: string, environment: JsonObject = {}, budget: JsonObject = {}): Promise<JsonObject> {

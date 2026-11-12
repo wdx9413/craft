@@ -1,4 +1,4 @@
-import { experienceGraphTemplate } from "../../capability/craft-experience/procedure-templates.ts";
+import { experienceGraphTemplate } from '@craft/capability-experience/procedure-templates';
 /** Isolated stdio workflow contract for any launcher consuming the shared component bundle. */
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";

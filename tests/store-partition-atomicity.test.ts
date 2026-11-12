@@ -10,7 +10,7 @@ import { Worker } from "node:worker_threads";
 import test from "node:test";
 import { CraftStore, withContextLockBudget } from "../core/infrastructure/store.ts";
 import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
-import { MarkdownContentStore } from "../common/craft-common-store-local/src/content-store.ts";
+import { MarkdownContentStore } from 'craft-common-store-local/content-store';
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-partition-atomicity-"));

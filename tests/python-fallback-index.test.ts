@@ -9,15 +9,15 @@ import { pathToFileURL } from "node:url";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
-import { analyzePythonCheckpoint, resolvePythonAnalyzerPath } from "../capability/craft-codebase/python-analysis.ts";
-import type { RepositoryFile } from "../capability/craft-codebase/repository-files.ts";
-import { ProjectGraphStore } from "../capability/craft-codebase/project-graph-store.ts";
+import { analyzePythonCheckpoint, resolvePythonAnalyzerPath } from '@craft/capability-codebase/python-analysis';
+import type { RepositoryFile } from '@craft/capability-codebase/repository-files';
+import { ProjectGraphStore } from '@craft/capability-codebase/project-graph-store';
 import { stableDigest } from "../core/digest.ts";
 
 test("Python fallback Unicode analysis imports and an old index policy is rebuilt without changing source files", async () => {
   const runtime = process.env.CRAFT_TEST_CODEBASE_RUNTIME_ROOT;
   const RuntimeService: typeof CraftService = runtime ? (await import(pathToFileURL(join(runtime, "dist/core/runtime-api.js")).href)).CraftService : CraftService;
-  const adapter: Pick<typeof import("../capability/craft-codebase/python-analysis.ts"), "analyzePythonCheckpoint" | "resolvePythonAnalyzerPath"> = runtime
+  const adapter: Pick<typeof import("@craft/capability-codebase/python-analysis"), "analyzePythonCheckpoint" | "resolvePythonAnalyzerPath"> = runtime
     ? await import(pathToFileURL(join(runtime, "dist/capability/craft-codebase/python-analysis.js")).href) : { analyzePythonCheckpoint, resolvePythonAnalyzerPath };
   const root = await realpath(await mkdtemp(join(tmpdir(), "craft-python-fallback-index-"))), repo = join(root, "repo"); await mkdir(repo);
   execFileSync("git", ["-C", repo, "init", "-q"]);

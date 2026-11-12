@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
-import { buildDataFlowGraph, createDataFlowCompilerHost, solveDataFlowFixedPoint } from "../capability/craft-codebase/data-flow.ts";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { buildDataFlowGraph, createDataFlowCompilerHost, solveDataFlowFixedPoint } from '@craft/capability-codebase/data-flow';
+import type { JsonObject } from 'craft-common-store-local/store';
 
 function analyze(content: string, name = "run", variable = "value"): JsonObject {
   const match = new RegExp(`function\\s+${name}\\b|(?:const|let|var)\\s+${name}\\s*=`).exec(content);

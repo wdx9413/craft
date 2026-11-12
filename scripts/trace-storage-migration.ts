@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
-import { TraceShardStore, type TraceEventRow, type TraceRecordRow } from "../common/craft-common-store-local/src/trace-shards.ts";
+import { craftPaths } from 'craft-common-store-local/paths';
+import { TraceShardStore, type TraceEventRow, type TraceRecordRow } from 'craft-common-store-local/trace-shards';
 
 const CHILD_KINDS = "'trace_event','trace_feedback','telemetry_event'";
 const PARENT_KINDS = "'trace','trace_archive'";

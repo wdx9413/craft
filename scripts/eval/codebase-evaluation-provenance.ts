@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
-import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
-import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { stableDigest } from 'craft-common-base/digest';
+import type { JsonObject } from 'craft-common-store-local/store';
 
 const GIT_MAX_BUFFER_BYTES = 32 * 1024 * 1024;
 

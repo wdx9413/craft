@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Bm25Index } from "../../common/craft-common-base/src/bm25.ts";
-import { retrievalTerms } from "../../common/craft-common-base/src/retrieval-terms.ts";
+import { Bm25Index } from 'craft-common-base/bm25';
+import { retrievalTerms } from 'craft-common-base/retrieval-terms';
 import { CraftStore } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
@@ -13,7 +13,7 @@ import { readCodebaseEvaluationSymbolNodes } from "./codebase-evaluation-graph.t
 import { assertEvaluationStateStable, checkpointManifestDigest, readGitEvaluationState } from "./codebase-evaluation-provenance.ts";
 import { sourceContainsSymbolName } from "./codebase-evaluation-source.ts";
 import { isEvaluationNonProductionPath } from "./codebase-evaluation-source-policy.ts";
-import { CODEBASE_LSP_CONFIG } from "../../capability/craft-codebase/lsp-config.ts";
+import { CODEBASE_LSP_CONFIG } from '@craft/capability-codebase/lsp-config';
 import { persistCodebaseEvaluation, persistCodebaseEvaluationInput } from "./codebase-evaluation-store.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 

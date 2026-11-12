@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildControlFlowGraph } from "../capability/craft-codebase/control-flow.ts";
+import { buildControlFlowGraph } from '@craft/capability-codebase/control-flow';
 
 function flow(source: string, name: string, path = "src/example.ts") {
   const offset = source.indexOf(name);

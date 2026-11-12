@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fixture, scope } from "./helpers/procedure-invocation-fixture.ts";
-import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
-import { experienceGraphTemplate } from "../capability/craft-experience/procedure-templates.ts";
+import { ExperienceContribution } from '@craft/capability-experience/contribution';
+import { experienceGraphTemplate } from '@craft/capability-experience/procedure-templates';
 import { discoverContextTools } from "../core/mcp/context-tools.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 

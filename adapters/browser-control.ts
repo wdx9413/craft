@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { stableDigest } from "../core/digest.ts";
-import type { ControlAction, ControlAdapter, ControlObservation } from "../capability/control-session.ts";
+import type { ControlAction, ControlAdapter, ControlObservation } from "../core/control-session.ts";
 import type { CdpSession } from "./browser-cdp.ts";
 
 // Runs only in a named isolated world. No caller-supplied JavaScript or CSS selector.

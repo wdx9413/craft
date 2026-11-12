@@ -1,1 +1,1 @@
-export * from "../../common/craft-common-store-local/src/store-schema.ts";
+export * from 'craft-common-store-local/store-schema';

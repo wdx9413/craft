@@ -9,13 +9,13 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import test from "node:test";
 import { CraftService } from "../core/service.ts";
-import { KnowledgeClaimGovernance } from "../capability/craft-knowledge/claim-governance.ts";
+import { KnowledgeClaimGovernance } from '@craft/capability-knowledge/claim-governance';
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, withContextLockBudget, type JsonObject } from "../core/infrastructure/store.ts";
-import { projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { projectStorageDirectory } from 'craft-common-store-local/paths';
 import { stableDigest } from "../core/digest.ts";
 import { codexTaskGoalDigest } from "../core/codex-task-prose.ts";
-import { applySessionEvidencePage, repairSessionEvidencePage } from "../capability/craft-knowledge/session-evidence-repair.ts";
+import { applySessionEvidencePage, repairSessionEvidencePage } from '@craft/capability-knowledge/session-evidence-repair';
 import { preflightSessionEvidencePage } from "../core/session-evidence-repair-preflight.ts";
 
 const sha = (digit: string) => `sha256:${digit.repeat(64)}`;

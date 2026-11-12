@@ -9,11 +9,11 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
-import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
+import { KnowledgeContribution } from '@craft/capability-knowledge/contribution';
 import { payload, stableDigest } from "../core/digest.ts";
 import { bindRemoteIdentity } from "../deploy/components/server.ts";
-import { REPOSITORY_SELECTION_LIMITS } from "../capability/craft-codebase/repository-files.ts";
-import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
+import { REPOSITORY_SELECTION_LIMITS } from '@craft/capability-codebase/repository-files';
+import { ProjectAnalysisCache } from '@craft/capability-codebase/project-analysis-cache';
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() {

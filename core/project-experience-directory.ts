@@ -1,9 +1,9 @@
 import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { CraftStore } from "../common/craft-common-store-local/src/store.ts";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
-import { scopeFromKey } from "../common/craft-common-base/src/scope-policy.ts";
-import { canonicalCandidatePath, ensureProjectStorageDirectory, existingProjectStorageDirectory, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import type { CraftStore } from 'craft-common-store-local/store';
+import { stableDigest } from 'craft-common-base/digest';
+import { scopeFromKey } from 'craft-common-base/scope-policy';
+import { canonicalCandidatePath, ensureProjectStorageDirectory, existingProjectStorageDirectory, projectStorageDirectory } from 'craft-common-store-local/paths';
 
 /** Resolve Experience data only inside the registered project's shared storage tree. */
 export function projectExperienceDirectory(store: CraftStore, scopeId: string, requestedRoot?: string, create = false,

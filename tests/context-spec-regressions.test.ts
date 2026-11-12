@@ -1,12 +1,12 @@
-import { experienceGraphTemplate } from "../capability/craft-experience/procedure-templates.ts";
+import { experienceGraphTemplate } from '@craft/capability-experience/procedure-templates';
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
-import { repositoryFiles } from "../capability/craft-codebase/repository-files.ts";
-import { ProcedureStore } from "../capability/craft-experience/procedure-projection.ts";
+import { repositoryFiles } from '@craft/capability-codebase/repository-files';
+import { ProcedureStore } from '@craft/capability-experience/procedure-projection';
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "../core/digest.ts";
 

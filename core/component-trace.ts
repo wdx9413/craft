@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { TraceKernel } from "./trace-kernel.ts";
-import { currentOperation, observeOperation, operationErrorCode, operationPersistenceEnabled, operationResultStatus } from "../common/craft-common-log/src/index.ts";
+import { currentOperation, observeOperation, operationErrorCode, operationPersistenceEnabled, operationResultStatus } from 'craft-common-log/index';
 
 export type ComponentTraceResult = {
   ok: boolean;

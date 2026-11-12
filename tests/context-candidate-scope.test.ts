@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
-import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
+import { KnowledgeContribution } from '@craft/capability-knowledge/contribution';
+import { ExperienceContribution } from '@craft/capability-experience/contribution';
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 
 const request = { query: "alpha", scope_kind: "project", scope_id: "target", max_items: 10, max_chars: 12000 } as const;

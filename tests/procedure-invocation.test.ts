@@ -4,7 +4,7 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 import { payload, stableDigest } from "../core/digest.ts";
-import { validateProcedureComposition } from "../capability/craft-experience/procedure-composition.ts";
+import { validateProcedureComposition } from '@craft/capability-experience/procedure-composition';
 
 import { fixture, spec, scope } from "./helpers/procedure-invocation-fixture.ts";
 function parent(child: JsonObject): JsonObject {

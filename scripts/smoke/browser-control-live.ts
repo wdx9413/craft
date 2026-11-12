@@ -8,7 +8,7 @@ import { isAbsolute, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { connectCdp } from "../../adapters/cdp-session.ts";
 import { createBrowserControlAdapter } from "../../adapters/browser-control.ts";
-import { createControlSession } from "../../capability/control-session.ts";
+import { createControlSession } from "../../core/control-session.ts";
 import { createStoreControlAuthority } from "../../core/application/control-authority.ts";
 import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";

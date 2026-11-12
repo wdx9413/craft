@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { planPythonIncremental, pythonFileUnitDigest, type PythonFileUnit } from "../capability/craft-codebase/python-incremental.ts";
-import type { RepositoryFile } from "../capability/craft-codebase/repository-files.ts";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { planPythonIncremental, pythonFileUnitDigest, type PythonFileUnit } from '@craft/capability-codebase/python-incremental';
+import type { RepositoryFile } from '@craft/capability-codebase/repository-files';
+import type { JsonObject } from 'craft-common-store-local/store';
 
 const files: RepositoryFile[] = [
   { path: "pkg/base.py", content: "def base(): pass", digest: "base1", language: "py" },

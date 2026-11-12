@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
-import { ProjectBrainKernel } from "../capability/craft-knowledge/project-brain.ts";
+import { ProjectBrainKernel } from '@craft/capability-knowledge/project-brain';
 import { text } from "./validation.ts";
 import { digestJson, payload } from "./digest.ts";
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { matchDefinitionEdges } from "../capability/craft-codebase/definition-query.ts";
+import { matchDefinitionEdges } from '@craft/capability-codebase/definition-query';
 
 const edge = (id: string, kind: string, target: string, start = 4, end = 10): JsonObject => ({ id, kind, to_node_id: target, source_span: { start_offset: start, end_offset: end } });
 

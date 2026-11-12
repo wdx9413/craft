@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import type { RepositoryFile } from "../capability/craft-codebase/repository-files.ts";
-import { analyzeShell } from "../capability/craft-codebase/shell-analysis.ts";
+import type { RepositoryFile } from '@craft/capability-codebase/repository-files';
+import { analyzeShell } from '@craft/capability-codebase/shell-analysis';
 
 const file = (path: string, content: string, language: string): RepositoryFile =>
   ({ path, content, digest: createHash("sha256").update(content).digest("hex"), language, file_version: "1" });

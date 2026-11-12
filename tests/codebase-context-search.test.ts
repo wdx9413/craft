@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CODE_USAGE_BOOST, CodeSymbolSearchIndex, codeContextCandidates, codeQueryTerms, rankCodeSymbols } from "../capability/craft-codebase/context-search.ts";
-import { lspDeclarationKind } from "../capability/craft-codebase/symbol-kind.ts";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { CODE_USAGE_BOOST, CodeSymbolSearchIndex, codeContextCandidates, codeQueryTerms, rankCodeSymbols } from '@craft/capability-codebase/context-search';
+import { lspDeclarationKind } from '@craft/capability-codebase/symbol-kind';
+import type { JsonObject } from 'craft-common-store-local/store';
 
 const symbol = (id: string, name: string, path: string): JsonObject => ({ id, kind: "symbol", name, path, language: "typescript" });
 

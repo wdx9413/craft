@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { supportsFileSymlinks } from "./symlink-support.ts";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { configuredLspWorkerEnvironment, languageIdForFile, MAX_LSP_DOCUMENTS, MAX_RELATION_SYMBOLS, readTrustedLspConfig } from "../capability/craft-codebase/lsp-config.ts";
+import { configuredLspWorkerEnvironment, languageIdForFile, MAX_LSP_DOCUMENTS, MAX_RELATION_SYMBOLS, readTrustedLspConfig } from '@craft/capability-codebase/lsp-config';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-lsp-config-")); mkdirSync(join(root, "config"));

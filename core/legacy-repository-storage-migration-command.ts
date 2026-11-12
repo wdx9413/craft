@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { canonicalCandidatePath, craftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { canonicalCandidatePath, craftPaths } from 'craft-common-store-local/paths';
 import { legacyRepositoryStoragePreflight } from "./legacy-repository-storage-preflight.ts";
 import { migrateLegacyRepositoryStorage } from "./legacy-repository-storage-migration.ts";
 import type { LegacyRepositoryStorageScan } from "./legacy-repository-storage-preflight.ts";

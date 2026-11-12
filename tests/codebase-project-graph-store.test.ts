@@ -4,9 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { linkDirectorySync, supportsFileSymlinks } from "./symlink-support.ts";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { ProjectGraphStore } from "../capability/craft-codebase/project-graph-store.ts";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { craftPaths, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { ProjectGraphStore } from '@craft/capability-codebase/project-graph-store';
+import type { JsonObject } from 'craft-common-store-local/store';
+import { craftPaths, projectStorageDirectory } from 'craft-common-store-local/paths';
 
 const record = (id: string, name = "alpha"): JsonObject => ({ id, version: 1, graph_digest: "digest", nodes: [{ name }], edges: [] });
 

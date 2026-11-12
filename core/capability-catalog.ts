@@ -23,10 +23,10 @@
  * `capability/craft-memory/capability.ts` at the place a reader would look.
  */
 import type { CraftCapability } from "./capability-protocol.ts";
-import { knowledgeCapability } from "../capability/craft-knowledge/capability.ts";
-import { memoryCapability } from "../capability/craft-memory/capability.ts";
-import { experienceCapability } from "../capability/craft-experience/capability.ts";
-import { codebaseCapability } from "../capability/craft-codebase/capability.ts";
+import { knowledgeCapability } from '@craft/capability-knowledge/capability';
+import { memoryCapability } from '@craft/capability-memory/capability';
+import { experienceCapability } from '@craft/capability-experience/capability';
+import { codebaseCapability } from '@craft/capability-codebase/capability';
 
 /** Ordered by dependency: a capability may require a kernel an earlier one provided. */
 export const CRAFT_CAPABILITIES: readonly CraftCapability[] = [

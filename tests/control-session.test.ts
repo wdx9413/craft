@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createControlSession, type ControlGrant, type ControlObservation, type ControlAction, type ControlAdapter } from "../capability/control-session.ts";
+import { createControlSession, type ControlGrant, type ControlObservation, type ControlAction, type ControlAdapter } from "../core/control-session.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 

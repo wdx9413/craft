@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { craftPaths, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
-import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { craftPaths, projectStorageDirectory } from 'craft-common-store-local/paths';
+import { CraftStore } from 'craft-common-store-local/store';
 import { migrateCodebaseSnapshots } from "../core/codebase-storage-migration.ts";
 import type { CodebaseMigrationEntry } from "../core/codebase-storage-preflight.ts";
 

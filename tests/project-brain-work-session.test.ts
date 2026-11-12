@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
-import { ProjectBrainKernel } from "../capability/craft-knowledge/project-brain.ts";
+import { ProjectBrainKernel } from '@craft/capability-knowledge/project-brain';
 import { WorkSessionKernel } from "../core/work-session.ts";
 import { WorkbenchExperienceKernel } from "../core/workbench-experience.ts";
 import { LongTaskWorkerKernel } from "../core/long-task-worker.ts";

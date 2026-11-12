@@ -8,7 +8,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
-import { MarkdownContentStore } from "../common/craft-common-store-local/src/content-store.ts";
+import { MarkdownContentStore } from 'craft-common-store-local/content-store';
 import { CraftService } from "../core/service.ts";
 
 async function fixture() {

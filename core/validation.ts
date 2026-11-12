@@ -1,1 +1,1 @@
-export * from "../common/craft-common-base/src/validation.ts";
+export * from 'craft-common-base/validation';

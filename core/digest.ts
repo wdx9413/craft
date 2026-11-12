@@ -1,1 +1,1 @@
-export * from "../common/craft-common-base/src/digest.ts";
+export * from 'craft-common-base/digest';

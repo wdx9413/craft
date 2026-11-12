@@ -1,5 +1,5 @@
 import type { CraftService } from "../application/craft-service.ts";
-import { ProcedureDefinitionStore } from "../../capability/craft-experience/procedure-definition.ts";
+import { ProcedureDefinitionStore } from '@craft/capability-experience/procedure-definition';
 import { acquireLearningWorkerLocks } from "./learning-worker-supervisor.ts";
 
 /** Local file maintenance is delayed until after startup and bounded per timer tick. */

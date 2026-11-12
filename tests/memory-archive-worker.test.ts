@@ -10,7 +10,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths, sessionStorageScopeId } from "../core/infrastructure/paths.ts";
-import { MemoryFileStore } from "../capability/craft-memory/memory-files.ts";
+import { MemoryFileStore } from '@craft/capability-memory/memory-files';
 import { launchMemoryArchiveWorker, queueHookMaintenance, runMemoryArchiveWorker } from "../core/interfaces/memory-archive-worker.ts";
 import { CraftService } from "../core/service.ts";
 import { acquireLearningWorkerLocks } from "../core/infrastructure/learning-worker-lock.ts";

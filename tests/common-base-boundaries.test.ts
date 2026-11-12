@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { credentialStatus, selectModel, type ModelProviderSpec } from "../common/craft-common-base/src/model-compat.ts";
-import { scopeAccess, scopeAllows, scopeEnvelope, scopeEnvelopeReceipt, scopeFromKey, sourceAllows } from "../common/craft-common-base/src/scope-policy.ts";
-import { runPhase, type Hook } from "../common/craft-common-base/src/capability-protocol.ts";
+import { credentialStatus, selectModel, type ModelProviderSpec } from 'craft-common-base/model-compat';
+import { scopeAccess, scopeAllows, scopeEnvelope, scopeEnvelopeReceipt, scopeFromKey, sourceAllows } from 'craft-common-base/scope-policy';
+import { runPhase, type Hook } from 'craft-common-base/capability-protocol';
 
 const project = { kind: "project", id: "p" };
 

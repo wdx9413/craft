@@ -1,8 +1,8 @@
 import { ComponentTraceKernel } from "../component-trace.ts";
-import { operationErrorCode } from "../../common/craft-common-log/src/operation.ts";
+import { operationErrorCode } from 'craft-common-log/operation';
 import { randomUUID as hookRequestId } from "node:crypto";
 import { assertContextReadCurrent } from "../context-access-guard.ts";
-import { contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
+import { contextAssetMatches, contextAssetRef } from 'craft-common-base/context-assets';
 /**
  * Bounded Codex lifecycle integration for Craft Context and its standalone products.
  *
@@ -17,7 +17,7 @@ import { projectIdentityFromRoot } from "../scope-identity.ts";
 import type { CraftService } from "../application/craft-service.ts";
 import type { JsonObject } from "../infrastructure/store.ts";
 import { estimateTokens } from "../token-budget.ts";
-import { retrievalExcerpt } from "../../common/craft-common-base/src/retrieval-excerpt.ts";
+import { retrievalExcerpt } from 'craft-common-base/retrieval-excerpt';
 import { payload, stableDigest } from "../digest.ts";
 import { projectExperienceDirectory } from "../project-experience-directory.ts";
 import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGoal } from "../experience-task-goals.ts";

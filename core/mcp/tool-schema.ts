@@ -1,5 +1,5 @@
 import type { JsonObject } from "../infrastructure/store.ts";
-import { DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from "../../common/craft-common-base/src/context-assets.ts";
+import { DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from 'craft-common-base/context-assets';
 
 export type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 export type ParamType = "boolean" | "integer" | "number" | "object" | "array" | "string";

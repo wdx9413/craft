@@ -4,9 +4,9 @@ import { existsSync, mkdtempSync, mkdirSync, renameSync, rmSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
-import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { stableDigest } from 'craft-common-base/digest';
+import { craftPaths } from 'craft-common-store-local/paths';
+import { CraftStore } from 'craft-common-store-local/store';
 
 test("storage apply validates its arguments and supports a read-only inventory", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-storage-apply-inventory-"));

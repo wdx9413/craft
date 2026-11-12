@@ -6,10 +6,10 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import test, { before, mock } from "node:test";
-import { DEFAULT_RULES, enabledBuiltinRules, Sanitizer, type Json } from "../capability/craft-datasec/rules.ts";
-import { TokenVault, isPrivateDirectory, isPrivateFile } from "../capability/craft-datasec/vault.ts";
-import { blank, blankResult, FAILURE, handleHook, type Event, type HookInput, type Host } from "../capability/craft-datasec/hook.ts";
+import test, { mock } from "node:test";
+import { DEFAULT_RULES, enabledBuiltinRules, Sanitizer, type Json } from '@craft/capability-datasec/rules';
+import { TokenVault, isPrivateDirectory, isPrivateFile } from '@craft/capability-datasec/vault';
+import { blank, blankResult, FAILURE, handleHook, type Event, type HookInput, type Host } from '@craft/capability-datasec/hook';
 import { runDataSecHookCli, runIfInvoked, writeCliResult } from "../bin/craft-datasec-hook.ts";
 import { allReleaseProducts, externalDistributionContract, externalMarketplaceProducts, releaseManifest, releaseProduct, releaseProductNames } from "../core/release-catalog.ts";
 
@@ -18,10 +18,6 @@ const phone = ["138", "1234", "5678"].join("");
 const identity = ["110105", "19900307", "6754"].join("");
 const bank = ["622202", "1234567890123"].join("");
 const project = resolve(import.meta.dirname, "..");
-// Build after test discovery: a top-level async build can cancel earlier files
-// while Node loads the suite with --test-isolation=none.
-before(async () => { await import("../capability/craft-datasec/build.ts"); });
-
 test("Datasec CLI validates events, uses configured rules, and emits closed failure responses", () => {
   const f = fixture();
   try {
@@ -395,8 +391,6 @@ test("concurrent hook processes publish complete stable mappings without a share
 });
 
 test("independent plugin builds and executes both packaged hook manifests without Context or MCP", () => {
-  const build = spawnSync(process.execPath, ["--experimental-strip-types", resolve(project, "capability/craft-datasec/build.ts")], { encoding: "utf8" });
-  assert.equal(build.status, 0, build.stderr);
   const f = fixture();
   try {
     for (const host of ["claude", "codex"] as const) {

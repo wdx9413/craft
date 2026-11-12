@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { isAbsolute, join } from "node:path";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
-import { canonicalCandidatePath, parseSessionStorageScopeId, projectStorageDirectory, sessionStorageDirectory, sessionStorageScopeId, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { stableDigest } from 'craft-common-base/digest';
+import { canonicalCandidatePath, parseSessionStorageScopeId, projectStorageDirectory, sessionStorageDirectory, sessionStorageScopeId, type CraftPaths } from 'craft-common-store-local/paths';
 
 type Scope = { kind: string; id: string };
 type Partition = { file: string; scope: Scope };

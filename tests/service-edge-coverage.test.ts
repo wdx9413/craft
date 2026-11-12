@@ -79,7 +79,7 @@ test("service facades exercise defaults, compatibility views, and model validati
     const scenarioScope = `project:${studioId}`;
     const scenarioClaim = store.create("knowledge_claim", "scenario-exit", { source_id: reviewSource.id, scope: scenarioScope, kind: "fact", content: "scenario claim", evidence_ids: [explicitEvidence.id], status: "candidate", scenario_key: "engineering.tests" });
     const { knowledgeDirectoryForScope } = await import("../core/project-knowledge-content.ts");
-    const { recordKnowledgeScenario } = await import("../capability/craft-knowledge/scenario-catalog.ts");
+    const { recordKnowledgeScenario } = await import("@craft/capability-knowledge/scenario-catalog");
     recordKnowledgeScenario({ knowledge_dir: knowledgeDirectoryForScope(store, scenarioScope), project_id: studioId, scenario_key: "engineering.tests",
       claim_id: String(scenarioClaim.id), source_id: String(reviewSource.id), evidence_ids: [String(explicitEvidence.id)], status: "candidate" });
     const scenarioExit = service.knowledgeClaimReview({ claim_id: scenarioClaim.id, status: "disputed", reviewer: "r", reason: "conflict" });

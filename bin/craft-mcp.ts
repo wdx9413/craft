@@ -4,7 +4,7 @@ import { resolveMcpProductMode } from "../core/interfaces/mcp/product-launch.ts"
 import { startContextLearningWorker } from "../core/interfaces/learning-worker-supervisor.ts";
 import { startExperienceAssetWorker } from "../core/interfaces/experience-asset-worker.ts";
 import { TRACE_RETENTION_WORKER_FLAG, runTraceRetentionMaintenance, startConfiguredTraceRetentionWorker } from "../core/interfaces/trace-retention-worker.ts";
-import { CODEBASE_LSP_WORKER_FLAG, runCodebaseLspWorkerSafely } from "../capability/craft-codebase/lsp-worker.ts";
+import { CODEBASE_LSP_WORKER_FLAG, runCodebaseLspWorkerSafely } from '@craft/capability-codebase/lsp-worker';
 
 if (process.argv[2] === CODEBASE_LSP_WORKER_FLAG && process.argv.length === 3) {
   runCodebaseLspWorkerSafely(process.stdin, line => process.stdout.write(line));

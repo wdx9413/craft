@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { cacheLspDocumentSymbols, lspDocumentSymbolsDigest, normalizeLspSymbols } from "../capability/craft-codebase/lsp-adapter.ts";
+import { cacheLspDocumentSymbols, lspDocumentSymbolsDigest, normalizeLspSymbols } from '@craft/capability-codebase/lsp-adapter';
 import type { JsonObject } from "../core/infrastructure/store.ts";
 const position = (line: number, character: number) => ({ line, character });
 const range = { start: position(1, 0), end: position(1, 3) };

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { stageLspSnapshotFiles } from "../capability/craft-codebase/lsp-snapshot-files.ts";
+import { stageLspSnapshotFiles } from '@craft/capability-codebase/lsp-snapshot-files';
 
 test("LSP snapshot staging writes only contained source and digest-pinned workspace files", () => {
   const temporaryRoot = mkdtempSync(join(tmpdir(), "craft-lsp-snapshot-files-"));

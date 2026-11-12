@@ -1,1 +1,1 @@
-export * from "../common/craft-common-log/src/cost-ledger.ts";
+export * from 'craft-common-log/cost-ledger';

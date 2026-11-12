@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GRAPH_BUDGET } from "../capability/craft-codebase/graph-budget.ts";
+import { GRAPH_BUDGET } from '@craft/capability-codebase/graph-budget';
 
 test("semantic graph budgets are one frozen, bounded source of truth", () => {
   assert.equal(Object.isFrozen(GRAPH_BUDGET), true);

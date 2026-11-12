@@ -10,12 +10,12 @@ import test from "node:test";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
-import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
+import { ProcedureDefinitionStore } from '@craft/capability-experience/procedure-definition';
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 import { projectKnowledgeContentDirectory } from "../core/project-knowledge-content.ts";
 import { projectExperienceContentDirectory, projectExperienceDirectory, projectPathAliasDigest } from "../core/project-experience-directory.ts";
-import { MemoryFileStore } from "../capability/craft-memory/memory-files.ts";
-import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
+import { MemoryFileStore } from '@craft/capability-memory/memory-files';
+import { KnowledgeContribution } from '@craft/capability-knowledge/contribution';
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { stableDigest } from "../core/digest.ts";
 

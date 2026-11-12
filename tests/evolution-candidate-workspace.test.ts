@@ -6,7 +6,7 @@ import { linkDirectory, linkDirectorySync, linkFile, supportsFileSymlinks } from
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { ensureProjectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { ensureProjectStorageDirectory } from 'craft-common-store-local/paths';
 import { EvolutionCandidateWorkspace } from "../core/evolution-candidate-workspace.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";

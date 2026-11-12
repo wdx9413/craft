@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { sessionStorageScopeId, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { sessionStorageScopeId, type CraftPaths } from 'craft-common-store-local/paths';
 
 type Row = { kind: string; id: string; version: number; payload_json: string };
 type Cursor = [string, string, number];

@@ -4,7 +4,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { HookSignalSanitizer } from "../core/interfaces/codex-hook-signal-sanitizer.ts";
 import { randomUUID } from "node:crypto";
 import { beginHookRuntimeDiagnostic, hookStorageFailureDetails } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
-import { operationErrorCode } from "../common/craft-common-log/src/index.ts";
+import { operationErrorCode } from 'craft-common-log/index';
 import { launchMemoryArchiveWorker, MEMORY_ARCHIVE_WORKER_FLAG } from "../core/interfaces/memory-archive-launcher.ts";
 
 type CodexHookMember = "context" | "knowledge" | "memory" | "experience";

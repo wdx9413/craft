@@ -3,11 +3,11 @@ import { realpathSync } from "node:fs";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { object, text } from "./validation.ts";
 import { stableDigest, payload } from "./digest.ts";
-import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
+import { sessionStorageScopeId } from 'craft-common-store-local/paths';
 import { EvolutionCandidateWorkspace } from "./evolution-candidate-workspace.ts";
 import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationEvidence } from "./knowledge-evaluation-provenance.ts";
-import { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
-import { activeProcedure } from "../capability/craft-experience/procedure-release.ts";
+import { MemoryLedgerKernel } from '@craft/capability-memory/memory-ledger';
+import { activeProcedure } from '@craft/capability-experience/procedure-release';
 import { WorkspaceState } from "./workspace.ts";
 
 const STAGES = new Set(["observe", "retrieve", "act", "feedback", "attribute", "candidate", "evaluate", "promote", "reject", "rollback", "replan"]);

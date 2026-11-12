@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { EXPERIENCE_COMPONENT, EXPERIENCE_OWNS } from "../capability/craft-experience/ownership.ts";
+import { EXPERIENCE_COMPONENT, EXPERIENCE_OWNS } from '@craft/capability-experience/ownership';
 
 test("experience ownership claims the conclusion deduplication family", () => {
   for (const owned of [

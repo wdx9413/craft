@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareRunReports, type RunReport } from "../capability/craft-eval/compare-run-reports.ts";
+import { compareRunReports, type RunReport } from "craft-eval/compare-run-reports";
 import { LEDGER_MIN_OBSERVATIONS } from "../core/eval-suite.ts";
 
 const identity = {

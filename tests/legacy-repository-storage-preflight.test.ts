@@ -5,7 +5,7 @@ import { linkDirectorySync } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory } from 'craft-common-store-local/paths';
 import { legacyRepositoryStoragePreflight, legacyRepositoryStorageSummary } from "../core/legacy-repository-storage-preflight.ts";
 
 function fixture(): string { return mkdtempSync(join(tmpdir(), "craft-legacy-repository-storage-")); }

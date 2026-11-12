@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { analyzePythonFallback } from "../capability/craft-codebase/python-fallback.ts";
-import type { RepositoryFile } from "../capability/craft-codebase/repository-files.ts";
+import { analyzePythonFallback } from '@craft/capability-codebase/python-fallback';
+import type { RepositoryFile } from '@craft/capability-codebase/repository-files';
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { planPythonIncremental, pythonFileUnitDigest, type PythonFileUnit } from "../capability/craft-codebase/python-incremental.ts";
+import { planPythonIncremental, pythonFileUnitDigest, type PythonFileUnit } from '@craft/capability-codebase/python-incremental';
 const file = (path: string, content: string): RepositoryFile => ({ path, content, language: "python", digest: createHash("sha256").update(content).digest("hex") });
 
 test("Python fallback uses UTF-16 spans after Chinese and emoji and locates names beyond keywords", () => {

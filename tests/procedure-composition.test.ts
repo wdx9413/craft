@@ -10,9 +10,9 @@ import { stableDigest } from "../core/digest.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 import { productSurfaceOf } from "../core/interfaces/mcp/product-launch.ts";
-import { validateProcedureComposition } from "../capability/craft-experience/procedure-composition.ts";
-import { ProcedureDefinitionStore, type ProcedureDefinition, type ProcedureDefinitionRef } from "../capability/craft-experience/procedure-definition.ts";
-import { stableDigest as digest } from "../common/craft-common-base/src/digest.ts";
+import { validateProcedureComposition } from '@craft/capability-experience/procedure-composition';
+import { ProcedureDefinitionStore, type ProcedureDefinition, type ProcedureDefinitionRef } from '@craft/capability-experience/procedure-definition';
+import { stableDigest as digest } from 'craft-common-base/digest';
 
 function spec(): JsonObject {
   return { steps: [{ id: "review", type: "instruction", instruction: "Review the supplied diff; findings are a valid report.", side_effect: "read_only", requires: ["diff"], provides: ["report"] }], composition: {

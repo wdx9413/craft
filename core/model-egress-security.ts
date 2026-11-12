@@ -1,5 +1,5 @@
 import type { JsonObject } from "./infrastructure/store.ts";
-import { DEFAULT_RULES, Sanitizer } from "../capability/craft-datasec/rules.ts";
+import { DEFAULT_RULES, Sanitizer } from '@craft/capability-datasec/rules';
 
 export interface EgressProviderBinding { base_url: string; chat_path: string }
 export interface EgressRequestBinding { url: string; body: JsonObject }

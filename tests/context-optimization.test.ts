@@ -7,10 +7,10 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
-import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
-import { KeywordRetrievalPort } from "../common/craft-common-base/src/retrieval-port.ts";
-import { ContextBudget, ContextBudgetError } from "../common/craft-common-base/src/context-assets.ts";
-import { ContextReadGuard } from "../common/craft-common-store-local/src/context-access-guard.ts";
+import { KnowledgeContribution } from '@craft/capability-knowledge/contribution';
+import { KeywordRetrievalPort } from 'craft-common-base/retrieval-port';
+import { ContextBudget, ContextBudgetError } from 'craft-common-base/context-assets';
+import { ContextReadGuard } from 'craft-common-store-local/context-access-guard';
 import { payload } from "../core/digest.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 async function fixture() {
@@ -141,7 +141,7 @@ test("explicit confirmation affects only exact revision ranking and receipt iden
 test("Knowledge revalidation selects reverse Source/Document dependencies without unrelated body hydration", async () => {
   const f = await fixture();
   try {
-    const { KnowledgeClaimGovernance } = await import("../capability/craft-knowledge/claim-governance.ts");
+    const { KnowledgeClaimGovernance } = await import("@craft/capability-knowledge/claim-governance");
     const sdk = new KnowledgeClaimGovernance(f.store);
     f.store.create("knowledge_document", "doc", { source_id: "source", scope: "project:p", status: "changed", content_digest: "new" });
     f.store.create("knowledge_claim", "target", { source_id: "source", document_id: "doc", document_digest: "d", scope: "project:p", status: "reviewed", content: "target" });
@@ -194,7 +194,7 @@ test("global scoped reads accept legacy, keyed and object forms without leaking 
       f.store.create("global_scope_probe", id, { scope });
     assert.deepEqual(f.store.listScoped("global_scope_probe", [{ kind: "global", id: "global" }]).map(r => r.id).sort(), ["keyed", "legacy", "object"]);
     assert.deepEqual(f.store.listScoped("global_scope_probe", [{ kind: "project", id: "other" }]).map(r => r.id), ["private"]);
-    const { ExperienceContribution } = await import("../capability/craft-experience/contribution.ts");
+    const { ExperienceContribution } = await import("@craft/capability-experience/contribution");
     f.store.create("experience_procedure", "global-procedure", { scope: "global:global", title: "产品研发", trigger: "产品研发", procedure_kind: "graph", lifecycle: "routeable", routeable: true });
     const kernel = new ContextResolutionKernel(f.store, [new ExperienceContribution(f.store)]);
     const resolved = await kernel.resolve({ scope_kind: "global", scope_id: "global", query: "产品研发", members: ["experience"], max_chars: 6000 });

@@ -3,10 +3,10 @@ import type { JsonObject } from "./infrastructure/store.ts";
 import { object, text } from "./validation.ts";
 import { digestJson } from "./digest.ts";
 import { compact } from "./compaction.ts";
-import { DEFAULT_RULES, Sanitizer, type Json } from "../capability/craft-datasec/rules.ts";
+import { DEFAULT_RULES, Sanitizer, type Json } from '@craft/capability-datasec/rules';
 
-export { TRACE_SCHEMA, TRACE_SCHEMA_REVISION, standardizeTrace, traceCorrelation, toOtlpTrace, exportOtlp } from "../common/craft-common-log/src/otlp.ts";
-export type { OtlpFetch, OtlpFetchResponse } from "../common/craft-common-log/src/otlp.ts";
+export { TRACE_SCHEMA, TRACE_SCHEMA_REVISION, standardizeTrace, traceCorrelation, toOtlpTrace, exportOtlp } from 'craft-common-log/otlp';
+export type { OtlpFetch, OtlpFetchResponse } from 'craft-common-log/otlp';
 
 export type ConversationRole = "system" | "user" | "assistant" | "tool";
 export interface ConversationMessage {

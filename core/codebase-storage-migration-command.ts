@@ -1,7 +1,7 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { craftPaths, ensureLayout } from "../common/craft-common-store-local/src/paths.ts";
+import { craftPaths, ensureLayout } from 'craft-common-store-local/paths';
 import { CodebaseStoragePreflightReader, type CodebaseMigrationEntry } from "./codebase-storage-preflight.ts";
 import { migrateCodebaseSnapshots } from "./codebase-storage-migration.ts";
 

@@ -3,9 +3,9 @@ import test from "node:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ProjectGraphStore } from "../capability/craft-codebase/project-graph-store.ts";
-import type { CraftStore, JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { ProjectGraphStore } from '@craft/capability-codebase/project-graph-store';
+import type { CraftStore, JsonObject } from 'craft-common-store-local/store';
+import { craftPaths } from 'craft-common-store-local/paths';
 import { readCodebaseEvaluationSymbolNodes } from "../scripts/eval/codebase-evaluation-graph.ts";
 
 const shardId = "codebase_shard_0123456789abcdef0123456789abcdef";

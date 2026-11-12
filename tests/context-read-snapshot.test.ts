@@ -8,7 +8,7 @@ import { once } from "node:events";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
-import { assertContextReadCurrent, ContextAccessChangedError } from "../common/craft-common-store-local/src/context-access-guard.ts";
+import { assertContextReadCurrent, ContextAccessChangedError } from 'craft-common-store-local/context-access-guard';
 
 async function fixture(count: number) {
   const root = mkdtempSync(join(tmpdir(), "craft-read-snapshot-"));

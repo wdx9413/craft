@@ -3,7 +3,7 @@ import { normalizeModelPricing, type CraftModelConfig, type ModelProtocol, type 
 export type { ModelPricing } from "./settings.ts";
 import { text } from "./validation.ts";
 import { stableDigest } from "./digest.ts";
-import { DEFAULT_RULES, Sanitizer } from "../capability/craft-datasec/rules.ts";
+import { DEFAULT_RULES, Sanitizer } from '@craft/capability-datasec/rules';
 import { sanitizeModelEgressRequest } from "./model-egress-security.ts";
 import { setTimeout as delay } from "node:timers/promises";
 

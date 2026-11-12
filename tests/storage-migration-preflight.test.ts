@@ -8,9 +8,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
-import { craftPaths, projectStorageDirectory, sessionStorageDirectory, sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
-import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { stableDigest } from 'craft-common-base/digest';
+import { craftPaths, projectStorageDirectory, sessionStorageDirectory, sessionStorageScopeId } from 'craft-common-store-local/paths';
+import { CraftStore } from 'craft-common-store-local/store';
 import { projectAliases, StorageMigrationPreflightReader, storageMigrationPreflight } from "../core/storage-migration-preflight.ts";
 
 test("preflight CLI reports identity status counts for its page", async () => {

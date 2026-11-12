@@ -6,8 +6,8 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { analyzeJavaCheckpoint, analyzeJavaControlFlow, resolveJavaAnalyzerPath, resolveJavaControlFlowAnalyzerPath } from "../capability/craft-codebase/java-analysis.ts";
-import type { RepositoryFile } from "../capability/craft-codebase/repository-files.ts";
+import { analyzeJavaCheckpoint, analyzeJavaControlFlow, resolveJavaAnalyzerPath, resolveJavaControlFlowAnalyzerPath } from '@craft/capability-codebase/java-analysis';
+import type { RepositoryFile } from '@craft/capability-codebase/repository-files';
 
 /** The analyzer reports `jdk_unavailable` honestly; the JDK-dependent cases skip. */
 function jdkAvailable(): boolean {

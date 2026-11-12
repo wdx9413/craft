@@ -1,5 +1,5 @@
 import { setImmediate as yieldImmediate, setTimeout as delay } from "node:timers/promises";
-import { MemoryFileStore } from "../../capability/craft-memory/memory-files.ts";
+import { MemoryFileStore } from '@craft/capability-memory/memory-files';
 import { craftPaths, dataRoot } from "../infrastructure/paths.ts";
 import { CraftStore } from "../infrastructure/store.ts";
 import { acquireLearningWorkerLocks } from "../infrastructure/learning-worker-lock.ts";

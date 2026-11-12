@@ -14,8 +14,8 @@ import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { contentReference } from "./infrastructure/content-store.ts";
 import { canonicalJson, payload, stableDigest } from "./digest.ts";
 import { optionalScope, text } from "./validation.ts";
-import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition } from "../capability/craft-experience/procedure-definition.ts";
-import { syncGraphVersionManifest } from "../capability/craft-experience/graph-version-manifest.ts";
+import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition } from '@craft/capability-experience/procedure-definition';
+import { syncGraphVersionManifest } from '@craft/capability-experience/graph-version-manifest';
 import { portableKnowledgeClaimForImport } from "./knowledge-claim-import.ts";
 
 const FORMAT = "craft.knowledge-memory-bundle";

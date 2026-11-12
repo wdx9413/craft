@@ -1,1 +1,1 @@
-export * from "../common/craft-common-base/src/retrieval-port.ts";
+export * from 'craft-common-base/retrieval-port';

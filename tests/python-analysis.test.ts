@@ -4,11 +4,11 @@ import test from "node:test";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolvePythonAnalyzerPath, analyzePythonCheckpoint, analyzePythonControlFlow, analyzePythonDataFlow,
-  defaultPythonCommand, resetPythonExecutableCache, resolvePythonExecutable } from "../capability/craft-codebase/python-analysis.ts";
-import { combineLanguageAnalyses } from "../capability/craft-codebase/multi-language-analysis.ts";
-import { GRAPH_BUDGET } from "../capability/craft-codebase/graph-budget.ts";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { pythonFileUnitDigest } from "../capability/craft-codebase/python-incremental.ts";
+  defaultPythonCommand, resetPythonExecutableCache, resolvePythonExecutable } from '@craft/capability-codebase/python-analysis';
+import { combineLanguageAnalyses } from '@craft/capability-codebase/multi-language-analysis';
+import { GRAPH_BUDGET } from '@craft/capability-codebase/graph-budget';
+import type { JsonObject } from 'craft-common-store-local/store';
+import { pythonFileUnitDigest } from '@craft/capability-codebase/python-incremental';
 
 const file = (content = "def f(): pass") => ({ path: "a.py", content, digest: createHash("sha256").update(content).digest("hex"), language: "py" });
 const graph = (language: string, nodes: JsonObject[], edges: JsonObject[] = [], diagnostics: JsonObject = {}) => ({

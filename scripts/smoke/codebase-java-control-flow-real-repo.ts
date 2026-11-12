@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { CraftStore } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
-import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import type { JsonObject } from 'craft-common-store-local/store';
 
 const projectRoot = resolve(process.argv[2] ?? "/Users/didi/Documents/project/d-forge");
 const targetPath = process.argv[3] ?? "d-forge-config-server/src/main/java/com/xiaoju/uemc/dforgeconfig/service/impl/DataWorkflowServiceImpl.java";

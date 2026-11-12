@@ -1,10 +1,10 @@
 import type { CraftStore, JsonObject } from "../../infrastructure/store.ts";
 import { KnowledgeIndex, diffKnowledgeBase, scanKnowledgeBase } from "../../knowledge-index.ts";
 import type { ContextResolutionKernel } from "../../context-resolution.ts";
-import type { KnowledgeRelationKernel } from "../../../capability/craft-knowledge/knowledge-relation.ts";
-import { contentReference } from "../../../common/craft-common-store-local/src/content-store.ts";
-import { scopeFromKey } from "../../../common/craft-common-base/src/scope-policy.ts";
-import { knowledgeScenarioIsActive, listKnowledgeScenarios, proposeKnowledgeScenarioMigration, retireKnowledgeScenario } from "../../../capability/craft-knowledge/scenario-catalog.ts";
+import type { KnowledgeRelationKernel } from '@craft/capability-knowledge/knowledge-relation';
+import { contentReference } from 'craft-common-store-local/content-store';
+import { scopeFromKey } from 'craft-common-base/scope-policy';
+import { knowledgeScenarioIsActive, listKnowledgeScenarios, proposeKnowledgeScenarioMigration, retireKnowledgeScenario } from '@craft/capability-knowledge/scenario-catalog';
 import { array, finiteInteger, object, text } from "../../validation.ts";
 import { knowledgeDirectoryForScope } from "../../project-knowledge-content.ts";
 import { knowledgeClaimPromotionProofVerified } from "../../knowledge-evaluation-provenance.ts";

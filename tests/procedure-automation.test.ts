@@ -5,13 +5,13 @@ import { join } from "node:path";
 import test from "node:test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
+import { ProcedureDefinitionStore } from '@craft/capability-experience/procedure-definition';
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { McpServer } from "../core/mcp.ts";
 import { CraftService } from "../core/service.ts";
 import { payload, stableDigest } from "../core/digest.ts";
-import { stableDigest as digest } from "../common/craft-common-base/src/digest.ts";
+import { stableDigest as digest } from 'craft-common-base/digest';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-procedure-automation-"));
@@ -82,7 +82,7 @@ test("two Host processes cannot claim the same Automation job", async () => {
     f.service.procedureAutomationSave({ ...binding, job_id: "concurrent", procedure_id: "concurrent", workspace: f.workspace, verifier_step_id: "verify-artifact" });
     const code = `import { CraftStore } from ${JSON.stringify(new URL("../core/infrastructure/store.ts", import.meta.url).href)};
       import { craftPaths } from ${JSON.stringify(new URL("../core/infrastructure/paths.ts", import.meta.url).href)};
-      import { ProcedureAutomationKernel } from ${JSON.stringify(new URL("../capability/craft-experience/procedure-automation.ts", import.meta.url).href)};
+      import { ProcedureAutomationKernel } from ${JSON.stringify(new URL("@craft/capability-experience/procedure-automation", import.meta.url).href)};
       const store = await new CraftStore(craftPaths(${JSON.stringify(join(f.root, "data"))})).open();
       try { console.log(JSON.stringify(new ProcedureAutomationKernel(store).run({job_id:"concurrent"}))); } finally { store.close(); }`;
     const results = await Promise.all([1, 2].map(() => promisify(execFile)(process.execPath, ["--input-type=module", "-e", code])));

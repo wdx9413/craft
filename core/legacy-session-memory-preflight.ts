@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { closeSync, lstatSync, openSync, readSync, readdirSync, realpathSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { basename, join } from "node:path";
-import { sessionStorageScopeId, sessionStorageDirectory, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { sessionStorageScopeId, sessionStorageDirectory, type CraftPaths } from 'craft-common-store-local/paths';
 
 type Status = "legacy_ready" | "unbound_host" | "ambiguous_host" | "ambiguous_session" | "unidentified_session"
   | "identity_mismatch" | "unscoped_entry" | "unsafe_path" | "broken_symlink" | "binding_unavailable" | "source_unreadable" | "target_conflict";

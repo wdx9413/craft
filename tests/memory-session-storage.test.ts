@@ -7,7 +7,7 @@ import { linkDirectorySync, supportsFileSymlinks } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import test from "node:test";
-import { MemoryFileStore } from "../capability/craft-memory/memory-files.ts";
+import { MemoryFileStore } from '@craft/capability-memory/memory-files';
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths, projectStorageDirectory, sessionStorageDirectory, sessionStorageScopeId } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";

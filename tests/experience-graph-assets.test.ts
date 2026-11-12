@@ -6,13 +6,13 @@ import { linkDirectorySync } from "./symlink-support.ts";
 import { join, dirname } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { fixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
-import { experienceGraphTemplate } from "../capability/craft-experience/procedure-templates.ts";
-import { checkedExperiencePath, experienceGraphDirectory, ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
-import { validateExperienceConfiguration } from "../capability/craft-experience/procedure-configuration.ts";
+import { experienceGraphTemplate } from '@craft/capability-experience/procedure-templates';
+import { checkedExperiencePath, experienceGraphDirectory, ProcedureDefinitionStore } from '@craft/capability-experience/procedure-definition';
+import { validateExperienceConfiguration } from '@craft/capability-experience/procedure-configuration';
 import { stableDigest } from "../core/digest.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { McpServer } from "../core/mcp.ts";
-import { projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { projectStorageDirectory } from 'craft-common-store-local/paths';
 
 const config = (): JsonObject => ({ title: "互联网产研", procedure_kind: "graph", definition: experienceGraphTemplate("internet-product-engineering") });
 const workflow = (): JsonObject => ({ title: "Review", procedure_kind: "workflow", scenario_id: "review", definition: spec() });
@@ -330,7 +330,7 @@ test("definition migration rejects a competing revision and retries without over
   const f = await fixture();
   try {
     const procedure = f.create();
-    const ref = procedure.definition_ref as unknown as import("../capability/craft-experience/procedure-definition.ts").ProcedureDefinitionRef;
+    const ref = procedure.definition_ref as unknown as import("@craft/capability-experience/procedure-definition").ProcedureDefinitionRef;
     const definitions = new ProcedureDefinitionStore(f.store);
     const value = definitions.read(ref);
     const legacyPath = join(f.store.paths.experienceProcedureDir, "workflows", "migration.v1.json");
@@ -366,7 +366,7 @@ test("graph migration publishes files without a primary writer lock and rejects 
   const f = await fixture();
   try {
     const procedure = f.create();
-    const ref = procedure.definition_ref as unknown as import("../capability/craft-experience/procedure-definition.ts").ProcedureDefinitionRef;
+    const ref = procedure.definition_ref as unknown as import("@craft/capability-experience/procedure-definition").ProcedureDefinitionRef;
     const definitions = new ProcedureDefinitionStore(f.store), value = definitions.read(ref);
     const legacyPath = join(f.store.paths.experienceProcedureDir, "workflows", "lock-probe.v1.json");
     mkdirSync(dirname(legacyPath), { recursive: true }); writeFileSync(legacyPath, JSON.stringify(value));
@@ -399,7 +399,7 @@ test("background definition maintenance is bounded, restartable and revisits new
     assert.equal(definitions.maintain(1).status, "idle");
     assert.equal(f.store.find("experience_asset_migration", "definition-locations"), null);
     const procedure = f.create();
-    const ref = procedure.definition_ref as unknown as import("../capability/craft-experience/procedure-definition.ts").ProcedureDefinitionRef;
+    const ref = procedure.definition_ref as unknown as import("@craft/capability-experience/procedure-definition").ProcedureDefinitionRef;
     const legacyPath = join(f.store.paths.experienceProcedureDir, "workflows", "background.v1.json");
     mkdirSync(dirname(legacyPath), { recursive: true }); writeFileSync(legacyPath, JSON.stringify(definitions.read(ref)));
     f.store.save("experience_procedure", String(procedure.id), { ...procedure, definition_ref: { ...ref, path: legacyPath } });
@@ -436,7 +436,7 @@ test("a malformed definition is isolated while later records migrate in the same
     const bad = f.store.create("experience_procedure", "a-malformed", { scope, definition_ref: { secret: "sensitive diagnostic fixture" } });
     const procedure = f.create();
     const definitions = new ProcedureDefinitionStore(f.store);
-    const ref = procedure.definition_ref as unknown as import("../capability/craft-experience/procedure-definition.ts").ProcedureDefinitionRef;
+    const ref = procedure.definition_ref as unknown as import("@craft/capability-experience/procedure-definition").ProcedureDefinitionRef;
     const path = join(f.store.paths.experienceProcedureDir, "workflows", "isolation.v1.json");
     mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(definitions.read(ref)));
     const current = f.store.save("experience_procedure", String(procedure.id), { ...procedure, definition_ref: { ...ref, path } });

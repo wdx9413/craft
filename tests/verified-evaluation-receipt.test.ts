@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { receiptEvidenceIds, receiptPassed, receiptPayload, verifiedEvaluationReceipt } from "../capability/verified-evaluation-receipt.ts";
+import { receiptEvidenceIds, receiptPassed, receiptPayload, verifiedEvaluationReceipt } from "../core/verified-evaluation-receipt.ts";
 
 function receipt(overrides: Record<string, unknown> = {}) {
   const check = { evidence_id: "evidence", command_digest: "sha256:command", result_digest: "sha256:result", status: "passed" };

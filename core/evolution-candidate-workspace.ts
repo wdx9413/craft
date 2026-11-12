@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { ensureProjectStorageDirectory, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { ensureProjectStorageDirectory, type CraftPaths } from 'craft-common-store-local/paths';
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { stableDigest } from "./digest.ts";
 

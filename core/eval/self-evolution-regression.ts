@@ -23,11 +23,11 @@ import { LocalDropAdapter, MessageListener } from "../message-listener.ts";
 import { FileDirDescRegistry, PROMOTION_USE_THRESHOLD } from "../file-dir-desc.ts";
 import { WorkspaceState } from "../workspace.ts";
 import { resolveCoordinatorDirectory } from "../pilot-coordinator.ts";
-import { combineLanguageAnalyses } from "../../capability/craft-codebase/multi-language-analysis.ts";
-import { GRAPH_BUDGET } from "../../capability/craft-codebase/graph-budget.ts";
-import { REPOSITORY_SELECTION_LIMITS } from "../../capability/craft-codebase/repository-files.ts";
-import { analyzeTypeScript } from "../../capability/craft-codebase/typescript-analysis.ts";
-import { analyzeShell } from "../../capability/craft-codebase/shell-analysis.ts";
+import { combineLanguageAnalyses } from '@craft/capability-codebase/multi-language-analysis';
+import { GRAPH_BUDGET } from '@craft/capability-codebase/graph-budget';
+import { REPOSITORY_SELECTION_LIMITS } from '@craft/capability-codebase/repository-files';
+import { analyzeTypeScript } from '@craft/capability-codebase/typescript-analysis';
+import { analyzeShell } from '@craft/capability-codebase/shell-analysis';
 
 export interface RegressionCase {
   readonly id: string;

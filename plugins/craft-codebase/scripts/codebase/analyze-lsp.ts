@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { analyzeLspSnapshot, type LspStdioRequest } from "../../capability/craft-codebase/lsp-stdio-client.ts";
+import { analyzeLspSnapshot, type LspStdioRequest } from "@craft/capability-codebase/lsp-stdio-client";
 
 const configPath = process.argv[2];
 if (!configPath || process.argv.length !== 3) throw new Error("Usage: node --experimental-strip-types scripts/codebase/analyze-lsp.ts <request.json>");

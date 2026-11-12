@@ -2,7 +2,7 @@ import type { CraftStore } from "../../infrastructure/store.ts";
 import type { ChangeSetKernel } from "../../changeset.ts";
 import type { HydrationKernel } from "../../hydration.ts";
 import type { LineageKernel } from "../../lineage.ts";
-import type { ProjectBrainKernel } from "../../../capability/craft-knowledge/project-brain.ts";
+import type { ProjectBrainKernel } from '@craft/capability-knowledge/project-brain';
 import type { StateWorkspaceKernel } from "../../state-workspace.ts";
 import type { TransactionCoordinator } from "../../transaction.ts";
 import type { WorkspaceObserverKernel } from "../../workspace-observer.ts";

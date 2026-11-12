@@ -3,7 +3,7 @@ import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { stableDigest } from "./digest.ts";
 import { text } from "./validation.ts";
 import type { ContextResolutionKernel } from "./context-resolution.ts";
-import { ContextBudget, ContextBudgetError, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS, contextAssetKey, contextAssetRef, contextAssetMatches, requiredContextRef } from "../common/craft-common-base/src/context-assets.ts";
+import { ContextBudget, ContextBudgetError, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS, contextAssetKey, contextAssetRef, contextAssetMatches, requiredContextRef } from 'craft-common-base/context-assets';
 
 export const CONTEXT_WORKING_SET_MEMBERS = ["history", "knowledge", "memory", "experience", "state"] as const;
 export type ContextWorkingSetMember = typeof CONTEXT_WORKING_SET_MEMBERS[number];

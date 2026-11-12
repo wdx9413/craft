@@ -8,8 +8,8 @@ import test from "node:test";
  * store-backed cases are disjoint. This check reads the runner source so a new
  * case cannot silently reuse the Memory value scope and inflate that case.
  */
-const source = readFileSync(new URL("../capability/craft-eval/suite.ts", import.meta.url), "utf8");
-const pairedSource = readFileSync(new URL("../capability/craft-eval/paired-value-runs.ts", import.meta.url), "utf8");
+const source = readFileSync(new URL(import.meta.resolve("craft-eval/suite")), "utf8");
+const pairedSource = readFileSync(new URL(import.meta.resolve("craft-eval/paired-value-runs")), "utf8");
 
 const scopes = (block: string): string[] => {
   const start = source.indexOf(block);

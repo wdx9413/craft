@@ -1,1 +1,1 @@
-export * from "../../common/craft-common-store-local/src/store-migrations.ts";
+export * from 'craft-common-store-local/store-migrations';

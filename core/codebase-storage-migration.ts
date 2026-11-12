@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { constants, copyFileSync, createReadStream, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { canonicalCandidatePath, ensureProjectStorageDirectory, projectStorageDirectory, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { canonicalCandidatePath, ensureProjectStorageDirectory, projectStorageDirectory, type CraftPaths } from 'craft-common-store-local/paths';
 import type { CodebaseMigrationEntry } from "./codebase-storage-preflight.ts";
 
 type SnapshotFile = { path: string; digest: string; size_bytes: number };

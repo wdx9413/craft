@@ -8,8 +8,8 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths, sessionStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
-import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { craftPaths, sessionStorageDirectory } from 'craft-common-store-local/paths';
+import { CraftStore } from 'craft-common-store-local/store';
 import { legacySessionMemoryInventory, legacySessionMemoryPreflight } from "../core/legacy-session-memory-preflight.ts";
 
 function putScopeDatabase(path: string, scopes: unknown[]): void {

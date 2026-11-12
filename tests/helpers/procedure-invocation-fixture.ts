@@ -7,7 +7,7 @@ import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts"
 import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
 import { payload, stableDigest } from "../../core/digest.ts";
-import { ProcedureDefinitionStore } from "../../capability/craft-experience/procedure-definition.ts";
+import { ProcedureDefinitionStore } from '@craft/capability-experience/procedure-definition';
 import { projectIdentityFromRoot } from "../../core/scope-identity.ts";
 
 const projectRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));

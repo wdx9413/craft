@@ -8,10 +8,10 @@ import { tmpdir } from "node:os";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
-import { CodebaseIndexKernel } from "../capability/craft-codebase/codebase-index.ts";
-import { contextAssetRef } from "../common/craft-common-base/src/context-assets.ts";
+import { CodebaseIndexKernel } from '@craft/capability-codebase/codebase-index';
+import { contextAssetRef } from 'craft-common-base/context-assets';
 import { payload } from "../core/digest.ts";
-import { codeContextCandidates } from "../capability/craft-codebase/context-search.ts";
+import { codeContextCandidates } from '@craft/capability-codebase/context-search';
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-projection-")), repo = join(root, "repo"); mkdirSync(repo);
   execFileSync("git", ["-C", repo, "init", "-q"]);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { combineLanguageAnalyses } from "../capability/craft-codebase/multi-language-analysis.ts";
-import { GRAPH_BUDGET } from "../capability/craft-codebase/graph-budget.ts";
+import { combineLanguageAnalyses } from '@craft/capability-codebase/multi-language-analysis';
+import { GRAPH_BUDGET } from '@craft/capability-codebase/graph-budget';
 
 test("combined analysis returns undefined without a complete analyzer graph", () => {
   assert.equal(combineLanguageAnalyses([]), undefined);

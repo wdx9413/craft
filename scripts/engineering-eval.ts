@@ -3,7 +3,7 @@
 import { mkdir } from "node:fs/promises";
 import { platform, versions } from "node:process";
 import { resolve } from "node:path";
-import { EngineeringEvaluationRunner } from "../capability/engineering-evaluation-runner.ts";
+import { EngineeringEvaluationRunner } from "../core/application/engineering-evaluation-runner.ts";
 import { digestJson } from "../core/digest.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";

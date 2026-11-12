@@ -7,7 +7,7 @@ import test from "node:test";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { projectStorageDirectory } from 'craft-common-store-local/paths';
 import { createActionHandlers } from "../core/application/actions/action-handlers.ts";
 import type { ModelTransport } from "../core/model-gateway.ts";
 import { knowledgeEvaluationAdjudicationVerified } from "../core/knowledge-evaluation-provenance.ts";

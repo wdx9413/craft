@@ -2,9 +2,9 @@ import type { CraftStore, JsonObject } from "../infrastructure/store.ts";
 import { payload, stableDigest } from "../digest.ts";
 import { object, text, uniqueList } from "../validation.ts";
 import { scopeAccess, scopeAllows, scopeEnvelope, scopeFromKey } from "../scope-policy.ts";
-import { assertProcedureTestIsolation, selectedProcedure } from "../../capability/craft-experience/procedure-release.ts";
-import { ProcedurePlanner } from "../../capability/craft-experience/procedure-composition.ts";
-import { ProcedureDefinitionStore, type ProcedureDefinitionRef } from "../../capability/craft-experience/procedure-definition.ts";
+import { assertProcedureTestIsolation, selectedProcedure } from '@craft/capability-experience/procedure-release';
+import { ProcedurePlanner } from '@craft/capability-experience/procedure-composition';
+import { ProcedureDefinitionStore, type ProcedureDefinitionRef } from '@craft/capability-experience/procedure-definition';
 import { DurableActionLoopKernel } from "../durable-action-loop.ts";
 import { AcceptanceGateKernel } from "../runtime-completion.ts";
 

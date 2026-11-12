@@ -1,5 +1,5 @@
-import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
-import { ProjectGraphStore } from "../../capability/craft-codebase/project-graph-store.ts";
+import type { CraftStore, JsonObject } from 'craft-common-store-local/store';
+import { ProjectGraphStore } from '@craft/capability-codebase/project-graph-store';
 
 /** Read the symbol corpus from either project-local or legacy CraftStore graph shards. */
 export function readCodebaseEvaluationSymbolNodes(store: Pick<CraftStore, "get" | "paths">, projectRoot: string,

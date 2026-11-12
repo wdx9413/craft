@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { completeExperienceScenarioClassificationRequest, createExperienceScenarioClassificationRequest, experienceScenarioCanClassify as canClassify, experienceScenarioIsRetired as isRetired, getExperienceScenarioClassificationRequest, listExperienceScenarios as listScenarios, proposeExperienceScenarioMigration as proposeMigration, recordExperienceScenario as persistExperienceScenario, retireExperienceScenario as persistRetirement, validateExperienceScenarioDefinition } from "../capability/craft-experience/scenario-catalog.ts";
+import { completeExperienceScenarioClassificationRequest, createExperienceScenarioClassificationRequest, experienceScenarioCanClassify as canClassify, experienceScenarioIsRetired as isRetired, getExperienceScenarioClassificationRequest, listExperienceScenarios as listScenarios, proposeExperienceScenarioMigration as proposeMigration, recordExperienceScenario as persistExperienceScenario, retireExperienceScenario as persistRetirement, validateExperienceScenarioDefinition } from '@craft/capability-experience/scenario-catalog';
 
 const digest = (value: string) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 const classificationContext = { sanitized: true, content_stored: false, task_goal: "Repair validation", effect_summary: "Checks pass", outcome: "passed",

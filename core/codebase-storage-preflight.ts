@@ -1,7 +1,7 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { canonicalCandidatePath, projectStorageDirectory, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { canonicalCandidatePath, projectStorageDirectory, type CraftPaths } from 'craft-common-store-local/paths';
 
 export type CodebaseMigrationStatus = "current" | "legacy_ready" | "missing_root" | "ambiguous_root"
   | "missing_workspace" | "invalid_checkpoint" | "source_out_of_scope" | "missing_snapshot";

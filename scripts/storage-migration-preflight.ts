@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { craftPaths } from 'craft-common-store-local/paths';
 import { legacySessionMemoryPreflight } from "../core/legacy-session-memory-preflight.ts";
 import { storageMigrationPreflight } from "../core/storage-migration-preflight.ts";
 

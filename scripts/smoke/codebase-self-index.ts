@@ -6,7 +6,7 @@ import { performance } from "node:perf_hooks";
 import { CraftStore } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
-import { ProjectGraphStore } from "../../capability/craft-codebase/project-graph-store.ts";
+import { ProjectGraphStore } from '@craft/capability-codebase/project-graph-store';
 
 const projectRoot = resolve(process.cwd());
 const temporaryRoot = mkdtempSync(join(tmpdir(), "craft-codebase-self-index-"));

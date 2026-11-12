@@ -10,8 +10,8 @@ import { WorkbenchWebApp } from "../core/workbench-server.ts";
 import { ContextUsageWorkbench } from "../core/application/coordinators/context-usage.ts";
 import { WorkflowDesignWorkbench, DESIGN_QUESTIONS, rollupFeedbackByDay } from "../core/application/coordinators/workflow-design.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
-import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
-import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
+import { KnowledgeContribution } from '@craft/capability-knowledge/contribution';
+import { ExperienceContribution } from '@craft/capability-experience/contribution';
 import { payload } from "../core/digest.ts";
 import { contextFeedbackWeight } from "../core/context-feedback-weight.ts";
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { serveMcpHttp } from "../core/mcp-http.ts";
 import { resolveMcpProductMode } from "../core/interfaces/mcp/product-launch.ts";
-import { CODEBASE_LSP_WORKER_FLAG, runCodebaseLspWorker } from "../capability/craft-codebase/lsp-worker.ts";
+import { CODEBASE_LSP_WORKER_FLAG, runCodebaseLspWorker } from '@craft/capability-codebase/lsp-worker';
 
 if (process.argv[2] === CODEBASE_LSP_WORKER_FLAG && process.argv.length === 3) {
   runCodebaseLspWorker(process.stdin, line => process.stdout.write(line)).catch(() => { process.stderr.write("Craft Codebase language analysis failed.\n"); process.exitCode = 1; });

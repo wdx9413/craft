@@ -11,7 +11,7 @@
  *   node --import ./scripts/dev/load-env.ts --experimental-strip-types scripts/dev/eval-model-probe.ts
  */
 import { buildChatRequest, createFetchTransport, credentialStatus } from "../../core/model-gateway.ts";
-import { EVAL_MODEL, EVAL_PROVIDER, evaluationCredentialMissing } from "../../capability/craft-eval/model.ts";
+import { EVAL_MODEL, EVAL_PROVIDER, evaluationCredentialMissing } from "craft-eval/model";
 
 const missing = evaluationCredentialMissing();
 if (missing) {

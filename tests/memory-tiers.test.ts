@@ -4,13 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { digestJson } from "../common/craft-common-base/src/digest.ts";
+import type { JsonObject } from 'craft-common-store-local/store';
+import { digestJson } from 'craft-common-base/digest';
 import { CraftService } from "../core/service.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths, projectStorageDirectory } from "../core/infrastructure/paths.ts";
-import { MemoryCapture } from "../capability/craft-memory/memory-capture.ts";
-import { MemoryContribution } from "../capability/craft-memory/contribution.ts";
+import { MemoryCapture } from '@craft/capability-memory/memory-capture';
+import { MemoryContribution } from '@craft/capability-memory/contribution';
 
 test("Memory capture preserves evidence on retry and rejects reuse or alteration", async t => {
   const root = mkdtempSync(join(tmpdir(), "craft-memory-evidence-"));

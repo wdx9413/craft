@@ -7,10 +7,10 @@ import {
   EXPERIENCE_KERNELS,
   EXPERIENCE_OWNS,
   experienceCapability,
-} from "../capability/craft-experience/capability.ts";
-import { EvaluationModelProfileKernel } from "../capability/craft-experience/evaluation-model-profile.ts";
-import { ExperienceLedgerKernel } from "../capability/craft-experience/experience-ledger.ts";
-import { WorkflowEvolutionKernel } from "../capability/craft-experience/workflow-evolution.ts";
+} from '@craft/capability-experience/capability';
+import { EvaluationModelProfileKernel } from '@craft/capability-experience/evaluation-model-profile';
+import { ExperienceLedgerKernel } from '@craft/capability-experience/experience-ledger';
+import { WorkflowEvolutionKernel } from '@craft/capability-experience/workflow-evolution';
 import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
 import { buildCapabilityRegistry, CORE_KERNELS, type CraftCapability } from "../core/capability-protocol.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { CraftStore, type JsonObject } from 'craft-common-store-local/store';
 import { classifyVerdict, ExperienceDeduplicationKernel, factorKey, normalizeFactor } from "../core/experience-deduplication.ts";
 
 test("factor normalization and dedupe keys ignore order and casing", () => {

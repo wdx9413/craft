@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { javaFileUnitDigest, planJavaIncremental, type JavaFileUnit } from "../capability/craft-codebase/java-incremental.ts";
-import type { RepositoryFile } from "../capability/craft-codebase/repository-files.ts";
+import type { JsonObject } from 'craft-common-store-local/store';
+import { javaFileUnitDigest, planJavaIncremental, type JavaFileUnit } from '@craft/capability-codebase/java-incremental';
+import type { RepositoryFile } from '@craft/capability-codebase/repository-files';
 
 const file = (path: string, content = path): RepositoryFile => ({ path, content, language: "java",
   digest: createHash("sha256").update(content, "utf8").digest("hex") });

@@ -7,14 +7,14 @@ import fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test, { mock } from "node:test";
-import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
+import { KnowledgeContribution } from '@craft/capability-knowledge/contribution';
 import type { ContextContributionProvider, ContextRequest } from "../core/capability-protocol.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { ContextResolutionKernel, projectKnowledgeRetrieval, projectMemoryRetrieval } from "../core/context-resolution.ts";
-import { assertContextReadCurrent } from "../common/craft-common-store-local/src/context-access-guard.ts";
-import { MemoryContribution } from "../capability/craft-memory/contribution.ts";
-import { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
+import { assertContextReadCurrent } from 'craft-common-store-local/context-access-guard';
+import { MemoryContribution } from '@craft/capability-memory/contribution';
+import { MemoryLedgerKernel } from '@craft/capability-memory/memory-ledger';
 import { KeywordRetrievalPort } from "../core/retrieval-port.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 

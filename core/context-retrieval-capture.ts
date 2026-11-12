@@ -149,7 +149,7 @@ export class ReversibleContext {
 // Gap 2: BM25 with identifier awareness
 // ---------------------------------------------------------------------------
 
-export { Bm25Index } from "../common/craft-common-base/src/bm25.ts";
+export { Bm25Index } from 'craft-common-base/bm25';
 
 /**
  * Reciprocal-rank fusion of several ranked lists.

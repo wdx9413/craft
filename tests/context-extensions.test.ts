@@ -11,12 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ContextExtensionsKernel, computeCommand, computeEnv } from "../core/context-extensions.ts";
-import { MemoryFileStore } from "../capability/craft-memory/memory-files.ts";
+import { MemoryFileStore } from '@craft/capability-memory/memory-files';
 import { contextStoragePreflight, ContextStoragePreflightReader } from "../core/context-storage-preflight.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
+import { stableDigest } from 'craft-common-base/digest';
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
+import { sessionStorageScopeId } from 'craft-common-store-local/paths';
 import { CraftService } from "../core/service.ts";
 import { TOOLS } from "../core/mcp/tool-catalog.ts";
 import { CONTEXT_ROUTED_TOOL_NAMES } from "../core/mcp/context-tools.ts";
@@ -448,7 +448,7 @@ test("Context migration command fails when its readback changes after publicatio
     store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run("context_ephemeral_index", "fault", 1, JSON.stringify({ session_id: "readback-fault", session_host: "codex", session_scope_id: scope, source: "docs", items: [{ text: "test" }] }), "2020-01-01", "2020-01-01");
     const preload = join(root, "migration-fault.mjs");
-    const storeUrl = pathToFileURL(join(process.cwd(), "common/craft-common-store-local/src/store.ts")).href;
+    const storeUrl = import.meta.resolve("craft-common-store-local/store");
     await writeFile(preload, `import { CraftStore } from ${JSON.stringify(storeUrl)};
       const original = CraftStore.prototype.migrateLegacyContextVersions;
       CraftStore.prototype.migrateLegacyContextVersions = function(entries) { const result = original.call(this, entries); this.database.prepare('DELETE FROM records WHERE kind=? AND id=? AND version=?').run('context_ephemeral_index', 'fault', 1); return result; };`);
@@ -549,7 +549,7 @@ test("Context migration backup restores missing versions without overwriting cha
     const existing = run(); assert.equal(JSON.parse(existing.stdout).status_counts.already_present, 1);
     assert.notEqual(run("--bad").status, 0);
     const preload = join(root, "restore-fault.mjs");
-    const storeUrl = pathToFileURL(join(process.cwd(), "common/craft-common-store-local/src/store.ts")).href;
+    const storeUrl = import.meta.resolve("craft-common-store-local/store");
     await writeFile(preload, `import { CraftStore } from ${JSON.stringify(storeUrl)}; import { DatabaseSync } from 'node:sqlite';
       const original = CraftStore.prototype.restoreContextMigrationBackup;
       CraftStore.prototype.restoreContextMigrationBackup = function(name) { const result = original.call(this, name); const db = new DatabaseSync(${JSON.stringify(path)}); db.prepare('UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=?').run('{}', ${JSON.stringify(entry.kind)}, ${JSON.stringify(entry.id)}, 1); db.close(); return result; };`);
@@ -687,8 +687,8 @@ test("Context migration recovers after the process dies between copy and pointer
   store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
     .run(entry.kind, entry.id, entry.version, JSON.stringify(body), "2020-01-01", "2020-01-01");
   store.close();
-  const moduleUrl = pathToFileURL(join(process.cwd(), "common/craft-common-store-local/src/store.ts")).href;
-  const pathsUrl = pathToFileURL(join(process.cwd(), "common/craft-common-store-local/src/paths.ts")).href;
+  const moduleUrl = import.meta.resolve("craft-common-store-local/store");
+  const pathsUrl = import.meta.resolve("craft-common-store-local/paths");
   const script = `const { writeSync } = await import('node:fs'); const { CraftStore } = await import(process.argv[1]); const { craftPaths } = await import(process.argv[2]);
     const store = await new CraftStore(craftPaths(process.argv[3])).open({ skipLegacyPartitionMigration: true });
     const original = store.memoryHeader.bind(store);
@@ -723,8 +723,8 @@ test("Context migration resumes a batch after a committed version and process de
   const insert = store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)");
   for (const entry of entries) insert.run(entry.kind, entry.id, entry.version, JSON.stringify({ session_id: "batch-crash", session_host: "codex", session_scope_id: scope, source: entry.id, items: [{ text: entry.id }] }), "2020-01-01", "2020-01-01");
   store.close();
-  const moduleUrl = pathToFileURL(join(process.cwd(), "common/craft-common-store-local/src/store.ts")).href;
-  const pathsUrl = pathToFileURL(join(process.cwd(), "common/craft-common-store-local/src/paths.ts")).href;
+  const moduleUrl = import.meta.resolve("craft-common-store-local/store");
+  const pathsUrl = import.meta.resolve("craft-common-store-local/paths");
   const script = `const { writeSync } = await import('node:fs'); const { CraftStore } = await import(process.argv[1]); const { craftPaths } = await import(process.argv[2]);
     const store = await new CraftStore(craftPaths(process.argv[3])).open({ skipLegacyPartitionMigration: true });
     const original = store.transaction.bind(store);
@@ -917,7 +917,7 @@ test("compute handles a failed spawn with absent output streams", async () => {
       const store = await new CraftStore(craftPaths(process.argv[4])).open({ skipLegacyPartitionMigration: true });
       const result = new ContextExtensionsKernel(store).compute({ language: 'javascript', code: '1', allow_execution: true });
       if (result.stdout !== '' || result.stderr !== '') process.exitCode = 2; store.close();`;
-    const urls = ["common/craft-common-store-local/src/store.ts", "common/craft-common-store-local/src/paths.ts", "core/context-extensions.ts"].map(path => pathToFileURL(join(process.cwd(), path)).href);
+    const urls = [import.meta.resolve("craft-common-store-local/store"), import.meta.resolve("craft-common-store-local/paths"), pathToFileURL(join(process.cwd(), "core/context-extensions.ts")).href];
     const result = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script, ...urls, root], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
   } finally { await rm(root, { recursive: true, force: true }); }

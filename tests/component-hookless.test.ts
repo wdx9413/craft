@@ -12,7 +12,7 @@ import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { createActionHandlers } from "../core/application/actions/action-handlers.ts";
 import { retrievalTerms } from "../core/retrieval-terms.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
-import { GRAPH_BUDGET } from "../capability/craft-codebase/graph-budget.ts";
+import { GRAPH_BUDGET } from '@craft/capability-codebase/graph-budget';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-hookless-"));

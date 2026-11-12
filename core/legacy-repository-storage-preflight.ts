@@ -1,7 +1,7 @@
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
-import { existingProjectStorageDirectory, projectStorageDirectory, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { existingProjectStorageDirectory, projectStorageDirectory, type CraftPaths } from 'craft-common-store-local/paths';
 
 export type LegacyRepositoryStorageStatus = "ready" | "unbound" | "unsafe" | "incomplete";
 export interface LegacyRepositoryStorageEntry {

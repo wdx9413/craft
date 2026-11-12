@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { persistCodebaseEvaluation, persistCodebaseEvaluationInput } from "../scripts/eval/codebase-evaluation-store.ts";
-import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory } from 'craft-common-store-local/paths';
 
 function fixturePaths(root: string) {
   const paths = craftPaths(join(root, "data"));

@@ -1,8 +1,8 @@
 import { lstatSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { canonicalCandidatePath, projectStorageDirectory, type CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
-import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
+import { canonicalCandidatePath, projectStorageDirectory, type CraftPaths } from 'craft-common-store-local/paths';
+import type { JsonObject } from 'craft-common-store-local/store';
 import { projectAliases } from "./storage-migration-preflight.ts";
 
 type PartitionScope = { kind?: string; id?: string };

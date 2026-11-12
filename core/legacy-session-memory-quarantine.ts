@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync, chmodSync, openSync, readSync, closeSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { hostname } from "node:os";
-import type { CraftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import type { CraftPaths } from 'craft-common-store-local/paths';
 import type { LegacySessionMemoryEntry } from "./legacy-session-memory-preflight.ts";
 
 type SnapshotFile = { path: string; bytes: number; digest: string };

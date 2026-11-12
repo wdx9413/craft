@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { lstat, mkdir, open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { atomicPrivateJson, craftPaths, dataRoot } from "../common/craft-common-store-local/src/paths.ts";
+import { atomicPrivateJson, craftPaths, dataRoot } from 'craft-common-store-local/paths';
 import { projectIdentityFromRoot } from "./scope-identity.ts";
 import { codexTaskGoalDigest } from "./codex-task-prose.ts";
 import { stableDigest } from "./digest.ts";

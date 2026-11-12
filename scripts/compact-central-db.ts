@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
+import { craftPaths } from 'craft-common-store-local/paths';
 
 /** Offline only: keep a hard-linked original and atomically replace the central DB with VACUUM INTO. */
 export function compactCentralDb(dataRoot: string, apply = false): {

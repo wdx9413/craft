@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { parseCodebaseStorageMigrationCommand, runCodebaseStorageMigrationCommand } from "../core/codebase-storage-migration-command.ts";
-import { craftPaths, projectStorageDirectory } from "../common/craft-common-store-local/src/paths.ts";
+import { craftPaths, projectStorageDirectory } from 'craft-common-store-local/paths';
 
 function fixture(snapshotRoot?: (root: string, project: string) => string) {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-migration-command-"));

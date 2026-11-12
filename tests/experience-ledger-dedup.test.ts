@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../common/craft-common-store-local/src/store.ts";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
-import { ExperienceLedgerKernel } from "../capability/craft-experience/experience-ledger.ts";
+import { CraftStore, type JsonObject } from 'craft-common-store-local/store';
+import { stableDigest } from 'craft-common-base/digest';
+import { ExperienceLedgerKernel } from '@craft/capability-experience/experience-ledger';
 import { ExperienceDeduplicationKernel } from "../core/experience-deduplication.ts";
 
 test("propose is blocked when any pattern scenario combination has been refuted before", async () => {

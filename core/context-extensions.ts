@@ -3,10 +3,10 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Bm25Index } from "../common/craft-common-base/src/bm25.ts";
-import { retrievalExcerpt } from "../common/craft-common-base/src/retrieval-excerpt.ts";
-import { sessionStorageScopeId } from "../common/craft-common-store-local/src/paths.ts";
-import { codebaseUsageWeights, recordCodebaseSymbolUsage } from "../capability/craft-codebase/usage-signals.ts";
+import { Bm25Index } from 'craft-common-base/bm25';
+import { retrievalExcerpt } from 'craft-common-base/retrieval-excerpt';
+import { sessionStorageScopeId } from 'craft-common-store-local/paths';
+import { codebaseUsageWeights, recordCodebaseSymbolUsage } from '@craft/capability-codebase/usage-signals';
 import { payload, stableDigest } from "./digest.ts";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 

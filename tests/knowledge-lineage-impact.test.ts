@@ -6,7 +6,7 @@ import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { CraftService } from "../core/service.ts";
-import { knowledgeLineageImpact } from "../capability/craft-knowledge/knowledge-lineage-impact.ts";
+import { knowledgeLineageImpact } from '@craft/capability-knowledge/knowledge-lineage-impact';
 
 async function fixture(): Promise<{ root: string; store: CraftStore; service: CraftService }> {
   const root = await mkdtemp(join(tmpdir(), "craft-lineage-"));

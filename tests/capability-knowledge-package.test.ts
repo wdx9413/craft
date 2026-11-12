@@ -1,4 +1,4 @@
-import { KnowledgeClaimGovernance } from "../capability/craft-knowledge/claim-governance.ts";
+import { KnowledgeClaimGovernance } from '@craft/capability-knowledge/claim-governance';
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,18 +8,18 @@ import {
   KNOWLEDGE_KERNELS,
   KNOWLEDGE_OWNS,
   knowledgeCapability,
-} from "../capability/craft-knowledge/capability.ts";
-import { KnowledgeBoundLaunchKernel } from "../capability/craft-knowledge/knowledge-bound-launch.ts";
-import { KnowledgeRelationKernel } from "../capability/craft-knowledge/knowledge-relation.ts";
-import { KnowledgeWorkbenchKernel } from "../capability/craft-knowledge/knowledge-workbench.ts";
-import { LocalCandidateImportKernel } from "../capability/craft-knowledge/local-candidate-import.ts";
+} from '@craft/capability-knowledge/capability';
+import { KnowledgeBoundLaunchKernel } from '@craft/capability-knowledge/knowledge-bound-launch';
+import { KnowledgeRelationKernel } from '@craft/capability-knowledge/knowledge-relation';
+import { KnowledgeWorkbenchKernel } from '@craft/capability-knowledge/knowledge-workbench';
+import { LocalCandidateImportKernel } from '@craft/capability-knowledge/local-candidate-import';
 import {
   KNOWLEDGE_COMPONENT,
-} from "../capability/craft-knowledge/ownership.ts";
-import { KnowledgeSourceRegistry } from "../capability/craft-knowledge/knowledge-source-registry.ts";
-import { ProjectBrainKernel } from "../capability/craft-knowledge/project-brain.ts";
-import { ProjectKnowledgeKernel } from "../capability/craft-knowledge/project-knowledge.ts";
-import { WikiCandidateGovernanceKernel } from "../capability/craft-knowledge/wiki-candidate-governance.ts";
+} from '@craft/capability-knowledge/ownership';
+import { KnowledgeSourceRegistry } from '@craft/capability-knowledge/knowledge-source-registry';
+import { ProjectBrainKernel } from '@craft/capability-knowledge/project-brain';
+import { ProjectKnowledgeKernel } from '@craft/capability-knowledge/project-knowledge';
+import { WikiCandidateGovernanceKernel } from '@craft/capability-knowledge/wiki-candidate-governance';
 import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
 import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
