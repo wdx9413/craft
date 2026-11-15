@@ -1,4 +1,4 @@
-import type { FileDirDescRecord, FileDirDescRegistry } from "./file-dir-desc.ts";
+import type { FileDirDescRecord, FileDirDescRegistry } from "@craft/capability-file-dir-desc/file-dir-desc";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { CraftOperationError } from "./operation-error.ts";
 

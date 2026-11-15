@@ -23,6 +23,9 @@ importers:
       '@craft/capability-experience':
         specifier: 0.20.4
         version: 0.20.4
+      '@craft/capability-file-dir-desc':
+        specifier: 0.20.4
+        version: 0.20.4
       '@craft/capability-knowledge':
         specifier: 0.20.4
         version: 0.20.4

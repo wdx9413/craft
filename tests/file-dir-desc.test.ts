@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { FileDirDescRegistry, PROMOTION_USE_THRESHOLD, type FileDirDescRecord } from "../core/file-dir-desc.ts";
+import { FileDirDescRegistry, PROMOTION_USE_THRESHOLD, type FileDirDescRecord } from "@craft/capability-file-dir-desc/file-dir-desc";
 import { type JsonObject } from "../core/infrastructure/store.ts";
 const asResults = (value: unknown): FileDirDescRecord[] => (value as JsonObject).results as unknown as FileDirDescRecord[];
 const asItems = (value: unknown): FileDirDescRecord[] => (value as JsonObject).items as unknown as FileDirDescRecord[];
@@ -153,5 +153,46 @@ test("relocation keeps identity and use, and refuses to overwrite another entry"
     assert.equal(asResults(registry.resolve({ path: "C:\\projects\\billing" })).length, 0);
     const other = registry.observe({ path: "C:\\projects\\ledger", description: "ledger service" }) as unknown as FileDirDescRecord;
     assert.throws(() => registry.relocate({ id: other.id, path: "D:\\work\\billing" }), /already describes/u);
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
+
+test("the same path on two devices is two places, and recall is device-scoped by default", async () => {
+  const { store, registry } = await fixture();
+  try {
+    const laptop = registry.record({ path: "C:\\work\\billing", description: "billing checkout", device_id: "laptop", device_kind: "local", promote: true }) as unknown as FileDirDescRecord;
+    const server = registry.record({ path: "C:\\work\\billing", description: "billing checkout", device_id: "build-01", device_kind: "ssh", promote: true }) as unknown as FileDirDescRecord;
+    assert.notEqual(laptop.id, server.id, "two devices must not share one place record");
+    assert.equal(laptop.deviceId, "laptop");
+    assert.equal(server.deviceKind, "ssh");
+    assert.equal(asResults(registry.resolve({ path: "C:\\work\\billing" })).length, 2);
+    assert.deepEqual(asResults(registry.resolve({ path: "C:\\work\\billing", device_id: "laptop" })).map((item) => item.deviceId), ["laptop"]);
+    assert.deepEqual(asResults(registry.resolve({ description: "billing", device_id: "build-01" })).map((item) => item.deviceId), ["build-01"]);
+    assert.deepEqual(asItems(registry.list({ device_id: "build-01" })).map((item) => item.deviceId), ["build-01"]);
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
+
+test("a repository identity lets two devices recall the same checkout, and never stores credentials", async () => {
+  const { store, registry } = await fixture();
+  try {
+    const repo = { remote_url: "https://github.com/acme/billing.git", commit: "abc1234" };
+    registry.record({ path: "C:\\work\\billing", description: "billing monorepo", device_id: "laptop", repo_identity: repo, promote: true });
+    registry.record({ path: "/srv/billing", description: "billing monorepo", device_id: "build-01", repo_identity: repo, promote: true });
+    const recalled = asResults(registry.resolve({ description: "billing", repo_identity: { remote_url: "https://github.com/acme/billing" } }));
+    assert.deepEqual(recalled.map((item) => item.deviceId).sort(), ["build-01", "laptop"]);
+    assert.equal(recalled[0]?.repoIdentity?.remoteUrl, repo.remote_url);
+    assert.throws(() => registry.record({ path: "C:\\work\\x", description: "x", repo_identity: { remote_url: "https://user:token@github.com/acme/x.git" } }), /credentials/u);
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
+
+test("device identity and relocation are validated so a place cannot silently change machine", async () => {
+  const { store, registry } = await fixture();
+  try {
+    assert.throws(() => registry.record({ path: "C:\\work\\a", description: "a", device_id: "Bad Device!" }), /device_id/u);
+    assert.throws(() => registry.record({ path: "C:\\work\\a", description: "a", device_kind: "toaster" }), /device_kind/u);
+    const place = registry.observe({ path: "C:\\work\\a", device_id: "laptop" }) as unknown as FileDirDescRecord;
+    assert.throws(() => registry.relocate({ id: place.id, path: "C:\\work\\b", device_id: "build-01" }), /another device/u);
+    const moved = registry.relocate({ id: place.id, path: "C:\\work\\b" }) as unknown as FileDirDescRecord;
+    assert.equal(moved.path, "C:\\work\\b");
+    assert.equal(moved.deviceId, "laptop");
   } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
 });

@@ -74,7 +74,7 @@ import { ComponentAssets } from "./coordinators/component-assets.ts";
 import { ContextUsageWorkbench } from "./coordinators/context-usage.ts";
 import { WorkflowDesignWorkbench } from "./coordinators/workflow-design.ts";
 import { CognitiveWorkbenchCoordinator } from "./coordinators/cognitive-workbench.ts";
-import { FileDirDescRegistry } from "../file-dir-desc.ts";
+import { FileDirDescRegistry } from "@craft/capability-file-dir-desc/file-dir-desc";
 import { resolveContextDirectory } from "../context-directory.ts";
 import { ModRegistry, type ModScopeKind } from "../mod-registry.ts";
 import { MessageInbox } from "../message-inbox.ts";

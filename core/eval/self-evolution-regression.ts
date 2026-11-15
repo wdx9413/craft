@@ -20,7 +20,7 @@ import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
 import { craftPaths } from "../infrastructure/paths.ts";
 import { ModRegistry } from "../mod-registry.ts";
 import { LocalDropAdapter, MessageListener } from "../message-listener.ts";
-import { FileDirDescRegistry, PROMOTION_USE_THRESHOLD } from "../file-dir-desc.ts";
+import { FileDirDescRegistry, PROMOTION_USE_THRESHOLD } from "@craft/capability-file-dir-desc/file-dir-desc";
 import { WorkspaceState } from "../workspace.ts";
 import { resolveCoordinatorDirectory } from "../pilot-coordinator.ts";
 import { combineLanguageAnalyses } from '@craft/capability-codebase/multi-language-analysis';

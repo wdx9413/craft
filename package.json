@@ -124,6 +124,7 @@
     "@craft/capability-codebase": "0.20.4",
     "@craft/capability-datasec": "0.1.6",
     "@craft/capability-experience": "0.20.4",
+    "@craft/capability-file-dir-desc": "0.20.4",
     "@craft/capability-knowledge": "0.20.4",
     "@craft/capability-memory": "0.20.4",
     "@modelcontextprotocol/sdk": "1.32.2",
