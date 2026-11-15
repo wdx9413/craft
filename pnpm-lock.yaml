@@ -38,6 +38,9 @@ importers:
       craft-common-log:
         specifier: 0.20.4
         version: 0.20.4
+      craft-common-ontology:
+        specifier: 0.20.4
+        version: 0.20.4
       craft-common-store-local:
         specifier: 0.20.4
         version: 0.20.4

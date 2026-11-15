@@ -32,6 +32,7 @@
 | [0026](0026-project-scoped-scenario-taxonomies.md) | Knowledge 与 Experience 场景分类按能力分域、按项目分层 |
 | [0027](0027-expiry-advisory-revival-domain-boundary.md) | 过期不删除、弱参考默认关闭、复活重走证据、经验不跨域 |
 | [0028](0028-public-web-research-is-read-only-and-source-bound.md) | 公网研究只读且每条观察绑定来源 |
+| [0029](0029-one-shared-concept-taxonomy.md) | Knowledge、Memory、Experience 共用六个概念分类，写入时强校验可读性 |
 
 ## 与技术文档的关系
 
@@ -47,3 +48,4 @@
 | 0022、0023、0024、0025 | [v0.12.35 控制面收口](../technical/modules/v01235-control-plane.md) |
 | 0026 | [Knowledge 与 Experience 场景分类契约](../technical/modules/scenario-taxonomy.md) |
 | 0027 | [生命周期、弱参考与领域隔离](../technical/modules/lifecycle-domain-isolation.md) |
+| 0029 | [Knowledge、Memory、Experience 共用一个概念分类](../technical/modules/scenario-taxonomy.md) |

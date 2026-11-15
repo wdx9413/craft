@@ -158,6 +158,9 @@ _Avoid_: Capability Source、Memory
 **Memory Ledger**：带来源、范围、证据、有效期、敏感等级和撤销关系的工作/情景/偏好/程序记忆记录。它通过兼容绑定引用旧记忆，不强制迁移旧账本。
 _Avoid_: Context Profile、Evidence Wiki
 
+**Concept**：Knowledge、Memory 与 Experience 共用的记录类型，只有六个：事实、规则、决定、术语、偏好、程序。每条记录必须能独立读懂，并说清自己属于哪一类。
+_Avoid_: 标签、分类、任意自定义类型
+
 **Context Resolution Receipt**：一次向 Host 提供受限上下文的内容无关回执，固定选中的知识/记忆版本、选择理由和预算。它不保存重复正文，不授予执行权。
 _Avoid_: Prompt、Activation Profile
 

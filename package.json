@@ -129,6 +129,7 @@
     "@modelcontextprotocol/sdk": "1.32.2",
     "craft-common-base": "0.20.4",
     "craft-common-log": "0.20.4",
+    "craft-common-ontology": "0.20.4",
     "craft-common-store-local": "0.20.4",
     "craft-eval": "0.7.2",
     "tesseract.js": "^7.0.0",
