@@ -17,10 +17,12 @@ function task(store: CraftStore, id: string, status = "active") {
   return store.create("task", id, { title: id, goal: "g", status });
 }
 
-test("the console board groups tasks into the seven plan states from real records", async () => {
+test("the console board groups tasks into the plan states from real records", async () => {
   const f = await fixture();
   try {
-    task(f.store, "idle");                                                    // no signal → awaiting_input
+    task(f.store, "idle");                                                    // no signal → stopped
+    task(f.store, "waiting");                                                 // an open control point → awaiting_input
+    f.store.create("task_control_state", "control-waiting", { task_id: "waiting", status: "awaiting_acceptance" });
     task(f.store, "completed", "completed");
     task(f.store, "failed");
     f.store.create("trial", "trial-failed", { task_id: "failed" });
@@ -42,13 +44,31 @@ test("the console board groups tasks into the seven plan states from real record
     assert.deepEqual((buckets.unknown as JsonObject[]).map((item) => item.id), ["unknown"]);
     assert.deepEqual((buckets.completed as JsonObject[]).map((item) => item.id), ["completed"]);
     assert.deepEqual((buckets.failed as JsonObject[]).map((item) => item.id), ["failed"]);
-    assert.ok((buckets.awaiting_input as JsonObject[]).some((item) => item.id === "idle"));
+    assert.deepEqual((buckets.awaiting_input as JsonObject[]).map((item) => item.id), ["waiting"]);
+    // A task left `active` after its host died is not waiting for anybody.
+    assert.deepEqual((buckets.stale as JsonObject[]).map((item) => item.id), ["idle"]);
     // Each row names its state and a human reason.
     const idle = (board.tasks as JsonObject[]).find((item) => item.id === "idle")!;
-    assert.equal(idle.state_label, "待输入");
-    assert.match(String(idle.reason), /等待/);
-    assert.deepEqual(board.order, ["running", "awaiting_approval", "awaiting_input", "queued", "failed", "unknown", "completed"]);
+    assert.equal(idle.state_label, "已停止");
+    assert.match(String(idle.reason), /停止/);
+    const waiting = (board.tasks as JsonObject[]).find((item) => item.id === "waiting")!;
+    assert.equal(waiting.state_label, "待输入");
+    assert.match(String(waiting.reason), /等待/);
+    assert.deepEqual(board.order, ["running", "awaiting_approval", "awaiting_input", "queued", "failed", "unknown", "stale", "completed"]);
     assert.equal((board.labels as JsonObject).running, "运行");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("a task that ran through the standalone runtime waits for a verdict instead of looking stopped", async () => {
+  const f = await fixture();
+  try {
+    task(f.store, "ran");
+    f.store.create("internal_dispatch", "dispatch-ran", { task_id: "ran", status: "completed" });
+    f.store.create("work_session", "session-ran", { task_id: "ran", status: "needs_review" });
+    const board = f.service.homeTaskBoard({ limit: 10 }) as JsonObject;
+    const buckets = board.buckets as Record<string, JsonObject[]>;
+    assert.deepEqual((buckets.awaiting_input as JsonObject[]).map((item) => item.id), ["ran"]);
+    assert.deepEqual(buckets.stale as JsonObject[], []);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

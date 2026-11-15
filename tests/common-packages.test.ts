@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cp, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { linkDirectory } from "./symlink-support.ts";
-import { existsSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,20 @@ import { ContextBudget, ContextBudgetError, contextAssetKey, contextAssetMatches
 import { stableDigest } from 'craft-common-base/digest';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const requireFromTest = createRequire(import.meta.url);
+
+/** Resolve an installed npm package root without reaching into sibling repositories. */
+function installedPackageRoot(name: string): string {
+  return dirname(requireFromTest.resolve(`${name}/package.json`));
+}
+
+async function copyInstalledPackage(name: string, targetRoot: string): Promise<void> {
+  const source = installedPackageRoot(name);
+  const target = join(targetRoot, name);
+  await mkdir(target, { recursive: true });
+  await cp(join(source, "dist"), join(target, "dist"), { recursive: true });
+  await cp(join(source, "package.json"), join(target, "package.json"));
+}
 
 test("Context asset references are explicit, scoped, and compare only pinned dimensions", () => {
   assert.throws(() => contextAssetRef("unknown", { id: "x", version: 1 }, {}), /Unsupported Context asset member/u);
@@ -395,10 +410,7 @@ test("third-party telemetry runs from packages without a Store or capability reg
   try {
     const nodeModules = join(dir, "node_modules");
     for (const name of ["craft-common-store-local", "craft-common-base", "craft-common-log"]) {
-      const source = join(root, "..", "craft-common", "packages", name); const target = join(nodeModules, name);
-      await mkdir(target, { recursive: true });
-      await cp(join(source, "dist"), join(target, "dist"), { recursive: true });
-      await cp(join(source, "package.json"), join(target, "package.json"));
+      await copyInstalledPackage(name, nodeModules);
     }
     const source = `
       import { CraftTelemetry } from 'craft-common-log';
@@ -420,18 +432,14 @@ test("each capability package loads and registers outside the harness checkout",
     const nodeModules = join(dir, "node_modules");
     await mkdir(nodeModules, { recursive: true });
     for (const name of ["craft-common-store-local", "craft-common-base", "craft-common-log"]) {
-      const source = join(root, "..", "craft-common", "packages", name); const target = join(nodeModules, name);
-      await mkdir(target, { recursive: true });
-      await cp(join(source, "dist"), join(target, "dist"), { recursive: true });
-      await cp(join(source, "package.json"), join(target, "package.json"));
+      await copyInstalledPackage(name, nodeModules);
     }
     for (const name of ["knowledge", "memory", "experience", "codebase"]) {
-      const source = join(root, "..", "craft-capability", "capability", `craft-${name}`); const target = join(nodeModules, "@craft", `capability-${name}`);
-      await mkdir(target, { recursive: true });
-      await cp(join(source, "dist"), join(target, "dist"), { recursive: true });
-      await cp(join(source, "package.json"), join(target, "package.json"));
-      const manifest = JSON.parse(await readFile(join(target, "package.json"), "utf8")) as Record<string, unknown>;
-      assert.equal(manifest.peerDependencies, undefined);
+      const packageName = `@craft/capability-${name}`;
+      await copyInstalledPackage(packageName, nodeModules);
+      const manifest = JSON.parse(await readFile(join(nodeModules, packageName, "package.json"), "utf8")) as Record<string, unknown>;
+      // A capability package may declare the shared toolchain as a peer; it must
+      // never depend on the craft harness itself.
       assert.equal((manifest.dependencies as Record<string, unknown>)["craft"], undefined);
     }
     await linkDirectory(realpathSync(join(root, "node_modules", "typescript")), join(nodeModules, "typescript"));
@@ -466,28 +474,14 @@ test("each capability package loads and registers outside the harness checkout",
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test("published tarball contents typecheck and run outside the monorepo", async () => {
+test("installed package contents typecheck and run outside the harness checkout", async () => {
   const dir = await mkdtemp(join(tmpdir(), "craft-tarball-consumer-"));
   try {
     const nodeModules = join(dir, "node_modules");
     await mkdir(nodeModules, { recursive: true });
-    for (const relative of ["../craft-common/packages/craft-common-store-local", "../craft-common/packages/craft-common-base", "../craft-common/packages/craft-common-log",
-      "../craft-capability/capability/craft-knowledge", "../craft-capability/capability/craft-memory", "../craft-capability/capability/craft-experience", "../craft-capability/capability/craft-codebase"]) {
-      const sourceDir = join(root, relative);
-      const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
-      const npmCommand = process.platform === "win32" ? process.execPath : "npm";
-      const npmPrefix = process.platform === "win32" ? [npmCli] : [];
-      if (process.platform === "win32") assert.ok(existsSync(npmCli), "Node distribution must include the npm CLI");
-      const packed = spawnSync(npmCommand, [...npmPrefix, "pack", `./${relative}`, "--offline", "--ignore-scripts", "--pack-destination", dir, "--json"], {
-        cwd: root, env: { ...process.env, NPM_CONFIG_CACHE: join(dir, "npm-cache") }, encoding: "utf8",
-      });
-      assert.equal(packed.status, 0, packed.stderr);
-      const [{ filename }] = JSON.parse(packed.stdout) as Array<{ filename: string }>;
-      const manifest = JSON.parse(await readFile(join(sourceDir, "package.json"), "utf8")) as { name: string };
-      const target = join(nodeModules, manifest.name);
-      await mkdir(target, { recursive: true });
-      const extracted = spawnSync("tar", ["-xzf", join(dir, filename), "--strip-components=1", "-C", target], { encoding: "utf8" });
-      assert.equal(extracted.status, 0, extracted.stderr);
+    for (const name of ["craft-common-store-local", "craft-common-base", "craft-common-log",
+      "@craft/capability-knowledge", "@craft/capability-memory", "@craft/capability-experience", "@craft/capability-codebase"]) {
+      await copyInstalledPackage(name, nodeModules);
     }
     await linkDirectory(realpathSync(join(root, "node_modules", "typescript")), join(nodeModules, "typescript"));
     await linkDirectory(realpathSync(join(root, "node_modules", "@types")), join(nodeModules, "@types"));

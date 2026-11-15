@@ -1,24 +1,13 @@
 packages:
   - adapters/deepseek-harness
   - adapters/dsh-plugin-host
-  # Shared sources live in sibling repositories; the in-tree copies were
-  # removed so a change can never drift between two identical trees.
-  - ../craft-common/packages/*
-  - ../craft-capability/capability/craft-knowledge
-  - ../craft-capability/capability/craft-memory
-  - ../craft-capability/capability/craft-experience
-  - ../craft-capability/capability/craft-codebase
-  - ../craft-capability/capability/craft-datasec
-  - ../craft-capability/capability/craft-file-dir-desc
-  - ../craft-eval
 autoInstallPeers: false
-# Internal packages are built here and bundled into the distributable runtime.
-linkWorkspacePackages: true
+# Sibling capabilities are consumed as npm packages, never as workspace links.
+linkWorkspacePackages: false
+excludeLinksFromLockfile: true
 allowBuilds:
   esbuild: true
   tesseract.js: false
 
-# Internal Craft Eval package is published to the authenticated local registry.
-# Exempt only its exact version from pnpm's default release-age delay.
-minimumReleaseAgeExclude:
-  - craft-eval@0.1.5 || 0.2.0 || 0.3.0 || 0.4.0 || 0.5.0 || 0.6.0
+# Runtime dependencies are resolved by exact versions from the npm registry.
+minimumReleaseAgeExclude: []

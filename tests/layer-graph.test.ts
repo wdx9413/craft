@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { auditLayerGraph } from "../scripts/ci/layer-graph.ts";
 
-test("public common packages cannot import a higher Craft layer", () => {
+test("kernel infrastructure cannot import a higher Craft layer", () => {
   const findings = auditLayerGraph({
-    "common/craft-common-store-local/src/store.ts": "import '../../craft-common-base/src/base.ts';",
-    "common/craft-common-base/src/base.ts": "import '../../craft-common-log/src/log.ts';",
-    "common/craft-common-log/src/log.ts": "import '../../../core/kernel.ts';",
-    "core/kernel.ts": "export const kernel = true;",
+    "core/infrastructure/store.ts": "import '../../core/application/kernel.ts';",
+    "core/infrastructure/paths.ts": "import '../../core/interfaces/kernel.ts';",
+    "core/infrastructure/content-store.ts": "import '../../core/application/kernel.ts';",
+    "core/application/kernel.ts": "export const kernel = true;",
+    "core/interfaces/kernel.ts": "export const kernel = true;",
   });
   assert.equal(findings.filter(item => item.kind === "upward").length, 3);
 });
@@ -76,24 +77,26 @@ test("type-only named imports follow only their real re-export, including aliase
 
 test("declared Craft package exports participate in direction, cycle and deep-import checks", () => {
   const exports = {
-    "craft-common-base": "common/craft-common-base/src/index.ts",
-    "craft-common-log": "common/craft-common-log/src/index.ts",
-    "@craft/capability-knowledge": "capability/craft-knowledge/capability.ts",
+    "craft-common-base": "core/infrastructure/index.ts",
+    "craft-common-log": "core/application/index.ts",
+    "@craft/capability-knowledge": "core/interfaces/index.ts",
   };
   assert.deepEqual(auditLayerGraph({
     "core/consumer.ts": "import { base } from 'craft-common-base';",
-    "common/craft-common-base/src/index.ts": "export const base = 1;",
+    "core/infrastructure/index.ts": "export const base = 1;",
   }, exports), []);
   const reverse = auditLayerGraph({
-    "common/craft-common-base/src/index.ts": "import '@craft/capability-knowledge';",
-    "capability/craft-knowledge/capability.ts": "export const knowledge = 1;",
+    "core/infrastructure/index.ts": "import '@craft/capability-knowledge';",
+    "core/interfaces/index.ts": "export const knowledge = 1;",
   }, exports);
   assert.equal(reverse[0]?.kind, "upward");
   const cycle = auditLayerGraph({
-    "common/craft-common-base/src/index.ts": "import 'craft-common-log';",
-    "common/craft-common-log/src/index.ts": "import 'craft-common-base';",
+    "core/infrastructure/index.ts": "import 'craft-common-log';",
+    "core/application/index.ts": "import 'craft-common-base';",
   }, exports);
   assert(cycle.some(item => item.kind === "cycle"));
+  // A subpath that is not a declared package export must not resolve to a
+  // private module.
   const deep = auditLayerGraph({ "core/consumer.ts": "import 'craft-common-base/internal';" }, exports);
   assert.deepEqual(deep, [{ kind: "unresolved", path: ["core/consumer.ts", "craft-common-base/internal"] }]);
 });

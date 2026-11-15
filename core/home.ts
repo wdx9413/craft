@@ -16,7 +16,7 @@ function required(value: unknown, name: string): string { if (typeof value !== "
 /** Console task states; the labels are the only user-facing wording. */
 const STATE_LABELS: Readonly<Record<string, string>> = {
   queued: "排队", running: "运行", awaiting_approval: "待批准", awaiting_input: "待输入",
-  completed: "完成", failed: "失败", unknown: "未知",
+  stale: "已停止", completed: "完成", failed: "失败", unknown: "未知",
 };
 
 /** Read-only, UI-safe projection for the CLI home screen and future Canvas shell. */
@@ -34,16 +34,32 @@ export class HomeKernel {
       ...this.store.list("orchestration_plan", 10_000).map((item) => ({ ...item, run_kind: "orchestration" })),
       ...this.store.list("host_run", 10_000).map((item) => ({ ...item, run_kind: "host" })),
     ];
+    // A launch can stay `running` after its run vanished or already ended; that
+    // is a stale record, not work in flight. A launch-linked run counts only
+    // while the run itself is live; a run that was never launched still counts
+    // while its own status is live.
     const activeRuns = runs.filter((item) => !["completed", "failed", "cancelled", "terminal"].includes(String(item.status)));
+    const staleLaunchRuns = new Set(this.store.list("work_launch", 10_000).filter((launch) => {
+      if (launch.run_id === undefined || launch.run_id === null) return true;
+      const run = this.store.find("host_run", String(launch.run_id));
+      return !run || ["completed", "failed", "cancelled", "terminal"].includes(String(run.status));
+    }).map((launch) => String(launch.run_id)).filter((id) => id !== "undefined"));
+    const liveRunCount = activeRuns.filter((item) => !staleLaunchRuns.has(String(item.id))).length;
     const budgets = this.store.list("budget_account", 10_000, (item) => item.status === "active");
     const resources = budgets.map((item) => { const limits = item.limits as JsonObject; const used = item.used as JsonObject; const reserved = item.reserved as JsonObject;
       return { ...pick(item, ["id", "owner_type", "owner_id", "status"]), remaining: Object.fromEntries(Object.entries(limits).map(([key, value]) =>
         [key, Number(value) - Number(used[key] ?? 0) - Number(reserved[key] ?? 0)])) }; });
     const maintenance = this.store.find("maintenance_status", "local");
+    // Only work that is actually waiting on a human counts as "需要处理".
+    // A task whose status stayed `active` after its host died is not waiting
+    // for anybody, and reporting it as pending makes the whole board lie.
+    const awaitingUser = this.store.list("work_launch", 10_000, (item) => item.status === "awaiting_approval").length
+      + this.store.list("task_control_state", 10_000, (item) => item.status === "awaiting_acceptance").length;
     return {
       generated_at: now,
       summary: { active_tasks: tasks.filter((item) => item.status === "active").length, workspaces: workspaces.length,
-        attention: attention.length, active_runs: activeRuns.length, active_budgets: budgets.length,
+        attention: attention.length, active_runs: liveRunCount, active_budgets: budgets.length,
+        awaiting_user: awaitingUser,
         active_task_controls: this.store.list("task_control_contract", 10_000, (item) => item.status === "active").length,
         active_task_runs: this.store.list("task_run", 10_000, (item) => item.lifecycle === "active").length, health: maintenance?.status ?? "not_started" },
       attention: attention.map((item) => pick(item, ["id", "audience", "priority", "reason", "action", "task_id", "source_kind", "source_id", "status", "deferred_until"])),
@@ -78,6 +94,11 @@ export class HomeKernel {
     const links = this.store.list("workbench_agent_session_link", 10_000);
     const launches = this.store.list("work_launch", 10_000);
     const controls = this.store.list("task_control_state", 10_000);
+    // A standalone `craft run` records its trace as a dispatch and a session
+    // rather than a workbench launch, so both count as evidence that the task
+    // really ran.
+    const dispatches = this.store.list("internal_dispatch", 10_000);
+    const sessions = this.store.list("work_session", 10_000);
     const queuedMessages = this.store.list("workbench_message_queue", 10_000, (item) => item.state === "queued");
     const trialTask = new Map(this.store.list("trial", 10_000).map((item) => [String(item.id), String(item.task_id)]));
     const failedTasks = new Set(this.store.list("outcome", 10_000)
@@ -119,9 +140,18 @@ export class HomeKernel {
         return { state: "failed", reason: "执行失败或被拒绝" };
       }
       if (String(task.status) === "completed") return { state: "completed", reason: "任务已完成" };
+      // A task can stay `active` forever when its host died before the task
+      // ever reached a terminal state. Calling that "等待下一步输入" tells the
+      // user to wait for something nobody will ever deliver. Only tasks with
+      // no execution trace at all are stopped: a task whose host finished
+      // still waits for a human verdict, and that is not the same thing.
+      if (String(task.status) === "active" && !by(launches, id).length && !by(controls, id).length && !taskLinks.length
+        && !by(dispatches, id).length && !by(sessions, id).length) {
+        return { state: "stale", reason: "执行已停止，没有待处理的步骤" };
+      }
       return { state: "awaiting_input", reason: "等待下一步输入" };
     };
-    const buckets: Record<string, JsonObject[]> = { queued: [], running: [], awaiting_approval: [], awaiting_input: [], completed: [], failed: [], unknown: [] };
+    const buckets: Record<string, JsonObject[]> = { queued: [], running: [], awaiting_approval: [], awaiting_input: [], stale: [], completed: [], failed: [], unknown: [] };
     const rows = tasks.map((task) => {
       const { state, reason } = stateFor(task);
       // Every state above has a bucket and a label, so no fallback is needed.
@@ -131,7 +161,7 @@ export class HomeKernel {
       buckets[state]!.push(row);
       return row;
     });
-    return { order: ["running", "awaiting_approval", "awaiting_input", "queued", "failed", "unknown", "completed"],
+    return { order: ["running", "awaiting_approval", "awaiting_input", "queued", "failed", "unknown", "stale", "completed"],
       labels: STATE_LABELS, buckets, tasks: rows };
   }
 

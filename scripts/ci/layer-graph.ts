@@ -5,11 +5,10 @@ export type SourceMap = Readonly<Record<string, string>>;
 export type LayerFinding = { kind: "upward" | "frontend" | "cycle" | "unresolved"; path: string[] };
 
 function rank(path: string): number {
-  // CLI is a stable public transport entry.
-  if (path === "core/cli.ts") return 3;
+  // Public transports (CLI, MCP, HTTP, hooks) sit above every kernel layer.
+  if (path === "core/cli.ts" || path.startsWith("core/interfaces/") || path.startsWith("bin/")) return 3;
   if (path.startsWith("core/infrastructure/")) return 0;
   if (path.startsWith("core/application/")) return 2;
-  if (path.startsWith("core/interfaces/")) return 3;
   if (path.startsWith("core/")) return 1;
   return 4;
 }

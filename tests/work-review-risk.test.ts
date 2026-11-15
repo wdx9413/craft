@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
@@ -20,6 +20,15 @@ async function fixture() {
   service.codexHost.executor = async () => { calls++; await writeFile(join(root, "result.txt"), "ready"); return { exitCode: 0, signal: null, stdout: JSON.stringify({ type: "turn.completed", usage: {} }) + "\n", stderr: "", timedOut: false, cancelled: false, outputLimited: false }; };
   const criteria = [{ id: "bytes", name: "Check bytes", method: "program" }];
   return { root, store, service, task, criteria, calls: () => calls, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
+}
+
+async function writeWorkbenchFixtures(root: string): Promise<string> {
+  const workbenchDir = join(root, "web");
+  await mkdir(workbenchDir, { recursive: true });
+  const asset = "export function renderTask() { return document.createElement('div'); }\n";
+  await writeFile(join(workbenchDir, "task-replan-ui.js"), asset);
+  await writeFile(join(workbenchDir, "work-review-risk-ui.js"), asset);
+  return workbenchDir;
 }
 test("risk rules validate structured declarations and retain deterministic checks", async () => {
   assert.deepEqual(reviewRisks(undefined, []), []);
@@ -63,7 +72,7 @@ test("risk-pinned execution blocks bypasses, reviews frozen output and preserves
     assert.throws(() => f.service.workLaunchPrepare({ task_id: f.task.id, host: "codex-cli", workspace: f.root, prompt: "bypass" }), /Task Run contract/);
     assert.throws(() => f.service.taskRunPrepare({ contract_id: control.id, host: "codex-cli", prompt: "migrate", sandbox: "workspace-write" }), /mandatory deterministic/);
     assert.equal(f.store.list("work_launch").length, 0);
-    const web = new WorkbenchWebApp(f.service, "token", "http://127.0.0.1:4173", { workbenchDir: resolve("../craft-workbench/workbench") });
+    const web = new WorkbenchWebApp(f.service, "token", "http://127.0.0.1:4173", { workbenchDir: await writeWorkbenchFixtures(f.root) });
     for (const module of ["task-replan-ui.js", "work-review-risk-ui.js"]) {
       for (const prefix of ["/", "/workbench/"]) {
         const asset = web.handle({ method: "GET", path: prefix + module, token: "token" });

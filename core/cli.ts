@@ -341,6 +341,13 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
   const projectId = option(args, "--project") ?? "local";
   if (!resumeId && !goal?.trim()) throw new Error("run requires --goal <text> or --resume <dispatch_id> with --goal");
   const provider = providerFromConfig(config.runtime.provider);
+  // A missing key otherwise surfaces as an opaque runtime verdict after the
+  // session, dispatch and evidence rows are already written, so the user sees
+  // "failed" with no idea what to fix. Check the credential before any of that.
+  const credential = credentialStatus(provider);
+  if (!credential.configured) {
+    throw new Error(`Model ${credential.provider} has no credential: set ${credential.api_key_env}, or configure the key in the Workbench (Settings → 模型).`);
+  }
   const store = await new CraftStore(paths).open();
   const service = new CraftService(store, undefined, undefined, undefined, undefined, undefined, [], [provider], createFetchTransport());
   try {
