@@ -72,7 +72,7 @@ test("Long Task checkpoints validate task-run ownership, expiry and malformed st
 test("legacy memory consolidation covers default scope, source, confidence and search filters", async () => {
   const f = await fixture();
   try {
-    const memory = new (await import("../core/memory-consolidation.ts")).MemoryConsolidationKernel(f.store);
+    const memory = new (await import("@craft/capability-memory/memory-consolidation")).MemoryConsolidationKernel(f.store);
     const first = memory.remember({ memory_id: "legacy-memory", content: "A bounded observation" });
     assert.equal(((first.memory as Record<string, unknown>).scope as Record<string, unknown>).kind, "task");
     assert.equal((first.memory as Record<string, unknown>).source, "work");

@@ -17,7 +17,7 @@ import { CraftService } from "../core/application/craft-service.ts";
 import { ContentMigrationKernel } from "../core/content-migration.ts";
 import { projectKnowledgeContentDirectory } from "../core/project-knowledge-content.ts";
 import { projectExperienceContentDirectory } from "../core/project-experience-directory.ts";
-import { MemoryConsolidationKernel } from "../core/memory-consolidation.ts";
+import { MemoryConsolidationKernel } from "@craft/capability-memory/memory-consolidation";
 import { McpServer } from "../core/mcp.ts";
 import { stableDigest } from "../core/digest.ts";
 

@@ -90,7 +90,7 @@ import { EnterpriseAccessKernel } from "../enterprise-access.ts";
 import { A2ADelegationKernel } from "../a2a-delegation.ts";
 import { AutonomousRuntimeKernel } from "../autonomous-runtime.ts";
 import { CapabilityLifecycleKernel } from "../capability-lifecycle.ts";
-import { MemoryConsolidationKernel } from "../memory-consolidation.ts";
+import { MemoryConsolidationKernel } from "@craft/capability-memory/memory-consolidation";
 import { RemoteInteropKernel } from "../remote-interop.ts";
 import { PlatformOperationsKernel } from "../platform-operations.ts";
 import { UsageKernel } from "../usage.ts";

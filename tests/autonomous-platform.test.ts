@@ -6,7 +6,7 @@ import test from "node:test";
 import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { AutonomousRuntimeKernel } from "../core/autonomous-runtime.ts";
 import { CapabilityLifecycleKernel } from "../core/capability-lifecycle.ts";
-import { MemoryConsolidationKernel } from "../core/memory-consolidation.ts";
+import { MemoryConsolidationKernel } from "@craft/capability-memory/memory-consolidation";
 import { PlatformOperationsKernel } from "../core/platform-operations.ts";
 import { RemoteInteropKernel } from "../core/remote-interop.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
