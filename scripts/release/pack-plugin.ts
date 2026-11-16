@@ -15,6 +15,7 @@ const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs", "craft-mcp-http.cj
 const targetBundleDirectory = resolve(pluginRoot, "dist", "plugin");
 const components = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
 const pluginsRoot = resolve(root, "plugins");
+const codebaseAnalyzers = resolve(root, "..", "craft-capability", "capability", "craft-codebase", "analyzers");
 
 function insidePlugin(path: string): boolean {
   return path === pluginRoot || path.startsWith(`${pluginRoot}/`) || path.startsWith(`${pluginRoot}\\`);
@@ -67,11 +68,11 @@ for (const component of components) {
     });
     const analyzerTarget = resolve(targetScripts, "analyzers");
     await mkdir(analyzerTarget, { recursive: true });
-    await cp(resolve(root, "capability", "craft-codebase", "analyzers", "analyze-python.py"), resolve(analyzerTarget, "analyze-python.py"));
-    await cp(resolve(root, "capability", "craft-codebase", "analyzers", "python-control-flow.py"), resolve(analyzerTarget, "python-control-flow.py"));
-    await cp(resolve(root, "capability", "craft-codebase", "analyzers", "python-data-flow.py"), resolve(analyzerTarget, "python-data-flow.py"));
-    await cp(resolve(root, "capability", "craft-codebase", "analyzers", "AnalyzeJava.java"), resolve(analyzerTarget, "AnalyzeJava.java"));
-    await cp(resolve(root, "capability", "craft-codebase", "analyzers", "AnalyzeJavaControlFlow.java"), resolve(analyzerTarget, "AnalyzeJavaControlFlow.java"));
+    await cp(resolve(codebaseAnalyzers, "analyze-python.py"), resolve(analyzerTarget, "analyze-python.py"));
+    await cp(resolve(codebaseAnalyzers, "python-control-flow.py"), resolve(analyzerTarget, "python-control-flow.py"));
+    await cp(resolve(codebaseAnalyzers, "python-data-flow.py"), resolve(analyzerTarget, "python-data-flow.py"));
+    await cp(resolve(codebaseAnalyzers, "AnalyzeJava.java"), resolve(analyzerTarget, "AnalyzeJava.java"));
+    await cp(resolve(codebaseAnalyzers, "AnalyzeJavaControlFlow.java"), resolve(analyzerTarget, "AnalyzeJavaControlFlow.java"));
   }
   const product = RELEASE_PRODUCTS.find(item => item.name === component)!;
   const codexManifest = JSON.parse(await readFile(resolve(componentRoot, ".codex-plugin", "plugin.json"), "utf8"));

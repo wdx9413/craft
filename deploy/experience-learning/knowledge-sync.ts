@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { atomicPrivateJson, craftPaths, dataRoot } from "../../common/craft-common-store-local/src/paths.ts";
+import { atomicPrivateJson, craftPaths, dataRoot } from "craft-common-store-local/paths";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
-import { operationErrorCode } from "../../common/craft-common-log/src/index.ts";
+import { operationErrorCode } from "craft-common-log";
 
 export interface KnowledgeLearningClient { call(name: string, args?: JsonObject): Promise<JsonObject> }
 export interface KnowledgeSyncOptions {

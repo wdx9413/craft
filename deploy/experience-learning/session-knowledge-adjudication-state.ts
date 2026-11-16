@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { atomicPrivateJson } from "../../common/craft-common-store-local/src/paths.ts";
+import { atomicPrivateJson } from "craft-common-store-local/paths";
 
 const SCHEMA = "craft.knowledge-session-adjudication-cursor.v2";
 const ID = /^[A-Za-z0-9._:-]{1,200}$/u;

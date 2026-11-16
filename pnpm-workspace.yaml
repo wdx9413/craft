@@ -1,10 +1,23 @@
 packages:
   - adapters/deepseek-harness
   - adapters/dsh-plugin-host
+  # Resolve matching local packages from their sibling source repositories so
+  # development builds do not depend on the configured mirror carrying them.
+  - ../craft-common/packages/*
+  - ../craft-capability
+  - ../craft-capability/capability/*
 autoInstallPeers: false
-# Sibling capabilities are consumed as npm packages, never as workspace links.
-linkWorkspacePackages: false
-excludeLinksFromLockfile: true
+# Manifests keep publishable semver ranges; the lockfile pins matching sibling
+# source packages as local links for reproducible multi-repository builds.
+linkWorkspacePackages: deep
+overrides:
+  # Use the checked-in built craft-eval archive; its source repository uses a
+  # newer TypeScript toolchain and is not needed for Craft's build.
+  craft-eval: file:vendor/craft-eval-0.7.2.tgz
+  # Keep all sibling packages on the Node declarations already pinned by Craft.
+  '@types/node': 25.9.5
+  # The checked-out capability sources accept TypeScript 6; reuse Craft's lock.
+  typescript: 6.0.3
 allowBuilds:
   esbuild: true
   tesseract.js: false

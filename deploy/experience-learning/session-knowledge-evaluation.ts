@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { atomicPrivateJson, craftPaths, dataRoot } from "../../common/craft-common-store-local/src/paths.ts";
+import { atomicPrivateJson, craftPaths, dataRoot } from "craft-common-store-local/paths";
 import { stableDigest } from "../../core/digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";

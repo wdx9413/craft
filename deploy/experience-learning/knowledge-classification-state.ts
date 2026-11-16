@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { atomicPrivateJson } from "../../common/craft-common-store-local/src/paths.ts";
+import { atomicPrivateJson } from "craft-common-store-local/paths";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 
 const SCHEMA = "craft.knowledge-classification-attempts.v1";
