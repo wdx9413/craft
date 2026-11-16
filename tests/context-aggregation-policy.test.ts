@@ -136,7 +136,11 @@ test("Context failures identify safe input fields and the failing budget stage",
   try {
     const server = new McpServer(f.service, "component-context-daily");
     const invalid = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_context_open", arguments: { project_root: f.repo, query: "", include_codebase: false } } }) as any;
-    assert.deepEqual(invalid.result.structuredContent, { error_code: "INVALID_INPUT", stage: "input_validation", details: { field: "query" } });
+    // The failure now carries a human-readable message alongside the stable
+    // machine fields; assert the machine contract explicitly.
+    assert.equal(invalid.result.structuredContent.error_code, "INVALID_INPUT");
+    assert.equal(invalid.result.structuredContent.stage, "input_validation");
+    assert.deepEqual(invalid.result.structuredContent.details, { field: "query" });
     const limited = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_context_open", arguments: { project_root: f.repo, query: "alpha", include_codebase: false, max_items: 0 } } }) as any;
     assert.equal(limited.result.structuredContent.error_code, "LIMIT_EXCEEDED");
     assert.equal(limited.result.structuredContent.stage, "budget_validation");

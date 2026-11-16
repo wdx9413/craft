@@ -53,9 +53,12 @@ test("assembles the Memory capability from the catalog rather than in place", as
     assert(signals instanceof MemorySignalsKernel);
     assert.equal(signals.store, f.store);
     assert.equal(ledger.store, f.store);
-    // Two kernels: the Ledger's writes and the signals derived from recall history. The count is
-    // the check that the package grows deliberately rather than by accumulation.
-    assert.deepEqual(Object.values(MEMORY_KERNELS).sort(), ["memory.governance", "memory.ledger", "memory.signals"]);
+    // The Ledger's writes, the signals derived from recall history, the
+    // governance kernel and consolidation each register separately; the count
+    // is the check that the package grows deliberately rather than by
+    // accumulation.
+    assert.deepEqual(Object.values(MEMORY_KERNELS).sort(),
+      ["memory.consolidation", "memory.governance", "memory.ledger", "memory.signals"]);
   } finally { await close(f); }
 });
 

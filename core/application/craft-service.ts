@@ -429,6 +429,13 @@ export class CraftService extends ServiceFoundation {
   fileDirDescResolve(args: JsonObject): JsonObject { return this.fileDirDesc.resolve(args); }
   fileDirDescList(args: JsonObject = {}): JsonObject { return this.fileDirDesc.list(args); }
 
+  fileDirDescRegisterDevice(args: JsonObject): JsonObject { return this.fileDirDesc.registerDevice(args) as unknown as JsonObject; }
+  fileDirDescDevice(args: JsonObject): JsonObject { return this.fileDirDesc.device(text(args.id, "id")) as unknown as JsonObject; }
+  fileDirDescListDevices(args: JsonObject = {}): JsonObject { return this.fileDirDesc.listDevices(args); }
+  fileDirDescDisableDevice(args: JsonObject): JsonObject { return this.fileDirDesc.disableDevice(text(args.id, "id")) as unknown as JsonObject; }
+  fileDirDescEnableDevice(args: JsonObject): JsonObject { return this.fileDirDesc.enableDevice(text(args.id, "id")) as unknown as JsonObject; }
+  fileDirDescReportDeviceHealth(args: JsonObject): JsonObject { return this.fileDirDesc.reportDeviceHealth(text(args.id, "id"), text(args.health, "health") as "healthy" | "degraded" | "offline") as unknown as JsonObject; }
+
   /** Mod kernel: cognitive overlays with a governed draft → approve → active lifecycle. */
   modCreate(args: JsonObject): JsonObject { return this.mods.create(args) as unknown as JsonObject; }
   modUpdate(args: JsonObject): JsonObject { return this.mods.update(args) as unknown as JsonObject; }

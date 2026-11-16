@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { FileDirDescRegistry, PROMOTION_USE_THRESHOLD, type FileDirDescRecord } from "@craft/capability-file-dir-desc/file-dir-desc";
+import { canonicalizePath } from "@craft/capability-file-dir-desc/file-dir-desc";
 import { type JsonObject } from "../core/infrastructure/store.ts";
 const asResults = (value: unknown): FileDirDescRecord[] => (value as JsonObject).results as unknown as FileDirDescRecord[];
 const asItems = (value: unknown): FileDirDescRecord[] => (value as JsonObject).items as unknown as FileDirDescRecord[];
@@ -13,7 +14,11 @@ const asItems = (value: unknown): FileDirDescRecord[] => (value as JsonObject).i
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-fdd-"));
   const store = await new CraftStore(craftPaths(root)).open();
-  return { root, store, registry: new FileDirDescRegistry(store) };
+  const registry = new FileDirDescRegistry(store);
+  // The local device is the implicit default device for every place, and is
+  // active by default in a real deployment.
+  registry.registerDevice({ id: "local", name: "Local device", device_kind: "local", host_kind: "local", health: "healthy" });
+  return { root, store, registry };
 }
 
 test("recording a directory only observes it until it is used often enough", async () => {
@@ -42,6 +47,63 @@ test("recording a directory only observes it until it is used often enough", asy
     // A second directory should not be promoted by the first one's usage.
     const other = registry.record({ path: "C:\\projects\\ledger", description: "ledger service" }) as unknown as FileDirDescRecord;
     assert.equal(other.status, "observed");
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
+
+test("device metadata: register, list, health and disable blocks recall", async () => {
+  const { store, registry } = await fixture();
+  try {
+    const device = registry.registerDevice({ id: "edge-01", name: "Edge node", device_kind: "container", host_kind: "cloud",
+      location: "eu-west", tags: ["ci", "build"], health: "healthy" });
+    assert.equal(device.id, "edge-01");
+    assert.equal(device.deviceKind, "container");
+    assert.equal(device.hostKind, "cloud");
+    assert.deepEqual(device.tags, ["ci", "build"]);
+
+    registry.record({ path: "/opt/app", description: "edge app", device_id: "edge-01", device_kind: "container", host_kind: "cloud",
+      promote: true });
+    assert.equal(asResults(registry.resolve({ description: "edge app", device_id: "edge-01" })).length, 1);
+
+    const disabled = registry.disableDevice("edge-01");
+    assert.equal(disabled.status, "disabled");
+    assert.equal(disabled.health, "offline");
+    assert.equal(asResults(registry.resolve({ description: "edge app", device_id: "edge-01" })).length, 0, "disabled device places must not be recalled");
+
+    const enabled = registry.enableDevice("edge-01");
+    assert.equal(enabled.status, "active");
+    assert.equal(asResults(registry.resolve({ description: "edge app", device_id: "edge-01" })).length, 1, "re-enabled device places are recallable again");
+
+    const all = registry.listDevices() as unknown as { items: { deviceKind: string }[] };
+    const kinds = all.items.map((item) => item.deviceKind);
+    assert.ok(kinds.includes("local") && kinds.includes("container"));
+    const active = registry.listDevices({ status: "active" }) as unknown as { items: unknown[] };
+    assert.equal(active.items.length, 2);
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
+
+test("device metadata: unknown device and reactivation rules", async () => {
+  const { store, registry } = await fixture();
+  try {
+    assert.throws(() => registry.disableDevice("no-such-device"), /Unknown device/);
+    assert.equal(registry.device("no-such-device"), null);
+    registry.registerDevice({ id: "edge-02", device_kind: "ssh", host_kind: "cloud" });
+    registry.disableDevice("edge-02");
+    assert.throws(() => registry.registerDevice({ id: "edge-02", status: "active" }), /reactivated/);
+  } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
+
+test("path canonicalization and concept tags do not split one place", async () => {
+  const { store, registry } = await fixture();
+  try {
+    const one = registry.record({ path: "/opt/codex", description: "codex cli", concept_kind: "rule", rationale: "The CLI entry point" });
+    assert.equal(one.concept_kind, "rule");
+    assert.equal(one.rationale, "The CLI entry point");
+    const two = registry.observe({ path: "/opt/codex/", description: "later title" });
+    assert.equal(two.description, "codex cli", "reinforcement never rewrites directory meaning");
+    assert.equal(two.concept_kind, "rule");
+    const canon = canonicalizePath("/opt/codex/");
+    assert.equal(canon, canonicalizePath("/opt/codex"));
+    assert.ok(!canon.endsWith("/") && !canon.endsWith("\\"), "trailing separators must be stripped");
   } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
 });
 
@@ -159,6 +221,8 @@ test("relocation keeps identity and use, and refuses to overwrite another entry"
 test("the same path on two devices is two places, and recall is device-scoped by default", async () => {
   const { store, registry } = await fixture();
   try {
+    registry.registerDevice({ id: "laptop", name: "Laptop", device_kind: "local", host_kind: "local", health: "healthy" });
+    registry.registerDevice({ id: "build-01", name: "Build server", device_kind: "ssh", host_kind: "cloud", location: "us-east" });
     const laptop = registry.record({ path: "C:\\work\\billing", description: "billing checkout", device_id: "laptop", device_kind: "local", promote: true }) as unknown as FileDirDescRecord;
     const server = registry.record({ path: "C:\\work\\billing", description: "billing checkout", device_id: "build-01", device_kind: "ssh", promote: true }) as unknown as FileDirDescRecord;
     assert.notEqual(laptop.id, server.id, "two devices must not share one place record");
@@ -175,6 +239,8 @@ test("a repository identity lets two devices recall the same checkout, and never
   const { store, registry } = await fixture();
   try {
     const repo = { remote_url: "https://github.com/acme/billing.git", commit: "abc1234" };
+    registry.registerDevice({ id: "laptop", name: "Laptop", device_kind: "local", host_kind: "local" });
+    registry.registerDevice({ id: "build-01", name: "Build server", device_kind: "ssh", host_kind: "cloud", location: "us-east" });
     registry.record({ path: "C:\\work\\billing", description: "billing monorepo", device_id: "laptop", repo_identity: repo, promote: true });
     registry.record({ path: "/srv/billing", description: "billing monorepo", device_id: "build-01", repo_identity: repo, promote: true });
     const recalled = asResults(registry.resolve({ description: "billing", repo_identity: { remote_url: "https://github.com/acme/billing" } }));

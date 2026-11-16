@@ -224,7 +224,9 @@ test("knowledge view and memory catalog surface the recall-feedback weight", asy
     f.store.create("context_correction_task", "corr-k", { status: "confirmed", outcome: "stale",
       asset_ref: { member: "knowledge", id: "claim-1" } });
     const service = new CraftService(f.store);
-    const view = service.knowledgeWorkbenchView({ limit: 10 }) as JsonObject;
+    // The knowledge view is scope-scoped in the capability package; ask for the
+    // project scope the claim was written into instead of the global default.
+    const view = service.knowledgeWorkbenchView({ limit: 10, scope: "project:demo" }) as JsonObject;
     const claim = (view.claims as JsonObject[]).find((item) => item.id === "claim-1")!;
     assert.equal(claim.recall_weight, 0.8);
     assert.equal(claim.pending_corrections, 1);

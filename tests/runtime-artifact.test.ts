@@ -68,10 +68,15 @@ test("runtime artifact consumes npm graph and copies actual dependency bytes wit
     await f.dependency("alpha", "1", { beta: "1" });
     await f.dependency("beta", "1", { alpha: "1" });
     await f.dependency("@local/scoped", "1");
+    // A file: tarball dependency can ship VCS metadata; the runtime must not carry it.
+    await mkdir(join(f.root, "node_modules/alpha/.git/objects"), { recursive: true });
+    await writeFile(join(f.root, "node_modules/alpha/.git/config"), "[core]");
+    await writeFile(join(f.root, "node_modules/alpha/.git/objects/blob"), "x");
     await f.configure();
     const result = await prepareRuntimeArtifact(f.root);
     assert.equal(await readFile(join(result, "dist/core/entry.js"), "utf8"), "compiled-runtime");
     assert.equal(JSON.parse(await readFile(join(result, "node_modules/beta/package.json"), "utf8")).version, "1");
+    await assert.rejects(readFile(join(result, "node_modules/alpha/.git/config")), /ENOENT/);
     await assert.rejects(readFile(join(result, "previous")), /ENOENT/);
   } finally { await f.close(); }
 });

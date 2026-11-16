@@ -47,25 +47,46 @@ const DEFAULT_CANDIDATE_POOL_ITEMS = 8;
 const DEFAULT_CANDIDATE_POOL_CHARS = 6_000;
 const MAX_CANDIDATE_POOL_ITEMS = 24;
 
+/**
+ * Human/model-readable reason a concept-tagged record is useful in context.
+ * This is an additive projection over an existing `concept_kind` tag: it never
+ * changes ranking or a receipt digest, because the taxonomy is diagnostic and
+ * the retrieval rank remains owned by each capability.
+ */
+const CONCEPT_SELECTION_REASON: Readonly<Record<string, string>> = {
+  fact: "可独立核实的陈述，作为当前事实背景",
+  rule: "团队约定或约束，执行时须遵守",
+  decision: "已定取舍，避免重复权衡",
+  term: "项目术语定义，统一用词含义",
+  preference: "可接受选项间的偏好，非强制规则",
+  procedure: "曾验证可复现的步骤序列",
+};
+
+function withConceptReason<T extends JsonObject>(item: T): T {
+  const concept = typeof item.concept_kind === "string" ? item.concept_kind : null;
+  if (!concept) return item;
+  return { ...item, concept_selection_reason: CONCEPT_SELECTION_REASON[concept] ?? `concept: ${concept}` };
+}
+
 export function projectKnowledgeRetrieval(item: JsonObject, query: string, required = false, maxChars = MAX_RETRIEVAL_EXCERPT_CHARS): JsonObject {
   const { retrieval_text: _retrievalText, ...source } = item;
-  if (required || typeof item.content !== "string") return source;
+  if (required || typeof item.content !== "string") return withConceptReason(source);
   const excerpt = retrievalExcerpt(item.content, query, Math.max(1, maxChars));
-  if (excerpt.reason === "complete") return source;
-  return { ...source, content: excerpt.text, content_excerpt: {
+  if (excerpt.reason === "complete") return withConceptReason(source);
+  return withConceptReason({ ...source, content: excerpt.text, content_excerpt: {
     source_start: excerpt.source_start, source_end: excerpt.source_end, source_chars: excerpt.source_chars, reason: excerpt.reason,
     ...(excerpt.matched_terms ? { matched_terms: excerpt.matched_terms } : {}),
-  } };
+  } });
 }
 
 export function projectMemoryRetrieval(item: JsonObject, query: string, required: boolean): JsonObject {
-  if (required || typeof item.content !== "string") return item;
+  if (required || typeof item.content !== "string") return withConceptReason(item);
   const excerpt = retrievalExcerpt(item.content, query, MAX_RETRIEVAL_EXCERPT_CHARS);
-  if (excerpt.reason === "complete") return item;
-  return { ...item, content: excerpt.text, content_excerpt: {
+  if (excerpt.reason === "complete") return withConceptReason(item);
+  return withConceptReason({ ...item, content: excerpt.text, content_excerpt: {
     source_start: excerpt.source_start, source_end: excerpt.source_end, source_chars: excerpt.source_chars, reason: excerpt.reason,
     ...(excerpt.matched_terms ? { matched_terms: excerpt.matched_terms } : {}),
-  } };
+  } });
 }
 
 /** Expansion-only hits contribute bounded lexical evidence to ranking, not a

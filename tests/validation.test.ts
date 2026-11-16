@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   SCOPE_KINDS,
   array,
@@ -143,11 +146,20 @@ test("keeps the shared helpers from widening what a caller refuses", async () =>
   // The two look-alike guards that were deliberately **not** merged, asserted so the reason stays
   // true. `guided-work.ts` matches a different pattern with a different message, and
   // `project-knowledge.ts` guards four terms instead of six and returns nothing.
-  const read = (name: string) => import("node:fs/promises").then((fs) => fs.readFile(new URL(`../${name}`, import.meta.url), "utf8"));
-  const guided = await read("core/guided-work.ts");
+  // The capability packages moved out of this checkout; their guards live in
+  // the sibling source repository the installed packages are built from.
+  const capabilityRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../craft-capability/capability");
+  if (!existsSync(capabilityRoot)) {
+    // The capability source checkout is optional; the guards it owns are still
+    // exercised by the installed-package tests. Skip rather than fail here.
+    return;
+  }
+  const read = (name: string) => import("node:fs/promises").then((fs) => fs.readFile(join(capabilityRoot, name), "utf8"));
+  const readCore = (name: string) => import("node:fs/promises").then((fs) => fs.readFile(new URL(`../${name}`, import.meta.url), "utf8"));
+  const guided = await readCore("core/guided-work.ts");
   assert.match(guided, /function noSecret\(value: string, name: string\): string/u);
   assert.match(guided, /sensitive assignments/u);
-  const project = await read("capability/craft-knowledge/project-knowledge.ts");
+  const project = await read("craft-knowledge/project-knowledge.ts");
   assert.match(project, /function noSecret\(value: string\): void/u);
   assert.match(project, /Project Knowledge content appears to contain a secret/u);
   // It also keeps its own two digests, one of which hashes `String(value)` rather than the JSON

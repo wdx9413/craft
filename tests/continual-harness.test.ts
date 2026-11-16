@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { ContinualHarnessKernel } from "../core/continual-harness.ts";
+import { ModRegistry } from "../core/mod-registry.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -18,7 +19,8 @@ async function fixture() {
   store.create("memory_ledger", "memory", { status: "active" }); store.create("workflow", "workflow", { lifecycle: "verified" });
   store.create("trial", "trial", { task_id: "task", status: "completed" }); store.create("acceptance_gate", "gate", { task_id: "task", verdict: "failed" });
   store.create("context_resolution_receipt", "context", { content_free: true });
-  return { root, store, harness: new ContinualHarnessKernel(store), compute: new StatefulComputeKernel(store) };
+  const mods = new ModRegistry(store);
+  return { root, store, mods, harness: new ContinualHarnessKernel(store, mods), compute: new StatefulComputeKernel(store) };
 }
 
 test("turns trajectory evidence into bounded or governed Harness refinements", async () => {
@@ -102,6 +104,46 @@ test("turns trajectory evidence into bounded or governed Harness refinements", a
     f.store.create("harness_refinement", "active-global", { view_id: view.id, lifecycle: "active", after_snapshot: "global" });
     f.store.create("harness_refinement", "expired-local", { view_id: view.id, lifecycle: "bounded_active", session_id: "session", expires_at: "2020-01-01T00:00:00.000Z", after_snapshot: "expired" });
     const currentResolution = f.harness.resolve({ view_id: view.id, session_id: "session" }); assert.ok((currentResolution.receipt as JsonObject).id); assert.equal((currentResolution.expired as JsonObject[]).length, 1);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("self-evolved Mod refinements must clear the shadow regression gate before submission", async () => {
+  const f = await fixture();
+  try {
+    const view = f.harness.viewCreate({ view_id: "mod-view", task_id: "task", bindings: [{ kind: "memory_ledger", id: "memory" }] }).view as JsonObject;
+    const modArgs = {
+      task_id: "task", view_id: view.id,
+      source_refs: [{ kind: "acceptance_gate", id: "gate" }], evidence_ids: ["confirmed"],
+      hypothesis: "A retrieval-gap rule may prevent the failure",
+      failure_class: "retrieval_gap", remedy: "widen retrieval window before answering",
+      changes: [{ kind: "mod", action: "create", scope: "project", summary: "Retrieve broader before answering" }],
+      mod_scope_id: "ws-1",
+    };
+    const refinement = f.harness.refine({ ...modArgs, refinement_id: "mod-refinement" }).refinement as JsonObject;
+    assert.equal(refinement.risk, "governed");
+    const modRefs = refinement.mod_refs as JsonObject[];
+    assert.equal(modRefs.length, 1);
+    const modId = String(modRefs[0].id);
+    assert.equal(f.store.get("mod", modId).status, "pending");
+    assert.equal(f.store.get("mod", modId).self_evolved, true);
+    // A self-evolved Mod is never a session-local change: submit is blocked until
+    // the model-free shadow regression set passes on the exact candidate body.
+    assert.throws(() => f.harness.submit({ refinement_id: refinement.id }), /passing shadow test/);
+    // An unattributed failure cannot produce a Mod candidate through the harness.
+    assert.throws(() => f.harness.refine({ ...modArgs, refinement_id: "mod-unattributed", failure_class: "unattributed" }), /unattributed/);
+    // Running the shadow test grants the only valid pass, and submission succeeds.
+    const run = f.mods.evaluateShadowTest({ id: modId }) as unknown as JsonObject;
+    assert.equal(run.shadowTest, "passed");
+    assert.equal(f.store.get("mod", modId).status, "pending");
+    const submitted = f.harness.submit({ refinement_id: refinement.id }).refinement as JsonObject;
+    assert.equal(submitted.lifecycle, "evaluation_required");
+    // Re-running an identical refinement is idempotent and does not duplicate the Mod.
+    assert.equal((f.harness.refine({ ...modArgs, refinement_id: "mod-refinement" }) as JsonObject).idempotent, true);
+    // Editing the body after a pass invalidates the gate.
+    f.store.save("mod", modId, { ...f.store.get("mod", modId), body: "# Rule retrieval_gap\nApply a different remedy." });
+    assert.throws(() => f.harness.refine({ ...modArgs, refinement_id: "mod-update", mod_body: "# Rule retrieval_gap\nApply a different remedy.", changes: [{ kind: "mod", action: "update", scope: "project", target_id: modId, summary: "new body" }] }), /passing shadow test/);
+    // Mod refinements cannot delete; revoke is the explicit path.
+    assert.throws(() => f.harness.refine({ ...modArgs, refinement_id: "mod-delete", changes: [{ kind: "mod", action: "delete", scope: "project", target_id: modId, summary: "drop" }] }), /cannot delete/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

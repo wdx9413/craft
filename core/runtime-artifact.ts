@@ -7,6 +7,21 @@ type Copy = { source: string; target: string };
 type Artifact = { npm_files: string[]; runtime_copies: Copy[] };
 type RuntimePackage = { name: string; source: string };
 
+/**
+ * Directories that are never part of a shipped runtime. A `file:` tarball
+ * dependency can carry its own VCS metadata (craft-eval does), and copying it
+ * both bloats the installer and makes Tauri's resource scan hit permission
+ * errors on `.git` internals.
+ */
+const RUNTIME_EXCLUDED_DIRS = new Set(["node_modules", ".git", ".coverage"]);
+function isRuntimeExcluded(source: string, root: string): boolean {
+  // `cp({dereference:true})` reports resolved targets, so a symlinked dependency
+  // (craft-eval is a `link:`) can hand back a path outside `root`. Match on the
+  // trailing segments after the package directory name instead of a prefix.
+  const tail = source.startsWith(root) ? source.slice(root.length) : source;
+  return tail.split(/[\\/]+/u).some((segment) => RUNTIME_EXCLUDED_DIRS.has(segment));
+}
+
 function localPath(root: string, path: string): string {
   const result = resolve(root, path);
   if (result === root || !result.startsWith(`${root}${sep}`)) throw new Error("Artifact path must remain inside its product");
@@ -121,13 +136,13 @@ export async function prepareRuntimeArtifact(root: string, binary = process.exec
     // in a source checkout holds dev-only packages such as @types/node) would
     // otherwise leak into the runtime and can exceed the installer path limit.
     await cp(entry.source, resolve(output, "node_modules", entry.name), { recursive: true, dereference: true,
-      filter: (source) => !source.slice(entry.source.length).split(/[\\/]+/u).includes("node_modules") });
+      filter: (source) => !isRuntimeExcluded(source, entry.source) });
   }
   for (const entry of nested.values()) {
     const target = resolve(output, "node_modules", entry.under, "node_modules", entry.name);
     await mkdir(dirname(target), { recursive: true });
     await cp(entry.source, target, { recursive: true, dereference: true,
-      filter: (source) => !source.slice(entry.source.length).split(/[\\/]+/u).includes("node_modules") });
+      filter: (source) => !isRuntimeExcluded(source, entry.source) });
   }
   const runtimeBinary = resolve(output, basename(binary));
   await cp(binary, runtimeBinary);

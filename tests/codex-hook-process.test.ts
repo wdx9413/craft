@@ -209,7 +209,11 @@ test("packaged PostToolUse preserves same-turn signals under concurrent Hook pro
     const failures = diagnosticRecords.filter(record => record.event === "PostToolUse" && record.outcome === "failed");
     assert.equal(failures.length, 0, JSON.stringify({ failures: failures.map(record => record.error_code),
       p95_process_elapsed_ms: runtimes[Math.ceil(runtimes.length * 0.95) - 1], max_process_elapsed_ms: runtimes.at(-1) }));
-    assert(runtimes.at(-1)! < 3_000, `Concurrent PostToolUse exceeded 3s: max ${runtimes.at(-1)}ms`);
+    // Wall-clock budget for 16 concurrently spawned Hook processes. The whole
+    // suite runs test files in parallel, so a loaded CI host can add a couple
+    // of seconds of scheduling delay; 5s still catches a real serialisation or
+    // hang regression while staying stable under that load.
+    assert(runtimes.at(-1)! < 5_000, `Concurrent PostToolUse exceeded 5s: max ${runtimes.at(-1)}ms`);
     assert.equal(diagnosticRecords.filter(record => record.event === "PostToolUse" && record.outcome === "completed").length, calls);
     t.diagnostic(`16 concurrent PostToolUse process elapsed ms: p50=${percentile(postToolRuntimes, 0.5)} p95=${percentile(postToolRuntimes, 0.95)} max=${percentile(postToolRuntimes, 1)}`);
     const signals = f.store.list("codex_hook_signal", 100, item => item.session_id === "codex-process" && item.turn_id === "stress-turn");

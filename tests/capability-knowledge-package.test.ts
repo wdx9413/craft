@@ -16,6 +16,7 @@ import { LocalCandidateImportKernel } from '@craft/capability-knowledge/local-ca
 import {
   KNOWLEDGE_COMPONENT,
 } from '@craft/capability-knowledge/ownership';
+import { KnowledgeAutoReviewKernel } from '@craft/capability-knowledge/knowledge-auto-review';
 import { KnowledgeSourceRegistry } from '@craft/capability-knowledge/knowledge-source-registry';
 import { ProjectBrainKernel } from '@craft/capability-knowledge/project-brain';
 import { ProjectKnowledgeKernel } from '@craft/capability-knowledge/project-knowledge';
@@ -50,7 +51,7 @@ async function close(f: Awaited<ReturnType<typeof fixture>>) {
 
 const KERNEL_CLASSES = [
   KnowledgeClaimGovernance, KnowledgeSourceRegistry, KnowledgeWorkbenchKernel, KnowledgeBoundLaunchKernel, KnowledgeRelationKernel,
-  WikiCandidateGovernanceKernel, LocalCandidateImportKernel, ProjectKnowledgeKernel, ProjectBrainKernel,
+  KnowledgeAutoReviewKernel, WikiCandidateGovernanceKernel, LocalCandidateImportKernel, ProjectKnowledgeKernel, ProjectBrainKernel,
 ];
 
 test("assembles the Knowledge capability from the catalog rather than in place", async () => {
@@ -58,7 +59,7 @@ test("assembles the Knowledge capability from the catalog rather than in place",
   try {
     const { registry } = buildCapabilityRegistry(CRAFT_CAPABILITIES, f.core);
     const instances = Object.values(KNOWLEDGE_KERNELS).map((name) => registry.require<{ store: CraftStore }>(name));
-    assert.equal(instances.length, 9);
+    assert.equal(instances.length, 10);
     // Each registered kernel is one of the eight classes, and every class is registered — so a
     // kernel added to the package without a name, or a name without a kernel, fails here.
     assert.deepEqual(

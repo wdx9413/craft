@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cp, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { linkDirectory } from "./symlink-support.ts";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -31,6 +31,19 @@ async function copyInstalledPackage(name: string, targetRoot: string): Promise<v
   await mkdir(target, { recursive: true });
   await cp(join(source, "dist"), join(target, "dist"), { recursive: true });
   await cp(join(source, "package.json"), join(target, "package.json"));
+  // The capability packages depend on the shared ontology/store/base/log
+  // packages; without their package.json files the copied tree cannot resolve
+  // its imports from an isolated consumer directory.
+  for (const dependency of ["craft-common-ontology", "craft-common-store-local", "craft-common-base", "craft-common-log"]) {
+    const packageRoot = installedPackageRoot(dependency);
+    if (!existsSync(packageRoot)) continue;
+    const targetDependency = join(targetRoot, dependency);
+    await mkdir(targetDependency, { recursive: true });
+    await cp(join(packageRoot, "dist"), join(targetDependency, "dist"), { recursive: true });
+    for (const file of ["package.json"]) {
+      if (existsSync(join(packageRoot, file))) await cp(join(packageRoot, file), join(targetDependency, file));
+    }
+  }
 }
 
 test("Context asset references are explicit, scoped, and compare only pinned dimensions", () => {

@@ -33,7 +33,7 @@
 
 ### Issue tracker
 
-规格和任务使用 GitHub `wdx9413/craft` 的 Issues。见 `docs/agents/issue-tracker.md`。
+议题和规格以本地 Markdown 文件保存在 `.scratch/` 目录中。见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 

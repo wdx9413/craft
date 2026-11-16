@@ -6,6 +6,7 @@ import { mkdtemp, mkdir, realpath, rm, stat, writeFile } from "node:fs/promises"
 import { join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
@@ -13,6 +14,8 @@ import { analyzePythonCheckpoint, resolvePythonAnalyzerPath } from '@craft/capab
 import type { RepositoryFile } from '@craft/capability-codebase/repository-files';
 import { ProjectGraphStore } from '@craft/capability-codebase/project-graph-store';
 import { stableDigest } from "../core/digest.ts";
+
+const requireFromTest = createRequire(import.meta.url);
 
 test("Python fallback Unicode analysis imports and an old index policy is rebuilt without changing source files", async () => {
   const runtime = process.env.CRAFT_TEST_CODEBASE_RUNTIME_ROOT;
@@ -23,7 +26,11 @@ test("Python fallback Unicode analysis imports and an old index policy is rebuil
   execFileSync("git", ["-C", repo, "init", "-q"]);
   const store = await new CraftStore(craftPaths(join(root, "data"))).open(), service = new RuntimeService(store); let calls = 0;
   try {
-    const moduleRoot = await realpath(runtime || resolve(import.meta.dirname, ".."));
+    // The Python analyzer now ships inside the codebase capability package,
+    // not this checkout; resolve the package from the installed module.
+    const moduleRoot = runtime
+      ? await realpath(runtime)
+      : await realpath(resolve(requireFromTest.resolve("@craft/capability-codebase/python-analysis"), "../.."));
     const analyzer = adapter.resolvePythonAnalyzerPath(root, path => path.startsWith(moduleRoot + sep) && existsSync(path));
     assert.ok(analyzer, "Python adapter must find a resource inside its own package without using sibling sources");
     assert.equal((await stat(analyzer)).isFile(), true);

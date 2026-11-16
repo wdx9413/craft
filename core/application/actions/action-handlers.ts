@@ -3,6 +3,7 @@ import type { JsonObject } from "../../infrastructure/store.ts";
 import type { ComponentName } from "../../component-readiness.ts";
 import type { McpHandlerGroup } from "./handler-types.js";
 import { createRuntimeHandlers } from "./runtime-handlers.ts";
+import { text } from "../../validation.ts";
 import { createWorkHandlers } from "./work-handlers.ts";
 import { createEvaluationHandlers } from "./evaluation-handlers.ts";
 import { createWorkspaceHandlers } from "./workspace-handlers.ts";
@@ -35,6 +36,19 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
         ...(args.command === undefined ? {} : { command_is_absolute: lspCommandIsAbsolute(args.command) }) }),
       craft_context_directory_resolve: (a) => service.contextDirectoryResolve(a),
       craft_context_open: (a) => service.contextOpen(a),
+      craft_file_dir_desc_register_device: service.fileDirDescRegisterDevice.bind(service),
+      craft_file_dir_desc_device: service.fileDirDescDevice.bind(service),
+      craft_file_dir_desc_list_devices: service.fileDirDescListDevices.bind(service),
+      craft_file_dir_desc_disable_device: service.fileDirDescDisableDevice.bind(service),
+      craft_file_dir_desc_enable_device: service.fileDirDescEnableDevice.bind(service),
+      craft_file_dir_desc_report_device_health: service.fileDirDescReportDeviceHealth.bind(service),
+      craft_file_dir_desc_record: service.fileDirDescRecord.bind(service),
+      craft_file_dir_desc_observe: service.fileDirDescObserve.bind(service),
+      craft_file_dir_desc_relocate: service.fileDirDescRelocate.bind(service),
+      craft_file_dir_desc_revoke: service.fileDirDescRevoke.bind(service),
+      craft_file_dir_desc_promote: service.fileDirDescPromote.bind(service),
+      craft_file_dir_desc_resolve: service.fileDirDescResolve.bind(service),
+      craft_file_dir_desc_list: service.fileDirDescList.bind(service),
       craft_context_routing_render: service.contextExtensionsRenderRouting.bind(service),
       craft_context_ephemeral_record: service.contextExtensionsRecordEphemeral.bind(service),
       craft_context_ephemeral_search: service.contextExtensionsSearchEphemeral.bind(service),
@@ -502,6 +516,11 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_continual_harness_authorize_canary: service.continualHarnessAuthorizeCanary.bind(service), craft_continual_harness_observe_canary: service.continualHarnessObserveCanary.bind(service),
       craft_continual_harness_rollback: service.continualHarnessRollback.bind(service), craft_continual_harness_get: service.continualHarnessGet.bind(service),
       craft_continual_harness_signals: service.continualHarnessSignals.bind(service), craft_continual_harness_resolve: service.continualHarnessResolve.bind(service),
+      craft_mod_create: service.modCreate.bind(service), craft_mod_update: service.modUpdate.bind(service), craft_mod_list: service.modList.bind(service),
+      craft_mod_approve: service.modApprove.bind(service), craft_mod_enable: service.modEnable.bind(service), craft_mod_disable: service.modDisable.bind(service),
+      craft_mod_revoke: service.modRevoke.bind(service), craft_mod_rollback: service.modRollback.bind(service), craft_mod_rollback_previous: service.modRollbackPrevious.bind(service),
+      craft_mod_propose_from_attribution: service.modProposeFromAttribution.bind(service), craft_mod_shadow_test_run: service.modEvaluateShadowTest.bind(service),
+      craft_mod_shadow_test_record: service.modRecordShadowTest.bind(service),
       craft_evolution_cycle_start: service.evolutionCycleStart.bind(service), craft_evolution_cycle_advance: service.evolutionCycleAdvance.bind(service),
       craft_evolution_cycle_get: service.evolutionCycleGet.bind(service),
       craft_stateful_compute_host_register: service.statefulComputeHostRegister.bind(service), craft_stateful_compute_session_prepare: service.statefulComputeSessionPrepare.bind(service),

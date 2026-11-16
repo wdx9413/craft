@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { atomicPrivateJson, craftPaths, dataRoot } from "craft-common-store-local/paths";
+import { atomicPrivateJson, craftPaths, dataRoot } from 'craft-common-store-local/paths';
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import type { KnowledgeLearningClient } from "./knowledge-sync.ts";
 

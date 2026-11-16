@@ -15,9 +15,14 @@
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { type CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { validateConceptBody } from "craft-common-ontology/validation";
 
-/** Content-addressed identity of a real regression run, bound to the candidate body. */
-function regressionDigest(id: string, body: string, cases: JsonObject[]): string {
+/**
+ * Content-addressed identity of a real regression run, bound to the candidate body.
+ * Exported so the Harness Mod-refinement gate can verify a shadow pass is bound to
+ * the exact body a refinement would publish, without duplicating the digest formula.
+ */
+export function regressionDigest(id: string, body: string, cases: JsonObject[]): string {
   return createHash("sha256").update(JSON.stringify({ id, body, cases })).digest("hex");
 }
 
@@ -141,7 +146,10 @@ export class ModRegistry {
       status: "pending", enabled: false, version: 1,
       created_at: now, updated_at: now, approved_by: null, approved_at: null,
       self_evolved: true, failure_class: failureClass, evidence_id: evidenceId,
-      shadow_test: "pending" };
+      // A Mod is a `rule` concept in the shared taxonomy. Its body is a bounded
+      // overlay (up to 20k chars), not a one-line ledger statement, so it carries
+      // the concept tag without the 300-char statement validation.
+      concept_kind: "rule", shadow_test: "pending" };
     this.store.save("mod", id, payload);
     return toRecord(payload);
   }
@@ -252,7 +260,7 @@ export class ModRegistry {
     const id = String(args.id ?? `mod_${randomUUID()}`);
     const payload = { id, name, body, scope_kind: scopeKind, scope_id: scopeId, applies_to: appliesTo,
       status: "draft", enabled: false, version: 1, created_at: now, updated_at: now, approved_by: null, approved_at: null,
-      ...(pluginId === null ? {} : { plugin_id: pluginId }) };
+      concept_kind: "rule", ...(pluginId === null ? {} : { plugin_id: pluginId }) };
     this.store.save("mod", id, payload);
     return toRecord(payload);
   }
@@ -395,7 +403,7 @@ function text(value: unknown, name: string): string {
 function bodyText(value: unknown): string {
   if (typeof value !== "string") throw new Error("body must be a string");
   if (value.length > 20_000) throw new Error("body must be 20000 characters or fewer");
-  return value;
+  return validateConceptBody(value, "body");
 }
 
 function boundedActor(value: unknown, name: string): string {

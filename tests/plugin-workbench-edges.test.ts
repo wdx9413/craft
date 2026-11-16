@@ -30,9 +30,9 @@ test("workbench contribution rejects malformed shapes and records sandboxed page
   assert.throws(() => normalizeWorkbenchContribution({ workbench: { schemaVersion: 1, pages: [{ id: "p", title: "t", schema: "s", requires: "x" as never }] } }), /requires/);
   assert.throws(() => normalizeWorkbenchContribution({ workbench: { schemaVersion: 1,
     themes: [{ id: "unsafe", title: "Unsafe", tokens: { "--bg-base": "#fff" } }] } }), /token is unsupported/u);
-  const sandboxed = normalizeWorkbenchContribution({ workbench: { schemaVersion: 1, pages: [{ id: "p", title: "t", kind: "sandboxed" }] } });
+  const sandboxed = normalizeWorkbenchContribution({ workbench: { schemaVersion: 1, pages: [{ id: "p", title: "t", kind: "sandboxed", entry: "index.html" }] } });
   assert.equal(sandboxed.pages[0]!.kind, "sandboxed");
-  assert.match(sandboxed.notes[0]!, /sandboxed/);
+  assert.equal(sandboxed.pages[0]!.entry, "index.html");
   // 33 pages exceeds the cap.
   const many = Array.from({ length: 33 }, (_, i) => ({ id: `p${i}`, title: "t", schema: "s" }));
   assert.throws(() => normalizeWorkbenchContribution({ workbench: { schemaVersion: 1, pages: many } }), /at most 32/);

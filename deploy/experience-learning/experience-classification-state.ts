@@ -1,7 +1,7 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
-import { atomicPrivateJson } from "craft-common-store-local/paths";
+import { atomicPrivateJson } from 'craft-common-store-local/paths';
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import { stableDigest } from "../../core/digest.ts";
 

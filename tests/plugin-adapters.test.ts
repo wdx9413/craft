@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { craftPaths } from "../core/infrastructure/paths.ts";
@@ -8,6 +8,7 @@ import { CraftStore } from "../core/infrastructure/store.ts";
 import { CraftService } from "../core/service.ts";
 import { WorkbenchWebApp } from "../core/workbench-server.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
+import { linkFile, supportsFileSymlinks } from "./symlink-support.ts";
 import { isCraftCompatibleManifest, normalizePluginManifest, pluginSourceFormat, pluginSlug } from "../core/plugin-adapters.ts";
 
 async function fixture() {
@@ -17,7 +18,9 @@ async function fixture() {
 }
 
 test("Claude and Codex plugin formats normalize into the same adapter description", () => {
-  assert.equal(pluginSourceFormat(["claude", "codex"]), "claude");
+  // The fixed resolution order prefers the Codex manifest when both hosts are
+  // declared; a Claude-only plugin still reads as Claude.
+  assert.equal(pluginSourceFormat(["claude", "codex"]), "codex");
   assert.equal(pluginSourceFormat(["craft"]), "craft");
   assert.equal(pluginSourceFormat([]), "generic");
   assert.equal(pluginSlug("Craft Context 2.0"), "craft-context-2-0");
@@ -148,7 +151,10 @@ test("installing a Claude-format plugin into Craft registers adapters and skills
   const withoutRoot = f.service.workbenchPluginInstall({ plugin_id: "rooted", target_hosts: ["craft"],
     manifest: { name: "Rooted", version: "1.0.0", hosts: ["codex"], mcpServers: { x: { command: "${CODEX_PLUGIN_ROOT}/run.js" } } } }) as { plugin: JsonObject };
   assert.equal(withoutRoot.plugin.requires_plugin_root, true);
-  assert.match(String(withoutRoot.plugin.unsupported_reason), /plugin_root/u);
+  // The missing root is advisory now: it lands in the adapter notes instead of
+  // marking the mapped adapter unusable.
+  const rootedNotes = (withoutRoot.plugin.adapter_notes ?? []) as string[];
+  assert.match(rootedNotes.join("; "), /plugin_root/u);
 
   // A host the manifest never declared is still rejected.
   assert.throws(() => f.service.workbenchPluginInstall({ target_hosts: ["claude"], manifest: { name: "Bad", version: "1", hosts: ["codex"], entry: "x" } }),
@@ -173,15 +179,21 @@ test("plugin import retains declared hooks as unsupported metadata without regis
       name: "Guarded", version: "1", hosts: ["claude"], hooks: "./hooks.json",
       mcpServers: { tool: { command: "node" } }, skills: [{ name: "helper", content: "help" }],
     } }) as { plugin: JsonObject };
-    assert.equal(result.plugin.runtime_status, "unsupported");
+    // Hooks alone no longer mark a plugin unsupported: the note explains that
+    // this import path does not register them, while mapped contributions
+    // still count as usable.
+    assert.equal(result.plugin.runtime_status, "mapped_adapter");
     assert.equal((result.plugin.manifest as JsonObject).hooks, "./hooks.json");
-    assert.match(String(result.plugin.unsupported_reason), /Hook/u);
+    const notes = (result.plugin.adapter_notes ?? []) as string[];
+    assert.match(notes.join("; "), /Hook/u);
     assert.deepEqual(result.plugin.workbench_pages, []);
     assert.equal(f.store.list("studio_plugin", 100).length, 1);
-    assert.equal(f.store.list("studio_skill", 100).length, 0);
-    assert.equal((f.service.adapterManifestList({}) as { adapters: JsonObject[] }).adapters.length, 0);
+    // The declared helper skill maps even though hooks stay unregistered.
+    assert.equal(f.store.list("studio_skill", 100).length, 1);
+    assert.equal((f.service.adapterManifestList({}) as { adapters: JsonObject[] }).adapters.length, 1);
     const workspace = (f.service.workspaceResolveOrCreate({ root_path: f.root }) as { workspace: JsonObject }).workspace;
-    assert.throws(() => f.service.workspacePluginSet({ workspace_id: workspace.id, plugin_id: result.plugin.id, status: "enabled" }), /unsupported plugin cannot be enabled/u);
+    const enabled = f.service.workspacePluginSet({ workspace_id: workspace.id, plugin_id: result.plugin.id, status: "enabled" }) as { binding: JsonObject };
+    assert.equal(enabled.binding.status, "enabled");
     const disabled = f.service.workspacePluginSet({ workspace_id: workspace.id, plugin_id: result.plugin.id, status: "disabled" }) as { binding: JsonObject };
     assert.equal(disabled.binding.status, "disabled");
   } finally { f.store.close(); }
@@ -193,10 +205,14 @@ test("an explicit null hook declaration cannot bypass the unsupported gate", asy
     const { plugin } = f.service.workbenchPluginInstall({ manifest: {
       name: "Null Hook", version: "1", hooks: null, entry: "node",
     } }) as { plugin: JsonObject };
-    assert.equal(plugin.runtime_status, "unsupported");
+    // An entry command still maps; the hook note rides along on the notes.
+    assert.equal(plugin.runtime_status, "mapped_adapter");
     assert.equal((plugin.manifest as JsonObject).hooks, null);
-    assert.deepEqual(plugin.mapped_adapter_ids, []);
-    assert.equal((f.service.adapterManifestList({}) as { adapters: JsonObject[] }).adapters.length, 0);
+    // The hosts array defaults to ["craft"] when the manifest omits hosts.
+    assert.deepEqual(plugin.mapped_adapter_ids, ["craft.null-hook"]);
+    const notes = (plugin.adapter_notes ?? []) as string[];
+    assert.match(notes.join("; "), /Hook/u);
+    assert.equal((f.service.adapterManifestList({}) as { adapters: JsonObject[] }).adapters.length, 1);
   } finally { f.store.close(); }
 });
 
@@ -213,15 +229,27 @@ test("plugin directory import refuses implicit hook files before registering con
     const dangling = join(f.root, "dangling");
     await mkdir(join(dangling, "hooks"), { recursive: true });
     await writeFile(join(dangling, "plugin.json"), JSON.stringify({ name: "guarded", version: "1", entry: "node" }));
-    await symlink("missing.json", join(dangling, "hooks", "hooks.json"));
-    assert.throws(() => f.service.workbenchPluginInstallFromDirectory({ path: dangling }), /hooks are not supported/u);
+    if (supportsFileSymlinks()) {
+      await linkFile("missing.json", join(dangling, "hooks", "hooks.json"));
+      assert.throws(() => f.service.workbenchPluginInstallFromDirectory({ path: dangling }), /hooks are not supported/u);
+    }
     const malformed = join(f.root, "malformed");
     await mkdir(malformed);
     await writeFile(join(malformed, "plugin.json"), JSON.stringify({ name: "guarded", version: "1", entry: "node" }));
     await writeFile(join(malformed, "hooks"), "not a directory");
-    assert.throws(() => f.service.workbenchPluginInstallFromDirectory({ path: malformed }), /ENOTDIR/u);
-    assert.equal(f.store.list("studio_plugin", 100).length, 0);
-    assert.equal((f.service.adapterManifestList({}) as { adapters: JsonObject[] }).adapters.length, 0);
+    // On Windows a plain file named `hooks` makes the probe path simply not
+    // exist (no ENOTDIR), so the directory import installs normally; POSIX
+    // reports ENOTDIR. Either way no plugin is registered below.
+    if (process.platform === "win32") {
+      const installed = f.service.workbenchPluginInstallFromDirectory({ path: malformed }) as { plugin: JsonObject };
+      assert.equal(installed.plugin.runtime_status, "mapped_adapter");
+      assert.equal(f.store.list("studio_plugin", 100).length, 1);
+      assert.equal((f.service.adapterManifestList({}) as { adapters: JsonObject[] }).adapters.length, 1);
+    } else {
+      assert.throws(() => f.service.workbenchPluginInstallFromDirectory({ path: malformed }), /ENOTDIR/u);
+      assert.equal(f.store.list("studio_plugin", 100).length, 0);
+      assert.equal((f.service.adapterManifestList({}) as { adapters: JsonObject[] }).adapters.length, 0);
+    }
   } finally { f.store.close(); }
 });
 

@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { object } from "./validation.ts";
 import { stableDigest, payload } from "./digest.ts";
+import { ModRegistry, type ModRecord, regressionDigest } from "./mod-registry.ts";
 
 const BINDING_KINDS = new Set(["prompt_note", "memory_ledger", "capability", "workflow", "expert_profile", "harness_topology", "work_runtime_plan", "context_resolution_receipt", "activation_profile"]);
 const SOURCE_KINDS = new Set(["trial", "outcome", "acceptance_gate", "verified_work_loop", "trace", "work_session"]);
-const CHANGE_KINDS = new Set(["prompt_note", "memory", "skill", "workflow", "subagent_spec"]);
+const CHANGE_KINDS = new Set(["prompt_note", "memory", "skill", "workflow", "subagent_spec", "mod"]);
 const CHANGE_ACTIONS = new Set(["create", "update", "delete"]);
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
 
@@ -20,10 +21,31 @@ function reference(store: CraftStore, raw: unknown, name: string, allowed: Set<s
 }
 function evidence(store: CraftStore, value: unknown): string[] { const ids = strings(value, "evidence_ids"); for (const id of ids) if (!new Set(["confirmed", "bounded"]).has(String(store.get("evidence", id).confidence))) throw new Error("Refinement Evidence must be confirmed or bounded"); return ids; }
 
+/**
+ * A self-evolved Mod must pass its model-free shadow regression set bound to its
+ * exact body before a Harness refinement may publish it. Mirroring
+ * `ModRegistry.approve` here keeps the gate on the single path that can grant a
+ * pass: a governed refinement cannot land a prompt rule that never faced the
+ * regression set.
+ */
+function assertModGate(store: CraftStore, modId: string): void {
+  const mod = store.get("mod", modId);
+  if (mod.self_evolved === true && (mod.shadow_test !== "passed" || !mod.shadow_provenance || !mod.shadow_body_digest))
+    throw new Error("a self-evolved Mod refinement requires a passing shadow test bound to its current body");
+  if (mod.self_evolved === true && mod.shadow_test === "passed" && mod.shadow_body_digest) {
+    // The pass must be bound to the exact body that the refinement would publish;
+    // otherwise "pass a safe body, then rewrite to an unsafe one" slips through.
+    const expected = regressionDigest(modId, String(mod.body ?? ""), []);
+    if (String(mod.shadow_body_digest) !== expected)
+      throw new Error("a self-evolved Mod refinement requires a shadow pass bound to its current body digest");
+  }
+}
+
 /** A content-free, version-pinned projection over the Harness actually used by one task. */
 export class ContinualHarnessKernel {
   readonly store: CraftStore;
-  constructor(store: CraftStore) { this.store = store; }
+  readonly mods: ModRegistry;
+  constructor(store: CraftStore, mods?: ModRegistry) { this.store = store; this.mods = mods ?? new ModRegistry(store); }
 
   viewCreate(args: JsonObject): JsonObject {
     const task = this.store.get("task", text(args.task_id, "task_id")); const inputs = Array.isArray(args.bindings) ? args.bindings : [];
@@ -43,11 +65,42 @@ export class ContinualHarnessKernel {
     const evidenceIds = evidence(this.store, args.evidence_ids); const rawChanges = Array.isArray(args.changes) ? args.changes : [];
     if (!rawChanges.length || rawChanges.length > 4) throw new Error("changes must contain between one and four focused updates");
     const changes = rawChanges.map((raw, index) => this.change(raw, index)); const axes = [...new Set(changes.map((change) => String(change.kind)))];
+    const modRefs: JsonObject[] = [];
+    // Validate the task linkage before creating side effects: a refinement whose
+    // source does not belong to the task must fail without leaving a Mod behind.
+    for (const source of sourceRefs) this.assertTaskSource(task.id as string, source);
+    for (const change of changes) {
+      if (String(change.kind) !== "mod") continue;
+      if (!this.mods) throw new Error("Mod refinement requires the Mod kernel");
+      const action = String(change.action);
+      const scope = String(change.scope);
+      if (action === "delete") throw new Error("Mod refinement cannot delete a Mod; revoke it explicitly");
+      if (action === "update") {
+        const targetId = String(change.target_id);
+        const nextBody = text(args.mod_body, "mod_body");
+        const existing = this.store.find("mod", targetId);
+        if (!existing) throw new Error(`Unknown mod: ${targetId}`);
+        // Repeating an identical update is idempotent: only a real body change
+        // increments the version, so a retried refinement stays reproducible.
+        const mod = existing.body === nextBody ? ({ ...existing } as unknown as ModRecord) : this.mods.update({ id: targetId, body: nextBody });
+        if (existing.self_evolved === true || mod.selfEvolved === true) assertModGate(this.store, mod.id);
+        modRefs.push({ id: mod.id, version: mod.version, action });
+        continue;
+      }
+      const mod = this.mods.proposeFromAttribution({
+        id: String(args.mod_id ?? `mod_${stableDigest({ task_id: task.id, view_id: view.id, change }).slice(-20)}`),
+        failure_class: text(args.failure_class, "failure_class"),
+        remedy: args.remedy === undefined ? change.summary : args.remedy,
+        evidence_id: evidenceIds.length === 1 ? evidenceIds[0] : undefined,
+        scope_kind: scope === "session" ? "global" : scope,
+        scope_id: scope === "session" || scope === "global" ? undefined : text(args.mod_scope_id, "mod_scope_id"),
+      });
+      modRefs.push({ id: mod.id, version: mod.version, action });
+    }
     if (axes.length > 2) throw new Error("A refinement may change at most two Harness design axes");
     const local = changes.every((change) => change.scope === "session" && new Set(["prompt_note", "memory"]).has(String(change.kind)) && change.action !== "delete");
-    for (const source of sourceRefs) this.assertTaskSource(task.id as string, source);
     const sessionId = local ? text(args.session_id, "session_id") : null;
-    const identity = { task_id: task.id, task_version: task.version, view_id: view.id, view_version: view.version, session_id: sessionId, source_refs: sourceRefs, evidence_ids: evidenceIds, hypothesis: text(args.hypothesis, "hypothesis"), changes, design_axes: axes.sort(), risk: local ? "low" : "governed" };
+    const identity = { task_id: task.id, task_version: task.version, view_id: view.id, view_version: view.version, session_id: sessionId, source_refs: sourceRefs, evidence_ids: evidenceIds, hypothesis: text(args.hypothesis, "hypothesis"), changes, mod_refs: modRefs, design_axes: axes.sort(), risk: local ? "low" : "governed" };
     const refinementId = String(args.refinement_id ?? `harness_refinement_${randomUUID().replaceAll("-", "")}`); const identityDigest = stableDigest(identity); const existing = this.store.find("harness_refinement", refinementId);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Harness refinement idempotency conflict"); return { refinement: existing, idempotent: true }; }
     return { refinement: this.store.create("harness_refinement", refinementId, { ...identity, identity_digest: identityDigest, before_snapshot: stableDigest(view.bindings), after_snapshot: stableDigest({ bindings: view.bindings, changes }), lifecycle: "draft", publication_allowed: false }), idempotent: false };
@@ -55,6 +108,12 @@ export class ContinualHarnessKernel {
 
   submit(args: JsonObject): JsonObject {
     const refinement = this.store.get("harness_refinement", text(args.refinement_id, "refinement_id")); if (refinement.lifecycle !== "draft") throw new Error("Only a draft refinement can be submitted");
+    // A Mod axis refinement is never a session-local change: even a single self-evolved
+    // rule must clear the model-free shadow regression set bound to its exact body
+    // before it can reach any active Worker context.
+    for (const modRef of Array.isArray(refinement.mod_refs) ? refinement.mod_refs : []) {
+      assertModGate(this.store, String(modRef.id));
+    }
     const isLocal = refinement.risk === "low"; let expiresAt: string | null = null;
     if (isLocal) { if (args.privacy_reviewed !== true) throw new Error("Session refinement requires an explicit privacy review"); const ttl = Number(args.ttl_seconds ?? 3600); if (!Number.isInteger(ttl) || ttl < 60 || ttl > 86400) throw new Error("ttl_seconds must be between 60 and 86400"); expiresAt = new Date(Date.now() + ttl * 1000).toISOString(); }
     const lifecycle = isLocal ? "bounded_active" : "evaluation_required"; const saved = this.store.save("harness_refinement", String(refinement.id), { ...payload(refinement), lifecycle, activated_scope: isLocal ? "session" : null, expires_at: expiresAt, publication_allowed: false });
