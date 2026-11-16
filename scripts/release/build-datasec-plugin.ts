@@ -6,18 +6,17 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const plugin = resolve(root, "plugins/craft-datasec");
 
-// The capability package is an external dependency: bundling it would give the
-// plugin its own copy of the runtime and break shared prototypes across packages.
+// This hook runs in a separate Host process. Bundle the capability and its local
+// runtime dependencies so the marketplace payload does not need a node_modules tree.
 await mkdir(resolve(plugin, "dist"), { recursive: true });
 await build({
   entryPoints: [resolve(root, "bin/craft-datasec-hook.ts")],
   bundle: true,
-  packages: "external",
   platform: "node",
   target: "node23",
   format: "esm",
   outfile: resolve(plugin, "dist/hook.mjs"),
 });
-const source = JSON.parse(await readFile(resolve(root, "node_modules/@craft/capability-datasec/package.json"), "utf8")) as { version: string };
-await writeFile(resolve(plugin, "dist/build.json"), JSON.stringify({ name: "craft-datasec", version: source.version }) + "\n");
+const manifest = JSON.parse(await readFile(resolve(plugin, ".codex-plugin/plugin.json"), "utf8")) as { version: string };
+await writeFile(resolve(plugin, "dist/build.json"), JSON.stringify({ name: "craft-datasec", version: manifest.version }) + "\n");
 process.stdout.write(`Built independent plugin: ${plugin}\n`);
