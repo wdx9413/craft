@@ -55,7 +55,7 @@ test("Datasec executable guard and output writer are deterministic", () => {
   assert.deepEqual(seen, ["warn\n", "ok\n"]);
   const built = JSON.parse(readFileSync(join(project, "plugins/craft-datasec/dist/build.json"), "utf8"));
   assert.equal(built.name, "craft-datasec");
-  assert.equal(built.version, "0.1.7");
+  assert.equal(built.version, "0.1.8");
   const bundle = readFileSync(join(project, "plugins/craft-datasec/dist/hook.mjs"), "utf8");
   assert.doesNotMatch(bundle, /from\s+["'](?:craft-common-store-local|@craft\/capability-datasec)(?:\/|["'])/u);
 });
@@ -66,7 +66,7 @@ test("independent Datasec is discoverable in release catalogs without joining th
   assert.equal(allReleaseProducts().length, 3);
   assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context", "craft-datasec"]);
   const contract = externalDistributionContract();
-  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.1.7");
+  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.1.8");
   assert.equal(contract.products.find(product => product.name === "craft-context")!.hook_member, "context");
   assert(releaseManifest().plugins.some(product => product.name === "craft-datasec"));
 });
