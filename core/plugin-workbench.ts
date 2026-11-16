@@ -34,7 +34,7 @@ function contained(base: string, candidate: string): boolean {
 
 export type WorkbenchPage = {
   id: string; title: string; icon?: string; kind: "declarative" | "sandboxed";
-  schema?: string; requires?: string[];
+  schema?: string; entry?: string; requires?: string[];
 };
 
 export type WorkbenchContextAction = { id: string; title: string; contexts: string[]; target: "memory" | "knowledge" | "workflows" };
