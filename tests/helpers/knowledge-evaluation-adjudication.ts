@@ -1,7 +1,7 @@
 import { stableDigest } from "../../core/digest.ts";
 import type { CraftService } from "../../core/service.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
-import { knowledgeEvaluationCaseBindingDigest } from "../../core/knowledge-evaluation-provenance.ts";
+import { knowledgeEvaluationCaseBindingDigest } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 
 /** Internal validator fixture. This synthetic Trace is not Host execution proof. */
 export function adjudicateKnowledgeCase(service: CraftService, case_: JsonObject,

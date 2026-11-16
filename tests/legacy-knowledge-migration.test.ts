@@ -7,7 +7,7 @@ import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
-import { knowledgeClaimPromotionProofVerified } from "../core/knowledge-evaluation-provenance.ts";
+import { knowledgeClaimPromotionProofVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 import { stableDigest } from "../core/digest.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { LegacyKnowledgeMigrationKernel } from "../core/legacy-knowledge-migration.ts";

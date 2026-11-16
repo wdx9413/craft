@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationCaseBindingDigest, knowledgeEvaluationEvidence, knowledgeEvaluationSourceMatches } from "../core/knowledge-evaluation-provenance.ts";
+import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationCaseBindingDigest, knowledgeEvaluationEvidence, knowledgeEvaluationSourceMatches } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { payload, stableDigest } from "../core/digest.ts";

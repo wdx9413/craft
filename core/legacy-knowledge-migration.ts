@@ -3,7 +3,7 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { CraftStore } from "./infrastructure/store.ts";
-import { knowledgeClaimPromotionProofVerified } from "./knowledge-evaluation-provenance.ts";
+import { knowledgeClaimPromotionProofVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 
 const CATEGORIES = new Set(["projects", "domains", "troubleshooting", "decisions", "workflows"]);
 const TYPES = new Map<string, string>([["domain_rule", "fact"], ["technical_decision", "decision"], ["workflow", "rule"], ["troubleshooting", "failure_mode"], ["stable_project_fact", "fact"]]);

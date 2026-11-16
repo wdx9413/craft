@@ -9,8 +9,8 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { projectStorageDirectory } from 'craft-common-store-local/paths';
 import { createActionHandlers } from "../core/application/actions/action-handlers.ts";
-import type { ModelTransport } from "../core/model-gateway.ts";
-import { knowledgeEvaluationAdjudicationVerified } from "../core/knowledge-evaluation-provenance.ts";
+import { PROVIDER_CATALOG, type ModelTransport } from "../core/model-gateway.ts";
+import { knowledgeEvaluationAdjudicationVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 import { runSessionKnowledgeAdjudicationOnce } from "../deploy/experience-learning/session-knowledge-adjudication.ts";
 import type { ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
 import { payload, stableDigest } from "../core/digest.ts";
@@ -28,8 +28,13 @@ async function fixture(output = JSON.stringify({ decision: "accepted", expected_
     if (options.fail !== undefined) throw options.fail;
     return { text: output, model: options.model ?? "gpt-6-luna", usage: options.no_usage ? null : { input_tokens: 12, output_tokens: 5 } };
   } };
-  const service = new CraftService(store, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-    undefined, "zh-CN", () => transport);
+  // Managed adjudication requires the Codex CLI provider. The runtime only
+  // adds it under an explicit policy switch, so this fixture injects the
+  // catalog entry directly instead of flipping a global default.
+  const codexProvider = PROVIDER_CATALOG.find((item) => item.provider === "codex-cli");
+  if (!codexProvider) throw new Error("Codex CLI provider missing from catalog");
+  const service = new CraftService(store, undefined, undefined, undefined, undefined, undefined, undefined,
+    [codexProvider], undefined, undefined, "zh-CN", () => transport);
   service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: root });
   const source = service.knowledgeSessionEvidenceRecord({ scope: "project:demo", task_id: "source-task", source_session_id: "source-session",
     turn_id: "source-turn", source_ref: sha("a"), task_goal: "验证规则", task_result: "规则成立", sanitized: true,

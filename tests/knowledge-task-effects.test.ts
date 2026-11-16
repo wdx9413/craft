@@ -8,10 +8,10 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { payload, stableDigest } from "../core/digest.ts";
 import { KnowledgeTaskEffects } from "../core/knowledge-task-effects.ts";
-import { knowledgeTaskEffectEvidenceVerified, knowledgeClaimPromotionProofVerified } from "../core/knowledge-evaluation-provenance.ts";
+import { knowledgeTaskEffectEvidenceVerified, knowledgeClaimPromotionProofVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 import { knowledgeTaskContract } from "../core/knowledge-task-contract.ts";
-import { knowledgeTaskEffectAssessmentDigest } from "../core/knowledge-task-effect-proof.ts";
-import { KnowledgeAutoReviewKernel } from "../core/knowledge-auto-review.ts";
+import { knowledgeTaskEffectAssessmentDigest } from "@craft/capability-knowledge/knowledge-task-effect-proof";
+import { KnowledgeAutoReviewKernel } from "@craft/capability-knowledge/knowledge-auto-review";
 
 test("task contracts require bounded deterministic outcomes and safety assertions", () => {
   const valid = { checks: [{ id: "answer", kind: "json_equals", path: "answer.json", key: "ok", equals: true }], safety_checks: [{ id: "safe", kind: "exit_code", equals: 0 }] };

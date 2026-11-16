@@ -10,7 +10,7 @@ import { ComponentTraceKernel } from "../component-trace.ts";
 import { observeMethods } from 'craft-common-log/index';
 import { createHash, randomUUID } from "node:crypto";
 import { ContextHostEvaluation } from "../context-host-evaluation.ts";
-import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationCaseBindingDigest, knowledgeEvaluationEvidence } from "../knowledge-evaluation-provenance.ts";
+import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationCaseBindingDigest, knowledgeEvaluationEvidence } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 import { knowledgeTaskContract } from "../knowledge-task-contract.ts";
 import { procedureHostControl } from "./procedure-host-control.ts";
 import { procedureDecisionEvaluate } from "./procedure-decision.ts";

@@ -6,8 +6,8 @@ import { findClaudeExecutable } from "./infrastructure/claude-executable.ts";
 import { findCodexExecutable } from "./infrastructure/codex-executable.ts";
 import { evaluationExecutable } from "./evaluation-engine-identity.ts";
 import { knowledgeTaskContract } from "./knowledge-task-contract.ts";
-import { assessKnowledgeEvaluationProvenance, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationEvidence, knowledgeEvaluationSourceMatches } from "./knowledge-evaluation-provenance.ts";
-import { KNOWLEDGE_TASK_EFFECT_POLICY, knowledgeTaskEffectId } from "./knowledge-task-effect-proof.ts";
+import { assessKnowledgeEvaluationProvenance, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationEvidence, knowledgeEvaluationSourceMatches } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
+import { KNOWLEDGE_TASK_EFFECT_POLICY, knowledgeTaskEffectId } from "@craft/capability-knowledge/knowledge-task-effect-proof";
 import { prepareTaskInput, type CaseResult, type Comparison, type TaskContext } from "craft-eval";
 import { createHash } from "node:crypto";
 

@@ -10,7 +10,7 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { adjudicateKnowledgeCase } from "./helpers/knowledge-evaluation-adjudication.ts";
 import { createActionHandlers } from "../core/application/actions/action-handlers.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
-import { knowledgeClaimPromotionProofVerified } from "../core/knowledge-evaluation-provenance.ts";
+import { knowledgeClaimPromotionProofVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-promotion-"));

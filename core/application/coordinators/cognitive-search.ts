@@ -7,7 +7,7 @@ import { scopeFromKey } from 'craft-common-base/scope-policy';
 import { knowledgeScenarioIsActive, listKnowledgeScenarios, proposeKnowledgeScenarioMigration, retireKnowledgeScenario } from '@craft/capability-knowledge/scenario-catalog';
 import { array, finiteInteger, object, text } from "../../validation.ts";
 import { knowledgeDirectoryForScope } from "../../project-knowledge-content.ts";
-import { knowledgeClaimPromotionProofVerified } from "../../knowledge-evaluation-provenance.ts";
+import { knowledgeClaimPromotionProofVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 
 /** Owns local diagnostic projections and the loop's governed Memory read path. */
 export class CognitiveSearchCoordinator {

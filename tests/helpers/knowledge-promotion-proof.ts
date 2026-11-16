@@ -3,7 +3,7 @@ import { stableDigest } from 'craft-common-base/digest';
 import { updateKnowledgeScenarioClaim } from '@craft/capability-knowledge/scenario-catalog';
 import { knowledgeDirectoryForScope } from "../../core/project-knowledge-content.ts";
 import { scopeFromKey } from 'craft-common-base/scope-policy';
-import { KNOWLEDGE_TASK_EFFECT_POLICY, knowledgeTaskEffectId, knowledgeTaskEffectAssessmentDigest } from "../../core/knowledge-task-effect-proof.ts";
+import { KNOWLEDGE_TASK_EFFECT_POLICY, knowledgeTaskEffectId, knowledgeTaskEffectAssessmentDigest } from "@craft/capability-knowledge/knowledge-task-effect-proof";
 
 /** Synthetic issuer receipt for read-side invalidation tests, never live task-effect evidence.
  * Issuer admission (21 independent tasks, native engines and assert sets) is tested separately. */

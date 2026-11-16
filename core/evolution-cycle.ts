@@ -5,7 +5,7 @@ import { object, text } from "./validation.ts";
 import { stableDigest, payload } from "./digest.ts";
 import { sessionStorageScopeId } from 'craft-common-store-local/paths';
 import { EvolutionCandidateWorkspace } from "./evolution-candidate-workspace.ts";
-import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationEvidence } from "./knowledge-evaluation-provenance.ts";
+import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerified, knowledgeEvaluationAdjudicationVerified, knowledgeEvaluationEvidence } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 import { MemoryLedgerKernel } from '@craft/capability-memory/memory-ledger';
 import { activeProcedure } from '@craft/capability-experience/procedure-release';
 import { WorkspaceState } from "./workspace.ts";

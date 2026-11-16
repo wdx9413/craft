@@ -67,7 +67,7 @@ import { TaskRunKernel } from "../task-run.ts";
 import { TaskBenchmarkKernel } from "../task-benchmark.ts";
 import { StateWorkspaceKernel } from "../state-workspace.ts";
 import { VerifiedWorkLoopKernel } from "../verified-work-loop.ts";
-import { KnowledgeAutoReviewKernel } from "../knowledge-auto-review.ts";
+import { KnowledgeAutoReviewKernel } from "@craft/capability-knowledge/knowledge-auto-review";
 import { DecisionPointContextGate } from "../decision-context-gate.ts";
 import { EvalCampaignKernel } from "../eval-campaign.ts";
 import type { ProjectKnowledgeKernel } from '@craft/capability-knowledge/project-knowledge';

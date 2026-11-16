@@ -3,7 +3,7 @@ import { CRAFT_RELEASE_VERSION } from "./version.ts";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { learningWorkerDiagnostic } from "./learning-worker-diagnostic.ts";
-import { knowledgeClaimPromotionProofVerified } from "./knowledge-evaluation-provenance.ts";
+import { knowledgeClaimPromotionProofVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 
 const COMPONENTS = new Set(["knowledge", "memory", "experience"]);
 
