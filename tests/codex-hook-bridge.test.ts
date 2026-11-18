@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { activeProcedure } from '@craft/capability-experience/procedure-release';
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { linkDirectory } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
@@ -73,6 +73,67 @@ test("UserPromptSubmit automatically accumulates conventions into ledger records
     assert.ok(candidates.length >= 1, "durable statements become Memory candidates");
     assert.ok(candidates.some((item) => String(item.content ?? "").includes("我偏好深色模式")), "preference is captured");
   } finally { await dispose(f); }
+});
+
+test("UserPromptSubmit durable accumulation is fail-open for capability errors", async t => {
+  const f = await fixture();
+  try {
+    t.mock.method(f.service, "memoryCaptureObservedFact", () => { throw new TypeError("memory private"); });
+    t.mock.method(f.service, "evidenceRecord", () => { throw new RangeError("evidence private"); });
+    const bridge = new CodexHookBridge(f.service);
+    const result = await bridge.handle("context", {
+      cwd: f.root, session_id: "auto-accumulate-failure", turn_id: "auto-accumulate-failure-1",
+      hook_event_name: "UserPromptSubmit",
+      prompt: "本项目约定：提交前必须运行 pnpm test。我偏好深色模式。",
+    });
+    assert.deepEqual(result, {});
+    const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed");
+    assert.deepEqual([...new Set(failures.map(event => (event.payload as JsonObject).error_type))].sort(), ["RangeError", "TypeError"]);
+    assert.doesNotMatch(JSON.stringify(failures), /private/u);
+  } finally { t.mock.restoreAll(); await dispose(f); }
+});
+
+test("UserPromptSubmit captures diagnostic-only Runbook candidates without blocking", async t => {
+  const f = await fixture();
+  const original = f.service.evolutionRunbookCapture;
+  let captureCount = 0;
+  f.service.evolutionRunbookCapture = (args: JsonObject) => { captureCount++; return { procedure: { id: "runbook" }, args }; };
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    const result = await bridge.handle("context", {
+      cwd: f.root, session_id: "runbook-session", turn_id: "runbook-turn",
+      hook_event_name: "UserPromptSubmit",
+      prompt: "如何操作 PPT：先打开文件，再选择模板，最后导出。",
+    });
+    assert.equal(captureCount, 1);
+    assert.deepEqual(typeof result, "object");
+  } finally { f.service.evolutionRunbookCapture = original; t.mock.restoreAll(); await dispose(f); }
+});
+
+test("trusted Mod lifecycle failures stay bounded", async t => {
+  const f = await fixture();
+  try {
+    t.mock.method(f.service, "modRuntimeHasTrustedEvent", (event: string) => event === "craft.session.lifecycle@1");
+    t.mock.method(f.service, "modRuntimeDispatch", async () => { throw new Error("mod private"); });
+    const bridge = new CodexHookBridge(f.service);
+    await bridge.handle("context", { cwd: f.root, session_id: "mod-failure", hook_event_name: "SessionStart" });
+    const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.mod_lifecycle_failed");
+    assert.equal(failures.length, 1);
+    assert.doesNotMatch(JSON.stringify(failures), /private/u);
+  } finally { t.mock.restoreAll(); await dispose(f); }
+});
+
+test("invalid trusted Mod context additions are rejected", async t => {
+  const f = await fixture();
+  try {
+    t.mock.method(f.service, "modRuntimeHasTrustedEvent", (event: string) => event === "craft.context.assemble@1");
+    t.mock.method(f.service, "modRuntimeDispatch", async () => ({ status: "ok", result: { query: "review", context_additions: [1] } }));
+    const bridge = new CodexHookBridge(f.service);
+    assert.deepEqual(await bridge.handle("context", { cwd: f.root, session_id: "mod-invalid", hook_event_name: "UserPromptSubmit", prompt: "review" }), {});
+    const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed");
+    assert.ok(failures.length >= 1);
+    assert.doesNotMatch(JSON.stringify(failures), /Mod Context additions/u);
+  } finally { t.mock.restoreAll(); await dispose(f); }
 });
 
 test("session-only Hook events join one generated turn and stop cannot finalize it twice", async () => {
@@ -324,6 +385,13 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
 });
 
 test("Hook traces identify the bounded lifecycle event without recording prompt text", async () => {
+  if (process.env.EXPERIMENT_COVERAGE === "1") {
+    const f = await fixture();
+    try {
+      const bridge = new CodexHookBridge(f.service);
+      await bridge.handle("memory", { cwd: f.root, session_id: "exp-modal", turn_id: "exp-turn", hook_event_name: "UserPromptSubmit", prompt: "以后请优先运行 focused tests" });
+    } finally { await dispose(f); }
+  }
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service);
@@ -649,6 +717,20 @@ test("Hook signal sanitizer accepts only local edit or verification metadata", (
   assert.equal(sanitizer.signal({ tool_name: "unknown" }), null);
   assert.equal(sanitizer.signal({}), null);
   assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "echo hello" } }), null);
+});
+
+test("Hook signal sanitizer resolves observed edit paths only inside the project", () => {
+  const root = mkdtempSync(join(tmpdir(), "hook-signal-sanitizer-"));
+  try {
+    writeFileSync(join(root, "local.txt"), "ok");
+    mkdirSync(join(root, "outside"));
+    writeFileSync(join(root, "outside", "secret.txt"), "private");
+    const sanitizer = new HookSignalSanitizer();
+    assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: "local.txt" } })?.observed_path, "local.txt");
+    assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: "../secret.txt" } })?.observed_path, undefined);
+    assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: "missing.txt" } })?.observed_path, undefined);
+    assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: "outside/secret.txt" } })?.observed_path, undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("Stop accepts a passing Node TypeScript test run after the last edit", async () => {

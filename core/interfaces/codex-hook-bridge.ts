@@ -23,6 +23,8 @@ import { projectExperienceDirectory } from "../project-experience-directory.ts";
 import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGoal } from "../experience-task-goals.ts";
 import { sanitizeCodexTaskGoal } from "../codex-task-prose.ts";
 import { validateConcept, mapLegacyKind } from 'craft-common-ontology/validation';
+import { evaluateEvolutionValue } from "../evolution-value-gate.ts";
+import { extractUserStatedOperatingSteps } from "../evolution-runbook-candidate.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import { HookSignalSanitizer, nestedText, type HookSignal } from "./codex-hook-signal-sanitizer.ts";
 import { queueHookMaintenance } from "./memory-archive-worker.ts";
@@ -126,6 +128,14 @@ export function automaticMemoryFact(prompt: unknown): string | null {
 /** Keep only a short, redacted task goal for project Experience classification. */
 export function sanitizedExperienceTaskGoal(value: unknown): string | null {
   return sanitizeCodexTaskGoal(value);
+}
+
+function evolutionDomainFor(textValue: string): "coding" | "office" | "travel" | "creation" | "research" {
+  if (/(?:会议|文档|表格|ppt|模板|审批)/iu.test(textValue)) return "office";
+  if (/(?:预算|行程|航班|酒店|签证)/iu.test(textValue)) return "travel";
+  if (/(?:prompt|风格|图片|视频|幻灯片|封面|素材)/iu.test(textValue)) return "creation";
+  if (/(?:论文|假设|实验|文献|反例|复现)/iu.test(textValue)) return "research";
+  return "coding";
 }
 
 /**
@@ -409,6 +419,22 @@ export class HookLearningCoordinator {
       observed_paths: observedPaths,
       ...(typeof journal.coarse_scenario_key === "string" ? { coarse_scenario_key: journal.coarse_scenario_key } : {}),
       ...(typeof lastVerifier?.verifier === "string" ? { scenario_verifier_digest: lastVerifier.verifier } : {}) });
+    const finalizedObject = finalized as JsonObject;
+    const observation = finalizedObject.observation as JsonObject | null;
+    if (journal.verification_outcome === "passed" && observation && typeof observation.id === "string") {
+      try {
+        const goalText = taskGoal || scenario || observedPaths.join(" ") || "verified project workflow";
+        const scope = journal.scope as JsonObject;
+        this.service.generalEvolution.captureProgramMemory({
+          scenario_key: scenario || "coding",
+          domain: evolutionDomainFor(goalText),
+          statement: `Verified workflow: ${goalText}`.slice(0, 280),
+          steps: observedPaths,
+          evidence_ids: [String(observation.id)],
+          scope: { kind: String(scope.kind), id: String(scope.id) },
+        });
+      } catch { this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "experience", event: "Stop", error_type: "program_memory_capture_failed" }); }
+    }
     return finalized;
   }
 }
@@ -580,6 +606,9 @@ export class CodexHookBridge {
         this.service.store.bindSessionStorageHost(sessionId, sessionHost);
         for (const item of autoStatements) {
           if (explicit && item.statement === explicit) continue;
+          const decision = evaluateEvolutionValue({ statement: item.statement, source_kind: "user-statement", explicit: true,
+            scope: { scope_kind: "session", scope_id: sessionId, project_scope_id: scope.id } });
+          if (decision.action !== "store_as_fact" && decision.action !== "store_as_preference") continue;
           const legacyKind = item.kind === "preference" ? "preference" : item.kind === "rule" ? "procedural" : "working";
           validateConcept(mapLegacyKind("memory", legacyKind), item.statement);
           const captured = this.service.memoryCaptureObservedFact({ content: item.statement, kind: legacyKind,
@@ -596,6 +625,9 @@ export class CodexHookBridge {
     if (shouldWriteKnowledge) {
       try {
         for (const item of autoStatements.filter((entry) => entry.kind === "rule")) {
+          const decision = evaluateEvolutionValue({ statement: item.statement, source_kind: "user-statement", explicit: true,
+            scope: { scope_kind: "project", scope_id: scope.id } });
+          if (decision.action !== "store_as_fact") continue;
           // A claim requires at least one Evidence record. The evidence only
           // attests "the user stated this rule", never that the rule is true.
           const evidenceId = `codex_hook_rule_${stableDigest({ statement: item.statement, session_id: sessionId ?? "" }).slice(-24)}`;
@@ -677,6 +709,15 @@ export class CodexHookBridge {
     // narrow set of preferences.
     const autoAccumulation = this.accumulateDurableStatements(prompt, input, scope, members);
     memoryWritten = memoryWritten || autoAccumulation.written;
+    // User-stated operating steps become a diagnostic-only Runbook candidate,
+    // never an executable Procedure. The capture is best-effort and never blocks.
+    try {
+      const sessionId = text(input.session_id), turnId = text(input.turn_id);
+      if (sessionId && turnId && extractUserStatedOperatingSteps(prompt).length) {
+        this.service.evolutionRunbookCapture({ statement: prompt, session_id: sessionId, turn_id: turnId,
+          source_refs: [{ kind: "hook-user-statement", id: turnId, version: 1, member: "codex-hook", session_id: sessionId }] });
+      }
+    } catch { /* A malformed or already-captured Runbook must not block the prompt. */ }
     if (members.includes("memory")) {
       const explicitStatement = explicitMemoryStatement(prompt);
       // `/remember:` statements keep the richer capture summary. Automatic

@@ -160,33 +160,33 @@ packages:
     engines: {node: '>=18'}
 
   '@craft/capability-codebase@0.20.5':
-    resolution: {integrity: sha512-IJKvYBZ/G1ZFwOBDXDU6BjdWIIpni5g/xoVDEXptkNqZttflfo5L6pCA/R+lx2+jrkMJ34aSZTXq/qJbCf3wBA==}
+    resolution: {integrity: sha512-ii4TOOzSSG9zAxjUBQkFrqUgA1C3iMEHfh6PGb13AXBi2G9NKNAY2tEwj89PKol7D++U7pWbQGUNqcU33uAt7w==}
     engines: {node: '>=23'}
     peerDependencies:
       typescript: 6.0.3
 
   '@craft/capability-datasec@0.1.7':
-    resolution: {integrity: sha512-KexO59zjW/zm7mxuSovKsvY1tZwWAA1U6Z4oD9xobxAm1PGXJy1s+CVnWFa0Zk0eVw9OiOoRcdGrdPbebxKXhw==}
+    resolution: {integrity: sha512-5W7VDtVvOktrECauYcZy024OnR6bE/DtnWGMX8hdzjQVzlXM2mYti8oxP0xf+1qgdkysEs1ECzamRZE290+0zw==}
     engines: {node: '>=23'}
 
   '@craft/capability-experience@0.20.5':
-    resolution: {integrity: sha512-bXixq+GoEvIwYzZgLiJ+kGAYlF8rdDuZ/s2IPRPsrcFGj/tHaImX7k3B8n3/ocNgOmisOapjhvZoyKCLn94dAQ==}
+    resolution: {integrity: sha512-x0rdvz5avRGlMSu/ky/ZvQDf0jy4sbH6uZT7n45c+mPsOpxQk9mRw8YuhWKz6hgTcwZryzA+J7mo8a1KIzQYSg==}
     engines: {node: '>=23'}
 
   '@craft/capability-experience@0.20.9':
-    resolution: {integrity: sha512-Vr5G4bm3vTOK4a0vTGc8tT/QC2Wiw0ynV0J9n8wRh5TRNumwpKN7JGs0NmqzNA0xd5bJoCXjGhH0mvwJcjJJMw==}
+    resolution: {integrity: sha512-Klw5TQGsgkfKjcVh3CXipLRR/asmovA8mwnDR+19jK7LLclkgptG0JADqnfDWdjuNYLH6lT9e40vWBbkXvEyWA==}
     engines: {node: '>=23'}
 
   '@craft/capability-knowledge@0.20.5':
-    resolution: {integrity: sha512-nVnCPQWe2NgfbLGc5DBCrY3sURqVa+0wz3hWufJF7pg1XR1qUDKclTA8qh2XXR5ehla+fLjKZdCGARVh0B0l4w==}
+    resolution: {integrity: sha512-W2FZuVTzXx162JQbL2PFzOjzG/DFeZD3Qmj+/HaLajmSLaGM6Nw8KX8UKz5DTyA3TbGD50dUL9UzUWYlOUMjEw==}
     engines: {node: '>=23'}
 
   '@craft/capability-memory@0.20.5':
-    resolution: {integrity: sha512-IF2K2ez7/YHn/ufAdumLZkTbRoJtIFSYt3rXwWS/9oBEwxmQmYIwexmh8berX8N3TaEEgHX0GJ6f4l1mSGGnXA==}
+    resolution: {integrity: sha512-/KXa2uo90GO8zcg9Jd0QTm1H62r8fqayDjkGfturBUNe4oEP8s8k19tHPNOshtWGdXQBGyVPj9TEaD1835qSzw==}
     engines: {node: '>=23'}
 
   '@craft/craft-notes@0.20.7':
-    resolution: {integrity: sha512-tP5wz9fLy+x6mWfl5NYSrVckfnrmDjlIhd63DsR1NrgEA+wzzF/HLHR5JkZMfLbjNh/0fFZdgwZqrBrphO3dZQ==}
+    resolution: {integrity: sha512-Mgx57R2FyKHlVhPp056GqQls+r6uxfTGHBuDOwsr0K31EL5lGdI34bAxXJy/4PoxCz8sSlEplHVtrvWKMUOoFQ==}
     engines: {node: '>=23'}
 
   '@esbuild/aix-ppc64@0.28.2':
@@ -519,23 +519,23 @@ packages:
     engines: {node: '>= 0.10'}
 
   craft-common-base@0.20.4:
-    resolution: {integrity: sha512-3oGyyGnBJ9LbzAVgsEp838DPIzV4Xe/0WTbUQqcrFGRLo+R5E9OOKWZMTi0mO4bJrnYltM9we+jmNlpCF0nH9g==}
+    resolution: {integrity: sha512-JDBy6TW2UxOtIb33UkVkRbMaumiJN2GSPx9GRDTVLYStJ4g3WibfuAAh9P+8vlkULYnA3gVlY2wF6v83Glc9Xg==}
     engines: {node: '>=23'}
 
   craft-common-log@0.20.4:
-    resolution: {integrity: sha512-RMoOxNbQmXhK0M2+JJcRbtFgaJMX0CbWsc8LjvO57+6aCJwx+TTjVD2XQva8P4Bo9+jOJGWx5vtswNQL4d3Dvg==}
+    resolution: {integrity: sha512-bK6MzvFfoJ66wnewuw6CUJI0yV7HzsbLneA1QOO5DX2Eyz8LefXcXrfidRs9Leh4bChEfRJHWG0f79BeHqcRJA==}
     engines: {node: '>=23'}
 
   craft-common-ontology@0.20.5:
-    resolution: {integrity: sha512-0Ra47KT4hl2k7rKrymDDHqFzlkm/BN6pFFYS7VY2D7vxksbto/eDL5CSt/J7GjUfdkFtkw31Hp/P4V3Rjnw+lQ==}
+    resolution: {integrity: sha512-Twz+2JqDjeyXlksC+namZhZyV30qRTHhyj7oK860Or9owj/qGQSrQgSdAK0piEe3019LAHLYJR0GMCWDWSbCtA==}
     engines: {node: '>=23'}
 
   craft-common-store-local@0.20.4:
-    resolution: {integrity: sha512-lGlLr8PIThQPVkRa5MQiNiIvNOdT6UxQVeGUB01jKQPTaWeNhhceMUDok6OK0mtn9cYIXcakpOSg0Ey2I3oeTA==}
+    resolution: {integrity: sha512-gTSFxbANgWIiRRtwJfIFmdhesRclPOoPQ9Hhr4eyhsPvEmBqx7Rf7uJn7reVUdx/oH95n2qn+bZJSAiqNr1uYw==}
     engines: {node: '>=23'}
 
   craft-eval@0.7.3:
-    resolution: {integrity: sha512-ZiSSmPIWfy3x37asWwiSdcAhWpNCUfpiTH3E99vyArsdxSeas30ww8XwA1NNWI2tMYo9PgbK7WBwwgTcA5Lcag==}
+    resolution: {integrity: sha512-c7ScaDryFJHxV05y8TdZ/BWiT5GbFUsJA6CrHGlURDTtDEF8TZ6zhBMBFSjP0p1GwPReLHsLk+tLux1GPoFshg==}
     engines: {node: '>=22'}
     hasBin: true
 

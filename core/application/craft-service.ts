@@ -1,3 +1,7 @@
+import { GeneralEvolutionKernel } from "../general-evolution.ts";
+import { captureUserStatedRunbook } from "../evolution-runbook-candidate.ts";
+import { CreationAdapter } from "../creation-adapter.ts";
+import { TravelAdapter } from "../travel-adapter.ts";
 import { reviewVerificationConfiguration, taskReviewVerification, verificationCriteria, assertReviewVerificationsStopped, prepareReviewVerification, reviewVerificationProjection, executeReviewVerification, stopReviewVerification, assertReviewVerificationCheck } from "../work-review-verification.ts";
 import { taskReviewRisk, riskReviewCriteria, RISK_REVIEW_CRITERION } from "../work-review-risk.ts";
 import { prepareTaskReplan, decideTaskReplan, consumeTaskReplan } from "../task-replan.ts";
@@ -20,6 +24,7 @@ import { isAbsolute, join, relative as relativePath, resolve, win32 } from "node
 import { pathToFileURL } from "node:url";
 import { validateJsonSchema, type JsonValue } from "../json-schema.ts";
 import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
+import { evaluateEvolutionValue } from "../evolution-value-gate.ts";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, SIDE_EFFECTS, substitute } from "../workflow.ts";
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, recoverExpiredLeases, submitNode,
   type PlanNode } from "../orchestration.ts";
@@ -300,6 +305,9 @@ export class CraftService extends ServiceFoundation {
   readonly evaluationRuns: EvaluationRunCoordinator;
   readonly craftNotesLocation: CraftNotesLocationRegistry;
   readonly craftNotes: CraftNotesRegistry;
+  readonly generalEvolution: GeneralEvolutionKernel;
+  readonly creationAdapter: CreationAdapter;
+  readonly travelAdapter: TravelAdapter;
   readonly mods: ModRegistry;
   readonly modRuntime: ModRuntime;
   readonly inbox: MessageInbox;
@@ -342,9 +350,12 @@ export class CraftService extends ServiceFoundation {
     };
     this.craftNotesLocation = new CraftNotesLocationRegistry(store, validateNoteText);
     this.craftNotes = new CraftNotesRegistry(store, validateNoteText);
+    this.generalEvolution = new GeneralEvolutionKernel(store);
+    this.creationAdapter = new CreationAdapter(store);
     migrateCraftNotesLocationNotes(store);
     this.mods = new ModRegistry(store);
     this.modRuntime = new ModRuntime(store);
+    this.travelAdapter = new TravelAdapter(this);
     this.inbox = new MessageInbox(store);
     this.pluginDiscovery = new PluginDiscovery(store);
     const calls = new ComponentTraceKernel(this.trace, "sdk");
@@ -496,6 +507,43 @@ export class CraftService extends ServiceFoundation {
   craftNotesLocationReportDeviceHealth(args: JsonObject): JsonObject { return this.craftNotesLocation.reportDeviceHealth(text(args.id, "id"), text(args.health, "health") as "healthy" | "degraded" | "offline") as unknown as JsonObject; }
 
   craftNotesCreateDevice(args: JsonObject): JsonObject { return this.craftNotes.createDevice(args) as unknown as JsonObject; }
+
+  evolutionValueDecide(args: JsonObject): JsonObject { return evaluateEvolutionValue(args) as unknown as JsonObject; }
+  evolutionDomainAdapters(args: JsonObject): JsonObject { return args.register === true ? this.generalEvolution.registerAdapter(args) : this.generalEvolution.ensureAdapters(); }
+  evolutionProgramMemoryCapture(args: JsonObject): JsonObject { return this.generalEvolution.captureProgramMemory(args); }
+  evolutionProgramMemoryList(args: JsonObject): JsonObject { return this.generalEvolution.listProgramMemory(args); }
+  evolutionProgramMemorySubmit(args: JsonObject): JsonObject { return this.generalEvolution.submitProgramMemory(text(args.id, "id")); }
+  evolutionArtifactLineageRecord(args: JsonObject): JsonObject { return this.generalEvolution.recordArtifactLineage(args); }
+  evolutionArtifactLineageRecall(args: JsonObject): JsonObject { return this.generalEvolution.recallArtifactLineage(args); }
+  evolutionProspectiveCreate(args: JsonObject): JsonObject { return this.generalEvolution.createProspectiveIntention(args); }
+  evolutionProspectiveFire(args: JsonObject): JsonObject { return this.generalEvolution.fireProspectiveIntention(args); }
+  evolutionResearchLink(args: JsonObject): JsonObject { return this.generalEvolution.linkResearch(args); }
+  evolutionEvalSummary(args: JsonObject = {}): JsonObject { return this.generalEvolution.evalSummary(); }
+  evolutionDomainCapture(args: JsonObject): JsonObject { return this.generalEvolution.captureDomainStatement(args); }
+  evolutionFailureCapture(args: JsonObject): JsonObject { return this.generalEvolution.captureFailureCandidate(args); }
+  evolutionProgramMemoryPromote(args: JsonObject): JsonObject { return this.generalEvolution.promoteProgramMemory(args); }
+  evolutionProgramMemoryFeedback(args: JsonObject): JsonObject { return this.generalEvolution.recordProgramMemoryFeedback(args); }
+  evolutionRunbookCapture(args: JsonObject): JsonObject {
+    return captureUserStatedRunbook(this.store, {
+      statement: text(args.statement, "statement"), session_id: text(args.session_id, "session_id"),
+      turn_id: text(args.turn_id, "turn_id"),
+      source_refs: Array.isArray(args.source_refs) ? args.source_refs as JsonObject[] : [],
+    });
+  }
+  evolutionRunbookRevoke(args: JsonObject): JsonObject { return this.experienceRunbookRevoke(args); }
+  evolutionResearchCapture(args: JsonObject): JsonObject { return this.generalEvolution.captureResearchNode(args); }
+  evolutionResearchRecall(args: JsonObject = {}): JsonObject { return this.generalEvolution.recallResearch(args); }
+  evolutionResearchImpact(args: JsonObject): JsonObject { return this.generalEvolution.applyResearchImpact(args); }
+  evolutionResearchForget(args: JsonObject): JsonObject { return this.generalEvolution.forgetResearchNode(args); }
+  evolutionReplicationPropose(args: JsonObject): JsonObject { return this.generalEvolution.proposeReplicationProcedure(args); }
+  evolutionTravelCapture(args: JsonObject): JsonObject { return this.travelAdapter.capture(args); }
+  evolutionTravelRecall(args: JsonObject): JsonObject { return this.travelAdapter.recall(args); }
+  evolutionTravelApply(args: JsonObject): JsonObject { return this.travelAdapter.apply(args); }
+  evolutionTravelForget(args: JsonObject): JsonObject { return this.travelAdapter.forget(args); }
+  evolutionCreationWrite(args: JsonObject): JsonObject { return this.creationAdapter.write(args); }
+  evolutionCreationRecall(args: JsonObject): JsonObject { return this.creationAdapter.recall(args); }
+  evolutionCreationApply(args: JsonObject): JsonObject { return this.creationAdapter.apply(args); }
+  evolutionCreationForget(args: JsonObject): JsonObject { return this.creationAdapter.forget(args); }
   craftNotesObserveDirectory(args: JsonObject): JsonObject { return this.craftNotes.observeDirectory(args); }
   craftNotesObserveFile(args: JsonObject): JsonObject { return this.craftNotes.observeFileReference(args); }
   craftNotesCandidateList(args: JsonObject = {}): JsonObject { return this.craftNotes.candidateList(args) as unknown as JsonObject; }

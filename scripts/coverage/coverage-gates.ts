@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { detectEnvironmentBlocker, findShortfall, parseCoverageRows } from "./coverage-gate-report.ts";
 import { parseGroupArguments, selectGateGroups } from "./coverage-gate-select.ts";
+import { coverageInventory } from "./coverage-inventory.ts";
 
 /**
  * Enforces the per-module coverage gates.
@@ -39,6 +40,21 @@ interface GateManifest {
 }
 
 const manifest = JSON.parse(readFileSync(resolve(root, "tests/coverage-gates.json"), "utf8")) as GateManifest;
+
+// Full-inventory mode: every production file must belong to some gate group.
+// Ordinary selection keeps its historical per-group behaviour.
+const fullInventory = process.argv.includes("--full");
+if (fullInventory) {
+  const files = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { cwd: root, encoding: "utf8" })
+    .stdout?.split("\0").filter(Boolean) ?? [];
+  const typeOnly = Object.fromEntries((manifest as GateManifest & { type_only?: string[] }).type_only?.map(path => [path, readFileSync(resolve(root, path), "utf8")]) ?? []);
+  const inventory = coverageInventory(files, manifest.groups, [], typeOnly);
+  if (inventory.missing.length) {
+    process.stderr.write(`coverage inventory incomplete: ${inventory.missing.length} production file(s) have no gate group\n` +
+      `${inventory.missing.map(path => `  ${path}`).join("\n")}\n`);
+    process.exitCode = 1;
+  }
+}
 
 if (!Array.isArray(manifest.groups) || manifest.groups.length === 0) {
   throw new Error("tests/coverage-gates.json must define at least one group");

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { JsonObject } from "../core/infrastructure/store.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,6 +34,31 @@ test("device notes are required and device notes are isolated and revocable", as
     assert.equal(revoked.status, "revoked");
     assert.equal(notes.resolve({ device_id: "laptop" }).items.length, 0);
     assert.throws(() => notes.revoke({ id: "missing", expected_version: 1, revoked_by: "user", reason: "test" }), /Unknown craft_note/u);
+  } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("disabled devices cannot add Notes candidates and cannot recall their places", async () => {
+  const { store, root, notes } = await fixture();
+  try {
+    notes.createDevice({ id: "laptop", note: "已停用设备", status: "disabled" });
+    assert.throws(() => notes.observeDirectory({ path: "/work/secret", device_id: "laptop", pin: true }), /active device/u);
+    assert.throws(() => notes.observeFileReference({ path: "/work/secret.txt", device_id: "laptop", pin: true }), /active device/u);
+    assert.equal(store.list("craft_note", 100).length, 2);
+    assert.equal(notes.resolve({ device_id: "laptop" }).items.length, 0);
+  } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("the same path stays device-local and a repo identity never broadens typed Notes", async () => {
+  const { store, root, notes } = await fixture();
+  try {
+    const directory = notes.observeDirectory({ path: "/work/craft", device_id: "local", pin: true, project_id: "repo-a" }).note as { id: string };
+    notes.confirm({ id: directory.id, expected_version: Number(store.find("craft_note", directory.id)?.version) });
+    assert.throws(() => notes.observeDirectory({ path: "/work/craft", device_id: "missing", pin: true }), /active device/u);
+    const directoryNotes = (query: Record<string, unknown>) => notes.resolve(query).items.filter(item => item.subject_type === "directory");
+    assert.equal(directoryNotes({ device_id: "local", project_id: "repo-a", path: "/work/craft" }).length, 1);
+    assert.equal(directoryNotes({ device_id: "laptop", project_id: "repo-a", path: "/work/craft" }).length, 0);
+    assert.equal(directoryNotes({ device_id: "local", project_id: "repo-b", path: "/work/craft" }).length, 0);
+    assert.equal(directoryNotes({ device_id: "local", path: "/work/other" }).length, 0);
   } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -146,19 +172,19 @@ test("only attested successful task completion contributes deduplicated usage to
     assert.equal(store.list("craft_note_usage", 20).length, 2);
     await completed("task-3", "session-2", "turn-3", "passed", true);
     assert.equal(store.list("craft_note_usage", 20).length, 3);
-    const candidate = service.craftNotesCandidateList({}).items[0]!;
+    const candidate = (service.craftNotesCandidateList({}).items as JsonObject[])[0]! as JsonObject & { id: string; version: number; project_id: string; subject_key: string };
     assert.equal(candidate.subject_key, `local:${repo}`);
     service.craftNotesConfirm({ id: candidate.id, expected_version: candidate.version, note: "核心项目目录" });
-    assert.equal(service.craftNotesResolve({ device_id: "local", project_id: candidate.project_id, path: repo }).items.length, 2);
+    assert.equal((service.craftNotesResolve({ device_id: "local", project_id: candidate.project_id, path: repo }).items as JsonObject[]).length, 2);
     const injected = await service.contextOpen({ project_root: repo, query: "项目目录用途", include_codebase: false,
-      task_id: "task-context", session_id: "session-3", turn_id: "turn-context" }) as Record<string, unknown>;
+      task_id: "task-context", session_id: "session-3", turn_id: "turn-context" }) as unknown as Record<string, unknown>;
     const injectedScope = (injected.pack_receipt as { scope: { id: string } }).scope.id;
-    assert.equal(service.craftNotesResolve({ device_id: "local", project_id: injectedScope, path: repo }).items.length, 2,
+    assert.equal((service.craftNotesResolve({ device_id: "local", project_id: injectedScope, path: repo }).items as JsonObject[]).length, 2,
       JSON.stringify({ injectedScope, candidateProject: candidate.project_id, candidatePath: candidate.subject_key }));
     assert.equal((injected.craft_notes as Array<{ subject_type: string; text: string }>).find(item => item.subject_type === "directory")?.text, "核心项目目录");
     const otherRepo = join(root, "other"); mkdirSync(otherRepo); execFileSync("git", ["-C", otherRepo, "init", "-q"]);
     const unrelated = await service.contextOpen({ project_root: otherRepo, query: "项目目录用途", include_codebase: false,
-      task_id: "task-other", session_id: "session-3", turn_id: "turn-other" }) as Record<string, unknown>;
+      task_id: "task-other", session_id: "session-3", turn_id: "turn-other" }) as unknown as Record<string, unknown>;
     assert.equal((unrelated.craft_notes as Array<{ subject_type: string }>).length, 1);
     assert.equal((unrelated.craft_notes as Array<{ subject_type: string }>).every(item => item.subject_type === "device"), true);
     const filePath = join(repo, "prod.yaml");
@@ -174,12 +200,37 @@ test("only attested successful task completion contributes deduplicated usage to
     const originalResolve = service.contextWorkingSets.resolve.bind(service.contextWorkingSets);
     service.contextWorkingSets.resolve = async args => {
       const result = await originalResolve(args);
-      const current = service.craftNotesResolve({ device_id: "local", project_id: injectedScope, path: repo }).items.find(item => item.id === candidate.id)!;
+      const current = (service.craftNotesResolve({ device_id: "local", project_id: injectedScope, path: repo }).items as JsonObject[]).find(item => item.id === candidate.id)!;
       service.craftNotesRevoke({ id: candidate.id, expected_version: current.version, revoked_by: "race-test", reason: "revoked during context read" });
       return result;
     };
     await assert.rejects(() => service.contextOpen({ project_root: repo, query: "项目目录用途", include_codebase: false,
       task_id: "task-race", session_id: "session-3", turn_id: "turn-race" }), /Craft Notes changed during Context resolution/u);
+  } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("scoped Craft Notes do not leak across devices or paths in Context resolution", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-notes-context-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const service = new CraftService(store);
+    const notes = service.craftNotes;
+    const repo = join(root, "repo"); mkdirSync(repo);
+    notes.createDevice({ id: "laptop", note: "笔记本设备" });
+    notes.createDevice({ id: "local", note: "测试用本地设备" });
+    const directory = notes.observeDirectory({ path: repo, device_id: "local", pin: true }).note as { id: string; version: number };
+    notes.confirm({ id: directory.id, expected_version: Number(store.find("craft_note", directory.id)?.version) });
+    service.craftNotesLocationDisableDevice({ id: "laptop" });
+    const open = async (deviceId: string, notePaths?: string[]) => service.contextOpen({ project_root: repo,
+      query: " Craft Notes 作用域", include_codebase: false, device_id: deviceId,
+      ...(notePaths ? { note_paths: notePaths } : {}), task_id: `scope-${deviceId}-${notePaths?.length ?? 0}`, session_id: "scope-session", turn_id: `scope-${deviceId}-${notePaths?.length ?? 0}` }) as unknown as Record<string, unknown>;
+    const local = await open("local");
+    assert.equal((local.craft_notes as Array<{ subject_type: string; subject_key: string }>).some(note => note.subject_type === "directory" && note.subject_key === `local:${repo}`), true,
+      JSON.stringify(local.craft_notes));
+    const otherDevice = await open("laptop");
+    assert.equal((otherDevice.craft_notes as Array<{ subject_type: string }>).every(note => note.subject_type === "device"), true);
+    const otherPath = await open("local", [join(root, "secret")]);
+    assert.equal((otherPath.craft_notes as Array<{ subject_type: string }>).some(note => note.subject_type === "directory"), false);
   } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

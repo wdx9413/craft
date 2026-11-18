@@ -29,7 +29,7 @@ import { digestJson } from "./digest.ts";
  */
 
 /** The sub-capability a case measures. */
-export const CAPABILITY_AXES = ["memory", "knowledge", "workflow", "datasec", "experience_dedup", "knowledge_lineage", "eval_governance", "governance", "end_to_end", "context_supply", "proactive_restraint", "lifecycle", "domain_isolation", "plugin_contribution", "pilot_boundary", "external_sync", "runtime_dependency", "message_source"] as const;
+export const CAPABILITY_AXES = ["memory", "knowledge", "workflow", "datasec", "experience_dedup", "knowledge_lineage", "general_evolution", "eval_governance", "governance", "end_to_end", "context_supply", "proactive_restraint", "lifecycle", "domain_isolation", "plugin_contribution", "pilot_boundary", "external_sync", "runtime_dependency", "message_source"] as const;
 export type CapabilityAxis = typeof CAPABILITY_AXES[number];
 
 /**
@@ -84,6 +84,7 @@ export const AXIS_LEDGER: Record<CapabilityAxis, Ledger> = {
   // Derived-claim impact analysis is a graph mechanism: when a foundation is
   // refuted, every derived claim is enumerated with degrading confidence.
   knowledge_lineage: "capability",
+  general_evolution: "capability",
   // Evaluation governance measures the comparator that drives iteration: a
   // suite that evolved must remain comparable, and regressions in shared cases
   // must still be detected. Deterministic kernel evidence.

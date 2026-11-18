@@ -37,6 +37,7 @@
 | [0031](0031-mods-are-trusted-runtime-modules.md) | Mod 是受精确版本信任约束的可执行 Runtime 模块；自进化候选不能获得审批策略能力 |
 | [0032](0032-versioned-evolution-ontology-and-immutable-core-policy.md) | 本体论可自动版本化演进；Core Policy 由 Runtime 独立执行且不可自改 |
 | [0033](0033-experience-runbooks-are-governed-procedures.md) | 经验手册属于 Experience Procedure；Context 编排捕获和召回，Notes 只存位置短备注 |
+| [0034](0034-codex-context-plugin-self-evolution-plan.md) | Codex 的 craft-context 是入口；Craft core 维持自进化状态机，Value Gate + Program Memory + Domain Adapter 驱动通用沉淀 |
 
 ## 与技术文档的关系
 
@@ -56,3 +57,4 @@
 | 0031 | [自进化 Mod 运行时模块](../technical/modules/self-evolution-mod.md) |
 | 0032 | [自进化本体论与评测闭环](../technical/modules/self-evolution-ontology.md) |
 | 0033 | [Experience / Eval](../technical/modules/experience-eval.md)、[Context 成员](../technical/modules/context-members.md) |
+| 0034 | [通用自进化缺口分析](../research/2026-11-18-general-self-evolution-gap-analysis.md)、[自进化 Mod](../technical/modules/self-evolution-mod.md) |

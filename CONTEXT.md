@@ -76,6 +76,24 @@ _Avoid_: 把 Hook 当成任意 Tool、隐藏的第二条主流程或隐式副作
 **Knowledge / Memory / Experience / Trace**：Knowledge 是有来源和 Evidence 的可复核主张；Memory 是有作用域、有效期和撤销关系的可持续上下文；Experience 是从多个 Trial/Outcome 归纳出的学习域，包含 Observation、Pattern 与 Procedure；Trace 是过程证据链。Context 在开始时可受限装载三者：Knowledge 只读 reviewed Claim，Memory 只读当前有效条目，Experience 只读已 routeable 的 Procedure。Workflow/Graph Procedure 的权威内容是经摘要校验的 JSON 定义，Markdown 仅为审阅视图；Prompt Procedure 才以 Markdown 为权威正文。Observation、Pattern 与 Candidate 只供复盘/评测；Procedure 通过评测和晋级后才成为可路由资产。三者的 `scope` 只回答“适用于哪里”；归属、受众、用途、租期与 tenant 由 Scope Envelope 单独表达，不能从一条项目路径或模型猜测中推出。
 _Avoid_: 把 Trace 直接当记忆、把未经验证记忆直接当 Skill
 
+**Evolution Value Gate**：自进化写入前的统一价值判定层。它接收用户陈述、工具轨迹、验证结果、重复次数与作用域，只输出候选及理由：`store_as_fact`、`store_as_preference`、`candidate_procedure`、`candidate_mod`、`ignore` 或 `needs_review`。它不发布行为改变，不绕过 Evidence，不把推断写成事实。
+_Avoid_: 把所有聊天都存起来、用模型高兴与否决定是否记忆
+
+**Program Memory**：从重复且已验证的经历中提炼出的可复用 know-how。它是 Experience 的一种受治理产物，先成为 `procedure candidate`，经 Shadow / Held-out / Signoff / Canary 后才可 `routeable`；必要时可结晶为工具或 Skill，但只有重复复用被证明有价值时才结晶。
+_Avoid_: 单次成功轨迹、未经评测的 prompt 片段、能运行就算可复用
+
+**Domain Adapter**：为 coding、office、travel、creation、research 等场景提供提取提示词、价值阈值、证据类型与适用边界的薄适配层。它复用 Craft 的 Knowledge/Memory/Experience/Procedure/Mod 内核，不拥有独立存储或独立晋升门禁。官方只维护核心 adapter，用户/插件可提供候选 adapter，模型只能生成候选而不能直接发布。
+_Avoid_: 每个场景另起一套记忆数据库、把场景提示词当全局规则
+
+**Artifact Lineage**：AI 创作与办公场景中的产物谱系，记录素材引用、prompt/参数、生成工具、版本、用户评价与最终选择。它保存引用和元数据而非大文件本体，检索时先按 artifact 类型或模态路由，再做文本相似。
+_Avoid_: 把对象仓库塞进账本、把最新生成结果当事实
+
+**Prospective Memory**：在未来某个时间点、文件状态或环境线索出现时执行或提醒某个既有意图的能力。它不是普通待办文本，必须绑定触发条件、作用域、证据和失效规则，触发失败要可观察。
+_Avoid_: 模型记得就行、定时提醒等于可靠执行
+
+**Craft Notes**：统一的设备、目录与文件 typed notes 能力。Device Note 说明设备用途与可信状态，Directory Note 说明目录/仓库语义，File Note 说明具体文件的用途和边界；位置记录使用 `craft_notes_*` 工具面与 `craft_notes_location` 存储集合。
+_Avoid_: 继续叫 file-dir-desc、把一台设备上的路径当全局身份
+
 **Evaluation Contract**：每个可独立暴露的能力都必须声明 fixture、契约/边界、对抗与泄漏、恢复/幂等、成本/延迟和兼容性检查。`mechanism_passed`、`fixture_passed`、`host_verified`、`business_eligible`、`routeable` 是递进状态，不可用单元覆盖率或单次成功替代。
 _Avoid_: 把组件的 MCP 握手当成业务效果证明
 

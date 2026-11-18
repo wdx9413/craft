@@ -23,7 +23,7 @@ const INTEGER_PARAMS = ["limit", "max_days", "version", "capacity", "max_concurr
 const NUMBER_PARAMS = ["score", "value", "threshold", "confidence", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd", "input_per_million", "output_per_million", "minimum_recall", "max_cost_usd"];
 
 const OBJECT_PARAMS = ["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores", "args", "task_contract",
-  "repo_identity", "device", "tag_filters",
+  "repo_identity", "device", "tag_filters", "trigger", "parameters",
   "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "authorization_requests", "notification_refs", "cost_hint", "design_axes", "report",
   "limits", "resources", "actual", "actual_resources", "estimated_resources", "observation", "trial_budget", "policy_fingerprints", "structured_data", "field_sources",
   "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks", "state", "action_results", "workbench", "runtime", "privacy", "acceptance", "budget", "allocation", "action_contract", "result_schema", "state_before", "state_after", "usage", "model_fingerprint", "environment_fingerprint", "capability_fingerprint", "policy_fingerprint", "metadata", "trace", "scope",

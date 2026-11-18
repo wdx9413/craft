@@ -121,7 +121,7 @@ test("device metadata: unknown device and reactivation rules", async () => {
     assert.equal(registry.device("no-such-device"), null);
     registry.registerDevice({ id: "edge-02", device_kind: "ssh", host_kind: "cloud", device_note: "远程构建节点" });
     registry.disableDevice("edge-02");
-    assert.throws(() => registry.registerDevice({ id: "edge-02", status: "active" }), /reactivated/);
+    assert.throws(() => registry.registerDevice({ id: "edge-02", status: "active", device_note: "重新启用远程构建节点" }), /reactivated/);
   } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
 });
 
