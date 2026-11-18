@@ -8,7 +8,7 @@ import { linkDirectory } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { CodexHookBridge, HookSignalSanitizer, automaticMemoryFact, codexProjectScope, explicitMemoryStatement } from "../core/codex-hook-bridge.ts";
+import { CodexHookBridge, HookSignalSanitizer, automaticMemoryFact, codexProjectScope, explicitMemoryStatement, extractDurableStatements } from "../core/codex-hook-bridge.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths, sessionStorageDirectory, sessionStorageScopeId } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
@@ -36,10 +36,44 @@ async function fixture(models?: ReturnType<typeof defaultSettings>["models"]) {
   return { root, store, service };
 }
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+
+test("extractDurableStatements captures conventions, preferences and facts conservatively", () => {
+  assert.deepEqual(extractDurableStatements("本项目约定：所有提交前必须运行 pnpm test。我偏好深色模式。本项目使用 pnpm 作为包管理器。"),
+    [
+      { kind: "rule", statement: "本项目约定：所有提交前必须运行 pnpm test。" },
+      { kind: "preference", statement: "我偏好深色模式。" },
+      { kind: "fact", statement: "本项目使用 pnpm 作为包管理器。" },
+    ]);
+  assert.deepEqual(extractDurableStatements("帮我打开网页然后点击登录按钮"), []);
+  const braces = String.fromCharCode(123, 123);
+  assert.deepEqual(extractDurableStatements(`记住这个密码: ${braces}PASSWORD_abc123${braces}`), []);
+  assert.deepEqual(extractDurableStatements(`本项目约定: api_key=${braces}SECRET_abc123${braces} 是默认值`), []);
+});
+
 function localExperienceDir(f: Awaited<ReturnType<typeof fixture>>): string {
   const identity = f.service.scopeIdentityResolveProject({ project_root: f.root }).identity as JsonObject;
   return projectExperienceDirectory(f.store, String((identity.canonical_scope as JsonObject).id), f.root, true);
 }
+
+test("UserPromptSubmit automatically accumulates conventions into ledger records", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    await bridge.handle("context", {
+      cwd: f.root, session_id: "auto-accumulate", turn_id: "auto-accumulate-1",
+      hook_event_name: "UserPromptSubmit",
+      prompt: "本项目约定：提交前必须运行 pnpm test。我偏好深色模式。",
+    });
+    const claims = f.store.list("knowledge_claim", 100, (item) => Array.isArray(item.tags) && item.tags.includes("auto_extracted_rule"));
+    assert.equal(claims.length, 1, "an extracted rule becomes a reviewable Knowledge claim");
+    assert.equal(claims[0]!.kind, "rule");
+    assert.equal(claims[0]!.concept_kind, "rule");
+    assert.ok(String(claims[0]!.content ?? "").includes("提交前必须运行 pnpm test"));
+    const candidates = f.store.list("memory_candidate", 100, (item) => String(item.content ?? "").includes("深色模式"));
+    assert.ok(candidates.length >= 1, "durable statements become Memory candidates");
+    assert.ok(candidates.some((item) => String(item.content ?? "").includes("我偏好深色模式")), "preference is captured");
+  } finally { await dispose(f); }
+});
 
 test("session-only Hook events join one generated turn and stop cannot finalize it twice", async () => {
   const f = await fixture();
@@ -428,13 +462,13 @@ test("Memory Hook automatically captures only classified stable project facts in
 
 test("Hook Memory output projects promotion summaries and legacy journals default missing sessions safely", async () => {
   const f = await fixture();
-  const originalCapture = f.service.memoryCaptureObservedFact;
+  const originalCapture = f.service.memoryCaptureUserStatement;
   try {
-    f.service.memoryCaptureObservedFact = (() => ({ auto_committed: false, candidate: { id: "candidate" }, next_action: "review",
+    f.service.memoryCaptureUserStatement = (() => ({ auto_committed: false, candidate: { id: "candidate" }, next_action: "review",
       topic_suggestions: [], memory_file: null, promotions: [{ tier: "session", auto_committed: false, memory_file: null }] })) as typeof f.service.memoryCaptureObservedFact;
     const bridge = new CodexHookBridge(f.service);
     const output = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root,
-      session_id: "promotion-session", prompt: "本项目默认使用 Node.js" });
+      session_id: "promotion-session", prompt: "记住：本项目默认使用 Node.js" });
     const emitted = JSON.parse(String(output.additionalContext)) as JsonObject;
     assert.deepEqual((emitted.memory_capture as JsonObject).promotions, [{ tier: "session", auto_committed: false }]);
 
@@ -448,7 +482,7 @@ test("Hook Memory output projects promotion summaries and legacy journals defaul
     assert.equal(bridge.journal.find({ cwd: f.root, turn_id: turn })?.id, legacyId);
     assert.equal(bridge.journal.find({ cwd: f.root, turn_id: turn, session_id: "different" }), null);
   } finally {
-    f.service.memoryCaptureObservedFact = originalCapture;
+    f.service.memoryCaptureUserStatement = originalCapture;
     await dispose(f);
   }
 });

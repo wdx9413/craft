@@ -22,6 +22,7 @@ import { payload, stableDigest } from "../digest.ts";
 import { projectExperienceDirectory } from "../project-experience-directory.ts";
 import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGoal } from "../experience-task-goals.ts";
 import { sanitizeCodexTaskGoal } from "../codex-task-prose.ts";
+import { validateConcept, mapLegacyKind } from 'craft-common-ontology/validation';
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import { HookSignalSanitizer, nestedText, type HookSignal } from "./codex-hook-signal-sanitizer.ts";
 import { queueHookMaintenance } from "./memory-archive-worker.ts";
@@ -125,6 +126,29 @@ export function automaticMemoryFact(prompt: unknown): string | null {
 /** Keep only a short, redacted task goal for project Experience classification. */
 export function sanitizedExperienceTaskGoal(value: unknown): string | null {
   return sanitizeCodexTaskGoal(value);
+}
+
+/**
+ * Extract durable statements (rules/facts/preferences) from a user prompt.
+ * Conservative by design: only explicit conventions, rules, preferences or
+ * facts are captured so ordinary task chatter is never persisted.
+ */
+export function extractDurableStatements(prompt: string): { kind: "rule" | "fact" | "preference"; statement: string }[] {
+  const results: { kind: "rule" | "fact" | "preference"; statement: string }[] = [];
+  const source = prompt.trim();
+  // Reject both inline credentials and placeholder tokens ({{SECRET_...}},
+  // {{PASSWORD_...}}) before any statement can reach a durable ledger.
+  if (!source || source.length > 1_000 || SECRET.test(source) || source.includes("{{") || source.includes("}}")) return results;
+  const sentences = source.split(/(?<=[。！!？?。]\s*)|(?<=[.!?]\s+)/u).map((item) => item.trim()).filter(Boolean);
+  for (const sentence of sentences) {
+    const pref = /^(?:我偏好|我更喜欢|我长期使用|我习惯|I prefer|I usually use|my default is)\s*[:：,，]?\s*(.+)$/iu.exec(sentence);
+    if (pref?.[1] && pref[1].trim().length > 2) { results.push({ kind: "preference", statement: sentence }); continue; }
+    const rule = /^(?:(?:本项目|这个项目|该项目)(?:的)?(?:约定|规范|默认规则|标准操作)(?:是)?\s*[:：,，]?\s*|(?:我们约定|项目要求|编码规范是|必须|始终|always|must|never|do not|don't)\s*[:：,，]?\s*|(?:以后|今后)(?:在本项目中)?(?:请)?(?:默认)?(?:使用|采用|遵循|保持|优先|避免|不要|总是)\s*[:：,，]?\s*)(.+)$/iu.exec(sentence);
+    if (rule?.[1] && rule[1].trim().length > 2) { results.push({ kind: "rule", statement: sentence }); continue; }
+    const fact = /^(?:(?:本项目|这个项目|该项目)(?:目前)?(?:默认)?(?:使用|采用|基于|运行在|部署在)\s*[:：,，]?\s*|(?:the project|this project|we use|it uses|default)\s*[:：,，]?\s*)(.+)$/iu.exec(sentence);
+    if (fact?.[1] && fact[1].trim().length > 2) { results.push({ kind: "fact", statement: sentence }); continue; }
+  }
+  return results;
 }
 
 function experienceTaskGoalArgs(service: CraftService, input: HookInput, scope: HookProjectScope | null) {
@@ -533,6 +557,63 @@ export class CodexHookBridge {
     });
   }
 
+  /**
+   * Write side of conversation self-evolution: turn durable user statements into
+   * governed ledger records. Every write goes through the capability's own
+   * validation and stays best-effort so a malformed statement can never block
+   * the user's prompt. Facts/preferences become scoped Memory candidates; rules
+   * additionally become reviewable Knowledge claims.
+   */
+  private accumulateDurableStatements(prompt: string, input: HookInput, scope: HookProjectScope,
+    members: readonly string[]): { written: boolean; count: number } {
+    const autoStatements = extractDurableStatements(prompt);
+    if (!autoStatements.length) return { written: false, count: 0 };
+    const sessionId = text(input.session_id);
+    const sessionHost = hookHost(input);
+    const explicit = explicitMemoryStatement(prompt);
+    let written = false;
+    let count = 0;
+    const shouldWriteMemory = members.includes("memory");
+    const shouldWriteKnowledge = members.includes("knowledge") || members.includes("context") || members.includes("memory");
+    if (shouldWriteMemory && sessionId) {
+      try {
+        this.service.store.bindSessionStorageHost(sessionId, sessionHost);
+        for (const item of autoStatements) {
+          if (explicit && item.statement === explicit) continue;
+          const legacyKind = item.kind === "preference" ? "preference" : item.kind === "rule" ? "procedural" : "working";
+          validateConcept(mapLegacyKind("memory", legacyKind), item.statement);
+          const captured = this.service.memoryCaptureObservedFact({ content: item.statement, kind: legacyKind,
+            session_id: sessionId, session_host: sessionHost, scope_kind: "session", scope_id: sessionId,
+            project_scope_id: scope.id, project_root: input.cwd, sensitivity: "internal",
+            ...(item.kind === "rule" ? { tags: ["auto_extracted_rule"] } : {}) });
+          written = written || captured.auto_committed === true;
+          count += 1;
+        }
+      } catch (error) {
+        this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "memory", event: "UserPromptSubmit", error_type: error instanceof Error ? error.name : "unknown" });
+      }
+    }
+    if (shouldWriteKnowledge) {
+      try {
+        for (const item of autoStatements.filter((entry) => entry.kind === "rule")) {
+          // A claim requires at least one Evidence record. The evidence only
+          // attests "the user stated this rule", never that the rule is true.
+          const evidenceId = `codex_hook_rule_${stableDigest({ statement: item.statement, session_id: sessionId ?? "" }).slice(-24)}`;
+          this.service.evidenceRecord({ evidence_id: evidenceId, source_type: "codex-hook",
+            claim: "user-stated-convention", confidence: "unverified",
+            locator: sessionId ?? "codex-hook" });
+          this.service.knowledgeClaimSave({ kind: "rule", content: item.statement, scope: scope.id,
+            project_root: input.cwd, evidence_ids: [evidenceId],
+            tags: ["auto_extracted_rule"], proposed_by: sessionId ?? "codex-hook" });
+          count += 1;
+        }
+      } catch (error) {
+        this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "knowledge", event: "UserPromptSubmit", error_type: error instanceof Error ? error.name : "unknown" });
+      }
+    }
+    return { written, count };
+  }
+
   private async prompt(member: CodexHookMember, input: HookInput, scope: HookProjectScope | null): Promise<JsonObject> {
     const prompt = text(input.prompt) ?? text(input.user_prompt);
     if (!scope || !prompt) return {};
@@ -590,9 +671,18 @@ export class CodexHookBridge {
       }
     }
     let memoryWritten = false; let captureSummary: JsonObject | null = null;
+    // Automatically accumulate durable statements from the user's prompt into
+    // the governed Knowledge/Memory ledgers. This is the write side that was
+    // missing: the Hook previously only projected context and captured a very
+    // narrow set of preferences.
+    const autoAccumulation = this.accumulateDurableStatements(prompt, input, scope, members);
+    memoryWritten = memoryWritten || autoAccumulation.written;
     if (members.includes("memory")) {
       const explicitStatement = explicitMemoryStatement(prompt);
-      const statement = explicitStatement ?? automaticMemoryFact(prompt);
+      // `/remember:` statements keep the richer capture summary. Automatic
+      // facts and conventions are handled by accumulateDurableStatements to
+      // avoid duplicate ledger writes.
+      const statement = explicitStatement;
       const sessionId = text(input.session_id);
       if (statement && sessionId) {
         try {
