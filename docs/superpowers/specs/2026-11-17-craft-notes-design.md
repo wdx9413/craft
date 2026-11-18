@@ -14,9 +14,9 @@ Craft Notes 为设备、目录和单文件保存简短、稳定、对后续任�
 
 ## 2. 当前基线
 
-- `craft-capability/capability/craft-file-dir-desc/file-dir-desc.ts` 当前主要实现目录备注，以 `(device_id, path)` 区分目录，并按原始 `use_count` 达到 3 次晋级。
+- `craft-capability/capability/craft-notes/craft-notes-location.ts` 当前主要实现目录备注，以 `(device_id, path)` 区分目录，并按原始 `use_count` 达到 3 次晋级。
 - Craft 的工具目录和测试已调用设备注册、启用、停用等接口；当前子能力 TypeScript 源码和其 `dist` 没有这些方法。Marketplace 已打包的 Context bundle 却含有独立 `device` 记录与管理方法，且设备数据没有说明字段。这些实现需要先统一，不能在分歧版本上继续叠功能。
-- 当前没有单文件备注模型。现有目录记录使用 `file_dir_desc` 存储种类与 `craft_file_dir_desc_*` 工具名。
+- 当前没有单文件备注模型。现有目录记录使用 `craft_notes_location` 存储种类与 `craft_notes_location_*` 工具名。
 - Workbench 和 Craft Context 已有显示与工具接缝；不新增一个未限定权限的完整 MCP 工具面。
 
 以上是本地工作区静态检查，不表示 Marketplace 包已更新或实际 Host 已验证。
@@ -29,7 +29,7 @@ Craft Notes 为设备、目录和单文件保存简短、稳定、对后续任�
 | 一套强类型 Notes 记录，按对象配置生命周期 | 共享来源、版本和撤销机制；设备、目录、文件仍可采用不同的必填规则和晋级门槛。采用此方案。 |
 | 把所有内容作为自由文本 Knowledge | 可以复用检索，但无法稳定绑定设备/路径，也很难对生命周期和风险提醒做一致约束。不采用。 |
 
-**决定：**采用第二种。用户可见名称为 Craft Notes / `craft-notes`。为兼容现有调用和数据，第一阶段保留 `@craft/capability-file-dir-desc`、`file_dir_desc` 和 `craft_file_dir_desc_*` 作为内部兼容标识；新接口可以使用 Notes 名称。是否另发独立 Host 插件不在本次范围内，Notes 继续随 Craft Context 提供有界工具。
+**决定（2026-11-18 更新）：**采用第二种，产品、npm 包、源码目录和主接口统一为 Craft Notes / `@craft/craft-notes`。新位置数据写入 `craft_notes_location`，MCP 使用 `craft_notes_*`，Workbench 使用 `/api/workbench/notes/...`，CLI 使用 `craft notes ...`。旧 `file_dir_desc` 持久化集合仅作为一次性迁移来源；迁移幂等并保留稳定 ID、状态和审计字段。旧工具名、CLI 命令和 HTTP 路径不再公开。是否另发独立 Host 插件不在本次范围内，Notes 继续随 Craft Context 提供有界工具。
 
 ## 4. 记录与身份
 
@@ -68,7 +68,7 @@ Craft Notes 为设备、目录和单文件保存简短、稳定、对后续任�
 
 ## 6. 旧数据迁移与兼容
 
-- 现有 `file_dir_desc` 目录记录迁入统一 Notes 投影时保留 ID、正文、设备、路径、仓库身份、计数、状态、时间、撤销信息和来源；不改写正文、不推断 File Note。
+- 现有 `craft_notes_location` 目录记录迁入统一 Notes 投影时保留 ID、正文、设备、路径、仓库身份、计数、状态、时间、撤销信息和来源；不改写正文、不推断 File Note。
 - 旧 `promoted` 记录标为 `legacy_unreviewed`，继续保持原有可召回行为并返回旧来源标记；Workbench 提供复核入口。用户确认后转为正式 `confirmed`；明确撤销则停止召回。此兼容仅限迁移前已晋级的记录，新候选必须经人工确认。
 - 旧 `observed` 保持不参与默认检索。旧撤销记录继续不可召回。
 - 已登记设备没有 Note 时标为 `needs_note`，不补造说明。迁移不得扫描文件或读取正文。

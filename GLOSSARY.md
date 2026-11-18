@@ -2,6 +2,20 @@
 
 Craft Learning turns scoped, independently supported facts and verified work outcomes into revisable assets. Knowledge, Memory and Experience keep separate ownership and storage while sharing stable project identity and Context receipts.
 
+## Experience language
+
+**Experience Procedure**:
+A versioned, scope-bound method for completing a recurring task; it becomes routeable only after its independent evidence and evaluation gates pass.
+_Avoid_: Runbook file, unverified instruction
+
+**Experience Procedure Candidate**:
+A non-routeable Experience Procedure version that can be recalled as clearly labeled provisional guidance.
+_Avoid_: Verified procedure, executable workflow
+
+**Experience Runbook**:
+The readable view of an Experience Procedure Candidate or Procedure, focused on non-obvious pitfalls, the corrected method, verification, recovery and provenance.
+_Avoid_: Project `docs/runbooks/` file, transcript
+
 ## Scenario language
 
 **Scenario**:

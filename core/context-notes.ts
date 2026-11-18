@@ -1,9 +1,9 @@
-import type { FileDirDescRecord, FileDirDescRegistry } from "@craft/capability-file-dir-desc/file-dir-desc";
+import type { CraftNotesLocationRecord, CraftNotesLocationRegistry } from "@craft/craft-notes/craft-notes-location";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { CraftOperationError } from "./operation-error.ts";
 
 /** Directory hints reuse the local registry; looking one up never observes or promotes it. */
-export function resolveContextDirectory(registry: FileDirDescRegistry, args: JsonObject): JsonObject {
+export function resolveContextNotes(registry: CraftNotesLocationRegistry, args: JsonObject): JsonObject {
   if ((args.path !== undefined) === (args.description !== undefined)) {
     throw new CraftOperationError("INVALID_INPUT", "input_validation", "Provide exactly one of path or description");
   }
@@ -16,7 +16,7 @@ export function resolveContextDirectory(registry: FileDirDescRegistry, args: Jso
     throw new CraftOperationError("INVALID_INPUT", "input_validation", "max_chars must be an integer from 1 to 4000");
   }
   const resolved = registry.resolve({ path: args.path, description: args.description, limit: 1_000 });
-  const matches = resolved.results as unknown as FileDirDescRecord[];
+  const matches = resolved.results as unknown as CraftNotesLocationRecord[];
   const results: JsonObject[] = [];
   for (const match of matches) {
     const item = { id: match.id, path: match.path, description: match.description, host_kind: match.hostKind, status: match.status };

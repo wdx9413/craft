@@ -24,13 +24,19 @@ function boundedState(directory: string, name: string): JsonObject {
   }
 }
 
-function countStatus(store: CraftStore, kind: string): Record<string, number> {
+function countStatus(store: CraftStore, kind: string): { counts: Record<string, number>; status: "available" | "incomplete" } {
   const counts: Record<string, number> = {};
-  for (const item of store.list(kind, 10_001, undefined, false)) {
-    const status = typeof item.status === "string" ? item.status : "unknown";
-    counts[status] = (counts[status] ?? 0) + 1;
+  try {
+    for (const item of store.list(kind, 10_001, undefined, false)) {
+      const status = typeof item.status === "string" ? item.status : "unknown";
+      counts[status] = (counts[status] ?? 0) + 1;
+    }
+    return { counts, status: "available" };
+  } catch {
+    // Readiness is diagnostic. One retired project partition must not make the
+    // whole Context Doctor unavailable or turn inaccessible records into zeroes.
+    return { counts: {}, status: "incomplete" };
   }
-  return counts;
 }
 
 function feedbackOutcomes(store: CraftStore): Record<string, number> {
@@ -55,6 +61,7 @@ function latestInjectedTokens(store: CraftStore): number | null {
 export function contextReadinessDoctor(store: CraftStore, args: JsonObject = {}): JsonObject {
   const projectRoot = typeof args.project_root === "string" && args.project_root.trim() ? args.project_root.trim() : null;
   const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id.trim() : null;
+  const correctionStatus = countStatus(store, "context_correction_task");
   let identity: JsonObject | null = null;
   let registryMigration: JsonObject | null = null;
   if (projectRoot !== null) {
@@ -83,17 +90,19 @@ export function contextReadinessDoctor(store: CraftStore, args: JsonObject = {})
       session_adjudication: boundedState(store.paths.knowledgeDir, "session-adjudication-cursor.json"),
       classification_attempts: boundedState(store.paths.knowledgeDir, "classification-attempts.json"),
     },
-    components: Object.fromEntries(COMPONENTS.map(component => [component, {
-      records: store.count(component === "experience" ? "experience_observation" : component === "memory" ? "memory_ledger" : "knowledge_claim"),
-      status_counts: countStatus(store, component === "experience" ? "experience_observation" : component === "memory" ? "memory_ledger" : "knowledge_claim"),
-    }])),
+    components: Object.fromEntries(COMPONENTS.map(component => {
+      const kind = component === "experience" ? "experience_observation" : component === "memory" ? "memory_ledger" : "knowledge_claim";
+      const status = countStatus(store, kind);
+      return [component, { records: store.count(kind), status_counts: status.counts, status_counts_status: status.status }];
+    })),
     context: {
       receipts: store.count("context_resolution_receipt"),
       working_sets: store.count("context_working_set_receipt"),
       emissions: store.count("context_emission"),
       feedback: store.count("context_feedback"),
       feedback_outcomes: feedbackOutcomes(store),
-      corrections: countStatus(store, "context_correction_task"),
+      corrections: correctionStatus.counts,
+      correction_status_counts_status: correctionStatus.status,
       correction_states: CORRECTION_STATES,
       resume_snapshots: store.count("context_resume_snapshot"),
       latest_injected_tokens: latestInjectedTokens(store),

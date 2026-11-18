@@ -709,8 +709,21 @@ export class CodexHookBridge {
       turn_id: text(input.turn_id), memory_written: false, observation_written: finalized !== null,
       plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
     this.lifecycle(member, "Stop", input);
-    const guidance = this.verificationGapGuidance(input, journal);
+    const guidance = this.verificationGapGuidance(input, journal) ?? this.runbookCaptureGuidance(input, journal, finalized);
     return guidance ? { systemMessage: guidance } : {};
+  }
+
+  /** Offer a non-blocking Experience capture choice after a verified project edit. */
+  private runbookCaptureGuidance(input: HookInput, journal: JsonObject | null, finalized: JsonObject | null): string | null {
+    if (input.stop_hook_active === true || !journal || journal.has_edit !== true || journal.verification_outcome !== "passed") return null;
+    const observation = finalized?.observation as JsonObject | undefined;
+    if (!observation || typeof observation.id !== "string") return null;
+    try {
+      const prior = this.service.store.list("experience_runbook_decision", 1, item => item.observation_id === observation.id);
+      const candidate = this.service.store.list("experience_procedure", 1, item => item.runbook_candidate === true && item.observation_id === observation.id);
+      if (prior.length || candidate.length) return null;
+    } catch { return null; }
+    return `Craft Experience：本轮已有通过验证的项目修改。若发现可复用的坑点，请用 craft_experience_runbook_capture 基于 observation_id=${observation.id} 提交一份脱敏 Runbook 候选；若没有可复用经验，用 decision=no_new_learning 和 reason=no_reusable_learning 明确略过。只写现象、原因、正确做法、合成示例、完成判据和失败处置；不要复制提示词、对话、原始日志、密钥或客户数据。该提示不影响本轮结果。`;
   }
 
   /**

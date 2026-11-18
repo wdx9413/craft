@@ -14,6 +14,7 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { ComponentReadinessKernel } from "../core/component-readiness.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
+import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-standalone-components-"));
@@ -109,6 +110,63 @@ test("Knowledge diagnosis reads only bounded content-free learning status", asyn
     assert.deepEqual(withUntraced, { status: "last_recorded", measurement_scope: "eligible_held_out_batch_only", legacy_unknown_outcomes: 11,
       legacy_untraced_tasks: 3, legacy_untraced_scope: "processed_state", updated_at: "2026-10-27T14:11:27.523Z" });
     assert.equal(JSON.stringify(withUntraced).includes("private-task-id"), false);
+  } finally { await dispose(f); }
+});
+
+test("Component readiness isolates unavailable legacy partition diagnostics", async () => {
+  const f = await fixture();
+  try {
+    const originalList = f.store.list.bind(f.store);
+    const unavailable = new Set(["knowledge_source", "knowledge_claim", "experience_procedure"]);
+    f.store.list = ((kind: string, limit?: number, predicate?: (record: JsonObject) => boolean, hydrate?: boolean,
+      dependencies?: { source_ids: string[]; document_ids: string[] }, scope?: string) => {
+      if (unavailable.has(kind)) throw new Error("Project Knowledge storage root is not registered");
+      return originalList(kind, limit, predicate, hydrate, dependencies, scope);
+    }) as typeof f.store.list;
+    const kernel = new ComponentReadinessKernel(f.store);
+    const knowledge = kernel.get({ component: "knowledge" });
+    assert.equal(knowledge.state, "storage_diagnostics_incomplete");
+    assert.equal((knowledge.counts as JsonObject).active_sources, null);
+    assert.equal((knowledge.counts as JsonObject).claim_status_counts_status, "incomplete");
+    assert.equal(knowledge.next_action, "repair_or_explicitly_migrate_unavailable_project_storage");
+    const memory = kernel.get({ component: "memory" });
+    assert.equal(memory.state, "storage_diagnostics_incomplete");
+    assert.equal((memory.counts as JsonObject).active_sources, null);
+    assert.equal((memory.counts as JsonObject).ledger_status_counts_status, "available");
+    const experience = kernel.get({ component: "experience" });
+    assert.equal(experience.state, "storage_diagnostics_incomplete");
+    assert.equal((experience.counts as JsonObject).procedure_status_counts_status, "incomplete");
+  } finally { await dispose(f); }
+});
+
+test("Knowledge readiness marks qualification proof incomplete when a claim partition cannot be read", async () => {
+  const f = await fixture();
+  try {
+    const originalList = f.store.list.bind(f.store);
+    let claimReads = 0;
+    f.store.list = ((kind: string, limit?: number, predicate?: (record: JsonObject) => boolean, hydrate?: boolean,
+      dependencies?: { source_ids: string[]; document_ids: string[] }, scope?: string) => {
+      if (kind === "knowledge_claim" && ++claimReads === 2) throw new Error("Project Knowledge storage root is not registered");
+      return originalList(kind, limit, predicate, hydrate, dependencies, scope);
+    }) as typeof f.store.list;
+    const readiness = new ComponentReadinessKernel(f.store).get({ component: "knowledge" });
+    assert.equal(readiness.state, "storage_diagnostics_incomplete");
+    assert.equal((readiness.counts as JsonObject).claim_status_counts_status, "available");
+    assert.equal((readiness.counts as JsonObject).qualification_status, "incomplete");
+  } finally { await dispose(f); }
+});
+
+test("Knowledge readiness exposes the qualified path only after verifying its full promotion proof", async () => {
+  const f = await fixture();
+  try {
+    const candidate = f.store.create("knowledge_claim", "qualified-readiness", {
+      scope: "global", status: "candidate", content: "A qualified claim with independent evidence.", evidence_ids: [],
+    });
+    attachVerifiedPromotionFixture(f.store, candidate);
+    const readiness = new ComponentReadinessKernel(f.store).get({ component: "knowledge" });
+    assert.equal(readiness.state, "ready");
+    assert.equal(readiness.next_action, "resolve_a_bounded_context_receipt_for_the_current_scope");
+    assert.equal((readiness.counts as JsonObject).qualification_status, "available");
   } finally { await dispose(f); }
 });
 

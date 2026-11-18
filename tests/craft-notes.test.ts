@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CraftNotesRegistry } from "@craft/capability-file-dir-desc";
+import { CraftNotesRegistry } from "@craft/craft-notes";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { migrateFileDirDescNotes } from "../core/craft-notes-migration.ts";
+import { migrateCraftNotesLocationNotes } from "../core/craft-notes-migration.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 import { execFileSync } from "node:child_process";
@@ -109,18 +109,18 @@ test("file notes only accept explicit evidence and caller metadata, then require
 test("legacy migration preserves ids and promoted recall, and is idempotent", async () => {
   const { store, root, notes } = await fixture();
   try {
-    store.save("file_dir_desc", "old-promoted", { id: "old-promoted", device_id: "local", path: "/work/old", description: "old directory", status: "promoted", use_count: 4 });
-    store.save("file_dir_desc", "old-observed", { id: "old-observed", device_id: "local", path: "/work/new", description: "new directory", status: "observed", use_count: 1 });
-    store.save("file_dir_desc", "old-revoked", { id: "old-revoked", device_id: "local", path: "/work/secret", description: "revoked directory", status: "revoked", use_count: 1 });
-    assert.deepEqual(migrateFileDirDescNotes(store), { scanned: 3, migrated: 3, skipped: 0 });
-    assert.deepEqual(migrateFileDirDescNotes(store), { scanned: 3, migrated: 0, skipped: 3 });
+    store.save("craft_notes_location", "old-promoted", { id: "old-promoted", device_id: "local", path: "/work/old", description: "old directory", status: "promoted", use_count: 4 });
+    store.save("craft_notes_location", "old-observed", { id: "old-observed", device_id: "local", path: "/work/new", description: "new directory", status: "observed", use_count: 1 });
+    store.save("craft_notes_location", "old-revoked", { id: "old-revoked", device_id: "local", path: "/work/secret", description: "revoked directory", status: "revoked", use_count: 1 });
+    assert.deepEqual(migrateCraftNotesLocationNotes(store), { scanned: 3, migrated: 3, skipped: 0 });
+    assert.deepEqual(migrateCraftNotesLocationNotes(store), { scanned: 3, migrated: 0, skipped: 3 });
     assert.equal(notes.resolve({ device_id: "local", path: "/work/old" }).items[0]?.status, "legacy_unreviewed");
     assert.equal(notes.resolve({ device_id: "local", path: "/work/new" }).items.some(item => item.subject_type === "directory"), false);
     assert.equal(notes.resolve({ device_id: "local", path: "/work/secret" }).items.some(item => item.subject_type === "directory"), false);
     assert.equal(notes.candidateList().items.some(item => item.id === "old-promoted"), true);
     assert.equal(notes.confirm({ id: "old-promoted", expected_version: 1 }).status, "confirmed");
-    store.save("file_dir_desc", "bad", { id: "bad", device_id: "local", path: "", status: "promoted" });
-    assert.deepEqual(migrateFileDirDescNotes(store), { scanned: 4, migrated: 0, skipped: 4 });
+    store.save("craft_notes_location", "bad", { id: "bad", device_id: "local", path: "", status: "promoted" });
+    assert.deepEqual(migrateCraftNotesLocationNotes(store), { scanned: 4, migrated: 0, skipped: 4 });
   } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

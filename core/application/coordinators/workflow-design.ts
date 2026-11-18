@@ -196,8 +196,13 @@ export class WorkflowDesignWorkbench {
         recall_weight: weight?.weight ?? 1, recall_penalty: weight?.penalty ?? 1,
         helpful_signals: weight?.positive ?? 0, pending_corrections: weight?.negative ?? 0 };
     });
-    return { scope, drafts, observations, patterns, procedures,
-      counts: { drafts: drafts.length, observations: observations.length, patterns: patterns.length, procedures: procedures.length } };
+    const runbookCandidates = procedureRecords.filter(item => item.runbook_candidate === true && item.lifecycle === "candidate" && item.routeable !== true).slice(0, 50).map(item => {
+      const content = item.content_ref && typeof item.content_ref === "object" ? this.store.contentStore.readCompatSync(item.content_ref as never) : null;
+      return { id: item.id, version: item.version, title: item.title, lifecycle: item.lifecycle, scope: item.scope,
+        observation_id: item.observation_id, evidence_ids: item.evidence_ids ?? [], body: content?.body ?? "" };
+    });
+    return { scope, drafts, observations, patterns, procedures, runbook_candidates: runbookCandidates,
+      counts: { drafts: drafts.length, observations: observations.length, patterns: patterns.length, procedures: procedures.length, runbook_candidates: runbookCandidates.length } };
   }
 
   /**

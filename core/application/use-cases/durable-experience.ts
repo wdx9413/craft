@@ -11,7 +11,7 @@ import { executeSteps, normalizeSteps, resolveInputs, safePath, substitute } fro
 import { stableDigest } from "../../digest.ts";
 
 declare module "../craft-service.ts" {
-  interface CraftService { experienceLearningEvaluationRun(args: JsonObject): JsonObject; }
+  interface CraftService { experienceLearningEvaluationRun(args: JsonObject): JsonObject; experienceRunbookCapture(args: JsonObject): JsonObject; experienceRunbookRevoke(args: JsonObject): JsonObject; }
 }
 
 /** Narrow public delegates for durable long-task progress and diagnostic learning. */
@@ -39,6 +39,8 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
     return { refuted: kernel.hasRefutedCombination((args.factors as string[]) ?? [], typeof args.pool === "string" ? args.pool : "") };
   };
   serviceClass.prototype.experienceProcedureDraft = function (args) { return this.experienceProcedures.draft(args); };
+  serviceClass.prototype.experienceRunbookCapture = function (args) { return this.experienceProcedures.runbookCapture(args); };
+  serviceClass.prototype.experienceRunbookRevoke = function (args) { return this.experienceProcedures.runbookRevoke(args); };
   serviceClass.prototype.experienceProcedureGate = function (args) {
     if (args.passed === true) throw new Error("Positive Procedure gates require bound evaluation results");
     return this.experienceProcedures.gate(args);

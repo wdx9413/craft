@@ -249,14 +249,14 @@ Context、Knowledge、Memory、Experience、Codebase 是上下文与学习链中
 | --- | --- | --- |
 | 上下文与学习 | Context 选择材料；Knowledge 管事实；Memory 管分层记忆；Experience 管可复用流程；Codebase 管快照绑定的代码证据 | 第 6、7.2、9 章 |
 | 能力发现与独立评测 | Craft Capability 发现、去重、检查健康并推荐最小能力集合；独立 craft-eval 负责通用评测，Craft 保留任务验收、证据校验与治理门 | 第 7.3、8、9 章 |
-| 数据保护与目录语义 | Datasec 管脱敏及受控映射；craft-file-dir-desc 管目录与用途的双向定位，服务本机及远端项目选择 | 第 7.3、10、12、13 章 |
+| 数据保护与目录语义 | Datasec 管脱敏及受控映射；craft-notes-location 管目录与用途的双向定位，服务本机及远端项目选择 | 第 7.3、10、12、13 章 |
 | 任务执行与治理 | Coordinator／Mainer／Worker／Reviewer、计划路由、持久工作流、队列、授权、预算、验收与恢复；学习控制从证据形成候选并经评测治理 | 第 3—5、9、11 章 |
 | 扩展与外部连接 | Skill／规则／运行时模块／Hook／MCP 的接入与生命周期；Host、模型、云电脑、邮箱／IM 和主动触发 | 第 8、12、13 章 |
 | 运维与交付 | 身份、分域存储、迁移、备份恢复、可观测性、发布及回滚 | 第 10、14—16 章 |
 
-**不再保留独立 Craft Quality 子产品。**通用评测统一归 craft-eval；旧 `craft-quality`／`craft-skill-quality` 名称仅按第 9.1 节兼容迁移，不再发展第二套评测引擎或产品页面。完整 `craft` 是组合入口。`craft-file-dir-desc` 作为目录能力登记，不因当前经 Context 提供入口而消失，也不因此要求单独分发插件。Skill 的来源管理、候选制作、评测与发布分属能力发现、扩展生命周期和评测治理，不能混成 Experience 自动发布 Skill；本轮仍不自动改写或发布用户 Skill。
+**不再保留独立 Craft Quality 子产品。**通用评测统一归 craft-eval；旧 `craft-quality`／`craft-skill-quality` 名称仅按第 9.1 节兼容迁移，不再发展第二套评测引擎或产品页面。完整 `craft` 是组合入口。`craft-notes-location` 作为目录能力登记，不因当前经 Context 提供入口而消失，也不因此要求单独分发插件。Skill 的来源管理、候选制作、评测与发布分属能力发现、扩展生命周期和评测治理，不能混成 Experience 自动发布 Skill；本轮仍不自动改写或发布用户 Skill。
 
-核对依据为[能力注册表](core/capability-catalog.ts)、[Capability 插件声明](plugins/craft-capability/.codex-plugin/plugin.json)、[Datasec 模块](capability/craft-datasec/README.md)与[目录语义实现](core/file-dir-desc.ts)。它们证明已有模块或入口，不证明全部目标已实现；旧组件架构中 Context 仅含 Knowledge／Memory、长期 Memory 一律人工批准等表述，不作为本总纲的目标合同，按本章及第 9 章核对现状与迁移。
+核对依据为[能力注册表](core/capability-catalog.ts)、[Capability 插件声明](plugins/craft-capability/.codex-plugin/plugin.json)、[Datasec 模块](capability/craft-datasec/README.md)与[目录语义实现](core/craft-notes-location.ts)。它们证明已有模块或入口，不证明全部目标已实现；旧组件架构中 Context 仅含 Knowledge／Memory、长期 Memory 一律人工批准等表述，不作为本总纲的目标合同，按本章及第 9 章核对现状与迁移。
 
 ### 7.2 上下文与学习能力的演进
 
@@ -288,7 +288,7 @@ Context、Knowledge、Memory、Experience、Codebase 是上下文与学习链中
 | --- | --- | --- |
 | Craft Capability | 从已授权来源登记 Skill、MCP、Workflow、Adapter 等，保留来源、版本、依赖、范围及健康；按任务返回少量候选与激活计划，实际安装和执行交给受控 Runtime | 来源撤销、版本变化、健康失败使推荐失效；排序策略用独立任务比较推荐命中、遗漏、无效激活、成本和时延。发现、推荐、安装、授权、执行分别留回执，不自动加载全部工具 |
 | Datasec | 本地检测、生成安全副本、维护隔离映射及最终出站检查；默认手机号、邮箱及密钥类敏感内容保护，其他规则显式开启 | 规则／处理链候选经漏检、误报、业务字段保真、流式边界、Host 覆盖及性能回归后启用；反馈不能自动关闭必要保护或全局放行敏感值，回滚仍保持当前授权要求 |
-| craft-file-dir-desc | 按实际使用记录目录、用途、别名、执行端和来源，支持“描述找目录／目录找描述”；观察态与正式条目分开，只读检索不增加使用证据 | 使用频次是候选信号，还须核实路径、描述、归属与冲突；搬迁、纠错、离线和身份变化触发失效或重绑。验收重名、否定、歧义、远端同路径及选择子项目的定位正确率，不全盘扫描、不靠目录关系增权 |
+| craft-notes-location | 按实际使用记录目录、用途、别名、执行端和来源，支持“描述找目录／目录找描述”；观察态与正式条目分开，只读检索不增加使用证据 | 使用频次是候选信号，还须核实路径、描述、归属与冲突；搬迁、纠错、离线和身份变化触发失效或重绑。验收重名、否定、歧义、远端同路径及选择子项目的定位正确率，不全盘扫描、不靠目录关系增权 |
 
 以上能力的规则与排序可以形成版本化候选，但不要求每次脱敏、目录查询或健康探测调用模型。正常路径按需、增量、有界执行；权限规则不能由收益分数覆盖。所有能力登记拥有的状态、来源、配置与版本、检索／调用入口、失效传播、成本和验收卡；新增能力同步更新本表及第 16 章，不能只加代码或插件名称。
 
@@ -658,7 +658,7 @@ SQLite 的 WAL 可改善读写并发，但单库仍只有一个写者，也可�
 
 ### 13.2 目录与主动触发
 
-`craft-file-dir-desc` 按需记录使用过的目录、用途、别名、执行端与来源，支持双向检索，不扫描全盘。频率提高排序，不证明语义、归属或权限；搬迁、离线、重名与远端身份改变需重验。
+`craft-notes-location` 按需记录使用过的目录、用途、别名、执行端与来源，支持双向检索，不扫描全盘。频率提高排序，不证明语义、归属或权限；搬迁、离线、重名与远端身份改变需重验。
 
 主动任务固定触发范围、去重、防抖、时区、错过调度后的补跑及预算规则。多设备需明确身份、关联与冲突策略，不能靠复制正在写入的 SQLite 文件同步。
 

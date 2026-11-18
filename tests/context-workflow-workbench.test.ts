@@ -157,12 +157,19 @@ test("experience overview surfaces the recall-feedback weight and pending correc
     f.store.create("experience_procedure", "proc-1", { scope: "project:demo", lifecycle: "routeable", procedure_kind: "workflow", routeable: true });
     f.store.create("context_correction_task", "corr-1", { status: "pending_review", outcome: "incorrect",
       asset_ref: { member: "experience", id: "proc-1" } });
+    const content = f.store.contentStore.writeSync({ kind: "experience", record_id: "runbook-1", version: 1, scope: "project:demo",
+      status: "candidate", sensitivity: "internal", source_id: "observation-1", title: "A tested recovery", folder: "prompts", body: "# A tested recovery\n\nStart from a blank page." });
+    f.store.create("experience_procedure", "runbook-1", { scope: "project:demo", lifecycle: "candidate", routeable: false,
+      procedure_kind: "prompt", runbook_candidate: true, observation_id: "observation-1", evidence_ids: ["evidence-1"], title: "A tested recovery", content_ref: content });
     const overview = designer.overview({ scope: "project:demo" }) as JsonObject;
     const procedure = (overview.procedures as JsonObject[]).find((item) => item.id === "proc-1")!;
     assert.equal(procedure.recall_weight, 0.8);
     assert.equal(procedure.recall_penalty, 0.8);
     assert.equal(procedure.pending_corrections, 1);
     assert.equal(procedure.helpful_signals, 0);
+    const runbook = (overview.runbook_candidates as JsonObject[]).find((item) => item.id === "runbook-1")!;
+    assert.match(String(runbook.body), /Start from a blank page/u);
+    assert.equal((overview.counts as JsonObject).runbook_candidates, 1);
   } finally { await f.close(); }
 });
 test("recall receipts audit trail lists each recall and its feedback verdicts", async () => {

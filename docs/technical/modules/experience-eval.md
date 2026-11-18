@@ -39,6 +39,10 @@
 - Shadow Experiment：0.9.8 只能将 `proposal_only` 候选送入只读 Workflow 的 held-out baseline/candidate 对照；它保存 Runner、Comparison、Promotion 和精确 Signoff Policy 的准备态。Promotion 通过仅为 `signoff_ready`，不产生 Signoff、更不允许发布。
 - Skill Proposal / Publication：版本化的 `SKILL.md` 候选复用 Evaluation/Signoff Gate；仅在明确授权、Source 内路径校验、摘要校验与备份完成后发布，回滚同样受摘要保护。
 
+## 已接受目标：Experience Runbook（待实现）
+
+经验手册由 Experience Procedure 拥有，不另设项目文档或 Notes 来源。一次已验证任务可以形成项目范围、不可路由的 Procedure Candidate；其可读内容聚焦下一位零上下文 AI 会遇到的实际坑点，包含现象、原因、正确做法、完成判据、失败处置、证据引用，以及有实测证据的时间或规模。真实项目源码只保留定位和版本引用；代码示例须为脱敏合成内容。Context 可将 Candidate 作为明确标注的待验证提示召回，但不能把它当作可执行 Procedure。至少两项独立验证任务和固定评测合同通过后自动路由；跨项目推广须有跨项目评测，用户可随时撤销。Experience 界面负责查看和撤销。该目标尚未由当前运行时实现，尤其缺少内容型 Candidate 的写入、Context 投影和 Work Loop 捕获验收。
+
 ## 关键门禁
 
 Evaluation Suite 的 Case 显式属于 `search`、`development` 或 `held_out`。Workflow 或 Skill Proposal 从 `candidate` 晋级 `verified` 时，必须引用该精确版本且全部通过的 held-out Evaluation Run 或对应的 passed Signoff。

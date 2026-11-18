@@ -558,6 +558,7 @@ export class WorkbenchWebApp {
       if (request.method === "GET" && path.startsWith("/api/workbench/workflow-designs/")) return json(200, this.service.workbenchWorkflowDesignGet({ design_id: decodeURIComponent(path.slice("/api/workbench/workflow-designs/".length)), scope: queryValue(url, "scope") }));
       if (request.method === "POST" && path === "/api/workbench/workflow-designs/capture") return json(201, this.service.workbenchWorkflowDesignCapture(bodyObject(request.body)));
       if (request.method === "GET" && path === "/api/workbench/experience/overview") return json(200, this.service.workbenchExperienceOverview({ scope: queryValue(url, "scope") }));
+      if (request.method === "POST" && path === "/api/workbench/experience/runbooks/revoke") return json(200, this.service.experienceRunbookRevoke(bodyObject(request.body)));
       if (request.method === "GET" && path === "/api/workbench/experience/recall-receipts") return json(200, this.service.workbenchExperienceRecallReceipts({
         asset_id: queryValue(url, "procedure_id") ?? queryValue(url, "asset_id") ?? "",
         member: queryValue(url, "member"), limit: queryValue(url, "limit") }));
@@ -634,14 +635,14 @@ export class WorkbenchWebApp {
       // Retiring a live ledger memory is a signed, version-checked human action.
       if (request.method === "POST" && path === "/api/workbench/memory/ledger/transition") return json(200, this.service.workbenchMemoryLedgerTransition(bodyObject(request.body)));
       // Craft Notes: directory <-> semantic note, bidirectional, self-evolving.
-      if (request.method === "POST" && path === "/api/workbench/file-dir-desc/record") return json(201, this.service.fileDirDescRecord(bodyObject(request.body)));
-      if (request.method === "POST" && path === "/api/workbench/file-dir-desc/promote") return json(200, this.service.fileDirDescPromote(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/workbench/notes/locations/record") return json(201, this.service.craftNotesLocationRecord(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/workbench/notes/locations/promote") return json(200, this.service.craftNotesLocationPromote(bodyObject(request.body)));
       // NEEDREAD 16 (目录语义): correction, relocation and withdrawal are separate,
       // attributed actions - a withdrawn entry must stop being recallable.
-      if (request.method === "POST" && path === "/api/workbench/file-dir-desc/relocate") return json(200, this.service.fileDirDescRelocate(bodyObject(request.body)));
-      if (request.method === "POST" && path === "/api/workbench/file-dir-desc/revoke") return json(200, this.service.fileDirDescRevoke(bodyObject(request.body)));
-      if (request.method === "GET" && path === "/api/workbench/file-dir-desc/resolve") return json(200, this.service.fileDirDescResolve({ description: queryValue(url, "description"), path: queryValue(url, "path"), limit: queryValue(url, "limit") }));
-      if (request.method === "GET" && path === "/api/workbench/notes/devices") return json(200, this.service.fileDirDescListDevices({ limit: queryValue(url, "limit") }));
+      if (request.method === "POST" && path === "/api/workbench/notes/locations/relocate") return json(200, this.service.craftNotesLocationRelocate(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/workbench/notes/locations/revoke") return json(200, this.service.craftNotesLocationRevoke(bodyObject(request.body)));
+      if (request.method === "GET" && path === "/api/workbench/notes/locations/resolve") return json(200, this.service.craftNotesLocationResolve({ description: queryValue(url, "description"), path: queryValue(url, "path"), limit: queryValue(url, "limit") }));
+      if (request.method === "GET" && path === "/api/workbench/notes/devices") return json(200, this.service.craftNotesLocationListDevices({ limit: queryValue(url, "limit") }));
       if (request.method === "POST" && path === "/api/workbench/notes/devices") return json(201, this.service.craftNotesCreateDevice(bodyObject(request.body)));
       if (request.method === "GET" && path === "/api/workbench/notes/candidates") return json(200, this.service.craftNotesCandidateList({ device_id: queryValue(url, "device_id"), limit: queryValue(url, "limit") }));
       if (request.method === "POST" && path === "/api/workbench/notes/observe-directory") return json(201, this.service.craftNotesObserveDirectory(bodyObject(request.body)));
@@ -694,7 +695,7 @@ export class WorkbenchWebApp {
       if (request.method === "GET" && path === "/api/workbench/pilot/outcomes") return json(200, this.service.pilotDeliveryOutcomes({ limit: queryValue(url, "limit") }));
       if (request.method === "POST" && path === "/api/workbench/pilot/resume-session") return json(200, this.service.pilotResumeSession({ session_id: queryValue(url, "session_id") }));
       if (request.method === "POST" && path === "/api/workbench/pilot/coordinator/resolve") return json(200, this.service.pilotCoordinatorResolve(bodyObject(request.body)));
-      if (request.method === "GET" && path === "/api/workbench/file-dir-desc/list") return json(200, this.service.fileDirDescList({ status: queryValue(url, "status"), host_kind: queryValue(url, "host_kind"), limit: queryValue(url, "limit") }));
+      if (request.method === "GET" && path === "/api/workbench/notes/locations/list") return json(200, this.service.craftNotesLocationList({ status: queryValue(url, "status"), host_kind: queryValue(url, "host_kind"), limit: queryValue(url, "limit") }));
       if (request.method === "POST" && path.startsWith("/api/workbench/memory/") && path.endsWith("/retire")) return json(200, this.service.workbenchMemoryRetire({ memory_id: decodeURIComponent(path.slice(22, -7)) }));
       if (request.method === "POST" && path === "/api/workbench/knowledge/claims") return json(201, this.service.workbenchKnowledgeClaimSave(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/workbench/workflows") return json(201, this.service.workbenchWorkflowSave(bodyObject(request.body)));

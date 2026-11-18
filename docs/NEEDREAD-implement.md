@@ -380,12 +380,12 @@
 | 控制台「自进化观察室」 | `evolution` 页展示自进化 Mod 候选、影子测试、插件发现提案、待归因失败轨迹与「交付结局（飞轮真值）」统计 | `tests/mod-pages.test.ts`、`tests/workbench-server.test.ts` |
 | 工作台 Mod 热插拔 / 一键回滚 | `mods` 页批准/启停/撤销/影子测试/回滚按钮 | `tests/mod-pages.test.ts` |
 | 沙盒隔离 / 版本回滚 | 既有 sandbox + skill-publisher / asset-revisions | 既有测试 |
-| 消息插件：纯工程监听 + 0 Token 展示 | `message-inbox.ts` + `messageIngest` webhook + `message-listener.ts`（`LocalDropAdapter` 本地/挂载云目录轮询，`message_seen` 持久去重，一源失败不影响其余，`ImapAdapter` 无配置诚实报错）+ `messagePoll` HTTP/CLI + `message-dock.js` 三模式（领航员播报/控制台待办含目录拉取/工作台 Toast+侧栏） | `tests/message-inbox.test.ts`、`tests/message-listener.test.ts`、`tests/message-dock.test.ts`、`tests/cli-dirs.test.ts`、`tests/workbench-server.test.ts` |
+| 消息插件：纯工程监听 + 0 Token 展示 | `message-inbox.ts` + `messageIngest` webhook + `message-listener.ts`（`LocalDropAdapter` 本地/挂载云目录轮询，`message_seen` 持久去重，一源失败不影响其余，`ImapAdapter` 无配置诚实报错）+ `messagePoll` HTTP/CLI + `message-dock.js` 三模式（领航员播报/控制台待办含目录拉取/工作台 Toast+侧栏） | `tests/message-inbox.test.ts`、`tests/message-listener.test.ts`、`tests/message-dock.test.ts`、`tests/cli-notes-locations.test.ts`、`tests/workbench-server.test.ts` |
 | 安全边界：脱敏先于落库 | `messageIngest` 用 `craft-datasec` 全部内置规则脱敏正文，发件人/主题只去凭据以保留可读性，绝不把密钥原文写入本地库 | `tests/message-inbox.test.ts` |
 | 消息插件：按需 AI | `messageProcess` 派发 Pilot turn（幂等），仅此步消耗模型 | `tests/message-inbox.test.ts` |
 | 控制台消息批量治理 | `messageBatch`（read 0 Token / summarize 才按需派发，逐条报告失败）+ 控制台勾选与底部浮条「批量标记已读 / 丢给 AI 统一总结」 | `tests/message-inbox.test.ts`、`tests/message-dock.test.ts` |
 | 工作台消息流一键拖拽到 Chat | 消息卡片可拖拽，把「参考消息：发件人《主题》」写入当前输入框，不发送、0 Token | `tests/message-dock.test.ts` |
-| `craft-file-dir-desc` 目录↔描述双向检索 | `core/file-dir-desc.ts`：`observe`（自动强化，不改写描述）与 `record`（人工纠错）分离；observed→promoted（3 次真实使用）；`relocate` 保留身份与使用次数并拒绝覆盖；`revoke` 署名撤销后停止召回且不会被再次使用自动恢复。CLI `craft dirs`，HTTP record/promote/relocate/revoke/resolve/list | `tests/file-dir-desc.test.ts`、`tests/cli-dirs.test.ts`、`tests/workbench-server.test.ts`、`tests/pilot-coordinator.test.ts` |
+| Craft Notes 位置检索 | `craft-capability/capability/craft-notes/craft-notes-location.ts`：`observe`（自动强化，不改写备注）与 `record`（人工纠错）分离；观察态到正式态需 3 次真实使用；`relocate` 保留身份与使用次数并拒绝覆盖；`revoke` 署名撤销后停止召回。CLI `craft notes locations`，HTTP `/api/workbench/notes/locations/*` | `tests/craft-notes-location.test.ts`、`tests/cli-notes-locations.test.ts`、`tests/workbench-server.test.ts`、`tests/pilot-coordinator.test.ts` |
 | 工作台 UI 融合 | `mod-pages.js`（认知约束/目录语义/首次引导/切模式确认/观察室/阻塞队列）+ NAV + 三模式导航 | `tests/mod-pages.test.ts`、169 测试全绿 |
 | 控制台待我批准批量治理 | `app.js` 勾选列 + 底部浮条「批量批准 / 批量稍后」，逐条走 `/api/inbox/decide`（一 effect 一授权，不合并语义），勾选跨重绘保持 | `tests/visual-layer.test.ts` |
 | 桌面双击即应用（隐藏控制台） | `.tools/start-craft-workbench.ps1` 优先拉起 Tauri release exe、单实例、`-Browser` 降级；`.vbs` 隐藏窗口；`scripts/install-desktop-shortcut.ps1` 生成桌面/开始菜单 `.lnk`（图标 `assets/craft.ico`），数据目录固定 `~/.craft_data` | 构建产物 `craft-workbench-desktop.exe` 存在，快捷方式指向该 exe |
@@ -473,7 +473,7 @@
 cd D:\documents\project\mytest\craft
 pnpm run typecheck
 pnpm run audit:layering                    # 566 modules, 0 violations
-node --experimental-strip-types --test tests/workbench-server.test.ts tests/file-dir-desc.test.ts tests/mod-registry.test.ts tests/message-inbox.test.ts tests/pilot-review-round.test.ts tests/platform-settings.test.ts tests/plugin-discovery.test.ts tests/pilot-mod-trace.test.ts tests/pilot-coordinator.test.ts
+node --experimental-strip-types --test tests/workbench-server.test.ts tests/craft-notes-location.test.ts tests/mod-registry.test.ts tests/message-inbox.test.ts tests/pilot-review-round.test.ts tests/platform-settings.test.ts tests/plugin-discovery.test.ts tests/pilot-mod-trace.test.ts tests/pilot-coordinator.test.ts
 
 cd ..\craft-workbench
 npm test                                   # 171 tests, 0 fail

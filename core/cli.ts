@@ -67,11 +67,11 @@ Usage:
   craft kit list                List installed Capability Kits
   craft kit install-builtins    Install reviewed built-in Capability Kits
   craft kit describe <id>       Describe the shared Skill/MCP/CLI/plugin surface
-  craft dirs record <path> <description> [--host local|cloud] [--promote]  记住目录与含义
-  craft dirs promote <id>      将观察到的目录提升为正式可召回条目
-  craft dirs resolve --by-desc <text>   用描述找目录（仅正式条目可召回）
-  craft dirs resolve --by-path <path>   查某目录已存的含义
-  craft dirs list [--status observed|promoted] [--host local|cloud]  列出目录语义
+  craft notes locations record <path> <description> [--host local|cloud] [--promote]  记住目录与含义
+  craft notes locations promote <id>      将观察到的位置提升为正式可召回条目
+  craft notes locations resolve --by-desc <text>   用描述找目录（仅正式条目可召回）
+  craft notes locations resolve --by-path <path>   查某目录已存的含义
+  craft notes locations list [--status observed|promoted] [--host local|cloud]  列出目录备注
   craft kit conformance <id>    Run deterministic Kit Conformance checks
   craft codex prepare ...       Prepare a digest-bound Codex CLI dispatch
   craft codex execute ...       Execute a prepared Codex CLI dispatch
@@ -462,7 +462,7 @@ async function dispatchMain(args: string[]): Promise<void> {
     }
     throw new Error("semantic requires configure, disable, or status.");
   }
-  if (["source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor", "command", "adapter", "openapi", "migrate", "dirs"].includes(args[0] ?? "")) {
+  if (["source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor", "command", "adapter", "openapi", "migrate", "notes"].includes(args[0] ?? "")) {
     const store = await new CraftStore(paths).open();
     const service = await CraftService.open(store);
     try {
@@ -614,22 +614,25 @@ async function dispatchMain(args: string[]): Promise<void> {
           finally { process.off("SIGINT", stop); process.off("SIGTERM", stop); }
         } else throw new Error("worker requires tick, run, or status.");
       }
-      else if (args[0] === "dirs") {
+      else if (args[0] === "notes") {
+        if (args[1] !== "locations") throw new Error("notes requires the locations subcommand.");
+        const subcommand = args[2];
+        const locationArgs = [args[0], ...args.slice(2)];
         const host = option(args, "--host");
         const promote = args.includes("--promote");
-        if (args[1] === "record") {
-          if (!args[2] || !args[3]) throw new Error("dirs record requires <path> and <description>");
-          result = service.fileDirDescRecord({ path: args[2], description: args[3], host_kind: host, promote });
-        } else if (args[1] === "promote") {
-          if (!args[2]) throw new Error("dirs promote requires <id>");
-          result = service.fileDirDescPromote({ id: args[2] });
-        } else if (args[1] === "resolve") {
+        if (subcommand === "record") {
+          if (!locationArgs[2] || !locationArgs[3]) throw new Error("notes locations record requires <path> and <description>");
+          result = service.craftNotesLocationRecord({ path: locationArgs[2], description: locationArgs[3], host_kind: host, promote });
+        } else if (subcommand === "promote") {
+          if (!locationArgs[2]) throw new Error("notes locations promote requires <id>");
+          result = service.craftNotesLocationPromote({ id: locationArgs[2] });
+        } else if (subcommand === "resolve") {
           const byDesc = option(args, "--by-desc"); const byPath = option(args, "--by-path");
-          if (byDesc === undefined && byPath === undefined) throw new Error("dirs resolve requires --by-desc <text> or --by-path <path>");
-          result = service.fileDirDescResolve({ description: byDesc, path: byPath, limit: option(args, "--limit") });
-        } else if (args[1] === "list") {
-          result = service.fileDirDescList({ status: option(args, "--status"), host_kind: host, limit: option(args, "--limit") });
-        } else throw new Error("dirs requires record, promote, resolve, or list.");
+          if (byDesc === undefined && byPath === undefined) throw new Error("notes locations resolve requires --by-desc <text> or --by-path <path>");
+          result = service.craftNotesLocationResolve({ description: byDesc, path: byPath, limit: option(args, "--limit") });
+        } else if (subcommand === "list") {
+          result = service.craftNotesLocationList({ status: option(args, "--status"), host_kind: host, limit: option(args, "--limit") });
+        } else throw new Error("notes locations requires record, promote, resolve, or list.");
       }
       else throw new Error(`Unknown command: ${args.join(" ")}`);
       stdout.write(`${JSON.stringify(result, null, 2)}\n`);

@@ -125,12 +125,12 @@
       ]
     },
     {
-      "name": "context-directory",
+      "name": "context-notes",
       "include": [
-        "core/context-directory.ts"
+        "core/context-notes.ts"
       ],
       "tests": [
-        "tests/context-directory.test.ts"
+        "tests/context-notes.test.ts"
       ],
       "branches": true
     },

@@ -36,6 +36,7 @@
 | [0030](0030-concept-tags-typed-relations-and-diagnostic-consistency.md) | 概念标签落盘，关系类型约束与一致性作为诊断 |
 | [0031](0031-mods-are-trusted-runtime-modules.md) | Mod 是受精确版本信任约束的可执行 Runtime 模块；自进化候选不能获得审批策略能力 |
 | [0032](0032-versioned-evolution-ontology-and-immutable-core-policy.md) | 本体论可自动版本化演进；Core Policy 由 Runtime 独立执行且不可自改 |
+| [0033](0033-experience-runbooks-are-governed-procedures.md) | 经验手册属于 Experience Procedure；Context 编排捕获和召回，Notes 只存位置短备注 |
 
 ## 与技术文档的关系
 
@@ -54,3 +55,4 @@
 | 0029 | [Knowledge、Memory、Experience 共用一个概念分类](../technical/modules/scenario-taxonomy.md) |
 | 0031 | [自进化 Mod 运行时模块](../technical/modules/self-evolution-mod.md) |
 | 0032 | [自进化本体论与评测闭环](../technical/modules/self-evolution-ontology.md) |
+| 0033 | [Experience / Eval](../technical/modules/experience-eval.md)、[Context 成员](../technical/modules/context-members.md) |

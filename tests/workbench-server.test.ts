@@ -952,6 +952,12 @@ test("Workbench exposes the native tool catalog and a token-gated trial call", a
   assert.equal(Array.isArray(costs.capabilities), true);
   assert.ok(costs.token_totals === null || typeof costs.token_totals === "number");
   assert.deepEqual(JSON.parse(app.handle({ method: "GET", path: "/api/workbench/experience/procedures", token: "secret" }).body).procedures, []);
+  f.store.create("experience_procedure", "runbook-to-revoke", { scope: "global", lifecycle: "candidate", routeable: false,
+    runbook_candidate: true, procedure_kind: "prompt", completed_gates: [] });
+  const revokedRunbook = await app.handleAsync({ method: "POST", path: "/api/workbench/experience/runbooks/revoke", token: "secret",
+    origin: "http://127.0.0.1:4173", body: JSON.stringify({ procedure_id: "runbook-to-revoke", expected_version: 1, reason: "not_reusable" }) });
+  assert.equal(revokedRunbook.status, 200);
+  assert.equal(JSON.parse(revokedRunbook.body).revoked, true);
   const exportRejected = await app.handleAsync({ method: "POST", path: "/api/workbench/experience/procedures/export", token: "secret",
     origin: "http://127.0.0.1:4173", body: JSON.stringify({ procedure_id: "missing" }) });
   assert.equal(exportRejected.status, 422);
@@ -1507,28 +1513,28 @@ test("Workbench retires a live ledger memory only with a version and a named act
   assert.equal(history.find((item) => item.id === "live-1")?.transitioned_by, "user:alex");
 });
 
-test("Workbench serves craft-file-dir-desc over HTTP: record, promote, resolve and list", async () => {
+test("Workbench serves Craft Notes locations over HTTP: record, promote, resolve and list", async () => {
   const f = await fixture();
   const app = new WorkbenchWebApp(f.service, "secret", "http://localhost");
   const call = (method: string, path: string, body?: unknown) => app.handle({ method, path, token: "secret", body: body === undefined ? undefined : JSON.stringify(body) });
   // First touch only observes.
   const projectPath = path.resolve("billing");
-  const rec = JSON.parse(call("POST", "/api/workbench/file-dir-desc/record", { path: projectPath, description: "billing service root" }).body);
+  const rec = JSON.parse(call("POST", "/api/workbench/notes/locations/record", { path: projectPath, description: "billing service root" }).body);
   assert.equal(rec.status, "observed");
   // Resolve by description returns nothing while observed.
-  assert.equal(JSON.parse(call("GET", "/api/workbench/file-dir-desc/resolve?description=billing%20service").body).results.length, 0);
+  assert.equal(JSON.parse(call("GET", "/api/workbench/notes/locations/resolve?description=billing%20service").body).results.length, 0);
   // Promote, then resolve returns the path.
-  call("POST", "/api/workbench/file-dir-desc/promote", { id: rec.id });
-  const resolved = JSON.parse(call("GET", "/api/workbench/file-dir-desc/resolve?description=billing%20service").body);
+  call("POST", "/api/workbench/notes/locations/promote", { id: rec.id });
+  const resolved = JSON.parse(call("GET", "/api/workbench/notes/locations/resolve?description=billing%20service").body);
   assert.equal(resolved.results.length, 1);
   assert.equal(resolved.results[0].path, projectPath);
   // List honours status filter.
-  const promoted = JSON.parse(call("GET", "/api/workbench/file-dir-desc/list?status=promoted").body);
+  const promoted = JSON.parse(call("GET", "/api/workbench/notes/locations/list?status=promoted").body);
   assert.equal(promoted.items.length, 1);
-  const observed = JSON.parse(call("GET", "/api/workbench/file-dir-desc/list?status=observed").body);
+  const observed = JSON.parse(call("GET", "/api/workbench/notes/locations/list?status=observed").body);
   assert.equal(observed.items.length, 0);
   // Malformed path is refused with 422.
-  assert.equal(call("POST", "/api/workbench/file-dir-desc/record", { path: "relative/path", description: "x" }).status, 422);
+  assert.equal(call("POST", "/api/workbench/notes/locations/record", { path: "relative/path", description: "x" }).status, 422);
 });
 
 test("one-click rollback goes to the immediately previous stable version", async () => {
@@ -1801,23 +1807,23 @@ test("Workbench serves directory-semantics withdrawal and relocation as attribut
   const directory = await mkdtemp(path.join(tmpdir(), "craft-fdd-route-"));
   let next = "";
   try {
-    const recorded = JSON.parse(call("POST", "/api/workbench/file-dir-desc/record",
+    const recorded = JSON.parse(call("POST", "/api/workbench/notes/locations/record",
       { path: directory, description: "billing service root" }).body);
-    call("POST", "/api/workbench/file-dir-desc/promote", { id: recorded.id });
-    assert.equal(JSON.parse(call("GET", "/api/workbench/file-dir-desc/resolve?description=billing%20service").body).results.length, 1);
+    call("POST", "/api/workbench/notes/locations/promote", { id: recorded.id });
+    assert.equal(JSON.parse(call("GET", "/api/workbench/notes/locations/resolve?description=billing%20service").body).results.length, 1);
     // Withdrawal is attributed and reversible only by an explicit promote.
-    assert.equal(call("POST", "/api/workbench/file-dir-desc/revoke", { id: recorded.id, reason: "moved" }).status, 422);
-    const revoked = JSON.parse(call("POST", "/api/workbench/file-dir-desc/revoke",
+    assert.equal(call("POST", "/api/workbench/notes/locations/revoke", { id: recorded.id, reason: "moved" }).status, 422);
+    const revoked = JSON.parse(call("POST", "/api/workbench/notes/locations/revoke",
       { id: recorded.id, revoked_by: "user:alex", reason: "project moved" }).body);
     assert.equal(revoked.status, "revoked");
-    assert.equal(JSON.parse(call("GET", "/api/workbench/file-dir-desc/resolve?description=billing%20service").body).results.length, 0);
+    assert.equal(JSON.parse(call("GET", "/api/workbench/notes/locations/resolve?description=billing%20service").body).results.length, 0);
     // Relocation keeps identity but changes the path it answers to.
     next = await mkdtemp(path.join(tmpdir(), "craft-fdd-route-2-"));
-    const moved = JSON.parse(call("POST", "/api/workbench/file-dir-desc/relocate",
+    const moved = JSON.parse(call("POST", "/api/workbench/notes/locations/relocate",
       { id: recorded.id, path: next }).body);
     assert.equal(moved.id, recorded.id);
     assert.equal(moved.path, next);
-    assert.equal(call("POST", "/api/workbench/file-dir-desc/relocate", { id: "nope", path: next }).status, 422);
+    assert.equal(call("POST", "/api/workbench/notes/locations/relocate", { id: "nope", path: next }).status, 422);
   } finally {
     await rm(directory, { recursive: true, force: true });
     if (next) await rm(next, { recursive: true, force: true });

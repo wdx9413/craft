@@ -628,7 +628,7 @@ test("Stop accepts a passing Node TypeScript test run after the last edit", asyn
     const journal = bridge.journal.find(base)!;
     assert.equal(journal.verification_outcome, "passed");
     const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
-    assert.equal(stop.systemMessage, undefined);
+    assert.match(String(stop.systemMessage), /craft_experience_runbook_capture/u);
   } finally { await dispose(f); }
 });
 
@@ -2214,7 +2214,7 @@ test("Stop surfaces a bounded hint when edits have no verification", async () =>
   } finally { await dispose(f); }
 });
 
-test("Stop stays quiet when the last edit was verified", async () => {
+test("Stop offers a non-blocking Runbook choice after a verified project edit", async () => {
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "verified-gap-turn" };
@@ -2222,7 +2222,10 @@ test("Stop stays quiet when the last edit was verified", async () => {
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "verified-gap-edit" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
-    assert.equal(stop.systemMessage, undefined);
+    assert.match(String(stop.systemMessage), /craft_experience_runbook_capture/u);
+    assert.match(String(stop.systemMessage), /本轮结果/u);
+    const reentered = await bridge.handle("context", { ...base, hook_event_name: "Stop", stop_hook_active: true });
+    assert.equal(reentered.systemMessage, undefined);
   } finally { await dispose(f); }
 });
 

@@ -20,7 +20,7 @@ import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
 import { craftPaths } from "../infrastructure/paths.ts";
 import { ModRegistry } from "../mod-registry.ts";
 import { LocalDropAdapter, MessageListener } from "../message-listener.ts";
-import { FileDirDescRegistry, PROMOTION_USE_THRESHOLD } from "@craft/capability-file-dir-desc/file-dir-desc";
+import { CraftNotesLocationRegistry, CRAFT_NOTES_LOCATION_USE_THRESHOLD } from "@craft/craft-notes/craft-notes-location";
 import { WorkspaceState } from "../workspace.ts";
 import { resolveCoordinatorDirectory } from "../pilot-coordinator.ts";
 import { combineLanguageAnalyses } from '@craft/capability-codebase/multi-language-analysis';
@@ -122,13 +122,13 @@ const CHECKS: Readonly<Record<string, Check>> = {
   },
   "self_evolution.dir_desc_records_real_use": (store) => {
     const workspaces = new WorkspaceState(store, craftPaths(mkdtempSync(join(tmpdir(), "craft-reg-ws-"))));
-    const registry = new FileDirDescRegistry(store);
+    const registry = new CraftNotesLocationRegistry(store);
     const projectDir = mkdtempSync(join(tmpdir(), "craft-reg-dir-"));
     try {
       // A real, registered directory is what the Coordinator is allowed to bind.
       workspaces.resolveOrCreate({ root_path: projectDir, name: "billing-service" });
       // A turn that names the project by its human name records one observed entry,
-      // exactly like PilotTurnAuto did via fileDirDesc.observe.
+      // exactly like PilotTurnAuto did via craftNotesLocation.observe.
       registry.observe({ path: projectDir, description: "billing-service" });
       const after = (registry.list({}) as JsonObject).items as JsonObject[];
       const observed = after.filter((item) => item.path === projectDir);
@@ -140,9 +140,9 @@ const CHECKS: Readonly<Record<string, Check>> = {
   "self_evolution.dir_desc_promotes_after_repeated_use": (store) => {
     const dir = mkdtempSync(join(tmpdir(), "craft-reg-promote-"));
     try {
-      const registry = new FileDirDescRegistry(store);
+      const registry = new CraftNotesLocationRegistry(store);
       let status = "observed";
-      for (let i = 0; i < PROMOTION_USE_THRESHOLD; i += 1) {
+      for (let i = 0; i < CRAFT_NOTES_LOCATION_USE_THRESHOLD; i += 1) {
         status = String((registry.record({ path: dir, description: "billing service root" }) as JsonObject).status);
       }
       const hits = ((registry.resolve({ description: "billing service" }) as JsonObject).results as JsonObject[]).filter((item) => item.path === dir).length;
@@ -152,7 +152,7 @@ const CHECKS: Readonly<Record<string, Check>> = {
   "self_evolution.dir_desc_use_is_not_faked": (store) => {
     const dir = mkdtempSync(join(tmpdir(), "craft-reg-use-"));
     try {
-      const registry = new FileDirDescRegistry(store);
+      const registry = new CraftNotesLocationRegistry(store);
       registry.observe({ path: dir, description: "billing service root" });
       const replayed = registry.observe({ path: dir, description: "a later task title" }) as JsonObject;
       return Number(replayed.useCount) === 2 && replayed.description === "billing service root" ? "passed" : "failed";
@@ -162,7 +162,7 @@ const CHECKS: Readonly<Record<string, Check>> = {
     const from = mkdtempSync(join(tmpdir(), "craft-reg-w-old-"));
     const to = mkdtempSync(join(tmpdir(), "craft-reg-w-new-"));
     try {
-      const registry = new FileDirDescRegistry(store);
+      const registry = new CraftNotesLocationRegistry(store);
       const entry = registry.observe({ path: from, description: "withdrawal probe legacy service" }) as JsonObject;
       registry.promote({ id: String(entry.id) });
       const recall = () => ((registry.resolve({ description: "withdrawal probe legacy" }) as JsonObject).results as JsonObject[])

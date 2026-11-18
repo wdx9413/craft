@@ -16,13 +16,23 @@ function component(value: unknown): ComponentName {
   return value as ComponentName;
 }
 
-function countByStatus(store: CraftStore, kind: string): Record<string, number> {
+function countByStatus(store: CraftStore, kind: string): { counts: Record<string, number>; status: "available" | "incomplete" } {
   const counts: Record<string, number> = {};
-  for (const item of store.list(kind, 10_000)) {
-    const status = typeof item.status === "string" ? item.status : "unknown";
-    counts[status] = (counts[status] ?? 0) + 1;
+  try {
+    for (const item of store.list(kind, 10_000)) {
+      const status = typeof item.status === "string" ? item.status : "unknown";
+      counts[status] = (counts[status] ?? 0) + 1;
+    }
+    return { counts, status: "available" };
+  } catch {
+    // Keep one broken legacy partition local to this component's diagnostics.
+    return { counts: {}, status: "incomplete" };
   }
-  return counts;
+}
+
+function safeActiveSourceCount(store: CraftStore): number | null {
+  try { return store.list("knowledge_source", 10_000, item => item.status === "active").length; }
+  catch { return null; }
 }
 
 function readDiagnosticState(directory: string, name: string): JsonObject {
@@ -142,18 +152,27 @@ export class ComponentReadinessKernel {
   }
 
   private knowledge(): JsonObject {
-    const activeSources = this.store.list("knowledge_source", 10_000, (item) => item.status === "active").length;
-    const claims = countByStatus(this.store, "knowledge_claim");
+    const activeSources = safeActiveSourceCount(this.store);
+    const claimStatus = countByStatus(this.store, "knowledge_claim");
+    const claims = claimStatus.counts;
     const receipts = this.store.count("context_resolution_receipt");
     const evaluationCases = this.store.count("knowledge_evaluation_case");
-    const hasQualifiedClaim = this.store.list("knowledge_claim", 10_000, item => item.status === "reviewed", false)
-      .some(claim => knowledgeClaimPromotionProofVerified(this.store, claim));
-    const state = activeSources === 0 ? "bootstrap_required"
+    let qualificationStatus: "available" | "incomplete" = "available";
+    let hasQualifiedClaim = false;
+    if (claimStatus.status === "available") {
+      try { hasQualifiedClaim = this.store.list("knowledge_claim", 10_000, item => item.status === "reviewed", false)
+        .some(claim => knowledgeClaimPromotionProofVerified(this.store, claim)); }
+      catch { qualificationStatus = "incomplete"; }
+    } else qualificationStatus = "incomplete";
+    const diagnosticsComplete = activeSources !== null && claimStatus.status === "available" && qualificationStatus === "available";
+    const state = !diagnosticsComplete ? "storage_diagnostics_incomplete" : activeSources === 0 ? "bootstrap_required"
       : (claims.reviewed ?? 0) === 0 ? "evidence_review_pending" : hasQualifiedClaim ? "ready" : "effect_evaluation_pending";
     return {
-      component: "knowledge", state, counts: { active_sources: activeSources, claims, context_receipts: receipts, evaluation_cases: evaluationCases },
+      component: "knowledge", state, counts: { active_sources: activeSources, claims, claim_status_counts_status: claimStatus.status,
+        qualification_status: qualificationStatus, context_receipts: receipts, evaluation_cases: evaluationCases },
       task_effect_gate: "available",
-      next_action: state === "bootstrap_required" ? "install_or_register_a_scoped_source"
+      next_action: state === "storage_diagnostics_incomplete" ? "repair_or_explicitly_migrate_unavailable_project_storage"
+        : state === "bootstrap_required" ? "install_or_register_a_scoped_source"
         : state === "evidence_review_pending" ? "search_or_draft_evidence_backed_claims_then_review_them"
           : state === "effect_evaluation_pending" ? "collect_independent_controlled_task_effect_evidence"
           : "resolve_a_bounded_context_receipt_for_the_current_scope",
@@ -167,20 +186,24 @@ export class ComponentReadinessKernel {
   }
 
   private memory(): JsonObject {
-    const activeSources = this.store.list("knowledge_source", 10_000, (item) => item.status === "active").length;
-    const ledger = countByStatus(this.store, "memory_ledger");
-    const candidates = countByStatus(this.store, "memory_candidate");
+    const activeSources = safeActiveSourceCount(this.store);
+    const ledgerStatus = countByStatus(this.store, "memory_ledger");
+    const candidateStatus = countByStatus(this.store, "memory_candidate");
+    const ledger = ledgerStatus.counts, candidates = candidateStatus.counts;
     const signals = this.store.count("memory_usage_signal");
     const feedback = this.store.list("context_feedback", 10_001, item => Array.isArray(item.memory_refs) && item.memory_refs.length > 0);
     const feedbackCount = Math.min(feedback.length, 10_000);
     const verifiedHelpfulFeedback = feedback.slice(0, 10_000).filter(item => item.outcome === "helpful" && item.evidence_verified === true).length;
-    const state = activeSources === 0 ? "bootstrap_required"
+    const diagnosticsComplete = activeSources !== null && ledgerStatus.status === "available" && candidateStatus.status === "available";
+    const state = !diagnosticsComplete ? "storage_diagnostics_incomplete" : activeSources === 0 ? "bootstrap_required"
       : (ledger.active ?? 0) === 0 ? "candidate_or_approval_required" : "ready";
     return {
-      component: "memory", state, counts: { active_sources: activeSources, ledger, candidates, usage_signals: signals,
+      component: "memory", state, counts: { active_sources: activeSources, ledger, candidates,
+        ledger_status_counts_status: ledgerStatus.status, candidate_status_counts_status: candidateStatus.status, usage_signals: signals,
         memory_feedback_records: feedbackCount, verified_helpful_memory_feedback_records: verifiedHelpfulFeedback,
         memory_feedback_records_truncated: feedback.length > 10_000, context_receipts: this.store.count("context_resolution_receipt") },
-      next_action: state === "bootstrap_required" ? "install_or_register_a_scoped_source"
+      next_action: state === "storage_diagnostics_incomplete" ? "repair_or_explicitly_migrate_unavailable_project_storage"
+        : state === "bootstrap_required" ? "install_or_register_a_scoped_source"
         : state === "candidate_or_approval_required" ? "propose_and_review_one_scoped_evidence_linked_memory"
           : "resolve_only_the_current_scope_and_record_outcome_linked_usage",
       model_effect_proven: false,
@@ -194,15 +217,20 @@ export class ComponentReadinessKernel {
 
   private experience(): JsonObject {
     const observations = this.store.count("workflow_evolution_observation") + this.store.count("experience_observation");
-    const requests = countByStatus(this.store, "workflow_evolution_request");
-    const proposals = countByStatus(this.store, "workflow_evolution_proposal");
-    const procedures = countByStatus(this.store, "experience_procedure");
+    const requestStatus = countByStatus(this.store, "workflow_evolution_request");
+    const proposalStatus = countByStatus(this.store, "workflow_evolution_proposal");
+    const procedureStatus = countByStatus(this.store, "experience_procedure");
+    const requests = requestStatus.counts, proposals = proposalStatus.counts, procedures = procedureStatus.counts;
     const patterns = this.store.count("experience_pattern");
-    const state = observations < 2 ? "independent_observations_required"
+    const diagnosticsComplete = requestStatus.status === "available" && proposalStatus.status === "available" && procedureStatus.status === "available";
+    const state = !diagnosticsComplete ? "storage_diagnostics_incomplete" : observations < 2 ? "independent_observations_required"
       : (proposals.draft ?? 0) === 0 ? "draft_proposal_available" : "evaluation_required";
     return {
-      component: "experience", state, counts: { observations, patterns, requests, draft_proposals: proposals.draft ?? 0, procedures, shadow_experiments: this.store.count("experience_shadow_experiment") },
-      next_action: state === "independent_observations_required" ? "record_two_sanitized_evidence_backed_outcomes_for_one_scenario"
+      component: "experience", state, counts: { observations, patterns, requests, draft_proposals: proposals.draft ?? 0, procedures,
+        request_status_counts_status: requestStatus.status, proposal_status_counts_status: proposalStatus.status, procedure_status_counts_status: procedureStatus.status,
+        shadow_experiments: this.store.count("experience_shadow_experiment") },
+      next_action: state === "storage_diagnostics_incomplete" ? "repair_or_explicitly_migrate_unavailable_project_storage"
+        : state === "independent_observations_required" ? "record_two_sanitized_evidence_backed_outcomes_for_one_scenario"
         : state === "draft_proposal_available" ? "propose_a_workflow_change_with_at_most_two_design_axes"
           : "evaluate_the_draft_in_shadow_then_use_signoff_and_canary_before_routing",
       model_effect_proven: false,

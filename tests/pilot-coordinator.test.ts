@@ -200,7 +200,7 @@ test("pilot dispatch and replay do not count as completed Craft Notes usage", as
     // A retry with the same turn id is the same request, not another use.
     const replay = f.service.pilotTurnAuto({ session_id: session.id, input, turn_id: turnId }) as JsonObject;
     assert.equal(replay.idempotent, true);
-    assert.equal(f.store.list("file_dir_desc", 100, item => item.path === dir).length, 0, "dispatch is not successful task evidence");
+    assert.equal(f.store.list("craft_notes_location", 100, item => item.path === dir).length, 0, "dispatch is not successful task evidence");
     f.service.pilotTurnAuto({ session_id: session.id, input: "在 billing 里补一个回归测试", turn_id: "turn_second" });
     assert.equal(f.store.list("craft_note_usage", 100, item => item.subject_key === `local:${dir}`).length, 0);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
@@ -217,7 +217,7 @@ test("an explicit workspace does not create Notes evidence before task completio
     const first = f.service.pilotTurnAuto(args) as JsonObject;
     assert.equal(((first.tasks as JsonObject[])[0].task as JsonObject).workspace_id, selected.id);
     assert.equal((f.service.pilotTurnAuto(args) as JsonObject).idempotent, true);
-    assert.equal(f.store.list("file_dir_desc", 100, item => item.path === alpha || item.path === beta).length, 0);
+    assert.equal(f.store.list("craft_notes_location", 100, item => item.path === alpha || item.path === beta).length, 0);
     assert.equal(f.store.list("craft_note_usage", 100, item => String(item.subject_key).endsWith(beta)).length, 0);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
@@ -231,7 +231,7 @@ test("a blocked directory decision records no use at all", async () => {
     const session = asSession(f.service.pilotSessionOpen({ input: "整理 alpha belta" }) as JsonObject);
     const blocked = f.service.pilotTurnAuto({ session_id: session.id, input: "整理 alpha belta" }) as JsonObject;
     assert.equal(blocked.status, "blocked");
-    assert.equal(((f.service.fileDirDescList({}) as JsonObject).items as JsonObject[]).length, 0);
+    assert.equal(((f.service.craftNotesLocationList({}) as JsonObject).items as JsonObject[]).length, 0);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -514,8 +514,8 @@ test("a path escaping a registered project cannot fall back to another project's
     const billing = join(f.root, "billing");
     await mkdir(registered); await mkdir(billing);
     f.service.workspaceResolveOrCreate({ root_path: registered });
-    const record = f.service.fileDirDescRecord({ path: billing, description: "用户服务" });
-    f.service.fileDirDescPromote({ id: record.id });
+    const record = f.service.craftNotesLocationRecord({ path: billing, description: "用户服务" });
+    f.service.craftNotesLocationPromote({ id: record.id });
     const input = `修改 ${registered}/../other 的用户服务`;
     const session = asSession(f.service.pilotSessionOpen({ input }) as JsonObject);
     const result = f.service.pilotTurnAuto({ session_id: session.id, input }) as JsonObject;

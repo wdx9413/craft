@@ -74,10 +74,10 @@ import { ComponentAssets } from "./coordinators/component-assets.ts";
 import { ContextUsageWorkbench } from "./coordinators/context-usage.ts";
 import { WorkflowDesignWorkbench } from "./coordinators/workflow-design.ts";
 import { CognitiveWorkbenchCoordinator } from "./coordinators/cognitive-workbench.ts";
-import { FileDirDescRegistry } from "@craft/capability-file-dir-desc/file-dir-desc";
-import { CraftNotesRegistry } from "@craft/capability-file-dir-desc";
-import { migrateFileDirDescNotes } from "../craft-notes-migration.ts";
-import { resolveContextDirectory } from "../context-directory.ts";
+import { CraftNotesLocationRegistry } from "@craft/craft-notes/craft-notes-location";
+import { CraftNotesRegistry } from "@craft/craft-notes";
+import { migrateCraftNotesLocationNotes } from "../craft-notes-migration.ts";
+import { resolveContextNotes } from "../context-notes.ts";
 import { ModRegistry, type ModScopeKind } from "../mod-registry.ts";
 import { ModRuntime } from "../mod-runtime.ts";
 import { MessageInbox } from "../message-inbox.ts";
@@ -291,14 +291,14 @@ export class CraftService extends ServiceFoundation {
   readonly dshPluginHost: DshPluginHostRuntime;
   private readonly knowledgeAdjudicationTransportFactory: () => ModelTransport;
   contextToolsDiscover(args: JsonObject): JsonObject { return discoverContextTools(args); }
-  contextDirectoryResolve(args: JsonObject): JsonObject { return resolveContextDirectory(this.fileDirDesc, args); }
+  contextNotesResolve(args: JsonObject): JsonObject { return resolveContextNotes(this.craftNotesLocation, args); }
   readonly workControl: WorkControl;
   readonly forgeDispatch: ForgeDispatchCoordinator;
   readonly cognitiveWorkbench: CognitiveWorkbenchCoordinator;
   readonly cognitiveWrites: CognitiveWriteCoordinator;
   readonly cognitiveSearch: CognitiveSearchCoordinator;
   readonly evaluationRuns: EvaluationRunCoordinator;
-  readonly fileDirDesc: FileDirDescRegistry;
+  readonly craftNotesLocation: CraftNotesLocationRegistry;
   readonly craftNotes: CraftNotesRegistry;
   readonly mods: ModRegistry;
   readonly modRuntime: ModRuntime;
@@ -340,9 +340,9 @@ export class CraftService extends ServiceFoundation {
     const validateNoteText = (value: string): void => {
       if (noteSanitizer.text(value) !== value) throw new Error("note appears to contain DataSec-sensitive content");
     };
-    this.fileDirDesc = new FileDirDescRegistry(store, validateNoteText);
+    this.craftNotesLocation = new CraftNotesLocationRegistry(store, validateNoteText);
     this.craftNotes = new CraftNotesRegistry(store, validateNoteText);
-    migrateFileDirDescNotes(store);
+    migrateCraftNotesLocationNotes(store);
     this.mods = new ModRegistry(store);
     this.modRuntime = new ModRuntime(store);
     this.inbox = new MessageInbox(store);
@@ -431,15 +431,15 @@ export class CraftService extends ServiceFoundation {
   /** Internal Host Hook path for bounded, automatically classified stable facts. */
   memoryCaptureObservedFact(args: JsonObject): JsonObject { return this.cognitiveWrites.captureObservedFact(args); }
 
-  /** Record or reinforce a directory↔description link; see `file-dir-desc.ts`. */
-  fileDirDescRecord(args: JsonObject): JsonObject {
-    const place = this.fileDirDesc.record(args);
+  /** Record or reinforce a directory↔description link; see `craft-notes-location.ts`. */
+  craftNotesLocationRecord(args: JsonObject): JsonObject {
+    const place = this.craftNotesLocation.record(args);
     try {
       this.craftNotes.observeDirectory({ id: place.id, path: String(args.path), device_id: args.device_id ?? "local",
         note: String(args.description), pin: true, ...(args.project_id === undefined ? {} : { project_id: args.project_id }) });
     } catch (error) {
       if (!(error instanceof Error) || !/active device with a confirmed Device Note/u.test(error.message)) throw error;
-      migrateFileDirDescNotes(this.store);
+      migrateCraftNotesLocationNotes(this.store);
     }
     if (args.promote === true) {
       try {
@@ -450,12 +450,12 @@ export class CraftService extends ServiceFoundation {
     }
     return place;
   }
-  fileDirDescPromote(args: JsonObject): JsonObject {
+  craftNotesLocationPromote(args: JsonObject): JsonObject {
     const id = text(args.id, "id");
     const note = this.store.find("craft_note", id);
     const expectedVersion = args.expected_version ?? (note ? Number(note.version ?? 1) : undefined);
     if (note) assertCraftNoteVersion(expectedVersion, note);
-    const place = this.fileDirDesc.promote(args);
+    const place = this.craftNotesLocation.promote(args);
     try {
       if (note) this.craftNotes.confirm({ id, expected_version: expectedVersion });
     }
@@ -463,9 +463,9 @@ export class CraftService extends ServiceFoundation {
     return place;
   }
   /** Automatic reinforcement from real use; never rewrites a description. */
-  fileDirDescObserve(args: JsonObject): JsonObject { return this.craftNotesObserveDirectory(args); }
-  fileDirDescRelocate(args: JsonObject): JsonObject {
-    const place = this.fileDirDesc.relocate(args);
+  craftNotesLocationObserve(args: JsonObject): JsonObject { return this.craftNotesObserveDirectory(args); }
+  craftNotesLocationRelocate(args: JsonObject): JsonObject {
+    const place = this.craftNotesLocation.relocate(args);
     const note = this.store.find("craft_note", text(args.id, "id"));
     if (note && note.subject_type === "directory") this.store.save("craft_note", String(note.id), {
       ...note, subject_key: `${String(note.device_id ?? "local")}:${String(place.path)}`,
@@ -473,27 +473,27 @@ export class CraftService extends ServiceFoundation {
     });
     return place;
   }
-  fileDirDescRevoke(args: JsonObject): JsonObject {
+  craftNotesLocationRevoke(args: JsonObject): JsonObject {
     const id = text(args.id, "id");
     const note = this.store.find("craft_note", id);
     const expectedVersion = args.expected_version ?? (note ? Number(note.version ?? 1) : undefined);
     if (note) assertCraftNoteVersion(expectedVersion, note);
-    const place = this.fileDirDesc.revoke(args);
+    const place = this.craftNotesLocation.revoke(args);
     try {
       if (note) this.craftNotes.revoke({ id, expected_version: expectedVersion, revoked_by: args.revoked_by ?? "workbench", reason: args.reason });
     }
     catch (error) { if (!(error instanceof Error) || !/Unknown craft_note/u.test(error.message)) throw error; }
     return place;
   }
-  fileDirDescResolve(args: JsonObject): JsonObject { return this.fileDirDesc.resolve(args); }
-  fileDirDescList(args: JsonObject = {}): JsonObject { return this.fileDirDesc.list(args); }
+  craftNotesLocationResolve(args: JsonObject): JsonObject { return this.craftNotesLocation.resolve(args); }
+  craftNotesLocationList(args: JsonObject = {}): JsonObject { return this.craftNotesLocation.list(args); }
 
-  fileDirDescRegisterDevice(args: JsonObject): JsonObject { return this.fileDirDesc.registerDevice(args as unknown as Parameters<FileDirDescRegistry["registerDevice"]>[0]) as unknown as JsonObject; }
-  fileDirDescDevice(args: JsonObject): JsonObject { return this.fileDirDesc.device(text(args.id, "id")) as unknown as JsonObject; }
-  fileDirDescListDevices(args: JsonObject = {}): JsonObject { return this.fileDirDesc.listDevices(args); }
-  fileDirDescDisableDevice(args: JsonObject): JsonObject { return this.fileDirDesc.disableDevice(text(args.id, "id")) as unknown as JsonObject; }
-  fileDirDescEnableDevice(args: JsonObject): JsonObject { return this.fileDirDesc.enableDevice(text(args.id, "id")) as unknown as JsonObject; }
-  fileDirDescReportDeviceHealth(args: JsonObject): JsonObject { return this.fileDirDesc.reportDeviceHealth(text(args.id, "id"), text(args.health, "health") as "healthy" | "degraded" | "offline") as unknown as JsonObject; }
+  craftNotesLocationRegisterDevice(args: JsonObject): JsonObject { return this.craftNotesLocation.registerDevice(args as unknown as Parameters<CraftNotesLocationRegistry["registerDevice"]>[0]) as unknown as JsonObject; }
+  craftNotesLocationDevice(args: JsonObject): JsonObject { return this.craftNotesLocation.device(text(args.id, "id")) as unknown as JsonObject; }
+  craftNotesLocationListDevices(args: JsonObject = {}): JsonObject { return this.craftNotesLocation.listDevices(args); }
+  craftNotesLocationDisableDevice(args: JsonObject): JsonObject { return this.craftNotesLocation.disableDevice(text(args.id, "id")) as unknown as JsonObject; }
+  craftNotesLocationEnableDevice(args: JsonObject): JsonObject { return this.craftNotesLocation.enableDevice(text(args.id, "id")) as unknown as JsonObject; }
+  craftNotesLocationReportDeviceHealth(args: JsonObject): JsonObject { return this.craftNotesLocation.reportDeviceHealth(text(args.id, "id"), text(args.health, "health") as "healthy" | "degraded" | "offline") as unknown as JsonObject; }
 
   craftNotesCreateDevice(args: JsonObject): JsonObject { return this.craftNotes.createDevice(args) as unknown as JsonObject; }
   craftNotesObserveDirectory(args: JsonObject): JsonObject { return this.craftNotes.observeDirectory(args); }
@@ -2844,7 +2844,7 @@ export class CraftService extends ServiceFoundation {
   /**
    * Coordinator: the directories this machine knows about, described the way
    * people describe them. A known workspace contributes its name and path; a
-   * promoted `craft-file-dir-desc` entry contributes a human description, so
+   * promoted `craft-notes-location` entry contributes a human description, so
    * "where does billing live" can resolve without the user typing a path.
    */
   coordinatorDirectories(): CoordinatorDirectory[] {
@@ -2855,7 +2855,7 @@ export class CraftService extends ServiceFoundation {
       description: null,
     }));
     const known = new Set(directories.map((entry) => canonicalRootPath(entry.root_path)));
-    const promoted = this.fileDirDesc.list({ status: "promoted", limit: 1_000 }).items;
+    const promoted = this.craftNotesLocation.list({ status: "promoted", limit: 1_000 }).items;
     for (const record of Array.isArray(promoted) ? promoted as JsonObject[] : []) {
       const entry = record as Record<string, unknown>;
       const rootPath = typeof entry.path === "string" ? entry.path : "";

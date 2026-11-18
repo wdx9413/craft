@@ -4,7 +4,7 @@
 
 **Goal:** Deliver one Craft Notes capability for required Device Notes and evidence-gated Directory/File Note candidates, with human confirmation, scoped retrieval, compatibility and review UI.
 
-**Architecture:** `@craft/capability-file-dir-desc` remains the compatibility package and owns a typed `CraftNotesRegistry` backed by the existing CraftStore. Craft adapts old `file_dir_desc` APIs and new Notes operations onto it; Workbench reviews candidates; Craft Context returns only confirmed, scope-matched Notes through existing egress controls. Eval exercises the public service/MCP contract, and Marketplace payloads are rebuilt only from a versioned source snapshot.
+**Architecture (updated 2026-11-18):** `@craft/craft-notes` is the canonical package and source directory. `CraftNotesRegistry` owns typed Note lifecycle; `CraftNotesLocationRegistry` handles device and directory-location metadata within that package. Craft Context returns only confirmed, scope-matched Notes through existing egress controls. Eval exercises the public service/MCP contract, and Marketplace payloads are rebuilt only from a versioned source snapshot. Existing `file_dir_desc` rows migrate idempotently to `craft_notes_location`.
 
 **Tech Stack:** TypeScript, Node built-in test runner, CraftStore, existing MCP/Workbench adapters, existing DataSec checks, craft-eval.
 
@@ -12,7 +12,8 @@
 
 ## Global Constraints
 
-- Preserve `@craft/capability-file-dir-desc`, `file_dir_desc`, and existing `craft_file_dir_desc_*` callers during migration.
+- Use `@craft/craft-notes`, `capability/craft-notes`, `CraftNotesRegistry`, and `craft_notes_*` as canonical names.
+- Read the legacy `file_dir_desc` collection only for idempotent migration; preserve its rows and IDs until migration is verified.
 - Device Notes are user supplied or confirmed; Directory/File candidates never enter default retrieval before confirmation.
 - Directory/File thresholds are 3 distinct tasks across 2 Host sessions in a rolling 30-day window; same-task retries and scanner activity do not count.
 - File Notes never read file bytes or content; available size/mtime is a review signal only.
@@ -34,11 +35,11 @@
 ### Task 1: Unify the capability source and device APIs
 
 **Files:**
-- Create: `craft-capability/capability/craft-file-dir-desc/notes.ts`
-- Modify: `craft-capability/capability/craft-file-dir-desc/file-dir-desc.ts`
-- Modify: `craft-capability/capability/craft-file-dir-desc/index.ts`
-- Modify: `craft-capability/capability/craft-file-dir-desc/package.json`
-- Modify: `craft-capability/capability/craft-file-dir-desc/README.md`
+- Create: `craft-capability/capability/craft-notes/notes.ts`
+- Modify: `craft-capability/capability/craft-notes/craft-notes-location.ts`
+- Modify: `craft-capability/capability/craft-notes/index.ts`
+- Modify: `craft-capability/capability/craft-notes/package.json`
+- Modify: `craft-capability/capability/craft-notes/README.md`
 - Create: `craft-capability/tests/craft-notes.test.ts`
 
 **Interfaces:**
@@ -47,13 +48,13 @@
 - `CraftNoteRecord` contains `id`, `subject_type`, `subject_key`, `text`, `status`, `version`, `evidence_refs`, `verified_at`, `created_at`, and `updated_at`.
 - `CraftNotesRegistry.createDevice(args: JsonObject): CraftNoteRecord`; `observeDirectory(args: JsonObject): JsonObject`; `observeFileReference(args: JsonObject): JsonObject`; `candidateList(args: JsonObject): {items: CraftNoteRecord[]}`; `confirm(args: JsonObject): CraftNoteRecord`; `revoke(args: JsonObject): CraftNoteRecord`; `resolve(args: JsonObject): {items: CraftNoteRecord[]}`; and `list(args: JsonObject): {items: CraftNoteRecord[]}`.
 - `observeFileReference` accepts optional caller-supplied `{size, modified_at}` metadata only; the registry never opens or reads files.
-- `FileDirDescRegistry` remains a compatibility facade that preserves the existing method names and response shapes while delegating to `CraftNotesRegistry`.
+- `CraftNotesLocationRegistry` is the location/device sub-registry within the Craft Notes package; the source exports only the unified Notes API.
 - Persist one typed `craft_note` record per Note and deduplicated content-free `craft_note_usage` evidence keyed by subject, task and session. Never persist prompt/file bodies.
 
 - [ ] **Step 1: Add failing capability tests** for required Device Note, threshold boundaries, duplicate Task/Session evidence, candidate visibility, explicit pin, credential rejection, revoke, device/path isolation, File metadata-only review and legacy projections.
 - [ ] **Step 2: Run the focused tests** with Node's TypeScript test runner and verify the new behavior fails before implementation.
 - [ ] **Step 3: Implement `CraftNotesRegistry`** with strict input normalization, typed identity, fixed threshold constants, candidate lifecycle, metadata-only file staleness, and DataSec validation.
-- [ ] **Step 4: Implement the `FileDirDescRegistry` compatibility facade** and export both interfaces from the existing package root.
+- [ ] **Step 4: Implement the `CraftNotesLocationRegistry` compatibility facade** and export both interfaces from the existing package root.
 - [ ] **Step 5: Add package test/build scripts and make every export point to an emitted file.**
 - [ ] **Step 6: Run the capability tests, typecheck and package build**; the new capability logic must meet 100% line and branch coverage.
 
@@ -65,13 +66,13 @@
 - Modify: `craft/core/application/actions/action-handlers.ts`
 - Modify: `craft/core/mcp/tool-catalog.ts`
 - Modify: `craft/core/mcp/tool-schema.ts`
-- Modify: `craft/tests/file-dir-desc.test.ts`
+- Modify: `craft/tests/craft-notes-location.test.ts`
 - Create: `craft/tests/craft-notes-service.test.ts`
 
 **Interfaces:**
 - `CraftService.craftNotesCreateDevice(args)`, `craftNotesObserveDirectory(args)`, `craftNotesObserveFile(args)`, `craftNotesCandidateList(args)`, `craftNotesConfirm(args)`, `craftNotesRevoke(args)`, and `craftNotesResolve(args)` delegate to the capability registry.
-- New public names use `craft_notes_*`; old `craft_file_dir_desc_*` names remain registered and adapt to the same service.
-- `migrateFileDirDescNotes(store, options)` is idempotent, preserves IDs and evidence, and never reads files.
+- New public names use `craft_notes_*`; old `craft_notes_location_*` names remain registered and adapt to the same service.
+- `migrateCraftNotesLocationNotes(store, options)` is idempotent, preserves IDs and evidence, and never reads files.
 
 - [ ] **Step 1: Add failing migration/service tests** for a second migration run, stable IDs, old promoted recall, observed/revoked status, missing device note, compatibility methods and new MCP schemas.
 - [ ] **Step 2: Implement the migration** as a bounded transaction over existing records, marking legacy records and retaining originals for rollback/audit.
@@ -110,7 +111,7 @@
 
 **Interfaces:**
 - Add authenticated `/api/workbench/notes/devices`, `/api/workbench/notes/candidates`, `/api/workbench/notes/:id/confirm`, `/api/workbench/notes/:id/revoke`, and `/api/workbench/notes/resolve` routes.
-- Preserve `/api/workbench/file-dir-desc/*` endpoints as compatibility routes.
+- Preserve `/api/workbench/notes/locations/*` endpoints as compatibility routes.
 - UI shows Device Note completion, Directory/File candidate reason and evidence, content-free metadata freshness, sensitivity, and confirm/edit/revoke controls.
 
 - [ ] **Step 1: Add failing route/UI tests** for authorization, missing description, stale candidate version, confirm/revoke, legacy review and empty/error states.

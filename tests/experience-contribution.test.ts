@@ -29,7 +29,7 @@ const request = (query: string, overrides: Partial<{ max_items: number; max_char
   query, scope_kind: "project" as const, scope_id: "p", max_items: 5, max_chars: 4_000, ...overrides,
 });
 
-function procedure(store: CraftStore, args: { id: string; title: string; trigger: string; kind?: "workflow" | "graph" | "prompt"; lifecycle?: string; scope?: string; domain?: string }): JsonObject {
+function procedure(store: CraftStore, args: { id: string; title: string; trigger: string; kind?: "workflow" | "graph" | "prompt"; lifecycle?: string; scope?: string; domain?: string; entrypoints?: JsonObject[] }): JsonObject {
   const kind = args.kind ?? "workflow";
   const scope = args.scope ?? "project:p";
   ensureProjectScope(store, scope);
@@ -41,6 +41,7 @@ function procedure(store: CraftStore, args: { id: string; title: string; trigger
     procedure_kind: kind, scope, trigger: args.trigger, title: args.title,
     acceptance_ref: "acceptance:fixture", scenario_signature: { project: "p", target_class: "fixture", ...(args.domain ? { domain: args.domain } : {}) },
     lifecycle: args.lifecycle ?? "routeable", routeable: (args.lifecycle ?? "routeable") === "routeable", content_ref: ref, content_digest: ref.digest,
+    ...(args.entrypoints === undefined ? {} : { entrypoints: args.entrypoints }),
   });
 }
 
@@ -131,6 +132,36 @@ test("Experience reaches Context Resolution beside Knowledge and remains replaya
   } finally { await close(f); }
 });
 
+test("Global Experience routing fits the shared Context budget without injecting full Graph contracts", async () => {
+  const f = await fixture();
+  try {
+    const entrypoints = Array.from({ length: 5 }, (_, index) => ({
+      id: `entry-${index}`, node_id: `node-${index}`, title: ["新需求与方案设计", "已有方案实施", "Bug修复", "代码审查", "测试验证"][index],
+      required_inputs: ["request", "repository"], preconditions: ["approved", "scope_resolved"],
+      routes: [{ exit_id: "delivery", subscenario_id: "feature" }, { exit_id: "diagnosis", subscenario_id: "diagnose" }],
+    }));
+    procedure(f.store, { id: "global-product-development", title: "产品研发流程", trigger: "产品需求研发 方案设计 开发测试", kind: "graph", scope: "global:global", entrypoints });
+
+    const direct = await f.contribution.contribute({ query: "产品需求研发 方案设计", scope_kind: "project", scope_id: "p",
+      scope_stack: [{ kind: "project", id: "p" }, { kind: "global", id: "global" }], candidate_mode: true, max_items: 3, max_chars: 1_200 });
+    assert.equal(direct.items.length, 1);
+    assert.ok(JSON.stringify(direct.items[0]).length <= 1_200);
+
+    const resolved = await new ContextResolutionKernel(f.store, [f.contribution]).resolve({
+      query: "产品需求研发 方案设计", scope_kind: "project", scope_id: "p", include_global: true,
+      members: ["experience"], max_items: 3, max_chars: 1_200,
+    });
+    const contribution = (resolved.contributions as JsonObject[]).find(item => item.member === "experience")!;
+    const projection = (contribution.items as JsonObject[])[0]!;
+    assert.equal(projection.procedure_id, "global-product-development");
+    assert.equal((contribution.items as JsonObject[]).length, 1);
+    assert.ok(JSON.stringify(projection).length <= 1_200);
+    assert.deepEqual(projection.entrypoints, entrypoints.map(entry => ({ id: entry.id, title: entry.title })));
+    assert.equal(JSON.stringify(projection).includes("preconditions"), false);
+    assert.equal(JSON.stringify(projection).includes("subscenario_id"), false);
+  } finally { await close(f); }
+});
+
 test("Context retrieval handles Experience text fallbacks only when each field is present", async () => {
   const f = await fixture();
   try {
@@ -157,7 +188,7 @@ test("Fresh or candidate-only Experience produces an empty Context contribution"
   try {
     procedure(f.store, { id: "candidate", title: "Candidate", trigger: "anything", lifecycle: "candidate" });
     assert.deepEqual(await f.contribution.contribute(request("anything")), { member: "experience", items: [], receipt_id: "experience_contribution_none", omitted_count: 0,
-      diagnostics: { scoped_procedure_count: 1, has_draft: false, routeable_count: 0, candidate_count: 1, reason: "no_promoted_release", next_tool: "craft_experience_graph_inspect", next_action: "diagnose", execution_started: false } });
+      diagnostics: { scoped_procedure_count: 1, has_draft: false, routeable_count: 0, candidate_count: 1, runbook_candidate_count: 0, reason: "no_promoted_release", next_tool: "craft_experience_graph_inspect", next_action: "diagnose", execution_started: false } });
     const empty = await f.contribution.contribute({ ...request("anything"), scope_id: "empty" });
     assert.equal((empty.diagnostics as JsonObject).reason, "no_accessible_procedure_in_scope");
     ensureProjectScope(f.store, "project:draft-only");

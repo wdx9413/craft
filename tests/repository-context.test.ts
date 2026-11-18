@@ -2340,6 +2340,86 @@ test("project Knowledge discovery checks only its three deterministic source rec
   } finally { f.close(); }
 });
 
+test("project Knowledge source merging never hydrates claims from unrelated scopes", async () => {
+  const f = await fixture();
+  try {
+    f.write("README.md", "# Current project source\nThis project has its own bounded Knowledge scope.\n");
+    const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
+    const originalList = f.store.list.bind(f.store);
+    let unscopedClaimScans = 0;
+    f.store.list = ((kind, limit, predicate, hydrate, dependencies, storedScope) => {
+      if (kind === "knowledge_claim" && dependencies === undefined && storedScope === undefined) {
+        unscopedClaimScans++;
+        throw new Error("unscoped Knowledge claim scan");
+      }
+      return originalList(kind, limit, predicate, hydrate, dependencies, storedScope);
+    }) as typeof f.store.list;
+    Object.assign(f.service.knowledgeSources, { sourceIngest() { return { status: "completed", candidates: [] }; } });
+
+    const result = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+
+    assert.equal(result.status, "ready");
+    assert.equal(result.candidates_created, 1);
+    assert.equal(unscopedClaimScans, 0);
+  } finally { f.close(); }
+});
+
+test("project Knowledge discovery retries a registered source that has no ingest receipt", async () => {
+  const f = await fixture();
+  try {
+    f.write("README.md", "# Source without receipt\n");
+    const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
+    let attempts = 0;
+    Object.assign(f.service.knowledgeSources, { sourceIngest() { attempts++; return { status: "completed", candidates: [] }; } });
+
+    f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    const retried = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+
+    assert.equal(retried.sources_ingested, 1);
+    assert.equal(attempts, 2);
+  } finally { f.close(); }
+});
+
+test("project Knowledge discovery retries old failed ingests and reports failures during cooldown", async () => {
+  const f = await fixture();
+  try {
+    f.write("README.md", "# Retryable project source\n");
+    const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
+    let attempts = 0;
+    Object.assign(f.service.knowledgeSources, { sourceIngest(args: JsonObject) {
+      attempts++;
+      const source = f.store.get("knowledge_source", String(args.source_id));
+      f.store.create("knowledge_ingest_receipt", `failed-ingest-${attempts}`, {
+        scope, source_id: args.source_id, source_version: source.version, status: attempts === 3 ? "unavailable" : "failed",
+      });
+      if (attempts === 3) return { status: "unavailable" };
+      throw new Error("bounded test failure");
+    } });
+
+    const first = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    assert.equal(first.failed_ingests, 1);
+    assert.equal(attempts, 1);
+
+    const cooledDown = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    assert.equal(cooledDown.status, "partial");
+    assert.equal(cooledDown.retry_deferred_sources, 1);
+    assert.equal(attempts, 1);
+
+    const actualNow = Date.now;
+    let retried: JsonObject;
+    try {
+      Date.now = () => actualNow() + 61_000;
+      retried = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    } finally { Date.now = actualNow; }
+    assert.equal(retried.failed_ingests, 1);
+    assert.equal(attempts, 2);
+
+    const forced = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id, retry_failed: true });
+    assert.equal(forced.failed_ingests, 1);
+    assert.equal(attempts, 3);
+  } finally { f.close(); }
+});
+
 test("Context returns its receipt when automatic Knowledge source discovery is unavailable", async () => {
   const f = await fixture();
   try {

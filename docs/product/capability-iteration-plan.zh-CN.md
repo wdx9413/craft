@@ -70,7 +70,7 @@
 ## 验证顺序
 
 1. `pnpm run typecheck`。
-2. `node --experimental-strip-types --test --test-concurrency=1` 运行直接相关测试：`context-readiness-doctor`、`context-remediation`、`context-extensions`、`context-directory`、`mcp`、`component-plugins`、`component-standalone-readiness`、`context-distribution`。
+2. `node --experimental-strip-types --test --test-concurrency=1` 运行直接相关测试：`context-readiness-doctor`、`context-remediation`、`context-extensions`、`context-notes`、`mcp`、`component-plugins`、`component-standalone-readiness`、`context-distribution`。
 3. `pnpm run lint`、`pnpm run audit:docs`、`pnpm run audit:surfaces`、`pnpm run audit:coverage-inventory --check`。
 4. 改动相关 coverage group：`context-remediation`、`component-readiness`、`context-extensions`、`component-plugins`、`repository-context-products`；新增 `context-readiness-doctor` 组要求行/函数/分支 100%。
 5. `pnpm run build:plugin`、`pnpm run pack:plugin`、`pnpm run test:smoke`、`pnpm run test:plugin`。

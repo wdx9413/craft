@@ -53,4 +53,4 @@ Mod 目标覆盖所有已声明插入点：输入接收/提交、Context 检索/
 
 1. **业务质量**：当前候选合同评测使用固定的三个合成输入向量；交付期质量只看真实 WorkDelivery 的拒绝/阻塞比例。需要真实用户质量指标时，必须先定义可信、可独立复核的评价器和证据源。
 2. **Host 覆盖**：当前事件目录只声明实际接入的 Codex、Workbench 与 Craft Runtime Host；Claude 等未接入适配器返回 unsupported。UI 仅支持 Workbench，其他 Host 会显式列入不可用贡献。
-3. **验证边界**：专项 Runtime 测试覆盖语句、函数和行均为 100%；分支覆盖仍未达到 100%。全量类型检查受工作区 `craft-common` 与 `craft-capability-file-dir-desc` 缺失导出影响，Mod Runtime 新增类型错误已清除。
+3. **验证边界**：专项 Runtime 测试覆盖语句、函数和行均为 100%；分支覆盖仍未达到 100%。全量类型检查受工作区 `craft-common` 与 `craft-capability-craft-notes-location` 缺失导出影响，Mod Runtime 新增类型错误已清除。

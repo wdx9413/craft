@@ -9,9 +9,9 @@ import test from "node:test";
 const run = promisify(execFile);
 const CLI = resolve(import.meta.dirname, "..", "core", "cli.ts");
 
-async function craftDirs(args: string[], dataDir: string): Promise<{ code: number; stdout: string; stderr: string }> {
+async function craftNotesLocations(args: string[], dataDir: string): Promise<{ code: number; stdout: string; stderr: string }> {
   try {
-    const { stdout, stderr } = await run(process.execPath, [CLI, "dirs", ...args], {
+    const { stdout, stderr } = await run(process.execPath, [CLI, "notes", "locations", ...args], {
       timeout: 30_000,
       env: { ...process.env, CRAFT_DATA_DIR: dataDir, CRAFT_HOOK_MODE: "0" },
     });
@@ -22,37 +22,37 @@ async function craftDirs(args: string[], dataDir: string): Promise<{ code: numbe
   }
 }
 
-test("craft dirs records, promotes, resolves and lists directory descriptions", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "craft-dirs-cli-"));
+test("craft notes locations records, promotes, resolves and lists directory descriptions", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "craft-notes-cli-"));
   try {
     // First touch only observes (below promotion threshold).
-    const r1 = await craftDirs(["record", "C:\\projects\\billing", "billing service root"], dataDir);
+    const r1 = await craftNotesLocations(["record", "C:\\projects\\billing", "billing service root"], dataDir);
     assert.match(r1.stdout, /"status": ?"observed"/u);
     // Repeat until promoted.
-    await craftDirs(["record", "C:\\projects\\billing", "billing service root"], dataDir);
-    const r3 = await craftDirs(["record", "C:\\projects\\billing", "billing service root"], dataDir);
+    await craftNotesLocations(["record", "C:\\projects\\billing", "billing service root"], dataDir);
+    const r3 = await craftNotesLocations(["record", "C:\\projects\\billing", "billing service root"], dataDir);
     assert.match(r3.stdout, /"status": ?"promoted"/u);
 
     // Description -> path resolve only matches promoted entries.
-    const resolved = await craftDirs(["resolve", "--by-desc", "billing service"], dataDir);
+    const resolved = await craftNotesLocations(["resolve", "--by-desc", "billing service"], dataDir);
     assert.match(resolved.stdout, /projects\\+billing/u);
 
     // Path -> description lookup.
-    const byPath = await craftDirs(["resolve", "--by-path", "C:\\projects\\billing"], dataDir);
+    const byPath = await craftNotesLocations(["resolve", "--by-path", "C:\\projects\\billing"], dataDir);
     assert.match(byPath.stdout, /billing service root/u);
 
     // List them.
-    const listed = await craftDirs(["list", "--status", "promoted"], dataDir);
+    const listed = await craftNotesLocations(["list", "--status", "promoted"], dataDir);
     assert.match(listed.stdout, /projects\\+billing/u);
   } finally {
     await rm(dataDir, { recursive: true, force: true });
   }
 });
 
-test("craft dirs rejects relative paths with a clear error", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "craft-dirs-cli-"));
+test("craft notes locations rejects relative paths with a clear error", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "craft-notes-cli-"));
   try {
-    const result = await craftDirs(["record", "relative/path", "x"], dataDir);
+    const result = await craftNotesLocations(["record", "relative/path", "x"], dataDir);
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /absolute path/u);
   } finally {

@@ -163,6 +163,8 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_memory_maintenance_run: { principal_ids: "array" },
   craft_memory_maintenance_schedule: { budget_available: "boolean", idle: "boolean", model_available: "boolean" },
   craft_experience_observe: { source_session_id: "string", verification: "object", scope: "string", scenario_signature: "object", execution_shape: "array" },
+  craft_experience_runbook_capture: { reason: "string", title: "string", applies_when: "string", exclude_when: "string", pitfall: "string", cause: "string", correct_method: "string", synthetic_example: "string", done_criteria: "string", failure_handling: "string" },
+  craft_experience_runbook_revoke: { expected_version: "integer", reason: "string" },
   craft_experience_procedure_draft: { design_axes: "array", observation_ids: "array" },
   craft_experience_procedure_submit: { composition: "object", graph_control: "object", inputs: "array", steps: "array", nodes: "array", edges: "array", outputs: "object", checkpoint_policy: "object" },
   craft_experience_learning_evaluation_run: { dispatch_id: "string" },

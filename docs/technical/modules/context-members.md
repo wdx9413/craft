@@ -96,6 +96,10 @@ Craft 自己跑循环时（`internal-host-driver.ts`，与 `codex-cli`、`claude
 
 experience 的例外不是策略选择，而是数据模型决定的：`compile` 只存 `hypothesis_digest` / `applicability_digest` / `counterexample_digest`，记录带 `content_free: true` 与 `execution_visible: false`，而工具说明写着 "execution Hosts never receive it directly"。**Craft 里根本没有那段散文可以泄露。** 所以它的贡献只能是指针加出处：哪个 pattern、哪个版本、什么类型、由多少独立观测支撑、以及是否已有干预通过 Signoff（`requires_governed_route: true`）——这正是路由策略决定"要不要走受治理路径去查账本"所需要的。测试断言条目的字段里**不能出现** `hypothesis` / `applicability` / `counterexample`，因为这条读侧唯一可能的坏法就是长出一个字段。
 
+### 已接受目标：Experience Runbook（待实现）
+
+当前 Experience Context contribution 仍只提供编译经验的指针。ADR-0033 接受为 Experience Procedure Candidate 增加经过整理、脱敏的可读内容，并允许 Context 在同项目任务中把它作为“待验证”提示；Candidate 不具备执行权，正式 Procedure 仍须通过独立证据和评测门槛。此目标尚未实现，现有 Hook 也不会保存命令正文或自动生成 runbook。项目源代码只能以版本、路径和摘要引用，不复制进 Experience；可运行示例须是脱敏合成内容。
+
 `resolve` 因此变成 async：贡献者的 `contribute` 是异步的。结果是**校验错误从同步抛错变成 rejection**——对 MCP 路径无差别（handler 两者都接），对直接调用者是一个真实的行为变化，测试里所有 `assert.throws` 相应改成 `assert.rejects`。
 
 ## 四个问题的处理结果

@@ -117,6 +117,24 @@ test("Readiness Doctor reports sparse migration and oversized or unknown state w
   } finally { await dispose(f); }
 });
 
+test("Readiness Doctor keeps unavailable legacy partitions local and marks status counts incomplete", async () => {
+  const f = await fixture();
+  try {
+    const originalList = f.store.list.bind(f.store);
+    f.store.list = ((kind: string, limit?: number, predicate?: (record: JsonObject) => boolean, hydrate?: boolean,
+      dependencies?: { source_ids: string[]; document_ids: string[] }, scope?: string) => {
+      if (kind === "knowledge_claim") throw new Error("Project Knowledge storage root is not registered");
+      return originalList(kind, limit, predicate, hydrate, dependencies, scope);
+    }) as typeof f.store.list;
+    const result = contextReadinessDoctor(f.store);
+    const knowledge = ((result.components as JsonObject).knowledge as JsonObject);
+    assert.equal(knowledge.status_counts_status, "incomplete");
+    assert.deepEqual(knowledge.status_counts, {});
+    assert.equal(knowledge.records, 0);
+    assert.equal(((result.components as JsonObject).memory as JsonObject).status_counts_status, "available");
+  } finally { await dispose(f); }
+});
+
 test("Context Doctor is mounted on narrow surfaces and correction list rejects invalid status", async () => {
   const f = await fixture();
   try {
@@ -207,7 +225,7 @@ test("Capability iteration plan is dry-run, threshold-gated and never writes liv
 test("Capability iteration plan rejects invalid, ambiguous and unsafe records", async () => {
   const f = await fixture();
   try {
-    assert.throws(() => buildCapabilityIterationPlan(f.store, { records: [] }), /project_scope_id/u);
+    assert.equal(buildCapabilityIterationPlan(f.store, { records: [] }).project_scope_id, "global");
     assert.throws(() => buildCapabilityIterationPlan(f.store, { project_scope_id: "project:demo", records: [null] }), /records\[0\]/u);
     assert.throws(() => buildCapabilityIterationPlan(f.store, { project_scope_id: "project:demo", records: Array.from({ length: 101 }, () => taskRecord("t", "s")) }), /records/u);
     assert.throws(() => buildCapabilityIterationPlan(f.store, { project_scope_id: "project:demo", records: [{ ...taskRecord("t", "s"), changed_paths: "invalid" }] }), /changed_paths/u);

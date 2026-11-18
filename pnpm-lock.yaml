@@ -25,17 +25,17 @@ importers:
         specifier: 0.1.7
         version: 0.1.7
       '@craft/capability-experience':
-        specifier: 0.20.5
-        version: 0.20.5
-      '@craft/capability-file-dir-desc':
-        specifier: 0.20.6
-        version: 0.20.6
+        specifier: 0.20.9
+        version: 0.20.9
       '@craft/capability-knowledge':
         specifier: 0.20.5
         version: 0.20.5
       '@craft/capability-memory':
         specifier: 0.20.5
         version: 0.20.5
+      '@craft/craft-notes':
+        specifier: 0.20.7
+        version: 0.20.7
       '@modelcontextprotocol/sdk':
         specifier: 1.32.2
         version: 1.32.2(supports-color@7.1.0)(zod@4.6.7)
@@ -173,8 +173,8 @@ packages:
     resolution: {integrity: sha512-bXixq+GoEvIwYzZgLiJ+kGAYlF8rdDuZ/s2IPRPsrcFGj/tHaImX7k3B8n3/ocNgOmisOapjhvZoyKCLn94dAQ==}
     engines: {node: '>=23'}
 
-  '@craft/capability-file-dir-desc@0.20.6':
-    resolution: {integrity: sha512-epN39MNcd8FigC2CbPLobhxdK5599ouuDT8PSOPOH/QuIg6SOzBDxlnKYpmjlxb/f4UxbL/PP/HjvrvPbhCyTw==}
+  '@craft/capability-experience@0.20.9':
+    resolution: {integrity: sha512-Vr5G4bm3vTOK4a0vTGc8tT/QC2Wiw0ynV0J9n8wRh5TRNumwpKN7JGs0NmqzNA0xd5bJoCXjGhH0mvwJcjJJMw==}
     engines: {node: '>=23'}
 
   '@craft/capability-knowledge@0.20.5':
@@ -183,6 +183,10 @@ packages:
 
   '@craft/capability-memory@0.20.5':
     resolution: {integrity: sha512-IF2K2ez7/YHn/ufAdumLZkTbRoJtIFSYt3rXwWS/9oBEwxmQmYIwexmh8berX8N3TaEEgHX0GJ6f4l1mSGGnXA==}
+    engines: {node: '>=23'}
+
+  '@craft/craft-notes@0.20.7':
+    resolution: {integrity: sha512-tP5wz9fLy+x6mWfl5NYSrVckfnrmDjlIhd63DsR1NrgEA+wzzF/HLHR5JkZMfLbjNh/0fFZdgwZqrBrphO3dZQ==}
     engines: {node: '>=23'}
 
   '@esbuild/aix-ppc64@0.28.2':
@@ -1166,9 +1170,12 @@ snapshots:
       craft-common-ontology: 0.20.5
       craft-common-store-local: 0.20.4
 
-  '@craft/capability-file-dir-desc@0.20.6':
+  '@craft/capability-experience@0.20.9':
     dependencies:
+      '@craft/capability-knowledge': 0.20.5
       craft-common-base: 0.20.4
+      craft-common-log: 0.20.4
+      craft-common-ontology: 0.20.5
       craft-common-store-local: 0.20.4
 
   '@craft/capability-knowledge@0.20.5':
@@ -1184,6 +1191,11 @@ snapshots:
       craft-common-base: 0.20.4
       craft-common-log: 0.20.4
       craft-common-ontology: 0.20.5
+      craft-common-store-local: 0.20.4
+
+  '@craft/craft-notes@0.20.7':
+    dependencies:
+      craft-common-base: 0.20.4
       craft-common-store-local: 0.20.4
 
   '@esbuild/aix-ppc64@0.28.2':
