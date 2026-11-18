@@ -187,7 +187,7 @@ test("the Navigator binds a directory named in the intent, and says so", async (
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("a replayed turn reinforces the directory once, not once per attempt", async () => {
+test("pilot dispatch and replay do not count as completed Craft Notes usage", async () => {
   const f = await fixture();
   try {
     const dir = join(f.root, "billing"); await mkdir(dir);
@@ -200,18 +200,13 @@ test("a replayed turn reinforces the directory once, not once per attempt", asyn
     // A retry with the same turn id is the same request, not another use.
     const replay = f.service.pilotTurnAuto({ session_id: session.id, input, turn_id: turnId }) as JsonObject;
     assert.equal(replay.idempotent, true);
-    const recorded = f.service.fileDirDescList({}) as JsonObject;
-    const entry = ((recorded.items as JsonObject[]).find((item) => item.path === dir) ?? {}) as JsonObject;
-    assert.equal(Number(entry.useCount ?? 0), 1, "NEEDREAD 16: repeated queries must not fake use frequency");
-    // A genuinely different turn is a separate use.
+    assert.equal(f.store.list("file_dir_desc", 100, item => item.path === dir).length, 0, "dispatch is not successful task evidence");
     f.service.pilotTurnAuto({ session_id: session.id, input: "在 billing 里补一个回归测试", turn_id: "turn_second" });
-    const after = f.service.fileDirDescList({}) as JsonObject;
-    const second = ((after.items as JsonObject[]).find((item) => item.path === dir) ?? {}) as JsonObject;
-    assert.equal(Number(second.useCount ?? 0), 2);
+    assert.equal(f.store.list("craft_note_usage", 100, item => item.subject_key === `local:${dir}`).length, 0);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("an explicit workspace reinforces only that workspace and only once on replay", async () => {
+test("an explicit workspace does not create Notes evidence before task completion", async () => {
   const f = await fixture();
   try {
     const alpha = join(f.root, "alpha"), beta = join(f.root, "beta"); await mkdir(alpha); await mkdir(beta);
@@ -222,9 +217,8 @@ test("an explicit workspace reinforces only that workspace and only once on repl
     const first = f.service.pilotTurnAuto(args) as JsonObject;
     assert.equal(((first.tasks as JsonObject[])[0].task as JsonObject).workspace_id, selected.id);
     assert.equal((f.service.pilotTurnAuto(args) as JsonObject).idempotent, true);
-    const entries = (f.service.fileDirDescList({}) as JsonObject).items as JsonObject[];
-    assert.equal(entries.find(item => item.path === alpha), undefined);
-    assert.equal(entries.find(item => item.path === beta)?.useCount, 1);
+    assert.equal(f.store.list("file_dir_desc", 100, item => item.path === alpha || item.path === beta).length, 0);
+    assert.equal(f.store.list("craft_note_usage", 100, item => String(item.subject_key).endsWith(beta)).length, 0);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

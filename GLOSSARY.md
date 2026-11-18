@@ -39,3 +39,43 @@ _Avoid_: Self-modifying Agent, automatic publication
 **Readiness Doctor**:
 A content-free readiness projection that separates configured state from observed Host execution, worker state, Context usage and learning outcomes.
 _Avoid_: Health check, installation proof
+
+## Extension language
+
+**Mod**:
+A versioned executable runtime module that registers Hooks, commands, or interface contributions at Craft extension points.
+_Avoid_: Rule, prompt overlay, Hook
+
+**Hook**:
+A handler registered by a Mod for a named runtime event, with a declared input, permitted result, ordering, scope, and failure policy.
+_Avoid_: Mod, settings file
+
+**Rule**:
+A textual instruction that shapes Agent reasoning without executing code or registering runtime event handlers.
+_Avoid_: Mod, runtime module
+
+**Mod trust**:
+User authorization for an exact Mod code and permission version to run; a changed code or permission declaration requires renewed review.
+_Avoid_: Package installation, permanent blanket trust
+
+## Self-evolution language
+
+**Evolution Ontology**:
+A versioned semantic model that defines Craft concepts, typed relationships, evidence provenance and the interpretation of durable records across Craft capabilities.
+_Avoid_: Knowledge graph, closed list of record tags
+
+**Core Policy**:
+The non-self-modifiable rules for approval, trust, permissions, privacy and safety that the Runtime enforces independently of evolving semantic models.
+_Avoid_: Ontology, candidate policy
+
+**Evaluation Contract**:
+A versioned, predeclared acceptance definition binding a candidate family to frozen evaluation cases and environment, target metrics, regression tolerances and hard safety assertions.
+_Avoid_: Candidate-authored benchmark, generic pass score
+
+**Semantic Reclassification**:
+An append-only, versioned change to a record's concept assignment that preserves its stable identity, original statement and evidence provenance.
+_Avoid_: Rewriting a fact, silent migration
+
+**Unresolved Classification**:
+A classification result whose evidence is insufficient or ambiguous; it is retained pending stronger evidence and does not change the record's retrieval or promotion behavior.
+_Avoid_: Best-guess fact, forced label

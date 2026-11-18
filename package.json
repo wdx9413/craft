@@ -13,8 +13,7 @@
   },
   "scripts": {
     "clean": "node --experimental-strip-types scripts/clean.ts",
-    "build": "pnpm run build:workspace-deps && pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run build:datasec && pnpm run build:deepseek && pnpm run pack:plugin",
-    "build:workspace-deps": "pnpm --filter '../craft-common/packages/**' --filter '../craft-capability/capability/**' -r --if-present run build",
+    "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run build:datasec && pnpm run build:deepseek && pnpm run pack:plugin",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
     "build:plugin": "node --experimental-strip-types scripts/release/prepare-typescript-compiler.ts && esbuild bin/craft-mcp.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-mcp.cjs && esbuild bin/craft-mcp-full.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-mcp-full.cjs && esbuild bin/craft-mcp-http.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-mcp-http.cjs && esbuild bin/craft-codex-hook.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=cjs --target=node23 --define:import.meta.url=undefined --outfile=dist/plugin/craft-codex-hook.cjs && esbuild bin/craft-parser-worker.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=esm --target=node23 --outfile=dist/plugin/craft-parser-worker.js && esbuild deploy/experience-learning/worker.ts --bundle --define:CRAFT_TYPESCRIPT_BUNDLE=true --platform=node --format=esm --target=node23 --outfile=dist/plugin/craft-experience-learning-worker.js",
     "pack:plugin": "node --experimental-strip-types scripts/release/pack-plugin.ts",
@@ -134,6 +133,7 @@
     "craft-common-ontology": "0.20.4",
     "craft-common-store-local": "0.20.4",
     "craft-eval": "0.7.2",
+    "quickjs-emscripten": "0.32.0",
     "tesseract.js": "^7.0.0",
     "typescript": ">=5.8 <7",
     "yaml": "^2.9.0",

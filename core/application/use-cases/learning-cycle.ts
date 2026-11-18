@@ -6,7 +6,7 @@ import { projectExperienceDirectory, projectPathAliasDigest } from "../../projec
 import { codexTaskGoalDigest } from "../../codex-task-prose.ts";
 
 declare module "../craft-service.ts" {
-  interface CraftService { learningCycleFinalize(args: JsonObject): JsonObject; learningCycleRequestGet(args: JsonObject): JsonObject; learningCycleTaskEvidenceList(args: JsonObject): JsonObject; experienceScenarioList(args: JsonObject): JsonObject; experienceScenarioRetire(args: JsonObject): JsonObject; experienceScenarioMigrationPropose(args: JsonObject): JsonObject; experienceScenarioClassificationRequestGet(args: JsonObject): JsonObject; experienceScenarioClassificationRequestComplete(args: JsonObject): JsonObject; }
+  interface CraftService { learningCycleFinalize(args: JsonObject): JsonObject; learningCycleRequestGet(args: JsonObject): JsonObject; learningCycleTaskEvidenceList(args: JsonObject): JsonObject; experienceScenarioList(args: JsonObject): JsonObject; experienceScenarioRetire(args: JsonObject): JsonObject; experienceScenarioMigrationPropose(args: JsonObject): JsonObject; experienceScenarioClassificationRequestGet(args: JsonObject): JsonObject; experienceScenarioClassificationRequestComplete(args: JsonObject): JsonObject; craftNotesObserveDirectory(args: JsonObject): JsonObject; }
 }
 
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
@@ -292,6 +292,15 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId, source_type: "host_completion_signal", confidence: "bounded", claim: `Host reported terminal verification ${outcome}.`, locator: `context-receipt:${receipt.id}`, metadata: { provenance: "host_completion_signal", terminal_identity_digest: terminalDigest, host, ...(sessionId ? { source_session_id: sessionId } : {}), ...(projectScope ? { project_scope_id: projectScope } : {}), ...(scenarioContext ? { task_goal_digest: codexTaskGoalDigest(scenarioContext.task_goal) } : {}), task_id: effectiveTaskId, turn_id: turnId, verification_outcome: outcome, verification_ref_digest: stableDigest(verificationRef), context_receipt_id: receipt.id, content_stored: false } });
     const observationId = `workflow_evolution_observation_${sourceDigest.slice(-20)}`;
     const observedPaths = Array.isArray(args.observed_paths) ? args.observed_paths : [];
+    // Notes usage is counted only after an attested, successful terminal result.
+    // Paths are task-bound references; the Notes registry never opens them.
+    if (outcome === "passed" && sessionId && projectScope && Array.isArray(args.observed_paths)) {
+      for (const path of new Set(args.observed_paths.filter((item): item is string => typeof item === "string" && item.trim().length > 0))) {
+        try { this.craftNotesObserveDirectory({ path, device_id: args.device_id ?? "local", project_id: projectScope,
+          task_id: effectiveTaskId, session_id: sessionId, outcome: "completed", evidence_ref: evidence.id }); }
+        catch { /* Notes capture is an optional learning side effect; task verification remains authoritative. */ }
+      }
+    }
     const observed = this.workflowEvolutionObserve({ observation_id: observationId, scenario_key: scenarioKey ?? `unclassified:${stableDigest({ scope, host }).slice(-24)}`, source_kind: `host:${host}`, source_id: effectiveTaskId, ...(sessionId ? { source_session_id: sessionId } : {}), source_digest: stableDigest({ taskId: effectiveTaskId, turnId, outcome, verificationRef, source_session_id: sessionId }), outcome, scope: observationScope, ...(observationSignature ? { scenario_signature: observationSignature } : {}), evidence_ids: [evidence.id], observed_paths: observedPaths, sanitized: true, content_stored: false });
     const observationReplay = observed.idempotent === true;
     if (!scenarioKey) {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -486,6 +486,76 @@ test("the internal loop mounts web fetch with an explicit untrusted-page instruc
     assert.match(String(toolResult?.content), /private or invalid public address/u,
       "the task-bound read action injects task identity and blocks a loopback destination before networking");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("trusted Mod tool-call patches reach the internal action only after Craft's normal authorization path", async () => {
+  let turn = 0; let lastRequest: JsonObject | undefined;
+  const f = await fixture({ complete: async (_provider, request) => { lastRequest = request.body as unknown as JsonObject; return turn++ === 0
+    ? { text: "", model: "mock", usage: { input_tokens: 1, output_tokens: 1 }, tool_calls: [{ id: "knowledge", type: "function", function: { name: "memory_search", arguments: JSON.stringify({ query: "original" }) } }] }
+    : { text: "done", model: "mock", usage: { input_tokens: 1, output_tokens: 1 } }; } });
+  try {
+    const packageRoot = join(f.root, "tool-mod"); await mkdir(packageRoot);
+    await writeFile(join(packageRoot, "register.mjs"), `export function register(on) {
+      on("craft.tool.call@1", (event) => ({ kind: "patch", patch: { arguments: { ...event.arguments, query: "patched" } } }));
+    }\n`);
+    f.service.modRuntimeStage({ manifest: { id: "tool-argument-mod", name: "Tool argument Mod", version: "1.0.0", entry: "register.mjs",
+      hooks: [{ event: "craft.tool.call@1", capability: "event.patch" }], capabilities: ["event.patch"] }, package_root: packageRoot });
+    const review = f.service.modRuntimeReview({ mod_id: "tool-argument-mod" }) as JsonObject;
+    f.service.modRuntimeTrust({ mod_id: "tool-argument-mod", code_digest: review.code_digest, permission_digest: review.permission_digest, actor: "user:test" });
+    const dispatch = f.service.internalHost.prepare({ task_id: f.task.id, prompt: "search", workspace: f.root, sandbox: "read-only" }).dispatch as JsonObject;
+    await f.service.internalHost.execute({ dispatch_id: dispatch.id, prompt: "search" });
+    const receipt = f.store.list("mod_runtime_receipt", 20, item => item.event === "craft.tool.call@1")[0];
+
+    assert.equal(((receipt?.result as JsonObject).arguments as JsonObject).query, "patched");
+    assert.equal(((receipt?.execution as JsonObject[])[0]?.result), "patch");
+    const toolMessage = (lastRequest!.messages as JsonObject[]).find(message => message.role === "tool");
+    assert.equal(JSON.parse(String(toolMessage?.content)).query, "patched", "the Craft action handler returned the patched query after its normal action gate");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("trusted model request and response Mods change the real Workbench transport and stored reply", async () => {
+  let sentMessages: JsonObject[] = [];
+  const f = await fixture({ complete: async (_provider, request) => {
+    sentMessages = (request.body as unknown as JsonObject).messages as JsonObject[];
+    return { text: "raw model output", model: "mock", usage: { input_tokens: 2, output_tokens: 3 } };
+  } });
+  const previousModelKey = process.env.TEST_MODEL_KEY;
+  try {
+    process.env.TEST_MODEL_KEY = "test-key";
+    f.service.modelAdd({ id: "local", name: "Local", baseUrl: "https://example.test/v1", model: "mock", apiKeyEnv: "TEST_MODEL_KEY" });
+    const packageRoot = join(f.root, "model-mod"); await mkdir(packageRoot);
+    await writeFile(join(packageRoot, "register.mjs"), `export function register(on) {
+      on("craft.channel.receive@1", (event) => ({ kind: "patch", patch: { content: event.content.replace("original", "received") } }));
+      on("craft.model.request@1", (event) => ({ kind: "patch", patch: { messages: event.messages.map((message) => message.role === "user" ? { ...message, content: "rewritten user request" } : message) } }));
+      on("craft.model.response@1", () => ({ kind: "patch", patch: { content: "transformed model output" } }));
+      on("craft.channel.send@1", (event) => ({ kind: "patch", patch: { content: event.content + " sent" } }));
+    }\n`);
+    f.service.modRuntimeStage({ manifest: { id: "model-transformer", name: "Model transformer", version: "1.0.0", entry: "register.mjs",
+      hooks: [
+        { event: "craft.channel.receive@1", capability: "event.patch" },
+        { event: "craft.model.request@1", capability: "event.patch" },
+        { event: "craft.model.response@1", capability: "event.patch" },
+        { event: "craft.channel.send@1", capability: "event.patch" },
+      ], capabilities: ["event.patch"] }, package_root: packageRoot });
+    const review = f.service.modRuntimeReview({ mod_id: "model-transformer" }) as JsonObject;
+    f.service.modRuntimeTrust({ mod_id: "model-transformer", code_digest: review.code_digest, permission_digest: review.permission_digest, actor: "user:test" });
+
+    const sent = await f.service.taskMessageSend({ task_id: f.task.id, model_id: "local", content: "original user request" });
+    const assistant = sent.assistant as JsonObject;
+    const user = sent.user as JsonObject;
+    assert.equal(sentMessages.find(message => message.role === "user")?.content, "rewritten user request");
+    assert.equal(user.content, "received user request");
+    assert.equal(user.original_content, "original user request");
+    assert.equal(assistant.content, "transformed model output sent");
+    assert.ok(user.mod_runtime_receive_receipt_id);
+    assert.ok(assistant.mod_runtime_request_receipt_id);
+    assert.ok(assistant.mod_runtime_response_receipt_id);
+    assert.ok(assistant.mod_runtime_send_receipt_id);
+  } finally {
+    if (previousModelKey === undefined) delete process.env.TEST_MODEL_KEY;
+    else process.env.TEST_MODEL_KEY = previousModelKey;
+    f.store.close(); await rm(f.root, { recursive: true, force: true });
+  }
 });
 
 test("internal task retry preserves loop limits and requires new business acceptance", async () => {

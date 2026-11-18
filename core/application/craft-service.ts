@@ -75,8 +75,11 @@ import { ContextUsageWorkbench } from "./coordinators/context-usage.ts";
 import { WorkflowDesignWorkbench } from "./coordinators/workflow-design.ts";
 import { CognitiveWorkbenchCoordinator } from "./coordinators/cognitive-workbench.ts";
 import { FileDirDescRegistry } from "@craft/capability-file-dir-desc/file-dir-desc";
+import { CraftNotesRegistry } from "@craft/capability-file-dir-desc";
+import { migrateFileDirDescNotes } from "../craft-notes-migration.ts";
 import { resolveContextDirectory } from "../context-directory.ts";
 import { ModRegistry, type ModScopeKind } from "../mod-registry.ts";
+import { ModRuntime } from "../mod-runtime.ts";
 import { MessageInbox } from "../message-inbox.ts";
 import { MessageListener, LocalDropAdapter, type SourceAdapter } from "../message-listener.ts";
 import { GitHubIssueSourceAdapter } from "../message-github-source.ts";
@@ -296,7 +299,9 @@ export class CraftService extends ServiceFoundation {
   readonly cognitiveSearch: CognitiveSearchCoordinator;
   readonly evaluationRuns: EvaluationRunCoordinator;
   readonly fileDirDesc: FileDirDescRegistry;
+  readonly craftNotes: CraftNotesRegistry;
   readonly mods: ModRegistry;
+  readonly modRuntime: ModRuntime;
   readonly inbox: MessageInbox;
   readonly pluginDiscovery: PluginDiscovery;
 
@@ -331,8 +336,15 @@ export class CraftService extends ServiceFoundation {
       proposeMemory: (args) => this.memoryCandidatePropose(args),
       recordEvidence: (args) => this.evidenceRecord(args, true), saveClaim: (args) => this.knowledgeClaimSave(args),
     });
-    this.fileDirDesc = new FileDirDescRegistry(store);
+    const noteSanitizer = new Sanitizer(DEFAULT_RULES.map(rule => ({ ...rule, enabled: true })), () => "[REDACTED]");
+    const validateNoteText = (value: string): void => {
+      if (noteSanitizer.text(value) !== value) throw new Error("note appears to contain DataSec-sensitive content");
+    };
+    this.fileDirDesc = new FileDirDescRegistry(store, validateNoteText);
+    this.craftNotes = new CraftNotesRegistry(store, validateNoteText);
+    migrateFileDirDescNotes(store);
     this.mods = new ModRegistry(store);
+    this.modRuntime = new ModRuntime(store);
     this.inbox = new MessageInbox(store);
     this.pluginDiscovery = new PluginDiscovery(store);
     const calls = new ComponentTraceKernel(this.trace, "sdk");
@@ -420,12 +432,59 @@ export class CraftService extends ServiceFoundation {
   memoryCaptureObservedFact(args: JsonObject): JsonObject { return this.cognitiveWrites.captureObservedFact(args); }
 
   /** Record or reinforce a directory↔description link; see `file-dir-desc.ts`. */
-  fileDirDescRecord(args: JsonObject): JsonObject { return this.fileDirDesc.record(args); }
-  fileDirDescPromote(args: JsonObject): JsonObject { return this.fileDirDesc.promote(args); }
+  fileDirDescRecord(args: JsonObject): JsonObject {
+    const place = this.fileDirDesc.record(args);
+    try {
+      this.craftNotes.observeDirectory({ id: place.id, path: String(args.path), device_id: args.device_id ?? "local",
+        note: String(args.description), pin: true, ...(args.project_id === undefined ? {} : { project_id: args.project_id }) });
+    } catch (error) {
+      if (!(error instanceof Error) || !/active device with a confirmed Device Note/u.test(error.message)) throw error;
+      migrateFileDirDescNotes(this.store);
+    }
+    if (args.promote === true) {
+      try {
+        const note = this.store.find("craft_note", String(place.id));
+        if (note) this.craftNotes.confirm({ id: String(place.id), expected_version: Number(note.version ?? 1) });
+      }
+      catch (error) { if (!(error instanceof Error) || !/Unknown craft_note/u.test(error.message)) throw error; }
+    }
+    return place;
+  }
+  fileDirDescPromote(args: JsonObject): JsonObject {
+    const id = text(args.id, "id");
+    const note = this.store.find("craft_note", id);
+    const expectedVersion = args.expected_version ?? (note ? Number(note.version ?? 1) : undefined);
+    if (note) assertCraftNoteVersion(expectedVersion, note);
+    const place = this.fileDirDesc.promote(args);
+    try {
+      if (note) this.craftNotes.confirm({ id, expected_version: expectedVersion });
+    }
+    catch (error) { if (!(error instanceof Error) || !/Unknown craft_note/u.test(error.message)) throw error; }
+    return place;
+  }
   /** Automatic reinforcement from real use; never rewrites a description. */
-  fileDirDescObserve(args: JsonObject): JsonObject { return this.fileDirDesc.observe(args); }
-  fileDirDescRelocate(args: JsonObject): JsonObject { return this.fileDirDesc.relocate(args); }
-  fileDirDescRevoke(args: JsonObject): JsonObject { return this.fileDirDesc.revoke(args); }
+  fileDirDescObserve(args: JsonObject): JsonObject { return this.craftNotesObserveDirectory(args); }
+  fileDirDescRelocate(args: JsonObject): JsonObject {
+    const place = this.fileDirDesc.relocate(args);
+    const note = this.store.find("craft_note", text(args.id, "id"));
+    if (note && note.subject_type === "directory") this.store.save("craft_note", String(note.id), {
+      ...note, subject_key: `${String(note.device_id ?? "local")}:${String(place.path)}`,
+      version: Number(note.version ?? 1) + 1, updated_at: new Date().toISOString(),
+    });
+    return place;
+  }
+  fileDirDescRevoke(args: JsonObject): JsonObject {
+    const id = text(args.id, "id");
+    const note = this.store.find("craft_note", id);
+    const expectedVersion = args.expected_version ?? (note ? Number(note.version ?? 1) : undefined);
+    if (note) assertCraftNoteVersion(expectedVersion, note);
+    const place = this.fileDirDesc.revoke(args);
+    try {
+      if (note) this.craftNotes.revoke({ id, expected_version: expectedVersion, revoked_by: args.revoked_by ?? "workbench", reason: args.reason });
+    }
+    catch (error) { if (!(error instanceof Error) || !/Unknown craft_note/u.test(error.message)) throw error; }
+    return place;
+  }
   fileDirDescResolve(args: JsonObject): JsonObject { return this.fileDirDesc.resolve(args); }
   fileDirDescList(args: JsonObject = {}): JsonObject { return this.fileDirDesc.list(args); }
 
@@ -436,8 +495,63 @@ export class CraftService extends ServiceFoundation {
   fileDirDescEnableDevice(args: JsonObject): JsonObject { return this.fileDirDesc.enableDevice(text(args.id, "id")) as unknown as JsonObject; }
   fileDirDescReportDeviceHealth(args: JsonObject): JsonObject { return this.fileDirDesc.reportDeviceHealth(text(args.id, "id"), text(args.health, "health") as "healthy" | "degraded" | "offline") as unknown as JsonObject; }
 
+  craftNotesCreateDevice(args: JsonObject): JsonObject { return this.craftNotes.createDevice(args) as unknown as JsonObject; }
+  craftNotesObserveDirectory(args: JsonObject): JsonObject { return this.craftNotes.observeDirectory(args); }
+  craftNotesObserveFile(args: JsonObject): JsonObject { return this.craftNotes.observeFileReference(args); }
+  craftNotesCandidateList(args: JsonObject = {}): JsonObject { return this.craftNotes.candidateList(args) as unknown as JsonObject; }
+  craftNotesConfirm(args: JsonObject): JsonObject { return this.craftNotes.confirm(args) as unknown as JsonObject; }
+  craftNotesRevoke(args: JsonObject): JsonObject { return this.craftNotes.revoke(args) as unknown as JsonObject; }
+  craftNotesResolve(args: JsonObject): JsonObject { return this.craftNotes.resolve(args) as unknown as JsonObject; }
+
   /** Mod kernel: cognitive overlays with a governed draft → approve → active lifecycle. */
   modCreate(args: JsonObject): JsonObject { return this.mods.create(args) as unknown as JsonObject; }
+  modRuntimeStage(args: JsonObject): JsonObject { return this.modRuntime.stage(args); }
+  modRuntimeEventCatalog(args: JsonObject = {}): JsonObject { return this.modRuntime.eventCatalog(args); }
+  modRuntimeHasTrustedEvent(event: string, scope: JsonObject): boolean { return this.modRuntime.hasTrustedEvent(event, scope); }
+  modRuntimeList(): JsonObject { return this.modRuntime.list(); }
+  modRuntimeReview(args: JsonObject): JsonObject { return this.modRuntime.review(args); }
+  modRuntimeTrust(args: JsonObject): JsonObject { return this.modRuntime.trust(args); }
+  modRuntimeTrustAll(args: JsonObject): JsonObject { return this.modRuntime.trustAll(args); }
+  modRuntimeCandidateCreate(args: JsonObject): Promise<JsonObject> { return this.modRuntime.candidateCreate(args); }
+  modRuntimeCandidateRegressionRun(args: JsonObject): Promise<JsonObject> { return this.modRuntime.candidateRegressionRun(text(args.mod_id, "mod_id")); }
+  modRuntimeRolloutStart(args: JsonObject): JsonObject { return this.modRuntime.rolloutStart(args); }
+  modRuntimeRolloutGet(args: JsonObject): JsonObject { return this.modRuntime.rolloutGet(args); }
+  modRuntimeRolloutPause(args: JsonObject): JsonObject { return this.modRuntime.rolloutPause(args); }
+  modRuntimeRolloutResume(args: JsonObject): Promise<JsonObject> { return this.modRuntime.rolloutResume(args); }
+  modRuntimeRolloutAuthorizeProject(args: JsonObject): Promise<JsonObject> { return this.modRuntime.rolloutAuthorizeProject(args); }
+  modRuntimeApprovalPolicySet(args: JsonObject): JsonObject { return this.modRuntime.approvalPolicySet(args); }
+  modRuntimeWithdraw(args: JsonObject): JsonObject { return this.modRuntime.withdraw(args); }
+  modRuntimeDispatch(args: JsonObject): Promise<JsonObject> { return this.modRuntime.dispatch(args); }
+  async modRuntimeUiInteract(args: JsonObject): Promise<JsonObject> {
+    const modId = text(args.mod_id, "mod_id"), workspaceId = text(args.workspace_id, "workspace_id");
+    const contributionId = text(args.contribution_id, "contribution_id"), actionId = text(args.action_id, "action_id");
+    const requestId = text(args.request_id, "request_id");
+    const platform = args.platform === undefined ? process.platform : text(args.platform, "platform");
+    this.store.get("workspace", workspaceId);
+    const mod = this.store.get("runtime_mod", modId);
+    if (mod.enabled !== true || mod.trust_status !== "trusted") throw new Error("Mod UI contribution is disabled or untrusted");
+    if (mod.scope_kind !== "global" && !(mod.scope_kind === "project" && mod.scope_id === workspaceId)) throw new Error("Mod UI contribution is outside this workspace scope");
+    const review = this.modRuntime.review({ mod_id: modId });
+    if (review.trust_status !== "trusted") throw new Error("Mod UI contribution changed after trust and requires renewed review");
+    const manifest = mod.manifest as JsonObject;
+    const contributions = Array.isArray(manifest.ui_contributions) ? manifest.ui_contributions as JsonObject[] : [];
+    const contribution = contributions.find((item) => item.id === contributionId);
+    const controls = Array.isArray(contribution?.layout) ? contribution.layout as JsonObject[] : [];
+    const control = controls.find((item) => item.type === "button" && item.action_id === actionId);
+    if (!contribution || !control || !Array.isArray(contribution.hosts) || !(contribution.hosts as string[]).includes("workbench")) throw new Error("Mod UI action is not declared for Workbench");
+    if (!Array.isArray(contribution.platforms) || !(contribution.platforms as string[]).includes(platform)) throw new Error("Mod UI action is not supported on this platform");
+    if (/approval|trust|mod_runtime|mod_approve|mod_enable/iu.test(actionId)) throw new Error("Mod UI cannot alter protected approval or trust surfaces");
+    const taskId = args.task_id === undefined ? undefined : text(args.task_id, "task_id");
+    const scopeKind = mod.scope_kind === "global" ? "global" : "project";
+    const scopeId = mod.scope_kind === "global" ? "global" : workspaceId;
+    const event = await this.modRuntime.dispatch({ event: "craft.ui.interaction@1", host: "workbench", platform, delivery_id: requestId,
+      scope_kind: scopeKind, scope_id: scopeId,
+      input: { contribution_id: contributionId, action_id: actionId, workspace_id: workspaceId, ...(taskId ? { task_id: taskId } : {}) } });
+    const actionArgs = args.action_args && typeof args.action_args === "object" && !Array.isArray(args.action_args) ? args.action_args as JsonObject : {};
+    const actionResult = await this.invokeInternalAction(actionId, { ...actionArgs,
+      ...(taskId ? { task_id: taskId } : {}), workspace_id: workspaceId });
+    return { event, action: { id: actionId, result: actionResult } };
+  }
   modUpdate(args: JsonObject): JsonObject { return this.mods.update(args) as unknown as JsonObject; }
   modApprove(args: JsonObject): JsonObject { return this.mods.approve(args) as unknown as JsonObject; }
   modEnable(args: JsonObject): JsonObject { return this.mods.enable(args) as unknown as JsonObject; }
@@ -660,6 +774,31 @@ export class CraftService extends ServiceFoundation {
   protected async invokeInternalAction(action: string, args: JsonObject, signal?: AbortSignal): Promise<JsonObject> {
     if (signal?.aborted) throw new Error("Internal action cancelled");
     if (action === "model_cost_reconcile" || action === "task_run_assignment" || action === "work_review_freeze" || action === "work_review_report" || action === "work_review_verification_prepare" || action === "work_review_verification_execute" || action === "work_review_verification_start" || action === "work_review_verification_stop" || action === "task_replan_prepare" || action === "task_replan_decide" || action === "task_replan_execute") throw new Error("This action requires an operator and cannot be performed by the internal model");
+    const taskId = typeof args.task_id === "string" ? args.task_id : undefined;
+    const sessionId = typeof args.session_id === "string" ? args.session_id : undefined;
+    const task = taskId ? this.store.find("task", taskId) : null;
+    const projectId = task ? String(task.workspace_id ?? task.project_id ?? "") : "";
+    const scope = task ? { scope_kind: "task", scope_id: taskId, task_id: taskId, ...(projectId ? { project_id: projectId } : {}) }
+      : { scope_kind: "global", scope_id: "global" } as JsonObject;
+    const callEvent = "craft.tool.call@1";
+    if (this.modRuntimeHasTrustedEvent(callEvent, scope)) {
+      const request = { tool: `craft_${action}`, arguments: args, ...(taskId ? { task_id: taskId } : {}), ...(sessionId ? { session_id: sessionId } : {}) };
+      const requestId = typeof args.operation_id === "string" ? `mod_internal_${args.operation_id}` : undefined;
+      const call = await this.modRuntimeDispatch({ event: callEvent, host: "craft-runtime", ...scope,
+        ...(requestId ? { delivery_id: requestId } : {}), input: request });
+      if (call.status === "failed" || call.status === "rejected") throw new Error(`Mod rejected Craft tool call: ${String(call.failure_reason ?? "rejected")}`);
+      const callReceipt = call.receipt as JsonObject | undefined;
+      const execution = Array.isArray(callReceipt?.execution) ? callReceipt.execution as JsonObject[] : [];
+      if (execution.some((item) => item.result === "takeover")) {
+        const tier = classifyTool(`craft_${action}`);
+        if (!this.internalHost.authorization.includes(tier) || this.internalActionEffect(action, args) !== "read_only") {
+          throw new Error("Mod takeover is limited to authorized read-only Craft tools");
+        }
+        return { ...(call.result as JsonObject), mod_runtime_receipt_id: callReceipt?.id ?? null };
+      }
+      const changed = call.result as JsonObject;
+      if (changed.arguments && typeof changed.arguments === "object" && !Array.isArray(changed.arguments)) args = changed.arguments as JsonObject;
+    }
     const tier = classifyTool(`craft_${action}`);
     if (!this.internalHost.authorization.includes(tier)) {
       throw new Error(`Internal host action is not permitted: ${action} (tier ${tier} is outside the mounted authorization)`);
@@ -676,14 +815,33 @@ export class CraftService extends ServiceFoundation {
     }
     this.canonicalHandlers ??= createActionHandlers(this);
     const canonicalHandler = this.canonicalHandlers[`craft_${action}`];
-    if (canonicalHandler) return canonicalHandler(approvedArgs);
-    const handler = this.internalFallbackActions()[action];
-    if (!handler) throw new Error(`Internal host action is not permitted: ${action} (not a known operation)`);
-    return handler(approvedArgs);
+    let result: JsonObject;
+    if (canonicalHandler) result = await canonicalHandler(approvedArgs) as JsonObject;
+    else {
+      const handler = this.internalFallbackActions()[action];
+      if (!handler) throw new Error(`Internal host action is not permitted: ${action} (not a known operation)`);
+      result = await handler(approvedArgs) as JsonObject;
+    }
+    // Tool result Mods may observe or project data. The projection never writes
+    // back into Craft state, and failures cannot turn a committed action into a
+    // fabricated error or completion signal.
+    const resultEvent = "craft.tool.result@1";
+    if (this.modRuntimeHasTrustedEvent(resultEvent, scope)) {
+      try {
+        await this.modRuntimeDispatch({ event: resultEvent, host: "craft-runtime", ...scope,
+          input: { tool: `craft_${action}`, result, ...(taskId ? { task_id: taskId } : {}), ...(sessionId ? { session_id: sessionId } : {}) } });
+      } catch { /* Mod result observers never change the committed action result. */ }
+    }
+    return result;
   }
 
   setInternalApprovalPolicy(policy: InternalApprovalPolicy): void {
-    this.internalApprovalBroker.setPolicy(policy);
+    this.internalApprovalBroker.setPolicy(async (action, effect, args) => {
+      const baseline = await policy(action, effect, args);
+      if (baseline !== "ask") return baseline;
+      try { return await this.modRuntime.approvalStrategy(action, effect, args) ?? "ask"; }
+      catch { return "ask"; }
+    });
   }
 
   /**
@@ -1231,6 +1389,25 @@ export class CraftService extends ServiceFoundation {
   }
 
   capabilityAssetSave(args: JsonObject): JsonObject { return this.capabilityAccess.assetSave(args); }
+  async capabilityAssetSaveWithRuntime(args: JsonObject): Promise<JsonObject> {
+    const asset = this.capabilityAssetSave(args);
+    const lifecycleEvent = "craft.asset.lifecycle@1";
+    const taskId = args.task_id === undefined ? undefined : text(args.task_id, "task_id");
+    const task = taskId ? this.store.find("task", taskId) : null;
+    const projectId = String(args.project_id ?? args.workspace_id ?? task?.workspace_id ?? task?.project_id ?? "");
+    const scope: JsonObject = taskId ? { scope_kind: "task", scope_id: taskId, task_id: taskId,
+      ...(projectId ? { project_id: projectId } : {}) } : projectId
+      ? { scope_kind: "project", scope_id: projectId, project_id: projectId }
+      : { scope_kind: "global", scope_id: "global" };
+    if (this.modRuntimeHasTrustedEvent(lifecycleEvent, scope)) {
+      try {
+        await this.modRuntimeDispatch({ event: lifecycleEvent, host: "craft-runtime", ...scope,
+          input: { asset_id: String(asset.id), kind: String(asset.asset_type), status: String(asset.health ?? "registered"),
+            scope_kind: String(scope.scope_kind), scope_id: String(scope.scope_id) } });
+      } catch { /* Lifecycle observers cannot undo a committed registry write. */ }
+    }
+    return asset;
+  }
   capabilityAccessPlan(args: JsonObject): JsonObject { return this.capabilityAccess.accessPlan(args); }
   capabilityCallIssue(args: JsonObject): JsonObject { return this.capabilityAccess.callIssue(args); }
   capabilityCallConsume(args: JsonObject): JsonObject { return this.capabilityAccess.callConsume(args); }
@@ -2474,14 +2651,14 @@ export class CraftService extends ServiceFoundation {
   async taskMessageSend(args: JsonObject): Promise<JsonObject> {
     const taskId = text(args.task_id, "task_id");
     const task = this.store.get("task", taskId);
-    const content = assertNoSecret(document(args.content, "content"), "content");
+    const originalContent = assertNoSecret(document(args.content, "content"), "content");
     const messageId = args.message_id === undefined ? null : text(args.message_id, "message_id");
     const requestedModelId = args.model_id === undefined ? null : text(args.model_id, "model_id");
     const modelId = requestedModelId ?? (task.model_id === null || task.model_id === undefined ? null : String(task.model_id));
     if (messageId) {
       const previous = this.store.find("task_message", messageId);
       if (previous) {
-        if (previous.task_id !== taskId || previous.role !== "user" || previous.content !== content || previous.model_id !== modelId) {
+        if (previous.task_id !== taskId || previous.role !== "user" || (previous.original_content ?? previous.content) !== originalContent || previous.model_id !== modelId) {
           throw new Error("Message idempotency key is already bound to a different task request");
         }
         const assistant = this.store.list("task_message", 100, item => item.task_id === taskId && item.reply_to_message_id === messageId)
@@ -2501,7 +2678,25 @@ export class CraftService extends ServiceFoundation {
       this.store.updateIfVersion("task", taskId, Number(task.version), { ...taskPayload, model_id: modelId, permission_mode: permissionMode });
       this.store.appendEvent(`task:${taskId}`, "task.updated", { model_id: modelId, permission_mode: permissionMode });
     }
-    const user = this.store.create("task_message", messageId ?? id("task_message"), { task_id: taskId, role: "user", content, model_id: modelId, source: "studio" });
+    const taskScope: JsonObject = task.workspace_id || task.project_id
+      ? { scope_kind: "project", scope_id: String(task.workspace_id ?? task.project_id), project_id: String(task.workspace_id ?? task.project_id), task_id: taskId }
+      : { scope_kind: "task", scope_id: taskId, task_id: taskId };
+    const messageSessionId = args.session_id === undefined ? undefined : text(args.session_id, "session_id");
+    let content = originalContent;
+    let channelReceiveReceiptId: string | null = null;
+    if (this.modRuntimeHasTrustedEvent("craft.channel.receive@1", taskScope)) {
+      const received = await this.modRuntimeDispatch({ event: "craft.channel.receive@1", host: "workbench",
+        scope_kind: taskScope.scope_kind, scope_id: taskScope.scope_id, task_id: taskId,
+        ...(taskScope.project_id ? { project_id: taskScope.project_id } : {}),
+        input: { channel: "workbench", content, task_id: taskId, ...(messageSessionId === undefined ? {} : { session_id: messageSessionId }) } });
+      if (received.status === "failed" || received.status === "rejected") throw new Error(`Mod rejected Workbench message: ${String(received.failure_reason ?? "rejected")}`);
+      const projected = (received.result as JsonObject).content;
+      if (typeof projected !== "string" || projected.length > 100_000) throw new Error("Mod Workbench receive patch must be a string of at most 100000 characters");
+      content = assertNoSecret(projected, "Mod Workbench receive content");
+      channelReceiveReceiptId = String((received.receipt as JsonObject | undefined)?.id ?? "") || null;
+    }
+    const user = this.store.create("task_message", messageId ?? id("task_message"), { task_id: taskId, role: "user", content, original_content: originalContent,
+      model_id: modelId, source: "studio", mod_runtime_receive_receipt_id: channelReceiveReceiptId });
     this.store.appendEvent(`task:${taskId}`, "task.message.user", { message_id: user.id, model_id: modelId });
     const history = this.store.list("task_message", 100, (item) => item.task_id === taskId)
       .sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
@@ -2530,8 +2725,54 @@ export class CraftService extends ServiceFoundation {
           content: String(item.content)
         })))
       });
-      const result = await transport.complete(spec, sanitizeModelEgressRequest(spec, request));
-      const assistant = this.store.create("task_message", id("task_message"), { task_id: taskId, role: "assistant", content: result.text, model_id: modelId, provider_model: result.model, usage: result.usage, source: "model", reply_to_message_id: user.id });
+      const modelScope = taskScope as JsonObject;
+      let requestReceiptId: string | null = null;
+      if (this.modRuntimeHasTrustedEvent("craft.model.request@1", modelScope)) {
+        const modRequest = await this.modRuntimeDispatch({ event: "craft.model.request@1", host: "workbench",
+          scope_kind: modelScope.scope_kind, scope_id: modelScope.scope_id, task_id: taskId,
+          ...(modelScope.project_id === undefined ? {} : { project_id: modelScope.project_id }),
+          input: { provider: spec.provider, model: model.model, messages: request.body.messages as unknown as JsonObject[], task_id: taskId } });
+        if (modRequest.status === "failed" || modRequest.status === "rejected") throw new Error(`Mod rejected model request: ${String(modRequest.failure_reason ?? "rejected")}`);
+        requestReceiptId = String((modRequest.receipt as JsonObject | undefined)?.id ?? "") || null;
+        const projected = (modRequest.result as JsonObject).messages;
+        if (projected !== undefined) {
+          if (!Array.isArray(projected) || projected.length > 100) throw new Error("Mod model request patch must contain at most 100 messages");
+          request.body.messages = projected.map((value, index) => {
+            const message = object(value, `Mod model request messages[${index}]`);
+            if (!new Set(["system", "user", "assistant", "tool"]).has(String(message.role))
+              || !(typeof message.content === "string" || message.content === null)
+              || typeof message.content === "string" && message.content.length > 100_000) throw new Error("Mod model request message is invalid");
+            return { role: message.role, content: message.content } as ChatMessage;
+          });
+        }
+      }
+      const modelResponse = await transport.complete(spec, sanitizeModelEgressRequest(spec, request));
+      let responseText = modelResponse.text;
+      let responseReceiptId: string | null = null;
+      if (this.modRuntimeHasTrustedEvent("craft.model.response@1", modelScope)) {
+        const modResponse = await this.modRuntimeDispatch({ event: "craft.model.response@1", host: "workbench",
+          scope_kind: modelScope.scope_kind, scope_id: modelScope.scope_id, task_id: taskId,
+          ...(modelScope.project_id === undefined ? {} : { project_id: modelScope.project_id }),
+          input: { provider: spec.provider, model: modelResponse.model, content: responseText, task_id: taskId } });
+        if (modResponse.status === "failed" || modResponse.status === "rejected") throw new Error(`Mod rejected model response: ${String(modResponse.failure_reason ?? "rejected")}`);
+        responseReceiptId = String((modResponse.receipt as JsonObject | undefined)?.id ?? "") || null;
+        const projected = (modResponse.result as JsonObject).content;
+        if (typeof projected === "string") responseText = projected;
+      }
+      let channelSendReceiptId: string | null = null;
+      if (this.modRuntimeHasTrustedEvent("craft.channel.send@1", taskScope)) {
+        const sent = await this.modRuntimeDispatch({ event: "craft.channel.send@1", host: "workbench",
+          scope_kind: taskScope.scope_kind, scope_id: taskScope.scope_id, task_id: taskId,
+          ...(taskScope.project_id ? { project_id: taskScope.project_id } : {}),
+          input: { channel: "workbench", content: responseText, task_id: taskId, ...(messageSessionId === undefined ? {} : { session_id: messageSessionId }) } });
+        if (sent.status === "failed" || sent.status === "rejected") throw new Error(`Mod rejected Workbench response: ${String(sent.failure_reason ?? "rejected")}`);
+        const projected = (sent.result as JsonObject).content;
+        if (typeof projected !== "string" || projected.length > 100_000) throw new Error("Mod Workbench send patch must be a string of at most 100000 characters");
+        responseText = assertNoSecret(projected, "Mod Workbench send content");
+        channelSendReceiptId = String((sent.receipt as JsonObject | undefined)?.id ?? "") || null;
+      }
+      const assistant = this.store.create("task_message", id("task_message"), { task_id: taskId, role: "assistant", content: responseText, model_id: modelId, provider_model: modelResponse.model, usage: modelResponse.usage, source: "model", reply_to_message_id: user.id,
+        mod_runtime_request_receipt_id: requestReceiptId, mod_runtime_response_receipt_id: responseReceiptId, mod_runtime_send_receipt_id: channelSendReceiptId });
       this.store.appendEvent(`task:${taskId}`, "task.message.assistant", { message_id: assistant.id, model_id: modelId,
         active_mods: activeMods.map((mod) => ({ id: String(mod.id), version: Number(mod.version ?? 1) })) });
       return { user, assistant };
@@ -2794,17 +3035,6 @@ export class CraftService extends ServiceFoundation {
       // Reinforcing here would fake promotion frequency, which NEEDREAD 13.2 and
       // the 16-chapter acceptance card explicitly forbid.
       return { turn: existing, ...(this.pilotSessionStatus({ session_id: sessionId })), idempotent: true };
-    }
-    // craft-file-dir-desc 自进化落点：一次真实派发才记一笔，常用（>=3）才转正。
-    // 走 observe 而不是 record：意图不是目录语义，重复使用不得改写描述。
-    // 放在幂等检查之后，所以重放不会虚增频次。
-    const observedPath = explicitWorkspace ? resolvedWorkspace?.root_path : resolution.root_path;
-    if (resolvedWorkspace && typeof observedPath === "string" && observedPath) {
-      try {
-        const bestCandidate = resolution.candidates.find((item) => item.root_path === observedPath);
-        const description = String(resolvedWorkspace.name ?? "") || (bestCandidate ? bestCandidate.name : "") || observedPath;
-        this.fileDirDesc.observe({ path: observedPath, description });
-      } catch { /* 登记失败不影响派发：目录语义是旁路进化，不是执行前置条件 */ }
     }
     // Historical conflicts are read before any task exists, otherwise the tasks
     // this very turn is about to create would be reported as their own duplicates.
@@ -4260,6 +4490,7 @@ export class CraftService extends ServiceFoundation {
   /** Only enabled, installed, supported plugins contribute to a selected workspace. */
   workbenchPluginContributions(args: JsonObject): JsonObject {
     const workspaceId = text(args.workspace_id, "workspace_id"), context = text(args.context ?? "project", "context");
+    const platform = args.platform === undefined ? process.platform : text(args.platform, "platform");
     if (context !== "project" && context !== "task") throw new Error("context must be project or task");
     this.store.get("workspace", workspaceId);
     const bindings = this.store.list("workspace_plugin_binding", 10_000, binding => binding.workspace_id === workspaceId && binding.status === "enabled", false);
@@ -4272,7 +4503,9 @@ export class CraftService extends ServiceFoundation {
         advanced_tools: Array.isArray(plugin.workbench_advanced_tools) ? plugin.workbench_advanced_tools as JsonObject[] : [],
         themes: Array.isArray(plugin.workbench_themes) ? plugin.workbench_themes as JsonObject[] : [] }];
     });
-    return { workspace_id: workspaceId, context, contributions };
+    return { workspace_id: workspaceId, context, contributions,
+      mod_contributions: this.modRuntime.workbenchContributions(workspaceId, context, platform),
+      unavailable_mod_contributions: this.modRuntime.unavailableWorkbenchContributions(workspaceId, platform) };
   }
   /** Resolve a contributed tool at call time so a stale UI cannot outlive its plugin grant. */
   workbenchPluginToolResolve(args: JsonObject): JsonObject {
@@ -7448,3 +7681,8 @@ export class CraftService extends ServiceFoundation {
 
 installAdapterRuntimeMethods(CraftService);
 installKernelDelegateMethods(CraftService);
+
+function assertCraftNoteVersion(expected: unknown, current: JsonObject): void {
+  if (!Number.isSafeInteger(expected) || Number(expected) < 1) throw new Error("expected_version must be a positive integer");
+  if (Number(expected) !== Number(current.version ?? 1)) throw new Error("stale Note version; reload the current candidate before deciding");
+}

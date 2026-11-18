@@ -39,6 +39,7 @@ const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capab
 // Content diagnostics are safe core reads; migration remains full-surface only.
 CORE_TOOL_NAMES.add("craft_content_status").add("craft_content_verify");
 for (const name of ["craft_evolution_cycle_start", "craft_evolution_cycle_advance", "craft_evolution_cycle_get"]) CORE_TOOL_NAMES.add(name);
+for (const name of ["craft_mod_runtime_stage", "craft_mod_runtime_list", "craft_mod_runtime_review", "craft_mod_runtime_trust", "craft_mod_runtime_trust_all", "craft_mod_runtime_approval_policy_set", "craft_mod_runtime_withdraw", "craft_mod_runtime_candidate_create", "craft_mod_runtime_candidate_regression_run", "craft_mod_runtime_rollout_start", "craft_mod_runtime_rollout_get", "craft_mod_runtime_rollout_pause", "craft_mod_runtime_rollout_resume"]) CORE_TOOL_NAMES.add(name);
 // Durable Task and Runtime Proof operations are part of the compact control surface.
 for (const name of ["craft_mcp_task_create", "craft_mcp_task_get", "craft_mcp_task_update", "craft_mcp_task_cancel", "craft_mcp_task_expire", "craft_runtime_proof_manifest", "craft_runtime_proof_probe", "craft_runtime_proof_conformance", "craft_runtime_proof_attest", "craft_runtime_proof_rehydrate"]) CORE_TOOL_NAMES.add(name);
 export const CORE_TOOLS: Tool[] = ACTIVE_TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));

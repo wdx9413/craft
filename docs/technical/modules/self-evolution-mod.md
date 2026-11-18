@@ -1,35 +1,56 @@
-# 自进化 Mod（cognitive overlay）
+# 自进化 Mod 运行时模块
 
-## 目的
+本文采用 ADR-0031 的术语：Mod 是可执行运行时模块，Hook 是它注册的事件处理合同；旧 `mod` 稳定键承载的文本认知约束是 Rule，不是 Mod。
 
-Mod 是一段结构化的认知约束（Markdown/YAML 规则），只改变 Worker/Reviewer 的**提示与行为边界**，不改变 Craft 的代码执行逻辑。它是"智力药水/工作手册"层，与"电动螺丝刀"层的 Plugin 正交。诚实边界：Mod 能约束 agent 如何思考与判断，不能单凭一段文本获得修改运行时代码的能力。
+## 当前状态
 
-## 生命周期
+Craft Runtime 已有独立的可执行 Mod Registry：使用 QuickJS WASM 沙箱运行 Hook，按代码摘要和权限摘要信任；发现、暂存都不会执行。运行时当前登记 14 类版本化事件，支持声明的 Host、平台（`darwin`、`linux`、`win32`）、字段、能力、失败策略、作用域、顺序和超时。WorkBench 实际接入任务创建/TaskRun 刷新、模型请求/响应、渠道消息、界面贡献与交互；Codex Hook 接入输入接收/提交、Context 和会话生命周期；Craft 内部 Host 接入工具调用/结果和资产生命周期。此覆盖不等于所有 Host 都实现了目录中的所有事件。
 
-`draft → pending → (shadow test) → active → revoked`，另有 git 风格 `rollback`（回滚写成新版本，留 `rolled_back_from/to`）。
+自进化候选必须绑定归因失败、完成的修复 TaskRun、合格 Verification Assessment、精确变更摘要、通过的检查回执与证据。Runtime v2 使用固定无模型合同回归：每个 Hook 运行三条内置输入向量，系统安全断言单独计数；候选输出与无 Mod 时的输入直通结果成对记录。通过后仍须人工信任并启动灰度。Task→Project→Global 使用阶段回归和不同 Task 的真实交付样本；升级样本要求真实终态 HostRun、当前版本 TaskRunState 和持久化 WorkDelivery 记录。阶段门禁对真实交付中的拒绝/阻塞比例使用 0.2 阈值。跨项目阶段暂停并要求 Workbench 操作者逐项目授权；目标项目执行单独的 Mod 包副本。副本只包含受限类型的 Mod 包文件，拒绝匹配凭据模式的内容，不复制项目运行数据，并绑定来源/目标/代码/权限摘要；副本摘要变化时目标项目 Hook 失败关闭。全局阶段有复验期限，且全局通过也不会绕过逐项目授权。
 
-- 人工 Mod：`craft_mod_create` 建草稿，`craft_mod_approve` 由具名操作者审批后生效。
-- 自进化 Mod：`craft_mod_propose_from_attribution` 把一条**已归因**失败（`failure_class` + `remedy`）蒸馏为 pending 候选；`unattributed` 失败被拒绝，绝不猜测原因。
-- 只有 `evaluateShadowTest`（MCP：`craft_mod_shadow_test_run`）能授予 pass。它运行确定性的、零模型调用的回归集：pending 期间不生效、正文非空、插件绑定不泄漏、影子运行不污染真实上下文、三条固定不变量（不忽略安全、不绕过审批、不外泄密钥）、候选正文确实可观测。
-- `craft_mod_shadow_test_record` 只能记录失败或外部 verdict，**永远不能授予 pass**。
+目前的回归结论仅覆盖事件合同与已持久化的交付状态，不代表自然语言任务质量或用户满意度。Mod UI 只在 Workbench 渲染；其它已登记 Host 的 UI 贡献通过 `unavailable_mod_contributions` 明确报告不可用。未接入的 Host/事件返回 unsupported，不宣称 Claude 等 Host 已实现。
 
-## 门禁不变量
+## 目标模型
 
-1. 自进化 Mod 未通过影子回归不得 approve。
-2. 影子 pass 绑定候选正文的 body digest；通过后改写正文会让 pass 失效，必须重跑。
-3. `active` 的 Mod 不可原地编辑；只能 revoke 后重建。
-4. 插件绑定的 Mod 只在插件启用时注入 overlay。
+- **Mod**：可执行运行时模块，可在声明的 Craft 内核和界面扩展点注册多个 Hook、命令和界面贡献。
+- **Hook**：对一个命名事件注册的处理器；合同定义输入、允许的结果、事件顺序、作用范围、超时、重入与失败策略。
+- **Contribution**：一个 Mod 声明的 Hook、命令、界面、服务或其他带独立输入输出和能力要求的贡献项。
+- **Plugin**：分发包格式，可携带 Mod 与其它 Contribution；安装包不代表 Mod 已获信任或已加载。
+- **Rule**：纯文本认知规则，不执行代码，不注册 Hook；历史文本 Mod 路由兼容映射到 Rule。
 
-## 与 Continual Harness 的关系
+## 事件覆盖
 
-`ContinualHarnessKernel.refine` 支持 `changes[].kind = "mod"` 轴：
+Mod 目标覆盖所有已声明插入点：输入接收/提交、Context 检索/组装、模型请求前/响应后、工具调用前/结果后、审批决策、任务/会话/资产、渠道接收/发送以及界面渲染/交互。事件目录逐项版本化并记录 Host、平台和界面能力支持状态；本版事件与 Workbench UI 声明支持 Node `darwin`、`linux`、`win32`。所有事件族纳入目标，不代表任一运行环境天然支持全部事件。
 
-- `create`：从 `failure_class`/`remedy` 提出自进化 Mod 候选；
-- `update`：编辑现有非 active Mod 正文；
-- `delete`：被拒绝（撤销走 `craft_mod_revoke`）。
+在审批事件中，人工创建且获信任的 Mod 可通过显式策略能力参与允许/拒绝决策。策略调用受用户配置的作用范围约束；Mod 不得自行扩大作用范围或绕开最终授权及审计。自进化 Mod 的能力白名单硬性排除审批策略，即使用户选择信任全部也不能解除。
 
-带 Mod 轴的 refinement 永远是 `governed`（不是 session-local）。`submit` 复用与 `ModRegistry.approve` 相同的门禁：每个关联 Mod 必须有绑定当前正文 digest 的影子 pass，否则拒绝进入 `evaluation_required`。这保证"从失败归因到行为规则"的自进化闭环无法绕过那道唯一有效的影子门。
+## 信任与执行
 
-## MCP 工具面
+- 首次加载前向用户展示 Mod 来源、代码/版本、注册的事件、Hook 顺序、请求的能力和副作用。
+- 支持逐个审查/信任及信任当前已审查集合。信任绑定精确代码摘要和权限声明摘要；二者任一变化都暂停加载并重新审查。
+- 用户信任允许 Mod 使用其精确声明且被授予的能力；高风险文件、网络、进程或替代执行能力必须清晰列出。安装不等于授权。
+- Runtime 根据事件合同调度处理器，支持观察、补丁、拒绝和受控接管。审批策略等高风险能力由专用授权接口提供；Mod 不能直接改写内核授权状态、最终出站检查或审计记录。
+- 界面贡献只能进入登记的插入点；无界面 Host 报告不支持界面贡献。失败隔离、预算、超时、幂等和停用需要有运行回执。
 
-`craft_mod_create/update/list/approve/enable/disable/revoke/rollback/rollback_previous/propose_from_attribution/shadow_test_run/shadow_test_record`。全部经 `action-handlers` 绑定到 `CraftService` 的同名方法；`tool-catalog.ts` 是声明的唯一来源。
+## 自进化闭环
+
+1. 从已归因失败和已验证的独立修复结果形成可执行 Mod 候选；绑定任务、运行版本、来源和结果证据。不足时停留为草稿。
+2. Runtime v2 运行不可变的系统安全断言和三条固定模块合同输入向量；提案人不能传入或修改验收用例。报告保留每个样本的无 Mod 直通输入和候选输出；合同质量阈值固定为 1.0，安全断言不计入样本数。
+3. 自进化候选默认不含审批策略能力；回归也不能为候选增加能力或建立执行信任。
+4. 用户信任具体代码与能力声明后，候选才能启动 Task 阶段。每阶段重新跑合同回归，并分别收集不同 Task 的真实交付样本。Hook 安全失败立即停用/回滚；拒绝或阻塞交付比例超过 0.2 时回滚到最新有效可信版本。
+5. 项目阶段完成后先暂停；WorkBench 授权会复制并校验独立 Mod 包，记录来源、目标、脱敏策略及代码/权限摘要。全局回归通过后仍逐项目授权。Runtime/回归集版本、代码或权限变化会暂停资格；全局 Mod 到期会暂停，人工恢复时重新执行阶段回归。
+
+## 完成验收
+
+- 用户可以查看并信任 Mod 的精确代码/权限版本，逐个信任或信任当前已审集合；更新后旧信任不能自动沿用。
+- 每个声明支持的事件都能通过 Craft 服务边界端到端触发对应处理器；请求/工具/审批等事件的最终行为和执行顺序可观察、可审计。
+- 批准策略 Mod 可在已授权范围内影响审批；越权、扩权及最终授权绕过被拒绝。
+- 自进化候选即使“信任全部”也不能声明或调用审批策略能力。
+- 代表性回归决定候选是否可进入信任/ rollout 阶段；样本不足、更新失效、安全失败和指标退化行为符合治理合同。
+- 各 Host/平台分别证明事件、界面、隔离、权限和回滚支持；未支持能力明确显示，不把包加载当行为生效证据。
+
+## 当前缺口
+
+1. **业务质量**：当前候选合同评测使用固定的三个合成输入向量；交付期质量只看真实 WorkDelivery 的拒绝/阻塞比例。需要真实用户质量指标时，必须先定义可信、可独立复核的评价器和证据源。
+2. **Host 覆盖**：当前事件目录只声明实际接入的 Codex、Workbench 与 Craft Runtime Host；Claude 等未接入适配器返回 unsupported。UI 仅支持 Workbench，其他 Host 会显式列入不可用贡献。
+3. **验证边界**：专项 Runtime 测试覆盖语句、函数和行均为 100%；分支覆盖仍未达到 100%。全量类型检查受工作区 `craft-common` 与 `craft-capability-file-dir-desc` 缺失导出影响，Mod Runtime 新增类型错误已清除。

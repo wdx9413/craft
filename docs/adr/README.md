@@ -33,6 +33,9 @@
 | [0027](0027-expiry-advisory-revival-domain-boundary.md) | 过期不删除、弱参考默认关闭、复活重走证据、经验不跨域 |
 | [0028](0028-public-web-research-is-read-only-and-source-bound.md) | 公网研究只读且每条观察绑定来源 |
 | [0029](0029-one-shared-concept-taxonomy.md) | Knowledge、Memory、Experience 共用六个概念分类，写入时强校验可读性 |
+| [0030](0030-concept-tags-typed-relations-and-diagnostic-consistency.md) | 概念标签落盘，关系类型约束与一致性作为诊断 |
+| [0031](0031-mods-are-trusted-runtime-modules.md) | Mod 是受精确版本信任约束的可执行 Runtime 模块；自进化候选不能获得审批策略能力 |
+| [0032](0032-versioned-evolution-ontology-and-immutable-core-policy.md) | 本体论可自动版本化演进；Core Policy 由 Runtime 独立执行且不可自改 |
 
 ## 与技术文档的关系
 
@@ -49,3 +52,5 @@
 | 0026 | [Knowledge 与 Experience 场景分类契约](../technical/modules/scenario-taxonomy.md) |
 | 0027 | [生命周期、弱参考与领域隔离](../technical/modules/lifecycle-domain-isolation.md) |
 | 0029 | [Knowledge、Memory、Experience 共用一个概念分类](../technical/modules/scenario-taxonomy.md) |
+| 0031 | [自进化 Mod 运行时模块](../technical/modules/self-evolution-mod.md) |
+| 0032 | [自进化本体论与评测闭环](../technical/modules/self-evolution-ontology.md) |

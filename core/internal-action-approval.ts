@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { digestJson } from "./digest.ts";
 
-export type InternalApprovalPolicy = (action: string, effect: string, args: JsonObject) => "allow" | "deny" | "ask";
+export type InternalApprovalPolicy = (action: string, effect: string, args: JsonObject) => "allow" | "deny" | "ask" | Promise<"allow" | "deny" | "ask">;
 
 type Waiter = { resolve: (value: JsonObject) => void; reject: (error: Error) => void };
 const KIND = "internal_action_approval";
@@ -35,7 +35,7 @@ export class InternalActionApprovalBroker {
   async authorize(action: string, args: JsonObject, effect: string, signal?: AbortSignal): Promise<JsonObject> {
     if (signal?.aborted) throw new Error(`Internal action cancelled: ${action}`);
     if (effect === "read_only") return { approval_ref: null, effect, action };
-    const decision = this.policy(action, effect, args);
+    const decision = await this.policy(action, effect, args);
     if (decision !== "allow" && decision !== "deny" && decision !== "ask") throw new Error("Internal approval policy returned an invalid decision");
     if (decision === "deny") throw new Error(`Internal action denied by host policy: ${action}`);
     const argsDigest = digestJson(args);

@@ -8,6 +8,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { FileDirDescRegistry, PROMOTION_USE_THRESHOLD, type FileDirDescRecord } from "@craft/capability-file-dir-desc/file-dir-desc";
 import { canonicalizePath } from "@craft/capability-file-dir-desc/file-dir-desc";
 import { type JsonObject } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
 const asResults = (value: unknown): FileDirDescRecord[] => (value as JsonObject).results as unknown as FileDirDescRecord[];
 const asItems = (value: unknown): FileDirDescRecord[] => (value as JsonObject).items as unknown as FileDirDescRecord[];
 
@@ -17,7 +18,7 @@ async function fixture() {
   const registry = new FileDirDescRegistry(store);
   // The local device is the implicit default device for every place, and is
   // active by default in a real deployment.
-  registry.registerDevice({ id: "local", name: "Local device", device_kind: "local", host_kind: "local", health: "healthy" });
+  registry.registerDevice({ id: "local", name: "Local device", device_kind: "local", host_kind: "local", health: "healthy", device_note: "本地开发设备" });
   return { root, store, registry };
 }
 
@@ -54,7 +55,7 @@ test("device metadata: register, list, health and disable blocks recall", async 
   const { store, registry } = await fixture();
   try {
     const device = registry.registerDevice({ id: "edge-01", name: "Edge node", device_kind: "container", host_kind: "cloud",
-      location: "eu-west", tags: ["ci", "build"], health: "healthy" });
+      location: "eu-west", tags: ["ci", "build"], health: "healthy", device_note: "欧洲构建节点" });
     assert.equal(device.id, "edge-01");
     assert.equal(device.deviceKind, "container");
     assert.equal(device.hostKind, "cloud");
@@ -86,7 +87,7 @@ test("device metadata: unknown device and reactivation rules", async () => {
   try {
     assert.throws(() => registry.disableDevice("no-such-device"), /Unknown device/);
     assert.equal(registry.device("no-such-device"), null);
-    registry.registerDevice({ id: "edge-02", device_kind: "ssh", host_kind: "cloud" });
+    registry.registerDevice({ id: "edge-02", device_kind: "ssh", host_kind: "cloud", device_note: "远程构建节点" });
     registry.disableDevice("edge-02");
     assert.throws(() => registry.registerDevice({ id: "edge-02", status: "active" }), /reactivated/);
   } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
@@ -117,6 +118,25 @@ test("explicit promote forces a one-off directory into the formal index", async 
     assert.equal(promoted.status, "promoted");
     assert.equal(asResults(registry.resolve({ path }))[0]?.status, "promoted");
   } finally { await store.close(); await rm(store.paths.root, { recursive: true, force: true }); }
+});
+
+test("stale legacy promotion and revocation do not split the Notes and compatibility records", async () => {
+  const { store, root } = await fixture();
+  try {
+    const service = new CraftService(store);
+    service.craftNotesCreateDevice({ id: "local", note: "本地开发设备" });
+    const place = service.fileDirDescRecord({ device_id: "local", path: "/work/versioned", description: "versioned project" });
+    const note = store.find("craft_note", String(place.id))!;
+    assert.throws(() => service.fileDirDescPromote({ id: place.id, expected_version: Number(note.version) + 1 }), /stale Note/u);
+    assert.equal(store.find("file_dir_desc", String(place.id))?.status, "observed");
+    assert.equal(store.find("craft_note", String(place.id))?.status, "candidate");
+    service.fileDirDescPromote({ id: place.id, expected_version: Number(note.version) });
+    const confirmed = store.find("craft_note", String(place.id))!;
+    assert.throws(() => service.fileDirDescRevoke({ id: place.id, expected_version: Number(confirmed.version) + 1,
+      revoked_by: "user", reason: "stale" }), /stale Note/u);
+    assert.equal(store.find("file_dir_desc", String(place.id))?.status, "promoted");
+    assert.equal(store.find("craft_note", String(place.id))?.status, "confirmed");
+  } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("resolve is bidirectional and only returns promoted directories by description", async () => {
@@ -221,8 +241,8 @@ test("relocation keeps identity and use, and refuses to overwrite another entry"
 test("the same path on two devices is two places, and recall is device-scoped by default", async () => {
   const { store, registry } = await fixture();
   try {
-    registry.registerDevice({ id: "laptop", name: "Laptop", device_kind: "local", host_kind: "local", health: "healthy" });
-    registry.registerDevice({ id: "build-01", name: "Build server", device_kind: "ssh", host_kind: "cloud", location: "us-east" });
+    registry.registerDevice({ id: "laptop", name: "Laptop", device_kind: "local", host_kind: "local", health: "healthy", device_note: "主力开发机" });
+    registry.registerDevice({ id: "build-01", name: "Build server", device_kind: "ssh", host_kind: "cloud", location: "us-east", device_note: "远程构建机" });
     const laptop = registry.record({ path: "C:\\work\\billing", description: "billing checkout", device_id: "laptop", device_kind: "local", promote: true }) as unknown as FileDirDescRecord;
     const server = registry.record({ path: "C:\\work\\billing", description: "billing checkout", device_id: "build-01", device_kind: "ssh", promote: true }) as unknown as FileDirDescRecord;
     assert.notEqual(laptop.id, server.id, "two devices must not share one place record");
@@ -239,8 +259,8 @@ test("a repository identity lets two devices recall the same checkout, and never
   const { store, registry } = await fixture();
   try {
     const repo = { remote_url: "https://github.com/acme/billing.git", commit: "abc1234" };
-    registry.registerDevice({ id: "laptop", name: "Laptop", device_kind: "local", host_kind: "local" });
-    registry.registerDevice({ id: "build-01", name: "Build server", device_kind: "ssh", host_kind: "cloud", location: "us-east" });
+    registry.registerDevice({ id: "laptop", name: "Laptop", device_kind: "local", host_kind: "local", device_note: "主力开发机" });
+    registry.registerDevice({ id: "build-01", name: "Build server", device_kind: "ssh", host_kind: "cloud", location: "us-east", device_note: "远程构建机" });
     registry.record({ path: "C:\\work\\billing", description: "billing monorepo", device_id: "laptop", repo_identity: repo, promote: true });
     registry.record({ path: "/srv/billing", description: "billing monorepo", device_id: "build-01", repo_identity: repo, promote: true });
     const recalled = asResults(registry.resolve({ description: "billing", repo_identity: { remote_url: "https://github.com/acme/billing" } }));

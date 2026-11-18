@@ -63,6 +63,59 @@ test("session-only Hook events join one generated turn and stop cannot finalize 
   } finally { await dispose(f); }
 });
 
+test("trusted input and Context Mods change the real prompt query and inject bounded Context additions", async () => {
+  const f = await fixture();
+  try {
+    const packageRoot = join(f.root, "uppercase-mod");
+    await mkdir(packageRoot);
+    await writeFile(join(packageRoot, "register.mjs"), `export function register(on) {
+      on("craft.input.receive@1", () => ({ kind: "continue" }));
+      on("craft.input.submit@1", (event) => ({ kind: "patch", patch: { text: event.text.toUpperCase() } }));
+      on("craft.context.assemble@1", () => ({ kind: "patch", patch: { context_additions: ["Use the project migration guide."] } }));
+    }\n`);
+    f.service.modRuntimeStage({ manifest: { id: "uppercase-prompt", name: "uppercase prompt", version: "1.0.0", entry: "register.mjs",
+      hooks: [{ event: "craft.input.receive@1", capability: "event.observe" },
+        { event: "craft.input.submit@1", capability: "event.patch" },
+        { event: "craft.context.assemble@1", capability: "event.patch" }], capabilities: ["event.observe", "event.patch"] }, package_root: packageRoot });
+    const review = f.service.modRuntimeReview({ mod_id: "uppercase-prompt" }) as JsonObject;
+    f.service.modRuntimeTrust({ mod_id: "uppercase-prompt", code_digest: review.code_digest,
+      permission_digest: review.permission_digest, actor: "user:test" });
+    const bridge = new CodexHookBridge(f.service);
+    const output = await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "mod-query", turn_id: "mod-query-turn", prompt: "find a matching workflow" });
+    const received = f.store.list("mod_runtime_receipt", 10, item => item.event === "craft.input.receive@1")[0];
+    assert.equal((received?.result as JsonObject).text, "find a matching workflow");
+    const receipt = f.store.list("mod_runtime_receipt", 10, item => item.event === "craft.input.submit@1")[0];
+    assert.equal((receipt?.result as JsonObject).text, "FIND A MATCHING WORKFLOW");
+    const workingSet = f.store.list("context_working_set_receipt", 10, item => item.session_id === "mod-query")[0];
+    assert.equal(workingSet?.query_digest, stableDigest("FIND A MATCHING WORKFLOW"));
+    assert.deepEqual(JSON.parse(String(output.additionalContext)).mod_context_additions, ["Use the project migration guide."]);
+  } finally { await dispose(f); }
+});
+
+test("Codex SessionStart and SessionEnd reach trusted Mod lifecycle observers once per Host session event", async () => {
+  const f = await fixture();
+  try {
+    const packageRoot = join(f.root, "session-mod"); await mkdir(packageRoot);
+    await writeFile(join(packageRoot, "register.mjs"), `export function register(on) {
+      on("craft.session.lifecycle@1", () => ({ kind: "continue" }));
+    }\n`);
+    f.service.modRuntimeStage({ manifest: { id: "session-observer", name: "Session observer", version: "1.0.0", entry: "register.mjs",
+      hooks: [{ event: "craft.session.lifecycle@1", capability: "event.observe" }], capabilities: ["event.observe"] }, package_root: packageRoot });
+    const review = f.service.modRuntimeReview({ mod_id: "session-observer" }) as JsonObject;
+    f.service.modRuntimeTrust({ mod_id: "session-observer", code_digest: review.code_digest,
+      permission_digest: review.permission_digest, actor: "user:test" });
+    const bridge = new CodexHookBridge(f.service);
+    const base = { cwd: f.root, session_id: "mod-lifecycle-session" };
+    await bridge.handle("context", { ...base, hook_event_name: "SessionStart" });
+    await bridge.handle("context", { ...base, hook_event_name: "SessionEnd" });
+    const receipts = f.store.list("mod_runtime_receipt", 10, item => item.event === "craft.session.lifecycle@1")
+      .sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
+    assert.deepEqual(receipts.map(item => (item.result as JsonObject).status), ["started", "ended"]);
+    assert.equal(receipts[0]?.host, "codex");
+    assert.equal(f.store.list("mod_runtime_delivery", 10).length, 2);
+  } finally { await dispose(f); }
+});
+
 test("Hook-mode PostToolUse persists its journal signal without a per-event SQLite Trace", async () => {
   const f = await fixture();
   const prior = process.env.CRAFT_HOOK_MODE;
@@ -557,9 +610,26 @@ test("Hook signal sanitizer accepts only local edit or verification metadata", (
   assert.equal(sanitizer.signal({ tool: { name: "Bash" }, input: { script: "go test ./..." }, output: { status: "passed" } })?.kind, "verification");
   assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "git apply patch.diff" }, tool_response: { exit_code: "error" } })?.outcome, "failed");
   assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "pnpm test" } })?.outcome, "unknown");
+  assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "node --experimental-strip-types --test tests/craft-notes.test.ts" }, tool_response: { exit_code: 0 } })?.kind, "verification");
+  assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "pnpm run build:core && node --experimental-strip-types --test tests/craft-notes.test.ts" }, tool_response: { exit_code: 0 } }), null);
   assert.equal(sanitizer.signal({ tool_name: "unknown" }), null);
   assert.equal(sanitizer.signal({}), null);
   assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "echo hello" } }), null);
+});
+
+test("Stop accepts a passing Node TypeScript test run after the last edit", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "node-strip-types-verification", turn_id: "node-strip-types-turn" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "modify and verify" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "edit" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "test",
+      tool_input: { command: "node --experimental-strip-types --test tests/craft-notes.test.ts" }, tool_response: { exit_code: 0 } });
+    const journal = bridge.journal.find(base)!;
+    assert.equal(journal.verification_outcome, "passed");
+    const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert.equal(stop.systemMessage, undefined);
+  } finally { await dispose(f); }
 });
 
 test("Knowledge, Memory and Experience hooks resolve only their named Context member", async () => {

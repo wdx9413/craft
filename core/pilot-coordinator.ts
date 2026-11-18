@@ -20,7 +20,7 @@ export interface CoordinatorDirectory {
   workspace_id: string | null;
   name: string;
   root_path: string;
-  /** A human description of what lives here, from the `craft-file-dir-desc` registry. */
+  /** A human description of what lives here, from the Craft Notes registry. */
   description: string | null;
 }
 

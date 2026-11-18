@@ -451,6 +451,22 @@ export class CodexHookBridge {
   private async dispatch(member: CodexHookMember, input: HookInput, projectScope: HookProjectScope | null): Promise<JsonObject> {
       const event = text(input.hook_event_name) as HookEvent | null;
       input = this.correlateTurn(input, event, projectScope);
+      if ((event === "SessionStart" || event === "SessionEnd") && text(input.session_id)) {
+        const sessionId = text(input.session_id)!;
+        const scope = projectScope ? { scope_kind: projectScope.kind, scope_id: projectScope.id,
+          ...(projectScope.kind === "project" ? { project_id: projectScope.id } : {}) }
+          : { scope_kind: "global", scope_id: "global" };
+        if (this.service.modRuntimeHasTrustedEvent("craft.session.lifecycle@1", scope)) {
+          const status = event === "SessionStart" ? "started" : "ended";
+          const deliveryId = `mod_session_${stableDigest({ host: hookHost(input), session_id: sessionId, status, scope }).slice(-32)}`;
+          try {
+            await this.service.modRuntimeDispatch({ event: "craft.session.lifecycle@1", host: hookHost(input), ...scope, delivery_id: deliveryId,
+              input: { session_id: sessionId, status, scope_kind: scope.scope_kind, scope_id: scope.scope_id } });
+          } catch {
+            this.service.store.appendEvent("codex-hook", "codex_hook.mod_lifecycle_failed", { event, host: hookHost(input), error_type: "mod_runtime_failure" });
+          }
+        }
+      }
       if (member === "context") {
         if (event === "SessionStart") return {};
         if (event === "SessionEnd") {
@@ -520,6 +536,46 @@ export class CodexHookBridge {
   private async prompt(member: CodexHookMember, input: HookInput, scope: HookProjectScope | null): Promise<JsonObject> {
     const prompt = text(input.prompt) ?? text(input.user_prompt);
     if (!scope || !prompt) return {};
+    const sessionId = text(input.session_id);
+    const turnId = text(input.turn_id);
+    const taskId = text(input.task_id);
+    const runtimeScope = { scope_kind: scope.kind, scope_id: scope.id, project_id: scope.kind === "project" ? scope.id : undefined,
+      ...(taskId ? { task_id: taskId } : {}) };
+    const deliveryId = (event: string) => turnId ? `mod_hook_${stableDigest({ event, scope, session_id: sessionId, turn_id: turnId }).slice(-32)}` : undefined;
+    if (this.service.modRuntimeHasTrustedEvent("craft.input.receive@1", runtimeScope)) {
+      try {
+        await this.service.modRuntimeDispatch({ event: "craft.input.receive@1", host: hookHost(input), ...runtimeScope,
+          ...(deliveryId("craft.input.receive@1") ? { delivery_id: deliveryId("craft.input.receive@1") } : {}),
+          input: { text: prompt, ...(sessionId ? { session_id: sessionId } : {}), ...(taskId ? { task_id: taskId } : {}) } });
+      } catch { /* Input receipt observers cannot block prompt submission. */ }
+    }
+    let effectivePrompt = prompt;
+    if (this.service.modRuntimeHasTrustedEvent("craft.input.submit@1", runtimeScope)) {
+      const inputResult = await this.service.modRuntimeDispatch({ event: "craft.input.submit@1", host: hookHost(input),
+        ...(deliveryId("craft.input.submit@1") ? { delivery_id: deliveryId("craft.input.submit@1") } : {}), ...runtimeScope,
+        input: { text: prompt, ...(sessionId ? { session_id: sessionId } : {}), ...(text(input.task_id) ? { task_id: text(input.task_id)! } : {}) } });
+      if (inputResult.status === "rejected" || inputResult.status === "failed") return {};
+      const submitted = inputResult.result as JsonObject;
+      effectivePrompt = typeof submitted.text === "string" ? submitted.text : prompt;
+    }
+    let effectiveQuery = effectivePrompt;
+    let modContextAdditions: string[] = [];
+    if (this.service.modRuntimeHasTrustedEvent("craft.context.assemble@1", runtimeScope)) {
+      const contextResult = await this.service.modRuntimeDispatch({ event: "craft.context.assemble@1", host: hookHost(input),
+        ...(deliveryId("craft.context.assemble@1") ? { delivery_id: deliveryId("craft.context.assemble@1") } : {}), ...runtimeScope,
+        input: { query: effectivePrompt, scope_kind: scope.kind, scope_id: scope.id,
+          ...(sessionId ? { session_id: sessionId } : {}), ...(text(input.task_id) ? { task_id: text(input.task_id)! } : {}) } });
+      if (contextResult.status === "rejected" || contextResult.status === "failed") return {};
+      const assembled = contextResult.result as JsonObject;
+      effectiveQuery = typeof assembled.query === "string" ? assembled.query : effectivePrompt;
+      if (assembled.context_additions !== undefined) {
+        if (!Array.isArray(assembled.context_additions) || assembled.context_additions.length > 5
+          || assembled.context_additions.some((item) => typeof item !== "string" || !item.trim() || item.length > 2_000 || SECRET.test(item))) {
+          throw new Error("Mod Context additions must be at most five non-empty, secret-free strings of at most 2000 characters");
+        }
+        modContextAdditions = [...assembled.context_additions] as string[];
+      }
+    }
     const members = member === "context" ? CONTEXT_MEMBERS : [member];
     // Persist the current checkout only as an alias. The receipt still names the
     // canonical Git identity, so it is portable and does not leak the path.
@@ -555,8 +611,7 @@ export class CodexHookBridge {
         }
       }
     }
-    const sessionId = text(input.session_id);
-    const resolved = await this.service.contextWorkingSets.resolve({ query: prompt, session_id: sessionId ?? undefined, session_scope_id: sessionId ?? undefined, session_host: hookHost(input), turn_id: text(input.turn_id) ?? undefined, scope_kind: scope.kind, scope_id: scope.id,
+    const resolved = await this.service.contextWorkingSets.resolve({ query: effectiveQuery, session_id: sessionId ?? undefined, session_scope_id: sessionId ?? undefined, session_host: hookHost(input), turn_id: turnId ?? undefined, scope_kind: scope.kind, scope_id: scope.id,
       members: [...members], include_global: true });
     const items = resolved.items as JsonObject[];
     const contributions = resolved.contributions as JsonObject[];
@@ -582,7 +637,8 @@ export class CodexHookBridge {
       let available: HookEmissionCandidate[] = candidateRefs ?? candidates.map(candidate => ({ candidate, ref: null }));
       available = available.map(entry => ({ ...entry, candidate: { ...entry.candidate, output: { ...entry.candidate.output } } }));
       const response = (selected: JsonObject[]) => JSON.stringify({ source: `craft-${member}`, scope, receipt_id: receipt?.id ?? null,
-        ...(captureSummary ? { memory_capture: captureSummary } : {}), selected });
+        ...(captureSummary ? { memory_capture: captureSummary } : {}),
+        ...(modContextAdditions.length ? { mod_context_additions: modContextAdditions } : {}), selected });
       let selected = available.map(entry => entry.candidate.output);
       let additionalContext = response(selected);
       while (selected.length > 0 && estimateTokens(additionalContext) > HOOK_ADDITIONAL_CONTEXT_BUDGET[member]) {
@@ -595,14 +651,14 @@ export class CodexHookBridge {
         if (longest >= 0) {
           const output = available[longest]!.candidate.output;
           const content = String(output.content);
-          available[longest]!.candidate.output = compactHookItem(output, prompt, Math.max(32, Math.floor(content.length / 2)));
+          available[longest]!.candidate.output = compactHookItem(output, effectiveQuery, Math.max(32, Math.floor(content.length / 2)));
         } else available = available.slice(0, -1);
         selected = available.map(entry => entry.candidate.output);
         additionalContext = response(selected);
       }
       if (estimateTokens(additionalContext) > HOOK_ADDITIONAL_CONTEXT_BUDGET[member]) return {};
       if (resolvedRefs && available.length > 0) {
-        const novelRefs = this.service.contextWorkingSets.claimEmission({ query: prompt, session_id: sessionId ?? undefined,
+        const novelRefs = this.service.contextWorkingSets.claimEmission({ query: effectiveQuery, session_id: sessionId ?? undefined,
           turn_id: text(input.turn_id) ?? undefined, scope_kind: scope.kind, scope_id: scope.id }, { asset_refs: available.map(entry => entry.ref!), receipt });
         available = available.filter(entry => novelRefs.some(ref => contextAssetMatches(ref, entry.ref!)));
         selected = available.map(entry => entry.candidate.output);
@@ -611,7 +667,7 @@ export class CodexHookBridge {
       for (const component of members) this.service.activationProofRecord({ host: hookHost(input), component, event: "UserPromptSubmit", session_id: text(input.session_id) ?? "unknown",
         turn_id: text(input.turn_id), context_receipt_id: receipt?.id ?? undefined, memory_written: component === "memory" && memoryWritten, observation_written: false,
         plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
-      if (!selected.length && !captureSummary) return {};
+      if (!selected.length && !captureSummary && !modContextAdditions.length) return {};
       return { additionalContext };
     });
   }

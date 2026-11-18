@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { type AddressInfo } from "node:net";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -1047,6 +1047,30 @@ test("Workbench exposes workspace listing and non-destructive task workspace bin
   } finally { f.store.close(); }
 });
 
+test("Workbench task creation emits the real task lifecycle Mod event", async () => {
+  const f = await fixture();
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  const packageRoot = path.join(f.store.paths.root, "task-observer"); await mkdir(packageRoot);
+  await writeFile(path.join(packageRoot, "register.mjs"), `export function register(on) {
+    on("craft.task.lifecycle@1", () => ({ kind: "continue" }));
+  }\n`);
+  try {
+    f.service.modRuntimeStage({ manifest: { id: "task-observer", name: "Task observer", version: "1.0.0", entry: "register.mjs",
+      hooks: [{ event: "craft.task.lifecycle@1", capability: "event.observe" }], capabilities: ["event.observe"] }, package_root: packageRoot });
+    const review = f.service.modRuntimeReview({ mod_id: "task-observer" }) as JsonObject;
+    f.service.modRuntimeTrust({ mod_id: "task-observer", code_digest: review.code_digest,
+      permission_digest: review.permission_digest, actor: "user:test" });
+    const created = await app.handleAsync({ method: "POST", path: "/api/tasks", token: "secret",
+      body: JSON.stringify({ title: "Observed task", goal: "task lifecycle" }) });
+    assert.equal(created.status, 201);
+    const createdBody = JSON.parse(created.body) as JsonObject;
+    const taskId = String((createdBody.task as JsonObject).id);
+    const receipt = f.store.list("mod_runtime_receipt", 10, item => item.event === "craft.task.lifecycle@1")[0];
+    assert.equal((receipt?.result as JsonObject).task_id, taskId);
+    assert.equal(receipt?.host, "workbench");
+  } finally { const root = f.store.paths.root; f.store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("Workbench approval grants are exact, workspace-bound and revocable over HTTP", async () => {
   const f = await fixture();
   const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
@@ -1798,4 +1822,41 @@ test("Workbench serves directory-semantics withdrawal and relocation as attribut
     await rm(directory, { recursive: true, force: true });
     if (next) await rm(next, { recursive: true, force: true });
   }
+});
+
+test("Workbench Craft Notes routes require auth and expose onboarding, candidate review and scoped resolve", async () => {
+  const f = await fixture();
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  const call = (method: string, path: string, body?: unknown, token = "secret") => app.handle({ method, path, token,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  try {
+    assert.equal(call("GET", "/api/workbench/notes/devices", undefined, "").status, 401);
+    assert.equal(call("POST", "/api/workbench/notes/devices", { id: "notes-device" }).status, 422);
+    const device = JSON.parse(call("POST", "/api/workbench/notes/devices", {
+      id: "notes-device", name: "工作站", note: "主力开发机，运行本地模型",
+    }).body);
+    assert.equal(device.status, "confirmed");
+    const candidateResponse = call("POST", "/api/workbench/notes/observe-directory", {
+      path: "/work/important", device_id: "notes-device", pin: true, note: "重要源码目录",
+    });
+    assert.equal(candidateResponse.status, 201);
+    const candidate = JSON.parse(candidateResponse.body).note;
+    assert.equal(candidate.status, "candidate");
+    assert.equal(JSON.parse(call("GET", "/api/workbench/notes/candidates?device_id=notes-device").body).items.length, 1);
+    assert.equal(call("POST", `/api/workbench/notes/${candidate.id}/confirm`, { note: "核心服务源码" }).status, 422);
+    assert.equal(call("POST", `/api/workbench/notes/${candidate.id}/confirm`, { expected_version: candidate.version + 1 }).status, 422);
+    const confirmedResponse = call("POST", `/api/workbench/notes/${candidate.id}/confirm`, { expected_version: candidate.version, note: "核心服务源码" });
+    assert.equal(confirmedResponse.status, 200);
+    const confirmed = JSON.parse(confirmedResponse.body);
+    assert.equal(JSON.parse(call("POST", "/api/workbench/notes/resolve", {
+      device_id: "notes-device", path: "/work/important",
+    }).body).items.some((item: JsonObject) => item.text === "核心服务源码"), true);
+    assert.equal(call("POST", `/api/workbench/notes/${candidate.id}/revoke`, { revoked_by: "user", reason: "moved" }).status, 422);
+    assert.equal(call("POST", `/api/workbench/notes/${candidate.id}/revoke`, { expected_version: confirmed.version + 1, revoked_by: "user", reason: "moved" }).status, 422);
+    assert.equal(call("POST", `/api/workbench/notes/${candidate.id}/revoke`, { expected_version: confirmed.version, revoked_by: "user", reason: "moved" }).status, 200);
+    assert.equal(JSON.parse(call("POST", "/api/workbench/notes/resolve", {
+      device_id: "notes-device", path: "/work/important",
+    }).body).items.some((item: JsonObject) => item.id === candidate.id), false);
+    assert.equal(call("POST", "/api/workbench/notes/unknown/confirm").status, 422);
+  } finally { f.store.close(); }
 });

@@ -15,7 +15,6 @@
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { type CraftStore, type JsonObject } from "./infrastructure/store.ts";
-import { validateConceptBody } from "craft-common-ontology/validation";
 
 /**
  * Content-addressed identity of a real regression run, bound to the candidate body.
@@ -403,7 +402,7 @@ function text(value: unknown, name: string): string {
 function bodyText(value: unknown): string {
   if (typeof value !== "string") throw new Error("body must be a string");
   if (value.length > 20_000) throw new Error("body must be 20000 characters or fewer");
-  return validateConceptBody(value, "body");
+  return value;
 }
 
 function boundedActor(value: unknown, name: string): string {

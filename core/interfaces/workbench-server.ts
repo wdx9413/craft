@@ -593,7 +593,8 @@ export class WorkbenchWebApp {
         dsh_host: this.service.dshPluginHost.status(),
       });
       if (request.method === "GET" && path === "/api/workbench/contributions") return json(200, this.service.workbenchPluginContributions({
-        workspace_id: queryValue(url, "workspace_id"), context: queryValue(url, "context") ?? "project" }));
+        workspace_id: queryValue(url, "workspace_id"), context: queryValue(url, "context") ?? "project",
+        platform: queryValue(url, "platform") ?? undefined }));
       if (request.method === "POST" && path === "/api/workbench/plugins") return json(201, this.service.workbenchPluginInstall(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/workbench/plugins/install-directory") return json(201, this.service.workbenchPluginInstallFromDirectory(bodyObject(request.body)));
       if (request.method === "GET" && path.startsWith("/api/workbench/plugins/") && path.endsWith("/pages")) {
@@ -632,7 +633,7 @@ export class WorkbenchWebApp {
       if (request.method === "POST" && path === "/api/workbench/memory/conflicts/resolve") return json(200, this.service.workbenchMemoryConflictResolve(bodyObject(request.body)));
       // Retiring a live ledger memory is a signed, version-checked human action.
       if (request.method === "POST" && path === "/api/workbench/memory/ledger/transition") return json(200, this.service.workbenchMemoryLedgerTransition(bodyObject(request.body)));
-      // craft-file-dir-desc: directory <-> semantic description, bidirectional, self-evolving.
+      // Craft Notes: directory <-> semantic note, bidirectional, self-evolving.
       if (request.method === "POST" && path === "/api/workbench/file-dir-desc/record") return json(201, this.service.fileDirDescRecord(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/workbench/file-dir-desc/promote") return json(200, this.service.fileDirDescPromote(bodyObject(request.body)));
       // NEEDREAD 16 (目录语义): correction, relocation and withdrawal are separate,
@@ -640,6 +641,22 @@ export class WorkbenchWebApp {
       if (request.method === "POST" && path === "/api/workbench/file-dir-desc/relocate") return json(200, this.service.fileDirDescRelocate(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/workbench/file-dir-desc/revoke") return json(200, this.service.fileDirDescRevoke(bodyObject(request.body)));
       if (request.method === "GET" && path === "/api/workbench/file-dir-desc/resolve") return json(200, this.service.fileDirDescResolve({ description: queryValue(url, "description"), path: queryValue(url, "path"), limit: queryValue(url, "limit") }));
+      if (request.method === "GET" && path === "/api/workbench/notes/devices") return json(200, this.service.fileDirDescListDevices({ limit: queryValue(url, "limit") }));
+      if (request.method === "POST" && path === "/api/workbench/notes/devices") return json(201, this.service.craftNotesCreateDevice(bodyObject(request.body)));
+      if (request.method === "GET" && path === "/api/workbench/notes/candidates") return json(200, this.service.craftNotesCandidateList({ device_id: queryValue(url, "device_id"), limit: queryValue(url, "limit") }));
+      if (request.method === "POST" && path === "/api/workbench/notes/observe-directory") return json(201, this.service.craftNotesObserveDirectory(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/workbench/notes/observe-file") return json(201, this.service.craftNotesObserveFile(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/workbench/notes/resolve") return json(200, this.service.craftNotesResolve(bodyObject(request.body)));
+      if (request.method === "POST" && path.startsWith("/api/workbench/notes/") && path.endsWith("/confirm")) {
+        const noteId = decodeURIComponent(path.slice("/api/workbench/notes/".length, -"/confirm".length));
+        if (!noteId || noteId.includes("/")) return json(404, { error: "Not found" });
+        return json(200, this.service.craftNotesConfirm({ ...bodyObject(request.body), id: noteId }));
+      }
+      if (request.method === "POST" && path.startsWith("/api/workbench/notes/") && path.endsWith("/revoke")) {
+        const noteId = decodeURIComponent(path.slice("/api/workbench/notes/".length, -"/revoke".length));
+        if (!noteId || noteId.includes("/")) return json(404, { error: "Not found" });
+        return json(200, this.service.craftNotesRevoke({ ...bodyObject(request.body), id: noteId }));
+      }
       // Mod 内核：认知约束的 draft -> approve -> active 生命周期，以及 Worker 上下文注入。
       if (request.method === "POST" && path === "/api/workbench/mods") return json(201, this.service.modCreate(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/workbench/mods/propose-from-attribution") return json(201, this.service.modProposeFromAttribution(bodyObject(request.body)));
@@ -718,6 +735,74 @@ export class WorkbenchWebApp {
    */
   async handleAsync(request: WebRequest): Promise<WebResponse> {
     const url = new URL(request.path, this.origin); const path = url.pathname;
+    const rolloutProjectApproval = path.match(/^\/api\/workbench\/mods\/([^/]+)\/rollout\/authorize-project$/u);
+    if (request.method === "POST" && rolloutProjectApproval) {
+      if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
+      if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
+      try { return json(200, await this.service.modRuntimeRolloutAuthorizeProject({
+        ...bodyObject(request.body), mod_id: decodeURIComponent(rolloutProjectApproval[1]!), actor: "user:local-workbench",
+      })); } catch (error) { return failure(error); }
+    }
+    const taskRunRefresh = path.match(/^\/api\/task-runs\/([^/]+)\/refresh$/u);
+    if (request.method === "POST" && taskRunRefresh) {
+      if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
+      if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
+      try {
+        const taskRunId = decodeURIComponent(taskRunRefresh[1]!);
+        const refreshed = this.service.taskRunRefresh({ ...bodyObject(request.body), task_run_id: taskRunId });
+        const run = this.service.store.get("task_run", taskRunId);
+        const taskId = String((run.launch_identity as JsonObject).task_id);
+        const task = this.service.store.find("task", taskId);
+        const projectId = task ? String(task.workspace_id ?? task.project_id ?? "") : "";
+        const scope = projectId ? { scope_kind: "project", scope_id: projectId, project_id: projectId, task_id: taskId }
+          : { scope_kind: "task", scope_id: taskId, task_id: taskId };
+        if (this.service.modRuntimeHasTrustedEvent("craft.task.lifecycle@1", scope)) {
+          const state = refreshed.state as JsonObject;
+          try {
+            const launch = this.service.store.get("work_launch", String(run.launch_id));
+            const hostRun = launch.run_id ? this.service.store.find("host_run", String(launch.run_id)) : null;
+            const acceptance = launch.acceptance_plan_id
+              ? this.service.store.find("acceptance_assessment", `assessment_${launch.acceptance_plan_id}`) : null;
+            const persistedDeliveryId = `mod_work_delivery_${taskRunId}_${launch.version}_${hostRun?.version ?? 0}_${acceptance?.version ?? 0}`;
+            const delivery = this.service.workDeliveryObserve({ launch_id: launch.id, delivery_id: persistedDeliveryId }) as JsonObject;
+            const deliveryRecord = delivery.delivery as JsonObject;
+            const eventDeliveryId = `mod_task_run_${taskRunId}_${String(state.version ?? 1)}`;
+            await this.service.modRuntimeDispatch({ event: "craft.task.lifecycle@1", host: "workbench", ...scope,
+              delivery_id: eventDeliveryId,
+              input: { task_id: taskId, task_run_id: taskRunId, delivery_id: String(deliveryRecord.id),
+                status: String(state.status), action: String(state.action), scope_kind: scope.scope_kind, scope_id: scope.scope_id } });
+          }
+          catch { /* Task outcome observers cannot change the Host receipt or acceptance decision. */ }
+        }
+        return json(200, refreshed);
+      } catch (error) { return failure(error); }
+    }
+    if (request.method === "POST" && path === "/api/tasks") {
+      if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
+      if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
+      try {
+        const created = this.service.taskOpen(bodyObject(request.body));
+        const task = created.task as JsonObject;
+        const taskId = String(task.id);
+        const projectId = String(task.workspace_id ?? task.project_id ?? "");
+        const scope = projectId ? { scope_kind: "project", scope_id: projectId, project_id: projectId, task_id: taskId }
+          : { scope_kind: "task", scope_id: taskId, task_id: taskId };
+        if (this.service.modRuntimeHasTrustedEvent("craft.task.lifecycle@1", scope)) {
+          try { await this.service.modRuntimeDispatch({ event: "craft.task.lifecycle@1", host: "workbench", ...scope,
+            input: { task_id: taskId, status: String(task.status ?? "open"), scope_kind: scope.scope_kind, scope_id: scope.scope_id } }); }
+          catch { /* Lifecycle observers cannot undo an already-created task. */ }
+        }
+        return json(201, created);
+      } catch (error) { return failure(error); }
+    }
+    const modUiAction = path.match(/^\/api\/workbench\/mods\/([^/]+)\/contributions\/([^/]+)\/actions\/([^/]+)$/u);
+    if (request.method === "POST" && modUiAction) {
+      if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
+      if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
+      try { return json(200, await this.service.modRuntimeUiInteract({
+        ...bodyObject(request.body), mod_id: decodeURIComponent(modUiAction[1]!), contribution_id: decodeURIComponent(modUiAction[2]!), action_id: decodeURIComponent(modUiAction[3]!),
+      })); } catch (error) { return failure(error); }
+    }
     // API keys typed in the Workbench live in an owner-only secrets.json. The
     // GET never returns a value, only which env-var names are configured.
     if (path === "/api/settings/secrets") {
