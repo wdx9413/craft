@@ -488,7 +488,7 @@ export class CraftService extends ServiceFoundation {
   fileDirDescResolve(args: JsonObject): JsonObject { return this.fileDirDesc.resolve(args); }
   fileDirDescList(args: JsonObject = {}): JsonObject { return this.fileDirDesc.list(args); }
 
-  fileDirDescRegisterDevice(args: JsonObject): JsonObject { return this.fileDirDesc.registerDevice(args) as unknown as JsonObject; }
+  fileDirDescRegisterDevice(args: JsonObject): JsonObject { return this.fileDirDesc.registerDevice(args as unknown as Parameters<FileDirDescRegistry["registerDevice"]>[0]) as unknown as JsonObject; }
   fileDirDescDevice(args: JsonObject): JsonObject { return this.fileDirDesc.device(text(args.id, "id")) as unknown as JsonObject; }
   fileDirDescListDevices(args: JsonObject = {}): JsonObject { return this.fileDirDesc.listDevices(args); }
   fileDirDescDisableDevice(args: JsonObject): JsonObject { return this.fileDirDesc.disableDevice(text(args.id, "id")) as unknown as JsonObject; }

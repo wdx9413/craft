@@ -22,6 +22,17 @@ async function fixture() {
   return { root, store, registry };
 }
 
+test("the implicit local device remains recallable when it has no explicit device row", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-fdd-implicit-local-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const registry = new FileDirDescRegistry(store);
+    const record = registry.record({ path: join(root, "project"), description: "local project" }) as unknown as FileDirDescRecord;
+    registry.promote({ id: record.id });
+    assert.equal(asResults(registry.resolve({ description: "local project" })).length, 1);
+  } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("recording a directory only observes it until it is used often enough", async () => {
   const { store, registry } = await fixture();
   try {

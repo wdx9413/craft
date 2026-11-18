@@ -15,7 +15,8 @@ const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs", "craft-mcp-http.cj
 const targetBundleDirectory = resolve(pluginRoot, "dist", "plugin");
 const components = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
 const pluginsRoot = resolve(root, "plugins");
-const codebaseAnalyzers = resolve(root, "..", "craft-capability", "capability", "craft-codebase", "analyzers");
+const codebasePackageJson = fileURLToPath(import.meta.resolve("@craft/capability-codebase/package.json"));
+const codebaseAnalyzers = resolve(dirname(codebasePackageJson), "analyzers");
 
 function insidePlugin(path: string): boolean {
   return path === pluginRoot || path.startsWith(`${pluginRoot}/`) || path.startsWith(`${pluginRoot}\\`);
