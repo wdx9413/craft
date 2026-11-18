@@ -687,15 +687,14 @@ export class CodexHookBridge {
       if (statement && sessionId) {
         try {
           this.service.store.bindSessionStorageHost(sessionId, hookHost(input));
-          const capture = explicitStatement ? this.service.memoryCaptureUserStatement.bind(this.service) : this.service.memoryCaptureObservedFact.bind(this.service);
-          const captured = capture({ content: statement, kind: "preference", session_id: sessionId, session_host: hookHost(input),
+          const captured = this.service.memoryCaptureUserStatement({ content: statement, kind: "preference", session_id: sessionId, session_host: hookHost(input),
             scope_kind: "session", scope_id: sessionId, project_scope_id: scope.id, project_root: input.cwd, sensitivity: "internal" });
           memoryWritten = captured.auto_committed === true;
           captureSummary = { candidate_id: (captured.candidate as JsonObject | null)?.id ?? null, next_action: captured.next_action,
             ...(statement.length <= 32 ? { captured_fact: statement } : {}),
             topic_suggestions: Array.isArray(captured.topic_suggestions) ? captured.topic_suggestions.slice(0, 2) : [],
             promotions: Array.isArray(captured.promotions) ? (captured.promotions as JsonObject[]).map(item => ({ tier: item.tier, auto_committed: item.auto_committed === true })) : [],
-            capture_mode: explicitStatement ? "explicit" : "automatic_stable_fact", memory_written: memoryWritten };
+            capture_mode: "explicit", memory_written: memoryWritten };
         } catch (error) {
           this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "memory", event: "UserPromptSubmit", error_type: error instanceof Error ? error.name : "unknown" });
         }
