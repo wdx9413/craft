@@ -4,6 +4,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { HookSignalSanitizer } from "../core/interfaces/codex-hook-signal-sanitizer.ts";
 import { randomUUID } from "node:crypto";
 import { beginHookRuntimeDiagnostic, hookStorageFailureDetails } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
+import { formatCodexHookOutput } from "../core/interfaces/codex-hook-output.ts";
 import { operationErrorCode } from 'craft-common-log/index';
 import { launchMemoryArchiveWorker, MEMORY_ARCHIVE_WORKER_FLAG } from "../core/interfaces/memory-archive-launcher.ts";
 
@@ -97,7 +98,7 @@ async function main(): Promise<void> {
     try { output = await new CodexHookBridge(service, () => { if (process.argv[1]) launchMemoryArchiveWorker(process.argv[1], store.paths.root); }).handle(component, input); }
     finally { handlerMs = performance.now() - handlerStarted; }
     const outputStarted = performance.now();
-    process.stdout.write(`${JSON.stringify(output)}\n`);
+    process.stdout.write(`${JSON.stringify(formatCodexHookOutput(event, output))}\n`);
     outputWriteMs = performance.now() - outputStarted;
   } catch (error) {
     if (serviceOpenStarted && serviceOpenMs === 0) serviceOpenMs = performance.now() - serviceOpenStarted;

@@ -42,7 +42,16 @@ async function replayFixture(host: "codex" | "claude") {
       try {
         assert.equal(signal, null, stderr);
         assert.equal(code, 0, stderr);
-        resolveResult(JSON.parse(stdout) as JsonObject);
+        const output = JSON.parse(stdout) as JsonObject;
+        if (eventName === "UserPromptSubmit") {
+          assert.equal(output.additionalContext, undefined, "additionalContext must not be emitted as a top-level Codex field");
+          const specific = output.hookSpecificOutput as JsonObject | undefined;
+          if (specific) {
+            assert.equal(specific.hookEventName, "UserPromptSubmit");
+            assert.equal(typeof specific.additionalContext, "string");
+          }
+        }
+        resolveResult(output);
       } catch (error) { reject(error); }
     });
     child.stdin.end(JSON.stringify({ ...base, ...event }));
