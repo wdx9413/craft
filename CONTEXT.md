@@ -83,7 +83,8 @@ _Avoid_: 把所有聊天都存起来、用模型高兴与否决定是否记忆
 _Avoid_: 单次成功轨迹、未经评测的 prompt 片段、能运行就算可复用
 
 **Domain Adapter**：为 coding、office、travel、creation、research 等场景提供提取提示词、价值阈值、证据类型与适用边界的薄适配层。它复用 Craft 的 Knowledge/Memory/Experience/Procedure/Mod 内核，不拥有独立存储或独立晋升门禁。官方只维护核心 adapter，用户/插件可提供候选 adapter，模型只能生成候选而不能直接发布。
-_Avoid_: 每个场景另起一套记忆数据库、把场景提示词当全局规则
+场景是**提示层而不是提取门禁**：没有匹配 adapter 的内容走 `general` 默认分类照常提取，因为 AI 的工作场景是开放集（研发、产品文档、技术方案、API 文档、数据 BI、操作特定产品系统网页等），不可能枚举全。
+_Avoid_: 每个场景另起一套记忆数据库、把场景提示词当全局规则、只有注册了 adapter 的场景才能积累
 
 **Artifact Lineage**：AI 创作与办公场景中的产物谱系，记录素材引用、prompt/参数、生成工具、版本、用户评价与最终选择。它保存引用和元数据而非大文件本体，检索时先按 artifact 类型或模态路由，再做文本相似。
 _Avoid_: 把对象仓库塞进账本、把最新生成结果当事实

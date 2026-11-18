@@ -65,6 +65,8 @@ Record 是事实层，Procedure 是可复用技能层，Mod 是行为约束层�
 
 ### 5. Domain Adapter 只做薄适配，不复制内核
 
+**修正（2026-11-19）**：场景不是提取轴。Value Gate 只看价值类型与五个条件，不看内容属于哪个场景；没有匹配 adapter 的内容走 `general` 默认分类，照常提取。adapter 只是提高提取精度的可选提示层，永远不是提取门禁。
+
 coding、office、travel、creation、research 共用 Craft core。每个 adapter 只定义：
 - 提取提示词/模式
 - 价值阈值
@@ -72,7 +74,15 @@ coding、office、travel、creation、research 共用 Craft core。每个 adapte
 - scope/domain 边界
 - eval case 模板
 
-官方维护少数核心 adapter；用户/插件可提供候选 adapter；模型只能生成候选，不能直接发布 adapter。
+官方维护少数核心 adapter；用户/插件可提供候选 adapter；模型只能生成候选，不能直接发布 adapter。场景是开放集，不可能枚举全，产品文档、技术方案、API 文档、数据与 BI、操作特定产品系统网页等长尾工作必须能通过 `general` 路径被提取。
+
+### 5a. 修正：自进化状态机归 craft-context，不归内核
+
+**修正（2026-11-19）**：原文第 1 条“自进化主运行时仍放在 Craft core”的表述过宽。自进化本质是积累并复用 Knowledge/Memory/Experience/Notes，属于 context 能力。
+
+- `craft/core` 只保留：Value Gate 纯函数契约、hook 触发面、Store/Policy/scope、Context Resolution seam、capability loader。
+- `craft-capability/craft-context` 持有：Program Memory、Domain Adapter 注册表、Artifact Lineage、Prospective Intention、Research Memory Link、Runbook 候选及其编排与 MCP 工具面。
+- 子能力仍各自拥有 collection；capability 通过既有 registry 组合，不在内核里自建第二套状态。
 
 ### 6. 创作与办公采用 Artifact Lineage，不存大文件
 

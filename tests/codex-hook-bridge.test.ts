@@ -75,6 +75,84 @@ test("UserPromptSubmit automatically accumulates conventions into ledger records
   } finally { await dispose(f); }
 });
 
+test("UserPromptSubmit applies value-gate decisions and tolerates non-Error capability failures", async () => {
+  const f = await fixture();
+  const originalEvidence = f.service.evidenceRecord;
+  const originalCapture = f.service.memoryCaptureObservedFact;
+  const originalBind = f.store.bindSessionStorageHost;
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    const ordinary = await bridge.handle("context", {
+      cwd: f.root, session_id: "gate-ordinary", turn_id: "gate-ordinary-1",
+      hook_event_name: "UserPromptSubmit", prompt: "帮我打开网页然后点击登录按钮",
+    });
+    assert.deepEqual(ordinary, {});
+    assert.equal(f.store.count("knowledge_claim"), 0);
+    assert.equal(f.store.count("memory_candidate"), 0);
+
+    let capturedKinds: string[] = [];
+    f.service.memoryCaptureObservedFact = ((args: JsonObject) => {
+      capturedKinds.push(String(args.kind));
+      return originalCapture(args);
+    }) as typeof f.service.memoryCaptureObservedFact;
+    await bridge.handle("memory", {
+      cwd: f.root, session_id: "gate-memory-kind", turn_id: "gate-memory-kind-1",
+      hook_event_name: "UserPromptSubmit", prompt: "本项目使用 pnpm 作为包管理器。我偏好深色模式。",
+    });
+    assert.deepEqual(capturedKinds, ["working"]);
+    const preference = f.store.list("memory_candidate", 100).find((item) => String(item.content ?? "").includes("深色模式"));
+    assert.equal(preference, undefined);
+    const plainFact = f.store.list("memory_candidate", 100).find((item) => String(item.content ?? "").includes("包管理器"));
+    assert.equal(plainFact, undefined);
+
+    f.service.memoryCaptureObservedFact = ((args: JsonObject) => {
+      capturedKinds.push(String(args.kind));
+      return originalCapture(args);
+    }) as typeof f.service.memoryCaptureObservedFact;
+    capturedKinds = [];
+    await bridge.handle("memory", {
+      cwd: f.root, session_id: "gate-preference", turn_id: "gate-preference-1",
+      hook_event_name: "UserPromptSubmit", prompt: "我偏好深色模式",
+    });
+    assert.deepEqual(capturedKinds, ["preference"]);
+    const preferenceRow = f.store.list("memory_candidate", 100).find((item) => String(item.content ?? "").includes("深色模式"));
+    assert.equal(plainFact, undefined);
+    assert.deepEqual(preferenceRow?.tags ?? [], []);
+
+    f.service.evidenceRecord = (() => { throw "evidence unavailable"; }) as typeof f.service.evidenceRecord;
+    const knowledgeFailure = await bridge.handle("knowledge", {
+      cwd: f.root, session_id: "gate-knowledge-failure", turn_id: "gate-knowledge-failure-1",
+      hook_event_name: "UserPromptSubmit", prompt: "以后请优先运行 focused tests",
+    });
+    assert.equal(knowledgeFailure.additionalContext, undefined);
+    f.service.evidenceRecord = originalEvidence;
+
+    f.service.memoryCaptureObservedFact = (() => { throw "memory unavailable"; }) as typeof f.service.memoryCaptureObservedFact;
+    await bridge.handle("memory", {
+      cwd: f.root, session_id: "gate-memory-failure", turn_id: "gate-memory-failure-1",
+      hook_event_name: "UserPromptSubmit", prompt: "我偏好深色模式",
+    });
+    f.service.memoryCaptureObservedFact = originalCapture;
+
+    f.store.bindSessionStorageHost = (() => { throw "storage unavailable"; }) as typeof f.store.bindSessionStorageHost;
+    await bridge.handle("memory", {
+      cwd: f.root, session_id: "gate-storage-failure", turn_id: "gate-storage-failure-1",
+      hook_event_name: "UserPromptSubmit", prompt: "我偏好深色模式",
+    });
+    f.store.bindSessionStorageHost = originalBind;
+
+    const failures = f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.failed");
+    assert.deepEqual(failures.map((event) => (event.payload as JsonObject).error_type).sort(),
+      ["TypeError", "TypeError", "unknown", "unknown", "unknown"]);
+    assert.doesNotMatch(JSON.stringify(failures), /unavailable|opaque failure/u);
+  } finally {
+    f.service.evidenceRecord = originalEvidence;
+    f.service.memoryCaptureObservedFact = originalCapture;
+    f.store.bindSessionStorageHost = originalBind;
+    await dispose(f);
+  }
+});
+
 test("UserPromptSubmit durable accumulation is fail-open for capability errors", async t => {
   const f = await fixture();
   try {
@@ -123,6 +201,33 @@ test("trusted Mod lifecycle failures stay bounded", async t => {
   } finally { t.mock.restoreAll(); await dispose(f); }
 });
 
+test("SessionStart for a component member resolves and reports its own lifecycle scope", async t => {
+  const f = await fixture();
+  try {
+    const calls: JsonObject[] = [];
+    const originalHasTrusted = f.service.modRuntimeHasTrustedEvent;
+    const originalDispatch = f.service.modRuntimeDispatch;
+    f.service.modRuntimeHasTrustedEvent = ((event: string) => {
+      calls.push({ probe: event });
+      return event === "craft.session.lifecycle@1";
+    }) as typeof f.service.modRuntimeHasTrustedEvent;
+    f.service.modRuntimeDispatch = (async (args: JsonObject) => {
+      calls.push(args);
+      return { status: "ok", result: null };
+    }) as typeof f.service.modRuntimeDispatch;
+    const bridge = new CodexHookBridge(f.service);
+    assert.deepEqual(await bridge.handle("knowledge", { cwd: f.root, session_id: "member-lifecycle", hook_event_name: "SessionStart" }), {});
+    const dispatched = calls.find((call) => call.event === "craft.session.lifecycle@1");
+    assert.ok(dispatched, "the lifecycle Mod receives a dispatch");
+    assert.equal(dispatched.scope_kind, "project");
+    assert.equal(dispatched.project_id, codexProjectScope(f.root)!.id);
+    assert.deepEqual((dispatched.input as JsonObject).status, "started");
+    assert.match(String(dispatched.delivery_id), /^mod_session_[a-f0-9]{32}$/u);
+    f.service.modRuntimeHasTrustedEvent = originalHasTrusted;
+    f.service.modRuntimeDispatch = originalDispatch;
+  } finally { await dispose(f); }
+});
+
 test("invalid trusted Mod context additions are rejected", async t => {
   const f = await fixture();
   try {
@@ -134,6 +239,54 @@ test("invalid trusted Mod context additions are rejected", async t => {
     assert.ok(failures.length >= 1);
     assert.doesNotMatch(JSON.stringify(failures), /Mod Context additions/u);
   } finally { t.mock.restoreAll(); await dispose(f); }
+});
+
+test("trusted prompt Mods cover receipt, rejection, task scope and Context addition paths", async t => {
+  const f = await fixture();
+  try {
+    const calls: JsonObject[] = [];
+    const originalHasTrusted = f.service.modRuntimeHasTrustedEvent;
+    const originalDispatch = f.service.modRuntimeDispatch;
+    f.service.modRuntimeHasTrustedEvent = ((event: string) => event !== "craft.context.assemble@1") as typeof f.service.modRuntimeHasTrustedEvent;
+    f.service.modRuntimeDispatch = (async (args: JsonObject) => {
+      calls.push(args);
+      if (args.event === "craft.input.receive@1") throw new Error("receipt unavailable");
+      if (args.event === "craft.input.submit@1") {
+        assert.equal(args.delivery_id, `mod_hook_${stableDigest({ event: "craft.input.submit@1", scope: { kind: "project", id: codexProjectScope(f.root)!.id }, session_id: "prompt-mod", turn_id: "prompt-turn" }).slice(-32)}`);
+        assert.equal((args.input as JsonObject).task_id, "review-task");
+        return { status: "rejected", result: { text: "ignored" } };
+      }
+      return { status: "ok", result: null };
+    }) as typeof f.service.modRuntimeDispatch;
+    const bridge = new CodexHookBridge(f.service);
+    assert.deepEqual(await bridge.handle("context", {
+      hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "prompt-mod", turn_id: "prompt-turn",
+      prompt: "review the patch", task_id: "review-task",
+    }), {});
+    assert.ok(calls.some((call) => call.event === "craft.input.receive@1"));
+    assert.ok(calls.some((call) => call.event === "craft.input.submit@1"));
+
+    calls.length = 0;
+    f.service.modRuntimeDispatch = (async (args: JsonObject) => {
+      calls.push(args);
+      if (args.event === "craft.input.receive@1") return { status: "ok", result: { text: "ignored" } };
+      if (args.event === "craft.input.submit@1") return { status: "failed", result: { text: "ignored" } };
+      return { status: "ok", result: null };
+    }) as typeof f.service.modRuntimeDispatch;
+    assert.deepEqual(await bridge.handle("context", {
+      hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "prompt-mod-failed", turn_id: "prompt-failed-turn",
+      prompt: "review the patch",
+    }), {});
+
+    f.service.modRuntimeHasTrustedEvent = ((event: string) => event === "craft.context.assemble@1") as typeof f.service.modRuntimeHasTrustedEvent;
+    f.service.modRuntimeDispatch = (async () => ({ status: "failed", result: { query: "ignored" } })) as typeof f.service.modRuntimeDispatch;
+    assert.deepEqual(await bridge.handle("context", {
+      hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "context-mod-failed", turn_id: "context-failed-turn",
+      prompt: "review the patch",
+    }), {});
+    f.service.modRuntimeHasTrustedEvent = originalHasTrusted;
+    f.service.modRuntimeDispatch = originalDispatch;
+  } finally { await dispose(f); }
 });
 
 test("session-only Hook events join one generated turn and stop cannot finalize it twice", async () => {
@@ -161,6 +314,7 @@ test("session-only Hook events join one generated turn and stop cannot finalize 
 test("trusted input and Context Mods change the real prompt query and inject bounded Context additions", async () => {
   const f = await fixture();
   try {
+    const receivedCalls: JsonObject[] = [];
     const packageRoot = join(f.root, "uppercase-mod");
     await mkdir(packageRoot);
     await writeFile(join(packageRoot, "register.mjs"), `export function register(on) {
@@ -176,7 +330,15 @@ test("trusted input and Context Mods change the real prompt query and inject bou
     f.service.modRuntimeTrust({ mod_id: "uppercase-prompt", code_digest: review.code_digest,
       permission_digest: review.permission_digest, actor: "user:test" });
     const bridge = new CodexHookBridge(f.service);
+    const originalHasTrusted = f.service.modRuntimeHasTrustedEvent;
+    const originalDispatch = f.service.modRuntimeDispatch;
+    f.service.modRuntimeHasTrustedEvent = ((event: string) => originalHasTrusted(event)) as typeof f.service.modRuntimeHasTrustedEvent;
+    f.service.modRuntimeDispatch = (async (args: JsonObject) => {
+      receivedCalls.push(args);
+      return originalDispatch(args);
+    }) as typeof f.service.modRuntimeDispatch;
     const output = await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "mod-query", turn_id: "mod-query-turn", prompt: "find a matching workflow" });
+    assert.ok(receivedCalls.some((call) => call.event === "craft.input.receive@1" && call.task_id === undefined && (call.input as JsonObject).session_id === "mod-query"));
     const received = f.store.list("mod_runtime_receipt", 10, item => item.event === "craft.input.receive@1")[0];
     assert.equal((received?.result as JsonObject).text, "find a matching workflow");
     const receipt = f.store.list("mod_runtime_receipt", 10, item => item.event === "craft.input.submit@1")[0];
@@ -184,7 +346,13 @@ test("trusted input and Context Mods change the real prompt query and inject bou
     const workingSet = f.store.list("context_working_set_receipt", 10, item => item.session_id === "mod-query")[0];
     assert.equal(workingSet?.query_digest, stableDigest("FIND A MATCHING WORKFLOW"));
     assert.deepEqual(JSON.parse(String(output.additionalContext)).mod_context_additions, ["Use the project migration guide."]);
-  } finally { await dispose(f); }
+  } finally {
+    (f.service as unknown as { modRuntimeHasTrustedEvent: unknown }).modRuntimeHasTrustedEvent =
+      Object.getPrototypeOf(f.service).modRuntimeHasTrustedEvent;
+    (f.service as unknown as { modRuntimeDispatch: unknown }).modRuntimeDispatch =
+      Object.getPrototypeOf(f.service).modRuntimeDispatch;
+    await dispose(f);
+  }
 });
 
 test("Codex SessionStart and SessionEnd reach trusted Mod lifecycle observers once per Host session event", async () => {
@@ -362,6 +530,12 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
   const originalFinalize = f.service.learningCycleFinalize;
   try {
     const bridge = new CodexHookBridge(f.service), input = { cwd: f.root, session_id: "explicit-scenario-session", turn_id: "explicit-scenario-turn" };
+    const originalCaptureProgramMemory = f.service.generalEvolution.captureProgramMemory.bind(f.service.generalEvolution);
+    const capturedDomains: unknown[] = [];
+    f.service.generalEvolution.captureProgramMemory = ((args: JsonObject) => {
+      capturedDomains.push(args.domain);
+      return originalCaptureProgramMemory(args);
+    }) as typeof f.service.generalEvolution.captureProgramMemory;
     const edit = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Edit" });
     const verification = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Bash",
       tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
@@ -374,10 +548,12 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
     const timestamp = new Date().toISOString();
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run("codex_hook_turn", String(legacyJournal.id), 1, JSON.stringify(legacyPayload), timestamp, timestamp);
-    f.service.learningCycleFinalize = (() => ({ status: "observed" })) as typeof f.service.learningCycleFinalize;
+    f.service.learningCycleFinalize = (() => ({ status: "observed", observation: { id: "observation" } })) as typeof f.service.learningCycleFinalize;
     const result = bridge.learning.finalize({ ...input, scenario_key: "coding.explicit-verification" });
     assert.equal(result?.status, "observed");
     assert.equal(bridge.journal.find(input)?.scenario_key, "coding.explicit-verification");
+    assert.deepEqual(capturedDomains, ["coding"]);
+    f.service.generalEvolution.captureProgramMemory = originalCaptureProgramMemory;
   } finally {
     f.service.learningCycleFinalize = originalFinalize;
     await dispose(f);
@@ -390,6 +566,7 @@ test("Hook traces identify the bounded lifecycle event without recording prompt 
     try {
       const bridge = new CodexHookBridge(f.service);
       await bridge.handle("memory", { cwd: f.root, session_id: "exp-modal", turn_id: "exp-turn", hook_event_name: "UserPromptSubmit", prompt: "以后请优先运行 focused tests" });
+      await bridge.handle("context", { cwd: f.root, session_id: "exp-modal", turn_id: "exp-turn", hook_event_name: "UserPromptSubmit", prompt: "以后请优先运行 focused tests" });
     } finally { await dispose(f); }
   }
   const f = await fixture();
@@ -525,6 +702,25 @@ test("Memory Hook automatically captures only classified stable project facts in
     assert.equal((evidence.metadata as JsonObject).capture_mode, "host-observed-stable-fact");
     const sessionMemoryPath = f.service.memoryGovernance.ledger.files.pathFor({ kind: "session", id: "automatic-memory-session" });
     assert.equal(existsSync(sessionMemoryPath!), true);
+  } finally { await dispose(f); }
+});
+
+test("Memory Hook projects explicit captures with bounded summary fields", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    const output = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "explicit-short", prompt: "/remember: 深色模式" });
+    const shortSummary = JSON.parse(String(output.additionalContext)) as JsonObject;
+    assert.equal((shortSummary.memory_capture as JsonObject).captured_fact, "深色模式");
+    assert.equal((shortSummary.memory_capture as JsonObject).candidate_id, null);
+    assert.equal((shortSummary.memory_capture as JsonObject).next_action, "auto_committed");
+    assert.deepEqual((shortSummary.memory_capture as JsonObject).topic_suggestions, []);
+    assert.deepEqual((shortSummary.memory_capture as JsonObject).promotions, []);
+    const output2 = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "explicit-long", prompt: `/remember: ${"深".repeat(33)}` });
+    const longSummary = JSON.parse(String(output2.additionalContext)) as JsonObject;
+    assert.equal((longSummary.memory_capture as JsonObject).captured_fact, undefined);
+    assert.equal(String(longSummary.memory_capture).length > 0, true);
+    assert.equal((longSummary.memory_capture as JsonObject).capture_mode, "explicit");
   } finally { await dispose(f); }
 });
 
@@ -947,9 +1143,9 @@ test("Context Hook keeps sibling recall available after a rejected memory captur
     assert.equal((failures[1]!.payload as JsonObject).error_type, "unknown");
     assert.doesNotMatch(JSON.stringify(failures), /fixture private content|opaque failure|无糖咖啡|红茶/u);
     f.service.memoryCaptureUserStatement = () => ({ candidate: null, next_action: "none" });
-    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "capture-empty", prompt: "记住：这个项目使用 Java" });
+    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "capture-empty", prompt: "/remember: 这个项目使用 Java 处理桌面端打包" });
     f.service.memoryCaptureUserStatement = original;
-    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "capture-success", prompt: "记住：以后默认使用 Node.js" });
+    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "capture-success", prompt: "/remember: 以后默认使用 Node.js" });
     await bridge.handle("context", { hook_event_name: "SessionStart", cwd, session_id: "session" });
     const resumedSession = f.store.list("context_hook_session", 10).find(item => item.session_id === "session");
     assert.deepEqual(resumedSession?.pending_turn_ids, []);
