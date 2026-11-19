@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { GeneralEvolutionKernel } from "../core/general-evolution.ts";
+import { SelfEvolutionKernel } from "@craft/capability-context";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "craft-common-base/digest";
@@ -26,7 +26,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-research-memory-"));
   const store = await new CraftStore(craftPaths(root)).open();
   await seedFixture({ store });
-  return { root, store, kernel: new GeneralEvolutionKernel(store) };
+  return { root, store, kernel: new SelfEvolutionKernel(store) };
 }
 
 const projectScope = { kind: "project", id: "project:research-alpha" };
@@ -105,7 +105,8 @@ test("legacy research links omit scope and stay diagnostic", async () => {
     assert.equal(link.relation, "derives_from");
     assert.equal(link.layer, "interpretation");
     assert.deepEqual(link.scope, {});
-    assert.equal((f.kernel.evalSummary().domains as JsonObject[]).length, 5);
+    // Five named adapters plus the general fallback domain.
+    assert.equal((f.kernel.evalSummary().domains as JsonObject[]).length, 6);
   } finally {
     f.store.close();
     await rm(f.root, { recursive: true, force: true });

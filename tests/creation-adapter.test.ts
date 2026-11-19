@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CreationAdapter } from "../core/creation-adapter.ts";
+import { CreationAdapter } from "@craft/capability-context";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 

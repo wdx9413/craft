@@ -201,6 +201,29 @@ test("trusted Mod lifecycle failures stay bounded", async t => {
   } finally { t.mock.restoreAll(); await dispose(f); }
 });
 
+test("SessionStart without a project root dispatches its lifecycle event in global scope", async () => {
+  const f = await fixture();
+  const calls: JsonObject[] = [];
+  const originalHasTrusted = f.service.modRuntimeHasTrustedEvent;
+  const originalDispatch = f.service.modRuntimeDispatch;
+  try {
+    f.service.modRuntimeHasTrustedEvent = ((event: string) => event === "craft.session.lifecycle@1") as typeof f.service.modRuntimeHasTrustedEvent;
+    f.service.modRuntimeDispatch = (async (args: JsonObject) => { calls.push(args); return { status: "ok", result: null }; }) as typeof f.service.modRuntimeDispatch;
+    const bridge = new CodexHookBridge(f.service);
+    assert.deepEqual(await bridge.handle("knowledge", { session_id: "global-lifecycle", hook_event_name: "SessionStart" }), {});
+    const dispatched = calls.find(call => call.event === "craft.session.lifecycle@1");
+    assert.ok(dispatched, "the lifecycle Mod receives a dispatch");
+    assert.equal(dispatched.scope_kind, "global");
+    assert.equal(dispatched.scope_id, "global");
+    assert.equal(dispatched.project_id, undefined);
+    assert.deepEqual((dispatched.input as JsonObject).status, "started");
+  } finally {
+    f.service.modRuntimeHasTrustedEvent = originalHasTrusted;
+    f.service.modRuntimeDispatch = originalDispatch;
+    await dispose(f);
+  }
+});
+
 test("SessionStart for a component member resolves and reports its own lifecycle scope", async t => {
   const f = await fixture();
   try {
@@ -289,6 +312,46 @@ test("trusted prompt Mods cover receipt, rejection, task scope and Context addit
   } finally { await dispose(f); }
 });
 
+test("trusted prompt Mods report assembled queries, task scope and empty result shapes", async () => {
+  const f = await fixture();
+  const originalHasTrusted = f.service.modRuntimeHasTrustedEvent;
+  const originalDispatch = f.service.modRuntimeDispatch;
+  try {
+    const calls: JsonObject[] = [];
+    f.service.modRuntimeHasTrustedEvent = ((event: string) => event === "craft.context.assemble@1") as typeof f.service.modRuntimeHasTrustedEvent;
+    f.service.modRuntimeDispatch = (async (args: JsonObject) => {
+      calls.push(args);
+      return { status: "ok", result: { query: "assembled query" } };
+    }) as typeof f.service.modRuntimeDispatch;
+    const bridge = new CodexHookBridge(f.service);
+    await bridge.handle("context", {
+      hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "assemble-mod", turn_id: "assemble-turn",
+      prompt: "review the patch", task_id: "assemble-task",
+    });
+    const assembled = calls.find(call => call.event === "craft.context.assemble@1");
+    assert.ok(assembled);
+    assert.equal((assembled.input as JsonObject).query, "review the patch");
+    assert.equal((assembled.input as JsonObject).task_id, "assemble-task");
+    assert.equal((assembled.input as JsonObject).session_id, "assemble-mod");
+    assert.equal(assembled.task_id, "assemble-task");
+    assert.match(String(assembled.delivery_id), /^mod_hook_[a-f0-9]{32}$/u);
+
+    calls.length = 0;
+    f.service.modRuntimeDispatch = (async (args: JsonObject) => { calls.push(args); return { status: "ok", result: {} }; }) as typeof f.service.modRuntimeDispatch;
+    await bridge.handle("context", {
+      hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "assemble-empty", turn_id: "assemble-empty-turn",
+      prompt: "review the patch",
+    });
+    const empty = calls.find(call => call.event === "craft.context.assemble@1");
+    assert.ok(empty);
+    assert.equal((empty.input as JsonObject).task_id, undefined);
+  } finally {
+    f.service.modRuntimeHasTrustedEvent = originalHasTrusted;
+    f.service.modRuntimeDispatch = originalDispatch;
+    await dispose(f);
+  }
+});
+
 test("session-only Hook events join one generated turn and stop cannot finalize it twice", async () => {
   const f = await fixture();
   try {
@@ -314,7 +377,6 @@ test("session-only Hook events join one generated turn and stop cannot finalize 
 test("trusted input and Context Mods change the real prompt query and inject bounded Context additions", async () => {
   const f = await fixture();
   try {
-    const receivedCalls: JsonObject[] = [];
     const packageRoot = join(f.root, "uppercase-mod");
     await mkdir(packageRoot);
     await writeFile(join(packageRoot, "register.mjs"), `export function register(on) {
@@ -330,15 +392,7 @@ test("trusted input and Context Mods change the real prompt query and inject bou
     f.service.modRuntimeTrust({ mod_id: "uppercase-prompt", code_digest: review.code_digest,
       permission_digest: review.permission_digest, actor: "user:test" });
     const bridge = new CodexHookBridge(f.service);
-    const originalHasTrusted = f.service.modRuntimeHasTrustedEvent;
-    const originalDispatch = f.service.modRuntimeDispatch;
-    f.service.modRuntimeHasTrustedEvent = ((event: string) => originalHasTrusted(event)) as typeof f.service.modRuntimeHasTrustedEvent;
-    f.service.modRuntimeDispatch = (async (args: JsonObject) => {
-      receivedCalls.push(args);
-      return originalDispatch(args);
-    }) as typeof f.service.modRuntimeDispatch;
     const output = await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "mod-query", turn_id: "mod-query-turn", prompt: "find a matching workflow" });
-    assert.ok(receivedCalls.some((call) => call.event === "craft.input.receive@1" && call.task_id === undefined && (call.input as JsonObject).session_id === "mod-query"));
     const received = f.store.list("mod_runtime_receipt", 10, item => item.event === "craft.input.receive@1")[0];
     assert.equal((received?.result as JsonObject).text, "find a matching workflow");
     const receipt = f.store.list("mod_runtime_receipt", 10, item => item.event === "craft.input.submit@1")[0];
@@ -346,13 +400,7 @@ test("trusted input and Context Mods change the real prompt query and inject bou
     const workingSet = f.store.list("context_working_set_receipt", 10, item => item.session_id === "mod-query")[0];
     assert.equal(workingSet?.query_digest, stableDigest("FIND A MATCHING WORKFLOW"));
     assert.deepEqual(JSON.parse(String(output.additionalContext)).mod_context_additions, ["Use the project migration guide."]);
-  } finally {
-    (f.service as unknown as { modRuntimeHasTrustedEvent: unknown }).modRuntimeHasTrustedEvent =
-      Object.getPrototypeOf(f.service).modRuntimeHasTrustedEvent;
-    (f.service as unknown as { modRuntimeDispatch: unknown }).modRuntimeDispatch =
-      Object.getPrototypeOf(f.service).modRuntimeDispatch;
-    await dispose(f);
-  }
+  } finally { await dispose(f); }
 });
 
 test("Codex SessionStart and SessionEnd reach trusted Mod lifecycle observers once per Host session event", async () => {
@@ -530,12 +578,15 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
   const originalFinalize = f.service.learningCycleFinalize;
   try {
     const bridge = new CodexHookBridge(f.service), input = { cwd: f.root, session_id: "explicit-scenario-session", turn_id: "explicit-scenario-turn" };
-    const originalCaptureProgramMemory = f.service.generalEvolution.captureProgramMemory.bind(f.service.generalEvolution);
+    const evolution = (f.service as unknown as { selfEvolution?: { captureProgramMemory: (args: JsonObject) => JsonObject };
+      generalEvolution?: { captureProgramMemory: (args: JsonObject) => JsonObject } }).selfEvolution
+      ?? (f.service as unknown as { generalEvolution: { captureProgramMemory: (args: JsonObject) => JsonObject } }).generalEvolution;
+    const originalCaptureProgramMemory = evolution.captureProgramMemory.bind(evolution);
     const capturedDomains: unknown[] = [];
-    f.service.generalEvolution.captureProgramMemory = ((args: JsonObject) => {
+    evolution.captureProgramMemory = ((args: JsonObject) => {
       capturedDomains.push(args.domain);
       return originalCaptureProgramMemory(args);
-    }) as typeof f.service.generalEvolution.captureProgramMemory;
+    }) as typeof evolution.captureProgramMemory;
     const edit = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Edit" });
     const verification = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Bash",
       tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
@@ -553,22 +604,78 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
     assert.equal(result?.status, "observed");
     assert.equal(bridge.journal.find(input)?.scenario_key, "coding.explicit-verification");
     assert.deepEqual(capturedDomains, ["coding"]);
-    f.service.generalEvolution.captureProgramMemory = originalCaptureProgramMemory;
+    evolution.captureProgramMemory = originalCaptureProgramMemory;
   } finally {
     f.service.learningCycleFinalize = originalFinalize;
     await dispose(f);
   }
 });
 
-test("Hook traces identify the bounded lifecycle event without recording prompt text", async () => {
-  if (process.env.EXPERIMENT_COVERAGE === "1") {
-    const f = await fixture();
-    try {
-      const bridge = new CodexHookBridge(f.service);
-      await bridge.handle("memory", { cwd: f.root, session_id: "exp-modal", turn_id: "exp-turn", hook_event_name: "UserPromptSubmit", prompt: "以后请优先运行 focused tests" });
-      await bridge.handle("context", { cwd: f.root, session_id: "exp-modal", turn_id: "exp-turn", hook_event_name: "UserPromptSubmit", prompt: "以后请优先运行 focused tests" });
-    } finally { await dispose(f); }
+test("verified Experience finalization derives evolution domains and bounded workflow fallbacks", async () => {
+  const f = await fixture();
+  try {
+    await mkdir(join(f.root, "src"), { recursive: true });
+    await writeFile(join(f.root, "src", "feature.ts"), "export const feature = true;\n");
+    const bridge = new CodexHookBridge(f.service);
+    const cases = [
+      ["请整理会议纪要和审批文档模板", "office"],
+      ["请规划本次出差旅行预算方案", "travel"],
+      ["请设计新的品牌封面素材方案", "creation"],
+      ["请复现论文中的实验结果假设", "research"],
+    ] as const;
+    for (const [index, [prompt, expectedDomain]] of cases.entries()) {
+      const base = { cwd: f.root, session_id: `domain-${index}`, turn_id: "domain-turn" };
+      await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt });
+      await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_input: { file_path: "src/feature.ts" } });
+      await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+      await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
+      const candidate = f.store.list("program_memory_candidate", 100, item => String(item.statement).startsWith("Verified workflow: " + prompt))[0];
+      assert.ok(candidate, `a program memory candidate is captured for ${expectedDomain}`);
+      assert.equal(candidate.domain, expectedDomain);
+    }
+
+    const pathBase = { cwd: f.root, session_id: "fallback-path", turn_id: "fallback-path-turn" };
+    await bridge.handle("experience", { ...pathBase, hook_event_name: "UserPromptSubmit", prompt: "ok" });
+    await bridge.handle("experience", { ...pathBase, hook_event_name: "PostToolUse", tool_name: "Edit", tool_input: { file_path: "src/feature.ts" } });
+    await bridge.handle("experience", { ...pathBase, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("experience", { ...pathBase, hook_event_name: "Stop" });
+    assert.equal(f.store.list("program_memory_candidate", 100, item => item.statement === "Verified workflow: src/feature.ts").length, 1);
+
+    const bareBase = { cwd: f.root, session_id: "fallback-bare", turn_id: "fallback-bare-turn" };
+    await bridge.handle("experience", { ...bareBase, hook_event_name: "UserPromptSubmit", prompt: "ok" });
+    await bridge.handle("experience", { ...bareBase, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    await bridge.handle("experience", { ...bareBase, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("experience", { ...bareBase, hook_event_name: "Stop" });
+    assert.equal(f.store.list("program_memory_candidate", 100, item => item.statement === "Verified workflow: verified project workflow").length, 1);
+  } finally { await dispose(f); }
+});
+
+test("a verified Stop records program memory capture failures without failing the turn", async () => {
+  const f = await fixture();
+  const evolution = (f.service as unknown as { selfEvolution?: { captureProgramMemory: (args: JsonObject) => JsonObject };
+    generalEvolution?: { captureProgramMemory: (args: JsonObject) => JsonObject } }).selfEvolution
+    ?? (f.service as unknown as { generalEvolution: { captureProgramMemory: (args: JsonObject) => JsonObject } }).generalEvolution;
+  const prototype = Object.getPrototypeOf(evolution) as { captureProgramMemory: (args: JsonObject) => JsonObject };
+  const originalCapture = prototype.captureProgramMemory;
+  try {
+    prototype.captureProgramMemory = ((args: JsonObject) => { void args; throw new TypeError("program memory unavailable"); }) as typeof originalCapture;
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "program-memory-failure", turn_id: "program-memory-turn" };
+    await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "请整理会议纪要和审批文档模板" });
+    await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_input: { file_path: "src/feature.ts" } });
+    await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    const stop = await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
+    assert.equal(typeof stop, "object");
+    const failure = f.store.events("codex-hook").find(event => event.event_type === "codex_hook.failed"
+      && (event.payload as JsonObject).error_type === "program_memory_capture_failed");
+    assert.ok(failure);
+    assert.doesNotMatch(JSON.stringify(failure), /unavailable/u);
+  } finally {
+    prototype.captureProgramMemory = originalCapture;
+    await dispose(f);
   }
+});
+
+test("Hook traces identify the bounded lifecycle event without recording prompt text", async () => {
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service);
@@ -712,8 +819,8 @@ test("Memory Hook projects explicit captures with bounded summary fields", async
     const output = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "explicit-short", prompt: "/remember: 深色模式" });
     const shortSummary = JSON.parse(String(output.additionalContext)) as JsonObject;
     assert.equal((shortSummary.memory_capture as JsonObject).captured_fact, "深色模式");
-    assert.equal((shortSummary.memory_capture as JsonObject).candidate_id, null);
-    assert.equal((shortSummary.memory_capture as JsonObject).next_action, "auto_committed");
+    assert.match(String((shortSummary.memory_capture as JsonObject).candidate_id), /^memory_candidate_statement_/u);
+    assert.equal((shortSummary.memory_capture as JsonObject).next_action, "available_for_scoped_context");
     assert.deepEqual((shortSummary.memory_capture as JsonObject).topic_suggestions, []);
     assert.deepEqual((shortSummary.memory_capture as JsonObject).promotions, []);
     const output2 = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "explicit-long", prompt: `/remember: ${"深".repeat(33)}` });

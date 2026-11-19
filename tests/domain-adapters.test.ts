@@ -3,16 +3,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CodingAdapter } from "../core/coding-adapter.ts";
-import { OfficeAdapter } from "../core/office-adapter.ts";
-import { GeneralEvolutionKernel } from "../core/general-evolution.ts";
+import { CodingAdapter } from "@craft/capability-context";
+import { OfficeAdapter } from "@craft/capability-context";
+import { SelfEvolutionKernel } from "@craft/capability-context";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-domain-adapters-"));
   const store = await new CraftStore(craftPaths(root)).open();
-  const kernel = new GeneralEvolutionKernel(store);
+  const kernel = new SelfEvolutionKernel(store);
   kernel.ensureAdapters();
   return { root, store, kernel, coding: new CodingAdapter(kernel), office: new OfficeAdapter(kernel) };
 }
@@ -23,8 +23,12 @@ test("coding adapter extracts scoped repair know-how and blocks unrelated text",
     const hit = f.coding.capture({ statement: "构建报错时先运行 pnpm test 再修 patch", scope: { kind: "project", id: "project:a" }, evidence_ids: ["e1"] }) as Record<string, unknown>;
     assert.equal(hit.status, "candidate");
     assert.equal((hit.candidate as Record<string, unknown>).domain, "coding");
+    // Adapters are hints, not gates: a non-matching statement degrades to the
+    // general path and is still captured rather than silently dropped.
     const miss = f.coding.capture({ statement: "我偏好深色模式" }) as Record<string, unknown>;
-    assert.equal(miss.status, "ignored");
+    assert.equal(miss.status, "candidate");
+    assert.equal(miss.adapter_match, false);
+    assert.equal(miss.domain, "general");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

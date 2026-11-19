@@ -27,6 +27,7 @@ import { knowledgeCapability } from '@craft/capability-knowledge/capability';
 import { memoryCapability } from '@craft/capability-memory/capability';
 import { experienceCapability } from '@craft/capability-experience/capability';
 import { codebaseCapability } from '@craft/capability-codebase/capability';
+import { contextCapability } from '@craft/capability-context/capability';
 
 /** Ordered by dependency: a capability may require a kernel an earlier one provided. */
 export const CRAFT_CAPABILITIES: readonly CraftCapability[] = [
@@ -36,6 +37,9 @@ export const CRAFT_CAPABILITIES: readonly CraftCapability[] = [
   // A snapshot-pinned, read-only analysis capability.  It intentionally has no
   // product field and therefore cannot widen the three external components.
   codebaseCapability,
+  // Context composes the members above; it owns self-evolution state and
+  // orchestration only, and never duplicates their stores.
+  contextCapability,
 ];
 
 /**

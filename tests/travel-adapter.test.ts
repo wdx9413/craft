@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { CraftService } from "../core/service.ts";
-import { TravelAdapter } from "../core/travel-adapter.ts";
+import { SelfEvolutionKernel, TravelAdapter } from "@craft/capability-context";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
@@ -16,7 +16,8 @@ async function fixture() {
   const service = new CraftService(store);
   store.create("scope_alias", "project-travel-trip-tokyo", { scope: { kind: "project", id: "travel:trip-tokyo" },
     alias_kind: "path", alias: projectRoot, status: "active" });
-  return { root, projectRoot, store, service, adapter: new TravelAdapter(service) };
+  const adapter = new TravelAdapter({ selfEvolution: new SelfEvolutionKernel(store), memory: service, store });
+  return { root, projectRoot, store, service, adapter };
 }
 
 function remember(service: CraftService, projectRoot: string, args: JsonObject): JsonObject {

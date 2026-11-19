@@ -268,6 +268,23 @@ const GENERAL_EVOLUTION_CASES: GradedCase[] = (["coding", "office", "travel", "c
 ]);
 
 /**
+ * Long-tail work that has no named adapter. These prove the general fallback
+ * path captures value instead of dropping it for lack of a scenario.
+ */
+const LONG_TAIL_EVOLUTION_CASES: GradedCase[] = ([
+  ["unknown_scenario", "上线前必须完成灰度评审并记录结论"],
+  ["product_document", "产品需求文档约定：范围变更必须先更新 PRD"],
+  ["technical_design", "技术方案决策：选择事件驱动而非轮询，因为延迟更低"],
+  ["web_system_operation", "先选部门，再提交表单"],
+] as const).flatMap(([slug]) => [
+  {
+    case: defineEvalCase({ id: `general_evolution.${slug}.write_recall`, axis: "general_evolution", evidence: "kernel", partition: "held_out", sanitized: true, approved_by: SUITE_REVIEWER,
+      description: `${slug} work has no named adapter but is still captured and recallable through the general path.` }),
+    check: { kind: "equals", expected: "candidate/1/0" },
+  },
+]);
+
+/**
  * Evaluation-governance cases.
  *
  * The comparison tool is what drives iteration, so its own contract must be
@@ -732,7 +749,7 @@ const MESSAGE_SOURCE_CASES: GradedCase[] = [
 /** Every graded case, in a stable order. */
 export function evalCases(): GradedCase[] {
   return [...MEMORY_CASES, ...KNOWLEDGE_CASES, ...WORKFLOW_CASES, ...DATASEC_CASES, ...GOVERNANCE_CASES, ...END_TO_END_CASES,
-    ...EXPERIENCE_DEDUP_CASES, ...KNOWLEDGE_LINEAGE_CASES, ...GENERAL_EVOLUTION_CASES, ...EVAL_GOVERNANCE_CASES, ...CONTEXT_SUPPLY_CASES, ...PROACTIVE_CASES,
+    ...EXPERIENCE_DEDUP_CASES, ...KNOWLEDGE_LINEAGE_CASES, ...GENERAL_EVOLUTION_CASES, ...LONG_TAIL_EVOLUTION_CASES, ...EVAL_GOVERNANCE_CASES, ...CONTEXT_SUPPLY_CASES, ...PROACTIVE_CASES,
     ...LIFECYCLE_CASES, ...DOMAIN_ISOLATION_CASES, ...PLUGIN_CONTRIBUTION_CASES, ...PILOT_BOUNDARY_CASES,
     ...EXTERNAL_SYNC_CASES, ...RUNTIME_DEPENDENCY_CASES, ...MESSAGE_SOURCE_CASES];
 }

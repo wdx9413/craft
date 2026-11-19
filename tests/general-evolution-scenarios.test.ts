@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { GeneralEvolutionKernel } from "../core/general-evolution.ts";
-import { CreationAdapter } from "../core/creation-adapter.ts";
+import { SelfEvolutionKernel } from "@craft/capability-context";
+import { CreationAdapter } from "@craft/capability-context";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
@@ -12,7 +12,7 @@ import type { JsonObject } from "../core/infrastructure/store.ts";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-evolution-scenarios-"));
   const store = await new CraftStore(craftPaths(root)).open();
-  const kernel = new GeneralEvolutionKernel(store);
+  const kernel = new SelfEvolutionKernel(store);
   kernel.ensureAdapters();
   return { root, store, kernel, creation: new CreationAdapter(store) };
 }
@@ -66,5 +66,28 @@ test("unpromoted general candidates never become routeable assets", async () => 
     assert.equal(candidate.status, "diagnostic");
     assert.throws(() => f.kernel.promoteProgramMemory({ id: candidate.id, evaluation_ref: "eval-1" }), /not submitted/);
     assert.equal((f.store.find("experience_procedure", String(candidate.id)) ?? null), null, "no procedure asset exists before gates");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("long-tail work without a named adapter is captured and recallable", async () => {
+  const f = await fixture();
+  try {
+    const samples: Array<[string, string]> = [
+      ["unknown_scenario", "上线前必须完成灰度评审并记录结论"],
+      ["product_document", "产品需求文档约定：范围变更必须先更新 PRD"],
+      ["technical_design", "技术方案决策：选择事件驱动而非轮询，因为延迟更低"],
+      ["web_system_operation", "先选部门，再提交表单"],
+    ];
+    for (const [slug, statement] of samples) {
+      const captured = f.kernel.captureDomainStatement({ statement, scope: inScope, evidence_ids: [`${slug}-evidence`] }) as JsonObject;
+      assert.equal(captured.status, "candidate", `${slug} must be captured`);
+      // A hint may legitimately match; the invariant is that capture happens
+      // regardless of whether any adapter matched.
+      assert.ok(["general", "coding", "office", "travel", "creation", "research"].includes(String(captured.domain)));
+    }
+    const items = (f.kernel.listProgramMemory({}) as JsonObject).items as JsonObject[];
+    assert.equal(items.length >= samples.length, true);
+    // Cross-scope recall must still be denied even for the general path.
+    assert.deepEqual(items.filter((item) => JSON.stringify(item.scope) === JSON.stringify(otherScope)), []);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

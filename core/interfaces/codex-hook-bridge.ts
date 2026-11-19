@@ -24,7 +24,7 @@ import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGo
 import { sanitizeCodexTaskGoal } from "../codex-task-prose.ts";
 import { validateConcept, mapLegacyKind } from 'craft-common-ontology/validation';
 import { evaluateEvolutionValue } from "../evolution-value-gate.ts";
-import { extractUserStatedOperatingSteps } from "../evolution-runbook-candidate.ts";
+import { extractUserStatedOperatingSteps } from '@craft/capability-context';
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import { HookSignalSanitizer, nestedText, type HookSignal } from "./codex-hook-signal-sanitizer.ts";
 import { queueHookMaintenance } from "./memory-archive-worker.ts";
@@ -425,7 +425,7 @@ export class HookLearningCoordinator {
       try {
         const goalText = taskGoal || scenario || observedPaths.join(" ") || "verified project workflow";
         const scope = journal.scope as JsonObject;
-        this.service.generalEvolution.captureProgramMemory({
+        this.service.selfEvolution.captureProgramMemory({
           scenario_key: scenario || "coding",
           domain: evolutionDomainFor(goalText),
           statement: `Verified workflow: ${goalText}`.slice(0, 280),
@@ -503,8 +503,7 @@ export class CodexHookBridge {
       input = this.correlateTurn(input, event, projectScope);
       if ((event === "SessionStart" || event === "SessionEnd") && text(input.session_id)) {
         const sessionId = text(input.session_id)!;
-        const scope = projectScope ? { scope_kind: projectScope.kind, scope_id: projectScope.id,
-          ...(projectScope.kind === "project" ? { project_id: projectScope.id } : {}) }
+        const scope = projectScope ? { scope_kind: projectScope.kind, scope_id: projectScope.id, project_id: projectScope.id }
           : { scope_kind: "global", scope_id: "global" };
         if (this.service.modRuntimeHasTrustedEvent("craft.session.lifecycle@1", scope)) {
           const status = event === "SessionStart" ? "started" : "ended";
@@ -596,7 +595,6 @@ export class CodexHookBridge {
     if (!autoStatements.length) return { written: false, count: 0 };
     const sessionId = text(input.session_id);
     const sessionHost = hookHost(input);
-    const explicit = explicitMemoryStatement(prompt);
     let written = false;
     let count = 0;
     const shouldWriteMemory = members.includes("memory");
@@ -605,7 +603,6 @@ export class CodexHookBridge {
       try {
         this.service.store.bindSessionStorageHost(sessionId, sessionHost);
         for (const item of autoStatements) {
-          if (explicit && item.statement === explicit) continue;
           const decision = evaluateEvolutionValue({ statement: item.statement, source_kind: "user-statement", explicit: true,
             scope: { scope_kind: "session", scope_id: sessionId, project_scope_id: scope.id } });
           if (decision.action !== "store_as_fact" && decision.action !== "store_as_preference") continue;
@@ -652,7 +649,7 @@ export class CodexHookBridge {
     const sessionId = text(input.session_id);
     const turnId = text(input.turn_id);
     const taskId = text(input.task_id);
-    const runtimeScope = { scope_kind: scope.kind, scope_id: scope.id, project_id: scope.kind === "project" ? scope.id : undefined,
+    const runtimeScope = { scope_kind: scope.kind, scope_id: scope.id, project_id: scope.id,
       ...(taskId ? { task_id: taskId } : {}) };
     const deliveryId = (event: string) => turnId ? `mod_hook_${stableDigest({ event, scope, session_id: sessionId, turn_id: turnId }).slice(-32)}` : undefined;
     if (this.service.modRuntimeHasTrustedEvent("craft.input.receive@1", runtimeScope)) {

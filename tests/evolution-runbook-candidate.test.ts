@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { ProcedureStore } from '@craft/capability-experience/procedure-projection';
 import { evaluateEvolutionValue } from "../core/evolution-value-gate.ts";
-import { captureUserStatedRunbook, extractUserStatedOperatingSteps } from "../core/evolution-runbook-candidate.ts";
+import { captureUserStatedRunbook, extractUserStatedOperatingSteps } from "@craft/capability-context";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "../core/digest.ts";

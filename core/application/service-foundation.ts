@@ -181,6 +181,8 @@ import { KNOWLEDGE_KERNELS } from '@craft/capability-knowledge/capability';
 import { MEMORY_KERNELS } from '@craft/capability-memory/capability';
 import { EXPERIENCE_KERNELS } from '@craft/capability-experience/capability';
 import { CODEBASE_KERNELS } from '@craft/capability-codebase/capability';
+import { CONTEXT_KERNELS } from '@craft/capability-context/capability';
+import type { SelfEvolutionKernel } from '@craft/capability-context/self-evolution';
 import type { CodebaseIndexKernel } from '@craft/capability-codebase/codebase-index';
 import { CRAFT_CAPABILITIES } from "../capability-catalog.ts";
 import { CORE_KERNELS, buildCapabilityRegistry } from "../capability-protocol.ts";
@@ -278,6 +280,7 @@ export abstract class ServiceFoundation {
   readonly capabilityKits: CapabilityKitRuntime;
   /** Optional, explicit, read-only Workspace structural analysis. */
   readonly codebase: CodebaseIndexKernel;
+  readonly selfEvolution: SelfEvolutionKernel;
   /** Explicit opt-in sample; it is not a default Host capability. */
   readonly engineeringQualityProfile: EngineeringQualityProfileKernel;
   /** Host-reported, content-free proof; configuration alone is never evidence. */
@@ -562,6 +565,7 @@ export abstract class ServiceFoundation {
     this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
     this.capabilityKits = new CapabilityKitRuntime(store);
     this.codebase = capabilities.registry.require<CodebaseIndexKernel>(CODEBASE_KERNELS.index);
+    this.selfEvolution = capabilities.registry.require<SelfEvolutionKernel>(CONTEXT_KERNELS.selfEvolution);
     this.engineeringQualityProfile = new EngineeringQualityProfileKernel(store);
     this.activationProof = new ActivationProofKernel(store);
     this.componentHistoryMigration = new ComponentHistoryMigrationKernel(store);

@@ -3,14 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { GeneralEvolutionKernel } from "../core/general-evolution.ts";
+import { SelfEvolutionKernel } from "@craft/capability-context";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-general-evolution-"));
   const store = await new CraftStore(craftPaths(root)).open();
-  return { root, store, kernel: new GeneralEvolutionKernel(store) };
+  return { root, store, kernel: new SelfEvolutionKernel(store) };
 }
 
 test("domain adapters register deterministically and candidate adapters stay candidates", async () => {
@@ -59,5 +59,34 @@ test("prospective intention records trigger outcomes and research links are type
     assert.equal(link.relation, "derives_from");
     assert.equal(link.layer, "interpretation");
     assert.throws(() => f.kernel.linkResearch({ source_id: "a", target_id: "b", relation: "likes" }), /unsupported/);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("general fallback captures long-tail work without any matching adapter", async () => {
+  const f = await fixture();
+  try {
+    // Long-tail work with no named-adapter signal must still be captured.
+    const prd = f.kernel.captureDomainStatement({ statement: "上线前必须完成灰度评审并记录结论", scope: { kind: "project", id: "project:x" } }) as Record<string, unknown>;
+    assert.equal(prd.status, "candidate");
+    assert.equal(prd.adapter_match, false, "no adapter matched, yet the statement is still captured");
+    assert.equal(prd.domain, "general");
+
+    const consoleOp = f.kernel.captureDomainStatement({ statement: "先选部门，再提交表单", scope: { kind: "project", id: "project:x" } }) as Record<string, unknown>;
+    assert.equal(consoleOp.status, "candidate");
+    assert.equal(consoleOp.domain, "general");
+
+    const items = (f.kernel.listProgramMemory({}) as { items: Record<string, unknown>[] }).items;
+    assert.ok(items.some((item) => item.domain === "general"), "general candidates are persisted");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("an unknown or mismatched adapter hint degrades to general instead of dropping", async () => {
+  const f = await fixture();
+  try {
+    assert.throws(() => f.kernel.captureDomainStatement({ domain: "legal", statement: "x" }), /unsupported domain adapter/u);
+    const mismatched = f.kernel.captureDomainStatement({ domain: "travel", statement: "产品需求文档约定：上线前必须评审" }) as Record<string, unknown>;
+    assert.equal(mismatched.status, "candidate");
+    assert.equal(mismatched.domain, "general");
+    assert.equal(mismatched.adapter_match, false);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
