@@ -41,7 +41,7 @@ Codebase 现有测试在 fixture 中直接调用 `service.workspaceOpen` 和 `wo
 - `craft_context_resolution_resolve` 的公开 Schema 没有 `members`，且 `additionalProperties: false`；内核和 Experience Skill 却依赖此字段。`include_working_notes` 等内核支持字段也未完整映射。
 - `craft_codebase_context_slice.node_ids` 被通用推断声明为 string，内核要求非空 array。这类问题应按每个工具的真实契约修正，不能按参数名字为全部工具猜类型。
 
-来源：[tool-schema](../../core/mcp/tool-schema.ts)、[tool-catalog](../../core/mcp/tool-catalog.ts)、[Workflow Evolution](../../capability/craft-experience/workflow-evolution.ts)、[Context Resolution](../../core/context-resolution.ts)、[Codebase index](../../capability/craft-codebase/codebase-index.ts)。现有 standalone 测试大量直接调用 `handlers`，绕过了宿主按 `inputSchema` 构造参数的过程。[standalone 测试](../../tests/component-standalone-readiness.test.ts)
+来源：[tool-schema](../../core/mcp/tool-schema.ts)、[tool-catalog](../../core/mcp/tool-catalog.ts)、[Workflow Evolution](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/workflow-evolution.ts)、[Context Resolution](../../core/context-resolution.ts)、[Codebase index](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/codebase-index.ts)。现有 standalone 测试大量直接调用 `handlers`，绕过了宿主按 `inputSchema` 构造参数的过程。[standalone 测试](../../tests/component-standalone-readiness.test.ts)
 
 最小修复：每工具显式类型/必要 override；由同一契约生成公开 Schema 和运行时校验；对“符合 Schema 的输入能够完成该路径”增加真实 MCP 边界测试。不能只断言工具名存在或总数不超过 16。
 
@@ -52,7 +52,7 @@ Codebase 现有测试在 fixture 中直接调用 `service.workspaceOpen` 和 `wo
 - scope identity 内核已有 Git remote canonical identity / path alias；daily 产品没有公开相应解析工具。跨宿主依赖 Agent 自己猜 `scope_id`，容易发生同仓库记忆不命中或多目录混用。
 - Memory daily 缺少直接 ledger revoke/transition 入口；已有冲突 supersede 能力不等于任意用户请求“忘掉这条”的完整独立入口。
 
-来源：[knowledgeSearch](../../core/application/craft-service.ts)（3322 行起）、[action handlers](../../core/application/actions/action-handlers.ts)、[Knowledge contribution](../../capability/craft-knowledge/contribution.ts)、[scope identity](../../core/scope-identity.ts)、[Memory governance](../../core/memory-governance.ts)。
+来源：[knowledgeSearch](../../core/application/craft-service.ts)（3322 行起）、[action handlers](../../core/application/actions/action-handlers.ts)、[Knowledge contribution](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/contribution.ts)、[scope identity](../../core/scope-identity.ts)、[Memory governance](../../core/memory-governance.ts)。
 
 最小修复：默认先解析明确 scope；检索输出显式标 candidate/reviewed 与排除原因；组件 MCP 在服务端固定本组件，组合模式显式声明成员；公开受控 scope 解析与记忆撤销。保留高级诊断的跨 scope 搜索，但必须明确选择和授权，不能成为日常默认值。
 
@@ -75,9 +75,9 @@ Codebase 现有测试在 fixture 中直接调用 `service.workspaceOpen` 和 `wo
 | Experience | 独立观察、最多两条设计轴、Procedure candidate、shadow/held-out/signoff/canary、disabled Skill export | 先修观察真实性、Schema 和无 Hook recall；再用任务类型/失败机制而非泛化的本地命令成功划分场景；建立固定 baseline 对照、退化检测与撤销。 |
 | Codebase | checkpoint 固定、显式激活、只存路径/span/digest、候选影响、stale 检查 | 先补独立 bootstrap、Schema；再加可插拔 AST/LSP/SCIP 分析器，覆盖 Java/Python/Go 等实际语言；补 changed-path 刷新和 working-tree drift 提示。 |
 
-检索现状并非“完全没有 BM25/向量”：Markdown `KnowledgeIndex` 用 token LIKE 候选 + BM25 排序；Memory resolver 有 keyword/vector/hybrid 与故障回退；reviewed Knowledge contribution 仍是词项包含计分。短板是路径与输出契约不统一，且中文自然语言中的连续字符通常被当作整段词项；应先用人工标注查询评估，再决定是否引入分词、别名或向量，不能直接堆新数据库。[KnowledgeIndex](../../core/knowledge-index.ts)、[Knowledge contribution](../../capability/craft-knowledge/contribution.ts)、[Context Resolution](../../core/context-resolution.ts)
+检索现状并非“完全没有 BM25/向量”：Markdown `KnowledgeIndex` 用 token LIKE 候选 + BM25 排序；Memory resolver 有 keyword/vector/hybrid 与故障回退；reviewed Knowledge contribution 仍是词项包含计分。短板是路径与输出契约不统一，且中文自然语言中的连续字符通常被当作整段词项；应先用人工标注查询评估，再决定是否引入分词、别名或向量，不能直接堆新数据库。[KnowledgeIndex](../../core/knowledge-index.ts)、[Knowledge contribution](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/contribution.ts)、[Context Resolution](../../core/context-resolution.ts)
 
-Codebase 目前 `ANALYZER = builtin-regex-static-v1`，只处理 TS/JS 家族；call edge 是文件到候选符号，带 `heuristic/partial`。未解析 import 与同名调用有诊断，但无目标声明的调用不会逐一产生 unresolved_call 诊断。查询只能说明指定 checkpoint；没有新 checkpoint 时，当前工作目录发生变化不会仅凭 `indexStatus` 自动被判 stale。它适合作为有限结构辅助，不能定位成完整多语言语义分析或运行时影响证明。[Codebase 实现](../../capability/craft-codebase/codebase-index.ts)
+Codebase 目前 `ANALYZER = builtin-regex-static-v1`，只处理 TS/JS 家族；call edge 是文件到候选符号，带 `heuristic/partial`。未解析 import 与同名调用有诊断，但无目标声明的调用不会逐一产生 unresolved_call 诊断。查询只能说明指定 checkpoint；没有新 checkpoint 时，当前工作目录发生变化不会仅凭 `indexStatus` 自动被判 stale。它适合作为有限结构辅助，不能定位成完整多语言语义分析或运行时影响证明。[Codebase 实现](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/codebase-index.ts)
 
 ## 无宿主 Hook 的最小使用协议
 
@@ -100,7 +100,7 @@ Codebase 目前 `ANALYZER = builtin-regex-static-v1`，只处理 TS/JS 家族；
 
 无需每轮调用三个 readiness 再做空写入。没有记忆授权就不写 Memory；没有独立结果就不伪造 Experience；没有可靠知识证据就不晋升 Knowledge。报告 `unused / unavailable / no_match / observed` 等具体原因，不用“调用过状态接口”代替有效使用。
 
-建议四个逻辑域保持独立；部署可以四插件，也可以一个选择性组合 MCP。默认不要求用户安装 full Craft，也不要求再配置第二个模型 API key：正常摘要/审核由现有宿主完成；无人值守提炼才选择独立模型服务，并受预算和证据约束。`host_kind` 当前仅接受 codex/claude/independent，可保留 independent 兼容，逐步用 host id/version/capabilities 表达宿主差异。[Host review](../../core/knowledge-auto-review.ts)
+建议四个逻辑域保持独立；部署可以四插件，也可以一个选择性组合 MCP。默认不要求用户安装 full Craft，也不要求再配置第二个模型 API key：正常摘要/审核由现有宿主完成；无人值守提炼才选择独立模型服务，并受预算和证据约束。`host_kind` 当前仅接受 codex/claude/independent，可保留 independent 兼容，逐步用 host id/version/capabilities 表达宿主差异。[Host review](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/knowledge-auto-review.ts)
 
 Context 应有跨组件总预算和去重。本地 resolver 当前分别给 Memory 与各 contributor 同样的 max_items/max_chars，receipt.used_chars 只统计 Memory；因此传 3000 并不等于聚合结果最多 3000。可以保留分配权独立，但对 Host 返回一个总量、截断与各组件占用的可检查契约。[Context Resolution](../../core/context-resolution.ts)（185–207 行）
 

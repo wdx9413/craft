@@ -181,6 +181,31 @@ test("Java control-flow adapter executes a valid response without tools.jar and 
   }
 });
 
+test("Java control-flow adapter adds the JDK tools.jar when it exists", () => {
+  const content = "class Main { void route() {} }\n", file = source("Main.java", content);
+  const symbol = { id: "java_route_symbol", name: "route", startOffset: content.indexOf("route") };
+  const javaHome = mkdtempSync(join(tmpdir(), "craft-java-home-test-"));
+  const toolsJar = join(javaHome, "lib", "tools.jar");
+  mkdirSync(join(javaHome, "lib"), { recursive: true }); writeFileSync(toolsJar, "test jar placeholder");
+  const priorJavaHome = process.env.JAVA_HOME;
+  process.env.JAVA_HOME = javaHome;
+  const commands: Array<{ command: string; args: string[] }> = [];
+  try {
+    const result = analyzeJavaControlFlow(file, symbol, { analyzerPath: "/helper", execute: (command, args) => {
+      commands.push({ command, args });
+      return command.endsWith("javac") ? "" : JSON.stringify({ format: "craft-java-control-flow-v1", language: "java", symbol_id: symbol.id,
+        blocks: [], edges: [], partial_reasons: [], source_content_included: false });
+    } });
+    assert(result.result);
+    assert(commands[0]?.args.includes("-classpath"));
+    assert(commands[0]?.args.includes(toolsJar));
+  } finally {
+    if (priorJavaHome === undefined) delete process.env.JAVA_HOME;
+    else process.env.JAVA_HOME = priorJavaHome;
+    rmSync(javaHome, { recursive: true, force: true });
+  }
+});
+
 test("Java control-flow helper failures and invalid responses remain bounded diagnostics", () => {
   const content = "class Main { void route() {} }\n", file = source("Main.java", content);
   const symbol = { id: "java_route_symbol", name: "route", startOffset: content.indexOf("route") };
@@ -221,6 +246,9 @@ test("Java analyzer resolution, JDK 8 compiler classpath and response budgets ar
   const moduleUrl = pathToFileURL(join(moduleRoot, "index.js")).href;
   const moduleAnalyzer = resolveJavaAnalyzerPath("/work", path => path.includes(join("module", "analyzers")), moduleUrl);
   assert.equal(moduleAnalyzer, join(moduleRoot, "analyzers", "AnalyzeJava.java"));
+  const packageAnalyzer = resolveJavaAnalyzerPath("/work", path => path === join(moduleRoot, "analyzers", "AnalyzeJava.java"),
+    pathToFileURL(join(moduleRoot, "dist", "java-analysis.js")).href);
+  assert.equal(packageAnalyzer, join(moduleRoot, "analyzers", "AnalyzeJava.java"));
   const scriptAnalyzer = resolveJavaAnalyzerPath("/work", path => path.includes(join("scripts", "codebase", "analyzers")), null);
   assert(scriptAnalyzer?.includes(join("scripts", "codebase", "analyzers", "AnalyzeJava.java")));
   // A module URL that is not a filesystem location is skipped, not fatal.

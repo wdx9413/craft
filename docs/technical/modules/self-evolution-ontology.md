@@ -8,9 +8,23 @@
 
 ## 当前状态
 
-当前共享包 `craft-common-ontology` 提供六种持久记录概念（`fact`、`rule`、`decision`、`term`、`preference`、`procedure`）、概念语句校验及旧类型映射。ADR-0029 明确不做通用本体推理。ADR-0030 描述关系类型约束、关系端点检查和跨记录一致性诊断，但当前 `craft-common-ontology/src/index.ts` 与 `src/validation.ts` 没有导出这些关系 API；Craft 测试引用了 `RELATION_KINDS`、`RELATION_TYPES`、`checkRelationConcepts` 和 `checkConceptConsistency`。因此这些关系能力目前是文档/调用方期望，不应称为共享包已实现能力。
+当前共享包 `craft-common-ontology` 提供六种持久记录概念（`fact`、`rule`、`decision`、`term`、`preference`、`procedure`）、概念语句校验、旧类型映射，以及 `RELATION_KINDS`、`RELATION_TYPES`、`checkRelationConcepts` 和 `checkConceptConsistency` 等类型关系与一致性诊断 API。源码位置为 `craft-common/packages/craft-common-ontology/src/{concepts,validation,index}.ts`。这些 API 是确定性的局部结构校验，不是通用本体推理、真实性判定或本体版本迁移。ADR-0029 明确不做通用本体推理。
 
-Craft 已有演进候选、任务/项目/全局阶段、回归、运行记录和回滚相关组件；但当前 `core/evolution-cycle.ts` 未将共享本体论绑定到候选生命周期，也未把类型化语义作为统一的候选评测合同。现有 Mod Runtime 的固定输入向量验证事件合同，不等同于用户任务质量评测。详见 [自进化 Mod Runtime](./self-evolution-mod.md)。
+Craft 已有追加式演进候选、作用域阶段和评测合同。Ontology 分类查询现在按激活指针读取分类投影，并保留无激活指针时的兼容基线。Runtime 仍需配置可信评测器、全局启用授权和操作员签名信任根；模拟验收不等同于 Codex 用户任务质量评测。详见 [自进化 Mod Runtime](./self-evolution-mod.md) 和 [Codex 自进化理想态规划](../../product/craft-context-codex-self-evolution-ideal-state.zh-CN.md)。
+
+## Runtime 信任配置
+
+Task Effect Contract 的评测器身份不能由候选合同自行授权。Runtime 从启动环境变量 `CRAFT_TRUSTED_EVALUATORS` 读取固定 JSON 数组，每项必须包含精确的 `id`、`version`、`digest` 和 `public_key_pem`。合同定义、结果记录和结果复核都会逐字段比对；缺少或不匹配时失败关闭。
+
+```json
+[{"id":"org-evaluator","version":"1","digest":"sha256:<64位小写十六进制>","public_key_pem":"-----BEGIN PUBLIC KEY-----\\n..."}]
+```
+
+Knowledge 全局来源使用 `CRAFT_TRUSTED_KNOWLEDGE_SOURCES` 固定来源 ID 与来源身份摘要；仅配置 ID 不授予信任。格式为 `[{"id":"org-standard","identity_digest":"sha256:<64位小写十六进制>"}]`。来源范围、`verified` 标记和身份摘要必须同时匹配。
+
+Ontology 全局发布还必须显式设置 `CRAFT_ONTOLOGY_GLOBAL_ACTIVATION=enabled`。操作员回滚/撤销使用 `CRAFT_ONTOLOGY_TRUSTED_OPERATORS` 固定 Ed25519 公钥注册表，格式为 `[ {"id":"release-operator","public_key_pem":"-----BEGIN PUBLIC KEY-----\\n..."} ]`；签名覆盖动作、目标指针、作用域、阶段、修订号、原因和请求 ID，不能复用到另一项操作。自动回滚只接受已信任评测器签署、精确绑定当前候选与作用域的越界报告，并追加指向前一有效指针的事件；没有前一指针时撤销到兼容基线。
+
+以上变量属于 Runtime 管理配置，不能由候选或 MCP 请求更新。它们提供可部署的信任根；真实 Codex Host 身份仍须经 Host 回执验收。
 
 ## 目标模型
 
@@ -70,12 +84,12 @@ Craft 已有演进候选、任务/项目/全局阶段、回归、运行记录和
 
 | 能力 | 当前证据 | 目标验收 |
 | --- | --- | --- |
-| 统一概念分类 | 共享包有六类概念和写入校验 | 增加版本化 Ontology schema；兼容读取旧版本 |
-| 类型化关系 | ADR-0030 描述，但共享包源码缺少对应导出 | 关系类型、端点约束、一致性诊断与 Craft-Eval 行为一致，并有真实调用方验证 |
-| 来源与有效性 | 各能力保留部分来源/版本字段 | Observation 到 Candidate、Evaluation、Rollout、Rollback 可追溯；撤销和过期传播可验证 |
-| 重分类 | 当前共享包只映射旧类型 | 追加分类版本、歧义隔离、历史回放和语义版本回滚通过数据迁移验收 |
-| 评测与晋级 | 候选生命周期存在，但通用 Ontology/Evaluation Contract 联结未证实 | 每种候选绑定不可变合同；配对留出评测和分阶段门禁能拒绝收益不足/安全失败候选 |
-| Core Policy | ADR-0003 表述为 Core Policy 永不自改 | 明确定义 Core Policy 集合；Runtime 在本体之外独立实施，越权变更失败关闭 |
+| 统一概念分类 | 共享包导出版本化 Ontology schema；Runtime 可幂等注册并校验内容摘要 | 真实调用方和 Craft-Eval 对多版本兼容的完整验证 |
+| 类型化关系 | 共享包已导出关系种类、端点约束和一致性诊断 API | 验证真实调用方和 Craft-Eval 对 API 行为的依赖；不把局部结构校验称为推理 |
+| 来源与有效性 | 分类修订保留稳定 Claim ID、源引用、Ontology 版本、置信度、理由及追加回执；写入前绑定项目 Cycle 与可信合同 | 历史索引重建及陈旧分类的自动刷新仍需运行验收 |
+| 历史重分类 | Runtime `ontologyClassificationRecord` 追加修订，来源正文不变；低置信度进入 `unresolved`；分类投影按项目/小范围/全局激活指针选择，撤销和回滚以追加事件切换 | 真实生产检索负载下的索引一致性与分阶段观测 |
+| 评测与晋级 | Ontology 候选必须关联精确版本、Runtime 信任根中的评测器、签名报告和 routeable 合同；小范围绑定固定 cohort，全局要求独立授权；越界反馈自动回滚，人工撤销要求受信操作员签名 | 其他资产族合同统一、真实 Codex Host 配对留出效果及真实部署观察 |
+| Core Policy | 普通 Mod 全信任也不能改变受保护审批策略；策略差异仅作为待审候选 | 真实 Host 下的端到端权限拒绝和审计证据 |
 
 外部研究支持将技能/能力视为可复用、带经验的长期资产，并逐项评测其生命周期；但自生成技能的收益可能为负。Darwin Gödel Machine 使用编程基准验证每次代码改动；MUSE-Autoskill 把创建、记忆、管理、评测和修订结合；SkillsBench 1.1 报告自生成技能在若干 Agent/模型配置上的任务解决率下降。因此 Craft 应以候选级证据而非“自动生成”作为晋级依据，且需覆盖长期收益与代价，而不只是一次通过率。
 

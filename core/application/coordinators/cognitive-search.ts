@@ -8,6 +8,7 @@ import { knowledgeScenarioIsActive, listKnowledgeScenarios, proposeKnowledgeScen
 import { array, finiteInteger, object, text } from "../../validation.ts";
 import { knowledgeDirectoryForScope } from "../../project-knowledge-content.ts";
 import { knowledgeClaimPromotionProofVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
+import { ontologyClassificationGetActive } from "../../ontology-classification-projection.ts";
 
 /** Owns local diagnostic projections and the loop's governed Memory read path. */
 export class CognitiveSearchCoordinator {
@@ -73,9 +74,13 @@ export class CognitiveSearchCoordinator {
       if (score <= 0) return [];
       const formallyReviewed = claim.status === "reviewed" && knowledgeClaimPromotionProofVerified(this.store, claim);
       if (!formallyReviewed && !includeCandidates) return [];
+      const classificationScope = scope?.startsWith("project:") ? scope.slice("project:".length) : "__global_query__";
+      const classification = ontologyClassificationGetActive(this.store, { claim_id: String(claim.id), claim_version: Number(claim.version),
+        project_scope_id: classificationScope, ...(typeof args.cohort_id === "string" ? { cohort_id: args.cohort_id } : {}) });
       return [{ kind: "governed_claim", claim_id: claim.id, claim_version: claim.version,
         status: formallyReviewed ? "reviewed" : claim.status === "candidate" ? "candidate" : "candidate_diagnostic",
         scope: claim.scope, content, content_digest: claim.content_digest, evidence_ids: claim.evidence_ids,
+        semantic_classification: classification.effective_classification, classification_unresolved: classification.unresolved,
         score, relations: this.relationSummary(`claim:${String(claim.id)}`) }];
     });
     const index = this.knowledgeIndex();

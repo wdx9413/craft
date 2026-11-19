@@ -118,6 +118,14 @@ test("feedback attributes selected code and schedules correction without alterin
     const feedback = f.service.contextResolutionFeedback({ receipt_id: id, outcome: "stale", usage_stage: "used", asset_refs: pack.asset_refs });
     const selectedCodeRefs = (pack.asset_refs as JsonObject[]).filter(ref => ref.member === "codebase");
     assert(selectedCodeRefs.length > 0); assert.equal((feedback.corrections as unknown[]).length, selectedCodeRefs.length);
+    const partialEvaluationBinding = f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", usage_stage: "used",
+      evaluation_contract_id: "contract-without-evaluation", feedback_id: "partial-evaluation-binding" }).feedback as JsonObject;
+    assert.equal(partialEvaluationBinding.token_provenance, "caller_reported");
+    assert.equal("evaluation_contract_id" in partialEvaluationBinding, false);
+    const completeEvaluationBinding = f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", usage_stage: "used",
+      evaluation_contract_id: "contract-1", evaluation_id: "evaluation-1", feedback_id: "complete-evaluation-binding" }).feedback as JsonObject;
+    assert.equal(completeEvaluationBinding.evaluation_contract_id, "contract-1");
+    assert.equal(completeEvaluationBinding.evaluation_id, "evaluation-1");
     assert.equal(f.service.contextResolutionFeedback({ receipt_id: id, outcome: "stale", usage_stage: "used", asset_refs: pack.asset_refs }).idempotent, true);
     assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", asset_refs: [{ member: "codebase", id: "other" }] }), /not selected/);
     assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "helpful", usage_stage: "verified" }), /Evidence/);

@@ -56,6 +56,12 @@ import { detectCoordinatorConflicts, resolveCoordinatorDirectory, type Coordinat
 import { canonicalRootPath, verifiedWorkspaceRoot } from "../workspace.ts";
 import { projectPilotTaskResult, reviewPilotResults, type PilotTaskResult } from "../pilot-results.ts";
 import { contextFeedbackWeights } from "../context-feedback-weight.ts";
+import { HostPolicyProposalKernel } from "../host-policy-proposal.ts";
+import { ontologyClassificationGet, ontologyClassificationRecord, ontologyVersionRegister } from "../ontology-classification.ts";
+import { ontologyClassificationGetActive, ontologyClassificationProjectionBuild } from "../ontology-classification-projection.ts";
+import { ontologyActivationResolve as resolveOntologyActivation, ontologyActivationSet as setOntologyActivation,
+  ontologyActivationRollback as rollbackOntologyActivation, ontologyActivationRevoke as revokeOntologyActivation } from "../ontology-activation.ts";
+import { ontologyOperatorAuthorizer } from "../ontology-operator-authorizer.ts";
 
 import { evaluateVerificationCheck, runVerification, verificationCaptureSignals } from "../verification-sensor.ts";
 import { abstractAcrossTrajectories, buildAbstraction, trajectoryFailureSignature } from "../trajectory-abstraction.ts";
@@ -314,9 +320,9 @@ export class CraftService extends ServiceFoundation {
     modelProviders?: readonly import("../model-gateway.ts").ModelProviderSpec[],
     modelTransport?: import("../model-gateway.ts").ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[],
     contentLanguage = "zh-CN", knowledgeAdjudicationTransportFactory: () => ModelTransport = () => new CodexCliModelTransport(),
-    localSandbox?: unknown) {
+    localSandbox?: unknown, trustedEvaluators?: readonly import("../evaluation-contract.ts").TrustedEvaluatorIdentity[]) {
     super(store, semanticProvider, isolatedAdapter as never, dockerSandbox as never, egressBroker as never, hostOwnerId,
-      hostProfiles, modelProviders, modelTransport, traceArchiveBackends, localSandbox as never);
+      hostProfiles, modelProviders, modelTransport, traceArchiveBackends, localSandbox as never, trustedEvaluators);
     this.internalApprovalBroker = new InternalActionApprovalBroker(store);
     this.nativeTools = new NativeToolKernel(store);
     this.dshPluginHost = new DshPluginHostRuntime(store, () => loadSettingsSync());
@@ -880,6 +886,7 @@ export class CraftService extends ServiceFoundation {
 
   setInternalApprovalPolicy(policy: InternalApprovalPolicy): void {
     this.internalApprovalBroker.setPolicy(async (action, effect, args) => {
+      if (action === "host_policy_proposal_review") return "ask";
       const baseline = await policy(action, effect, args);
       if (baseline !== "ask") return baseline;
       try { return await this.modRuntime.approvalStrategy(action, effect, args) ?? "ask"; }
@@ -1490,6 +1497,18 @@ export class CraftService extends ServiceFoundation {
   evolutionCycleStart(args: JsonObject): JsonObject { return this.evolutionCycles.start(args); }
   evolutionCycleAdvance(args: JsonObject): JsonObject { return this.evolutionCycles.advance(args); }
   evolutionCycleGet(args: JsonObject): JsonObject { return this.evolutionCycles.get(args); }
+  hostPolicyProposalPrepare(args: JsonObject): JsonObject { return new HostPolicyProposalKernel(this.store, this.evaluationContracts).prepare(args); }
+  hostPolicyProposalPropose(args: JsonObject): JsonObject { return new HostPolicyProposalKernel(this.store, this.evaluationContracts).propose(args); }
+  async hostPolicyProposalReview(args: JsonObject): Promise<JsonObject> {
+    const approvalArgs = { proposal_id: String(args.proposal_id ?? ""), expected_version: Number(args.expected_version),
+      decision: String(args.decision ?? ""), reason: String(args.reason ?? "") };
+    const action = "host_policy_proposal_review", effect = "external_write";
+    const authorization = await this.internalApprovalBroker.authorize(action, approvalArgs, effect);
+    if (typeof authorization.approval_ref !== "string") throw new Error("Host policy review requires a Workbench human approval");
+    this.internalApprovalBroker.consume(authorization.approval_ref, action, approvalArgs, effect);
+    return new HostPolicyProposalKernel(this.store, this.evaluationContracts).review({ ...approvalArgs, approval_ref: authorization.approval_ref });
+  }
+  hostPolicyProposalGet(args: JsonObject): JsonObject { return new HostPolicyProposalKernel(this.store, this.evaluationContracts).get(args); }
   statefulComputeHostRegister(args: JsonObject): JsonObject { return this.statefulCompute.hostRegister(args); }
   statefulComputeSessionPrepare(args: JsonObject): JsonObject { return this.statefulCompute.sessionPrepare(args); }
   statefulComputeDispatch(args: JsonObject): JsonObject { return this.statefulCompute.dispatch(args); }
@@ -6172,7 +6191,95 @@ export class CraftService extends ServiceFoundation {
   verifiedWorkLoopGet(args: JsonObject): JsonObject { return this.workControl.get(args); }
   evaluationContractDefine(args: JsonObject): JsonObject { return this.evaluationContracts.define(args as unknown as EvaluationContractInput & { contract_id?: string }); }
   evaluationContractRecord(args: JsonObject): JsonObject { return this.evaluationContracts.record(args as unknown as { contract_id: string; stage: EvaluationStage; evidence?: string[]; metrics?: JsonObject }); }
+  evaluationContractTaskEffectRecord(args: JsonObject): JsonObject {
+    return this.evaluationContracts.recordTaskEffectEvaluation(args);
+  }
   evaluationContractGet(args: JsonObject): JsonObject { return this.evaluationContracts.get(text(args.contract_id, "contract_id")); }
+  ontologyVersionRegister(args: JsonObject): JsonObject { return ontologyVersionRegister(this.store, args); }
+  ontologyClassificationRecord(args: JsonObject): JsonObject { return ontologyClassificationRecord(this.store, this.evolutionCycles, args, this.evaluationContracts); }
+  ontologyClassificationGet(args: JsonObject): JsonObject { return args.project_scope_id === undefined
+    ? ontologyClassificationGet(this.store, args) : ontologyClassificationGetActive(this.store, args); }
+  ontologyClassificationProjectionBuild(args: JsonObject): JsonObject { return ontologyClassificationProjectionBuild(this.store, args); }
+  ontologyActivationSet(args: JsonObject): JsonObject {
+    return setOntologyActivation(this.store, args, { verify: (input) => {
+      const target = input.scope as JsonObject;
+      const contractRef = input.evaluation_contract_ref as JsonObject;
+      const reportRef = input.evaluation_result_ref as JsonObject;
+      const contract = this.store.get(String(contractRef.kind), String(contractRef.id), Number(contractRef.version));
+      const report = this.store.get(String(reportRef.kind), String(reportRef.id), Number(reportRef.version));
+      const contractScope = contract.scope as JsonObject;
+      const history = Array.isArray(contract.stage_history) ? contract.stage_history as JsonObject[] : [];
+      const hasStage = (stage: string) => history.some((entry) => entry.stage === stage && entry.verification === "trusted"
+        && Array.isArray(entry.evidence) && entry.evidence.includes(String(report.id)));
+      const evaluation = this.evaluationContracts.verifyTaskEffectEvaluation({ contract_id: String(contract.id),
+        evaluation_id: String(report.id), candidate_ref: input.candidate_ref as unknown as Parameters<typeof this.evaluationContracts.verifyTaskEffectEvaluation>[0]["candidate_ref"] });
+      const stagesPassed = hasStage("business_eligible") && hasStage("routeable");
+      const projectScopeMatches = target.kind === "project" && contractScope.kind === "project" && contractScope.id === target.id;
+      const cohortId = input.cohort_id === undefined || input.cohort_id === null ? null : String(input.cohort_id);
+      const taskEffect = contract.task_effect && typeof contract.task_effect === "object" && !Array.isArray(contract.task_effect)
+        ? contract.task_effect as JsonObject : {};
+      const cohortAuthorized = projectScopeMatches && cohortId !== null && taskEffect.cohort_id === cohortId && stagesPassed;
+      const projectAuthorized = projectScopeMatches && stagesPassed;
+      const globalAuthorized = target.kind === "global" && contractScope.kind === "global" && contractScope.id === target.id
+        && process.env.CRAFT_ONTOLOGY_GLOBAL_ACTIVATION === "enabled" && stagesPassed;
+      const stageAuthorized = input.stage === "shadow"
+        ? (projectScopeMatches || target.kind === "global" && contractScope.kind === "global" && contractScope.id === target.id)
+        : input.stage === "small-scope" ? cohortAuthorized
+          : input.stage === "project" ? projectAuthorized : input.stage === "global" && globalAuthorized;
+      return { verified: evaluation.valid === true && evaluation.evaluation_digest === report.evaluation_digest,
+        verdict: evaluation.valid === true ? "passed" : "failed", eligible: evaluation.eligible === true,
+        routeable: evaluation.routeable === true && stageAuthorized,
+        global_authorized: globalAuthorized, cohort_authorized: cohortAuthorized, cohort_id: cohortId,
+        evaluation_digest: report.evaluation_digest, candidate_ref: input.candidate_ref,
+        evaluation_contract_ref: { kind: String(contract.kind ?? "evaluation_contract"), id: String(contract.id), version: Number(contract.version), digest: String(contract.contract_digest) },
+        scope: target, verification_receipt: stableDigest({ contract_id: contract.id, contract_digest: contract.contract_digest,
+          evaluation_id: report.id, evaluation_digest: report.evaluation_digest, candidate_ref: evaluation.candidate_ref,
+          scope: target, verified: evaluation.valid === true, routeable: evaluation.routeable === true && stageAuthorized,
+          cohort_id: cohortId, global_authorized: globalAuthorized }) };
+    } });
+  }
+  ontologyActivationResolve(args: JsonObject): JsonObject { return resolveOntologyActivation(this.store, args); }
+  ontologyActivationRollback(args: JsonObject): JsonObject {
+    const operatorId = text(args.operator_id, "operator_id"), signature = text(args.authorization_signature, "authorization_signature");
+    const actor = text(args.actor ?? operatorId, "actor");
+    const receipt = `operator-signature:${operatorId}:${signature}`;
+    return rollbackOntologyActivation(this.store, { ...args, actor, verification_receipt: receipt }, ontologyOperatorAuthorizer(operatorId, signature));
+  }
+  ontologyActivationRevoke(args: JsonObject): JsonObject {
+    const operatorId = text(args.operator_id, "operator_id"), signature = text(args.authorization_signature, "authorization_signature");
+    const actor = text(args.actor ?? operatorId, "actor");
+    const receipt = `operator-signature:${operatorId}:${signature}`;
+    return revokeOntologyActivation(this.store, { ...args, actor, verification_receipt: receipt }, ontologyOperatorAuthorizer(operatorId, signature));
+  }
+  ontologyActivationFeedback(args: JsonObject): JsonObject {
+    const active = this.store.get("ontology_activation_pointer", text(args.active_pointer_id, "active_pointer_id"));
+    if (active.action !== "activate" || active.verified !== true || active.stage === "shadow") throw new Error("Feedback requires an active verified Ontology pointer");
+    const reportId = text(args.evaluation_id, "evaluation_id"), report = this.store.get("task_effect_evaluation", reportId);
+    const contractId = text(report.contract_id, "report.contract_id");
+    const evaluation = this.evaluationContracts.verifyTaskEffectEvaluation({ contract_id: contractId, evaluation_id: reportId,
+      candidate_ref: active.candidate_ref as unknown as Parameters<typeof this.evaluationContracts.verifyTaskEffectEvaluation>[0]["candidate_ref"] });
+    if (evaluation.valid !== true || evaluation.evaluation_digest !== report.evaluation_digest)
+      throw new Error("Ontology feedback requires a valid trusted task-effect report bound to the active candidate");
+    const contract = this.store.get("evaluation_contract", contractId), contractScope = contract.scope as JsonObject | undefined;
+    const pointerScope = active.scope as JsonObject;
+    if (!contractScope || contractScope.kind !== pointerScope.kind || contractScope.id !== pointerScope.id)
+      throw new Error("Ontology feedback contract scope differs from the active pointer");
+    if (evaluation.eligible === true) return { status: "within_bounds", rolled_back: false, pointer: active, evaluation_id: reportId };
+    const reason = `trusted_task_effect_regression:${reportId}`;
+    const requestId = `auto_${stableDigest({ active_pointer_id: active.id, evaluation_id: report.id, evaluation_digest: report.evaluation_digest }).slice(-24)}`;
+    const controlArgs: JsonObject = { active_pointer_id: active.id, request_id: requestId, expected_pointer_revision: active.pointer_revision,
+      stage: active.stage, scope: active.scope as JsonObject, actor: "runtime:auto-rollback", reason,
+      verification_receipt: `task-effect:${report.id}@${report.version}:${report.evaluation_digest}` };
+    if (active.cohort_id !== null && active.cohort_id !== undefined) controlArgs.cohort_id = active.cohort_id;
+    const targetPointerId = active.previous_effective_pointer_id;
+    const authorizeFeedback = { authorize: (input: JsonObject) => input.actor === "runtime:auto-rollback"
+      && input.active_pointer_id === active.id && input.reason === reason && input.request_id === requestId };
+    if (typeof targetPointerId === "string") controlArgs.target_pointer_id = targetPointerId;
+    const rollback = typeof targetPointerId === "string"
+      ? rollbackOntologyActivation(this.store, controlArgs, authorizeFeedback)
+      : revokeOntologyActivation(this.store, controlArgs, authorizeFeedback);
+    return { status: "regression_rolled_back", rolled_back: true, pointer: rollback, evaluation_id: reportId };
+  }
   verifiedWorkLoopWorkbenchPrepare(args: JsonObject): JsonObject {
     const root = resolve(text(args.workspace, "workspace")); const includePaths = uniqueTextArray(args.include_paths ?? ["."], "include_paths").sort();
     const workspaceId = args.workspace_id === undefined ? `workspace_loop_${valueDigest({ root, include_paths: includePaths }).slice(-16)}` : text(args.workspace_id, "workspace_id"); const existing = this.store.find("workspace", workspaceId);

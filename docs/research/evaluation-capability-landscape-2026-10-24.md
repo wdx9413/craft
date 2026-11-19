@@ -62,7 +62,7 @@ LangSmith 官方将离线评测用于基准、单元与回归，将在线评测�
 | [`core/application/coordinators/evaluation-runs.ts`](../../core/application/coordinators/evaluation-runs.ts)、[`core/eval-campaign.ts`](../../core/eval-campaign.ts) | 已有版本化 Suite、Trial、Outcome、聚合、配对比较、候选/基线 Slot；自动 Runner 目前只执行 Workflow，Agent 由 Host 绑定真实 TaskRun | 优先抽出共用的运行与比较内核，不再造第二套 Campaign |
 | [`core/retrieval-evaluation.ts`](../../core/retrieval-evaluation.ts)、[`core/context-host-evaluation.ts`](../../core/context-host-evaluation.ts) | 前者跑带标签的检索语料，报告 recall、precision、漏检和成本；后者绑定真实 Host 发出的 Context 引用并评估检索/引用，明确不证明模型实际使用 | 同一“检索”需要区分模块效果、Host 交付和任务价值，不能只看一层 |
 | [`core/delivery-evaluation.ts`](../../core/delivery-evaluation.ts)、[`core/task-benchmark.ts`](../../core/task-benchmark.ts)、[`core/agent-eval-lab.ts`](../../core/agent-eval-lab.ts) | 将真实 TaskRun、Delivery、终态再观察与可比环境连接；缺交付或环境不一致返回待定 | 整体任务应消费这些事实链，而不根据 Agent 的完成宣告造真值 |
-| [`capability/craft-experience/scenario-evaluation.ts`](../../capability/craft-experience/scenario-evaluation.ts)、[`core/application/engineering-evaluation-runner.ts`](../../core/application/engineering-evaluation-runner.ts) | Experience 有影子/留出/金丝雀数据集合同；工程 Profile 有隔离执行和程序验收 | 领域判据与环境执行仍应留在拥有它们的模块或 Host Adapter |
+| [`capability/craft-experience/scenario-evaluation.ts`](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/scenario-evaluation.ts)、[`core/application/engineering-evaluation-runner.ts`](../../core/application/engineering-evaluation-runner.ts) | Experience 有影子/留出/金丝雀数据集合同；工程 Profile 有隔离执行和程序验收 | 领域判据与环境执行仍应留在拥有它们的模块或 Host Adapter |
 
 [`core/capability-catalog.ts`](../../core/capability-catalog.ts) 仅登记 Knowledge、Memory、Experience、Codebase；`capability/craft-eval/` 是评测脚本目录。前述判断是源码推论，不能当作安装态或真实 Host 效果证明。
 

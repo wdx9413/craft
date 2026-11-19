@@ -1,5 +1,11 @@
 # Experience / Eval Kernel
 
+## Procedure 的可信 Held-out 结果
+
+本地只读 Workflow Evaluator 负责 Shadow 与通过准入后的回归运行。它不能替代独立基线/候选任务效果对照。Held-out dispatch 保持 `awaiting_adapter`，直到 Runtime 信任根中的评测器提交已签名 `task_effect_evaluation`，并且报告绑定冻结的 `experience_procedure` 候选版本、held-out Task 与已完成 Host Session 回执。提交结果时调用 `craft_experience_learning_evaluation_result`，传入精确的 `dispatch_id`、`evaluation_contract_id` 和 `evaluation_id`。Craft 会验证信任、候选摘要和任务配对，再创建脱敏 Evidence 并继续 Signoff；报告缺失、签名不可信或候选不匹配时失败关闭。仅 Canary 通过后才更新当前发布指针。
+
+评测器信任根由运行时启动配置 `CRAFT_TRUSTED_EVALUATORS` 提供，不能由 Procedure、MCP 请求或模型候选自行授权。配置示例及 Evaluation Contract 的合同和报告阶段见 [自进化本体论与评测闭环](./self-evolution-ontology.md#runtime-信任配置)。本地插件烟测验证的是无可信 Held-out 报告时保持未发布；它不证明真实 Codex 用户任务效果。
+
 ## 在产品架构中的位置
 
 **评测与实验属于第三支柱“学习与改进”**，与记忆与知识、学习与适应、编译与复用并列。独立模块表示职责清晰，不表示第四支柱。第二支柱“执行与保障”的验证与观察负责本次工作的结果和运行状态；评测使用跨案例/版本证据判断方法是否值得复用。

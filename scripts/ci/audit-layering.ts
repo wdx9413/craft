@@ -35,7 +35,27 @@ for (const directory of ["common", "capability"]) {
     }
   }
 }
-const findings = auditLayerGraph(sources, packageExports);
+const manifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")) as {
+  dependencies?: Record<string, string>;
+};
+const externalPackageExports = new Set<string>();
+for (const packageName of Object.keys(manifest.dependencies ?? {})) {
+  if (!packageName.startsWith("craft-common-") && !packageName.startsWith("@craft/capability-")) continue;
+  const packageManifestPath = resolve(root, "node_modules", packageName, "package.json");
+  if (!existsSync(packageManifestPath)) continue;
+  const packageManifest = JSON.parse(readFileSync(packageManifestPath, "utf8")) as {
+    exports?: string | Record<string, unknown>;
+  };
+  if (typeof packageManifest.exports === "string") {
+    externalPackageExports.add(packageName);
+  } else {
+    for (const subpath of Object.keys(packageManifest.exports ?? {})) {
+      if (subpath === ".") externalPackageExports.add(packageName);
+      else if (subpath.startsWith("./") && !subpath.includes("*")) externalPackageExports.add(`${packageName}/${subpath.slice(2)}`);
+    }
+  }
+}
+const findings = auditLayerGraph(sources, packageExports, externalPackageExports);
 for (const finding of findings) console.error(`layer audit: ${finding.kind}: ${finding.path.join(" -> ")}`);
 console.log(`layer audit: ${Object.keys(sources).length} modules, ${findings.length} violation(s), no import exemptions`);
 if (findings.length) process.exitCode = 1;

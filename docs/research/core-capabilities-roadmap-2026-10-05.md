@@ -108,7 +108,7 @@ flowchart TD
 
 **Interface 仍靠调用方掌握隐含顺序。** 多数用例接收/返回 `JsonObject`，身份、Scope、版本、Evidence、生命周期合法组合由运行时分散检查。类型检查可以通过，但一个层次把 `source_id`、`artifact_id` 或不同版本身份混用时，编译器帮助有限。应从高风险纵切引入领域类型和明确失败分类，不要求一次类型化全部记录。
 
-**包图与源码图未统一。** 源码仍大量跨包相对路径导入；构建用逐入口 bundle 与声明路径替换生成可发布包。可以工作，但源码测试、包消费测试和产物类型解析之间存在三套观察面。需要用真实消费用例验证一致性，而不是仅更换目录名。[构建脚本](../../scripts/release/build-common-packages.ts)。
+**包图与源码图未统一。** 源码仍大量跨包相对路径导入；构建用逐入口 bundle 与声明路径替换生成可发布包。可以工作，但源码测试、包消费测试和产物类型解析之间存在三套观察面。需要用真实消费用例验证一致性，而不是仅更换目录名。[构建脚本](https://github.com/wdx9413/craft-common/blob/main/packages/craft-common-log/package.json)。
 
 ### 3.3 目标职责分配
 
@@ -132,9 +132,9 @@ flowchart TD
 [独立 Standards 报告](core-standards-review-2026-10-05.md)：**3 项明确问题、1 项性能候选**，本轴最严重为 S1 / High。
 
 - **S1：私有 Knowledge Claim 读取旁路。** `knowledgeClaimGet/List` 没有复用现有访问检查；旧工具 Schema 又没有身份字段，远程身份 Adapter 无从注入。已证明同 Store、同 tenant 的另一 principal 可以读取 fixture 私有正文；未证明跨 tenant。[读取位置](../../core/application/craft-service.ts) 第 2815–2816 行；[工具声明](../../core/mcp/tool-catalog.ts) 第 363–364 行。
-- **S2：配置文件与数据库失败不一致。** 写出不可变 Procedure JSON 后，数据库失败回滚，版本文件仍留下；相同 id/title 修改内容重试受阻。[配置保存](../../capability/craft-experience/procedure-configuration.ts) 第 27–38 行。
+- **S2：配置文件与数据库失败不一致。** 写出不可变 Procedure JSON 后，数据库失败回滚，版本文件仍留下；相同 id/title 修改内容重试受阻。[配置保存](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-configuration.ts) 第 27–38 行。
 - **S3：Codebase owns 声明不真实。** 版本 inspect/restore 属于共享应用实现，却声明为 Codebase 包拥有，违反 [ADR-0016](../adr/0016-ownership-is-not-projection.md)。产品可见范围不需要因此删除。
-- **S4：有界返回未形成有界读取。** Store 的 predicate 路径先装载全集合与正文再过滤；201 条记录、limit=1 的探针发生 201 次正文读取。这是规模风险，未测量生产延迟。[Store](../../common/craft-common-store-local/src/store.ts) 第 197–205 行。
+- **S4：有界返回未形成有界读取。** Store 的 predicate 路径先装载全集合与正文再过滤；201 条记录、limit=1 的探针发生 201 次正文读取。这是规模风险，未测量生产延迟。[Store](https://github.com/wdx9413/craft-common/blob/main/packages/craft-common-store-local/src/store.ts) 第 197–205 行。
 
 ### Spec
 
@@ -165,7 +165,7 @@ flowchart TD
 | 本地存储 | SQLite WAL、追加版本、CAS、迁移备份、Markdown/JSON 内容存储 | predicate 扫描/正文提前加载、启动全索引重建、文件事务恢复和规模数据维护待改善 |
 | 远程与分发 | HTTPS/token introspection 配置、服务端 tenant 路由、产品 MCP、各 Host 包装 | 本地 fixture 不等于真实 IdP/运维；同 tenant principal 读取 ACL 要先修，互不信任多人场景还缺完整逐用户写入/管理员授权；npm 发布身份、产物复现与实际 Host 覆盖仍需完成 |
 
-入口依据：[Verified Work Loop](../../core/verified-work-loop.ts)、[Capability Kit](../../core/capability-kit-runtime.ts)、[Durable Action](../../core/durable-action-loop.ts)、[Host 装配](../../core/application/service-foundation.ts)、[Context](../../core/context-resolution.ts)、[Verification](../../core/verification-plane.ts)、[存储](../../common/craft-common-store-local/src/store.ts)、[远程身份](../../deploy/components/server.ts)。这是一张实现盘点表，不表示每个域都已经过等强度审计。
+入口依据：[Verified Work Loop](../../core/verified-work-loop.ts)、[Capability Kit](../../core/capability-kit-runtime.ts)、[Durable Action](../../core/durable-action-loop.ts)、[Host 装配](../../core/application/service-foundation.ts)、[Context](../../core/context-resolution.ts)、[Verification](../../core/verification-plane.ts)、[存储](https://github.com/wdx9413/craft-common/blob/main/packages/craft-common-store-local/src/store.ts)、[远程身份](../../deploy/components/server.ts)。这是一张实现盘点表，不表示每个域都已经过等强度审计。
 
 ## 6. 四个子能力各自需要补什么
 
@@ -183,7 +183,7 @@ flowchart TD
 
 **可选扩展：** 目录摄取当前主要处理 `.md/.mdx/.txt`，不能由 Linkly 的 PDF 场景推导 Craft 已有完整 PDF/Office/OCR 知识库。项目已有 parser/OCR 相关基础，但是否接入 Source→fragment→review 全链须按真实文档需求决定；网页/云盘连接器同理。先证明两种真实输入差异，再选择 Parser Adapter 的 Seam。
 
-源码：[Source 摄取](../../capability/craft-knowledge/knowledge-source-registry.ts) 第 32、134–229 行；[Review](../../core/knowledge-auto-review.ts)；[知识贡献](../../capability/craft-knowledge/contribution.ts)。
+源码：[Source 摄取](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/knowledge-source-registry.ts) 第 32、134–229 行；[Review](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/knowledge-auto-review.ts)；[知识贡献](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/contribution.ts)。
 
 ### 6.2 Memory：从能保存召回，做到可更正、可拒答、可迁移
 
@@ -199,7 +199,7 @@ flowchart TD
 
 **验证缺口：** 少量 fixture 的召回率不证明记忆减少了重复错误。必须固定 Host/model/任务/预算，比较无 Memory 与有 Memory 的真实任务，并记录错误复发率和不当召回。
 
-源码：[Ledger](../../capability/craft-memory/memory-ledger.ts)、[治理](../../core/memory-governance.ts)、[维护](../../core/memory-maintenance.ts)、[历史与检索](../../core/context-resolution.ts)、[评测限制](../../core/retrieval-evaluation.ts) 第 19–24 行。
+源码：[Ledger](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-memory/memory-ledger.ts)、[治理](../../core/memory-governance.ts)、[维护](../../core/memory-maintenance.ts)、[历史与检索](../../core/context-resolution.ts)、[评测限制](../../core/retrieval-evaluation.ts) 第 19–24 行。
 
 ### 6.3 Experience：已有 Graph 核心，下一步是可信运行与评测
 
@@ -215,7 +215,7 @@ flowchart TD
 
 **明确限制：** 当前 Graph 节点支持 `read_only/local_write`；可以调用固定版本 Workflow 子流程，其中可包含只读并行组；子 Graph 显式拒绝。控制图当前一次推进一个活动节点，不能等同于任意并行多 Token 流程引擎。外部系统补偿需交给有权限的 Host/Adapter，不能由 graph edge 伪装成已经回滚。
 
-源码：[Graph 校验](../../capability/craft-experience/procedure-graph.ts)、[Procedure 组合](../../capability/craft-experience/procedure-composition.ts)、[Graph 转移](../../core/application/procedure-graph-progress.ts)、[Invocation](../../core/application/procedure-invocation.ts)。
+源码：[Graph 校验](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-graph.ts)、[Procedure 组合](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-composition.ts)、[Graph 转移](../../core/application/procedure-graph-progress.ts)、[Invocation](../../core/application/procedure-invocation.ts)。
 
 ### 6.4 Codebase：从有界结构参考，发展为可量化可靠的影响候选
 
@@ -229,7 +229,7 @@ flowchart TD
 4. 建立真实 TS/JS、Python 项目正确/错误控制样本，测符号定位、关系 precision/recall、动态/生成代码诊断、跨包导入与删除后失效。Java/Go 等按使用需求接入有证据的 AST/LSP/SCIP Adapter，不以正则符号名宣布语义支持。
 5. 增量能力要区分文件级缓存和关系图增量更新。测冷启动、无变更热启动、一个文件变更和跨文件引用变更，之后决定是否需要持久图增量机制。
 
-源码：[文件预算](../../capability/craft-codebase/repository-files.ts)、[索引与导入](../../capability/craft-codebase/codebase-index.ts)、[TS 分析](../../capability/craft-codebase/typescript-analysis.ts)、[仓库准备](../../core/application/use-cases/repository-context.ts)。
+源码：[文件预算](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/repository-files.ts)、[索引与导入](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/codebase-index.ts)、[TS 分析](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/typescript-analysis.ts)、[仓库准备](../../core/application/use-cases/repository-context.ts)。
 
 ## 7. 版本能力应该继续做，但须分清版本身份
 

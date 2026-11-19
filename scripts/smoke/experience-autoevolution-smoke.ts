@@ -237,7 +237,7 @@ try {
     child!.once("close", (code, signal) => resolveClose({ code, signal }));
   });
 
-  let routeable: JsonObject | undefined;
+  let procedureCandidate: JsonObject | undefined;
   let evidenceCount = 0;
   let evidenceStages = new Set<string>();
   let runCount = 0;
@@ -256,8 +256,8 @@ try {
   for (let attempt = 0; attempt < 300; attempt += 1) {
     const observed = await new CraftStore(paths).open();
     try {
-      routeable = observed.list("experience_procedure", 100, row => row.title === generatedWorkflow.name
-        && row.procedure_kind === "workflow" && row.lifecycle === "routeable" && row.routeable === true)[0];
+      procedureCandidate = observed.list("experience_procedure", 100, row => row.title === generatedWorkflow.name
+        && row.procedure_kind === "workflow" && row.lifecycle === "candidate" && row.routeable === false)[0];
       const evaluationEvidence = observed.list("evidence", 100, row => {
         const metadata = row.metadata as JsonObject | undefined;
         return typeof metadata?.experience_evaluation_dispatch_id === "string";
@@ -282,25 +282,27 @@ try {
         provider_calls: await providerCallCount(), knowledge_candidate_ready: knowledgeCandidateReady, knowledge_review_reasons: knowledgeReviewReasons,
         traced_calls: [...tracedCalls] };
     } finally { observed.close(); }
-    if (routeable && evidenceCount === 4 && evidenceStages.size === 4 && runCount === 3 && knowledgeCandidateReady
+    if (procedureCandidate && evidenceCount === 1 && evidenceStages.size === 1 && evidenceStages.has("shadow") && runCount === 1 && knowledgeCandidateReady
       && knowledgeReviewReasons.includes("independent_effectiveness_evaluation_required")
       && tracedCalls.size === expectedCalls.size && await providerCallCount() === 1) break;
     await delay(100);
   }
 
-  assert(routeable, `packaged Context worker did not formally promote a Workflow; stderr=${childError}; state=${JSON.stringify(diagnostic)}`);
-  assert.equal(evidenceCount, 4, "Shadow, Held-out, Signoff and Canary must each persist bound Evidence");
-  assert.deepEqual(evidenceStages, new Set(["shadow", "held_out", "signoff", "canary"]), "all four ordered gates must persist Evidence");
-  assert.equal(runCount, 3, "Shadow, Held-out and Canary each execute the evaluator; automatic Signoff consumes their Evidence");
+  assert(procedureCandidate, `packaged Context worker did not retain its unpublished Workflow candidate; stderr=${childError}; state=${JSON.stringify(diagnostic)}`);
+  assert.equal(evidenceCount, 1, "Only Shadow may be recorded by the local evaluator before a trusted Held-out report");
+  assert.deepEqual(evidenceStages, new Set(["shadow"]), "untrusted local checks must not pass Held-out, Signoff, or Canary");
+  assert.equal(runCount, 1, "The local evaluator may execute Shadow but must not impersonate the independent held-out evaluator");
+  assert(diagnostic.dispatches && (diagnostic.dispatches as JsonObject[]).some(item => item.stage === "held_out" && item.status === "awaiting_adapter"),
+    "the exact candidate must remain queued for an independent trusted task-effect evaluator");
   assert(knowledgeCandidateReady, `two independently registered verified Knowledge sources must produce a supported candidate; state=${JSON.stringify(diagnostic)}; stderr=${childError}`);
   assert(knowledgeReviewReasons.includes("independent_effectiveness_evaluation_required"),
     `Knowledge must remain unpromoted until independent held-out effectiveness evidence exists; state=${JSON.stringify(diagnostic)}; stderr=${childError}`);
   assert(existsSync(paths.knowledgeDatabaseFile), "Knowledge artifacts must persist in the central .craft_data/knowledge store");
   assert(isUnder(join(projectStorageDirectory(paths, projectRoot), "knowledge", "md"), (knowledgeCandidate!.content_ref as JsonObject | undefined)?.path),
     "Project-scoped Knowledge Markdown must stay under shared project storage");
-  assert(isUnder(join(projectStorageDirectory(paths, projectRoot), "experience", "md"), (routeable!.content_ref as JsonObject | undefined)?.path),
+  assert(isUnder(join(projectStorageDirectory(paths, projectRoot), "experience", "md"), (procedureCandidate!.content_ref as JsonObject | undefined)?.path),
     "Project-scoped Experience review content must stay under shared project storage");
-  assert(isUnder(join(projectStorageDirectory(paths, projectRoot), "experience", "graph"), (routeable!.definition_ref as JsonObject | undefined)?.path),
+  assert(isUnder(join(projectStorageDirectory(paths, projectRoot), "experience", "graph"), (procedureCandidate!.definition_ref as JsonObject | undefined)?.path),
     "Project-scoped Experience definitions must stay under shared project storage");
   assert.deepEqual(tracedCalls, expectedCalls, "worker model, submission, evaluation and Knowledge calls must be traced");
   assert.equal(await providerCallCount(), 1, "the packaged worker must execute one model request against the local fixture");
@@ -337,7 +339,8 @@ try {
   assert(knowledgeIngestCallsAfterUpdate > knowledgeIngestCallsBeforeUpdate,
     "the revised Knowledge candidate must be caused by a later, traceable worker ingestion pass");
 
-  const firstProcedureId = String(routeable.id), firstProcedureVersion = Number(routeable.version);
+  const firstProcedureId = String(procedureCandidate!.id);
+  const firstProcedureVersion = Number(procedureCandidate!.version);
   await writeFile(join(projectRoot, "sentinel-v2.txt"), "newly observed marker");
   await writeFile(join(projectRoot, "held-out-sentinel-v2.txt"), "independent held-out fixture for iteration two");
   const scenarioPath = join(projectStorageDirectory(paths, projectRoot), "experience", "experience-scenarios.json");
@@ -352,43 +355,38 @@ try {
   } finally { nextStore.close(); }
 
   let evolved: JsonObject | undefined;
-  let evolvedEvidence: JsonObject | undefined;
-  let evolvedEvidenceCount = 0;
+  let evolvedEvidence: JsonObject[] = [];
   let evolvedRunCount = 0;
   let evolvedTraceCalls = new Set<string>();
+  let heldOutAwaiting = false;
   for (let attempt = 0; attempt < 300; attempt += 1) {
     const observed = await new CraftStore(paths).open();
     try {
-      evolved = observed.list("experience_procedure", 100, row => row.title === revisedWorkflow.name && row.lifecycle === "routeable" && row.routeable === true)[0];
-      const allEvaluationEvidence = observed.list("evidence", 100, row => typeof (row.metadata as JsonObject | undefined)?.experience_evaluation_dispatch_id === "string");
-      evolvedEvidenceCount = allEvaluationEvidence.length;
-      evolvedEvidence = allEvaluationEvidence.find(row => {
-        const metadata = row.metadata as JsonObject;
-        return metadata.procedure_id === firstProcedureId && metadata.stage === "canary" && Number(metadata.baseline_version) === firstProcedureVersion;
-      });
+      evolved = observed.list("experience_procedure", 100, row => row.title === revisedWorkflow.name && row.lifecycle === "candidate" && row.routeable === false)[0];
+      evolvedEvidence = observed.list("evidence", 100, row => typeof (row.metadata as JsonObject | undefined)?.experience_evaluation_dispatch_id === "string");
       evolvedRunCount = observed.list("workflow_run", 100, row => typeof row.evaluator_dispatch_id === "string").length;
       evolvedTraceCalls = new Set(observed.list("trace_event", 10_000, row => expectedCalls.has(String(row.operation_id))).map(row => String(row.operation_id)));
+      heldOutAwaiting = observed.list("experience_evaluation_dispatch", 100, row => row.procedure_id === evolved?.id
+        && row.stage === "held_out" && row.status === "awaiting_adapter").length > 0;
     } finally { observed.close(); }
-    if (evolved && Number(evolved.version) > firstProcedureVersion && evolvedEvidenceCount === 8 && evolvedRunCount === 7
-      && evolvedEvidence && evolvedTraceCalls.size === expectedCalls.size && await providerCallCount() === 2) break;
+    if (evolved && evolvedEvidence.length === 2 && evolvedRunCount === 2 && heldOutAwaiting
+      && evolvedTraceCalls.size === expectedCalls.size && await providerCallCount() === 2) break;
     await delay(100);
   }
 
-  assert(evolved, "a later observation must produce a new routeable revision of the existing Experience Procedure");
+  assert(evolved, "a later observation must create a new Experience Procedure candidate");
   assert.equal(evolved.id, firstProcedureId, "iteration must version the same scenario Procedure instead of creating a parallel artifact");
-  assert(Number(evolved.version) > firstProcedureVersion, "the current Procedure version must advance after successful Canary");
-  assert.equal(evolvedEvidenceCount, 8, "the second iteration must persist its own four ordered Evidence records");
-  assert.equal(evolvedRunCount, 7, "the second iteration must execute three candidate runs plus one current Canary baseline run");
-  const canaryMetadata = evolvedEvidence!.metadata as JsonObject;
-  assert.equal(canaryMetadata.baseline_version, firstProcedureVersion, "Canary must compare against the prior released revision");
-  assert.equal((canaryMetadata.baseline_workflow_run_ids as string[]).length, 1);
-  assert.equal((canaryMetadata.workflow_run_ids as string[]).length, 1);
+  assert(Number(evolved.version) > firstProcedureVersion, "the immutable candidate revision must advance");
+  assert.equal(evolved.routeable, false, "candidate Workflow changes stay unpublished without another trusted paired report");
+  assert.equal(evolvedEvidence.length, 2, "the second iteration may add Shadow Evidence only");
+  assert.equal(evolvedRunCount, 2, "the local evaluator must not execute held-out or Canary task effects");
+  assert(heldOutAwaiting, "the second exact Procedure revision must wait for independent task-effect evaluation");
   assert.deepEqual(evolvedTraceCalls, expectedCalls, "both iterations and their Knowledge sync calls must remain observable");
   assert.equal(await providerCallCount(), 2, "the Worker must request a new model proposal for the later iteration");
   const latest = await new CraftStore(paths).open();
   try {
-    assert.equal(latest.find("experience_release", firstProcedureId)?.record_version, evolved.version,
-      "only a passing second Canary may move the current Experience release pointer");
+    assert.equal(latest.find("experience_release", firstProcedureId), null,
+      "neither candidate may publish a release before trusted held-out evaluation");
   } finally { latest.close(); }
 
   child.stdin.end();
@@ -488,18 +486,18 @@ try {
       for (let attempt = 0; attempt < 300; attempt += 1) {
         const store = await new CraftStore(standalonePaths).open();
         try {
-          procedure = store.list("experience_procedure", 100, item => item.title === generatedWorkflow.name && item.lifecycle === "routeable" && item.routeable === true)[0];
+          procedure = store.list("experience_procedure", 100, item => item.title === generatedWorkflow.name && item.lifecycle === "candidate" && item.routeable === false)[0];
           const evidence = store.list("evidence", 100, item => typeof (item.metadata as JsonObject | undefined)?.experience_evaluation_dispatch_id === "string");
           stages = new Set(evidence.map(item => String((item.metadata as JsonObject).stage)));
           runCount = store.list("workflow_run", 100, item => typeof item.evaluator_dispatch_id === "string").length;
           calls = new Set(store.list("trace_event", 10_000, event => expected.includes(String(event.operation_id))).map(event => String(event.operation_id)));
         } finally { store.close(); }
-        if (procedure && stages.size === 4 && runCount === 3 && calls.size === expected.length) break;
+          if (procedure && stages.size === 1 && stages.has("shadow") && runCount === 1 && calls.size === expected.length) break;
         await delay(100);
       }
-      assert(procedure, "Context Experience worker must submit and promote a generated Workflow");
-      assert.deepEqual(stages, new Set(["shadow", "held_out", "signoff", "canary"]), "Context Experience must pass the four ordered gates");
-      assert.equal(runCount, 3, "Context Experience must run Shadow, Held-out and Canary evaluators");
+      assert(procedure, "Context Experience worker must submit and retain a generated Workflow candidate");
+      assert.deepEqual(stages, new Set(["shadow"]), "Context Experience must await a trusted held-out report before progressing");
+      assert.equal(runCount, 1, "Context Experience may run Shadow before independent evaluation");
       assert.deepEqual(calls, new Set(expected), "Context Experience ticket, distillation, submission and evaluation calls must be traced");
       assert.equal(Number((JSON.parse(await readFile(standaloneExperienceState, "utf8")) as JsonObject).calls), 1,
         "Context Experience must send one bounded provider request to the local model fixture");
@@ -508,15 +506,15 @@ try {
       assert(isUnder(join(projectStorageDirectory(standalonePaths, standaloneExperienceProject), "experience", "graph"), (procedure!.definition_ref as JsonObject | undefined)?.path),
         "Project-scoped Context Experience definitions must remain under shared project storage");
       const releaseStore = await new CraftStore(standalonePaths).open();
-      try { assert.equal(releaseStore.find("experience_release", String(procedure!.id))?.record_version, procedure!.version,
-        "only the passing Canary may publish the current Experience release"); }
+      try { assert.equal(releaseStore.find("experience_release", String(procedure!.id)), null,
+        "a candidate without trusted held-out Evidence must never publish a release"); }
       finally { releaseStore.close(); }
     },
     cleanup: async () => { await Promise.all([rm(standaloneExperienceProject, { recursive: true, force: true }), rm(standaloneExperienceState, { force: true })]); },
   };
   await verifyContextWorker("experience", ["craft_experience_procedure_submit", "craft_experience_learning_evaluation_dispatch",
     "craft_experience_learning_evaluation_run"], [], standaloneExperienceProbe);
-  process.stdout.write("Context Hook promoted Memory across tiers; the complete Context worker generated and held a supported Knowledge candidate pending independent effectiveness evidence, promoted an Experience Workflow, and evolved the same Procedure against its released baseline after a later Canary.\n");
+  process.stdout.write("Context Hook promoted Memory across tiers; the Context worker generated a supported Knowledge candidate pending independent effectiveness evidence and retained an Experience Workflow candidate at the trusted Held-out gate.\n");
 } finally {
   if (child && child.exitCode === null) {
     child.stdin.end();

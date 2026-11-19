@@ -144,14 +144,14 @@
 
 | 当前源码证据 | 可以确认什么 | 还不能据此确认什么 |
 |---|---|---|
-| [context-assets.ts](../../common/craft-common-base/src/context-assets.ts) | 共享条数/字符预算、明确版本的资产引用；本地默认 3 条、1,200 字符 | 这些数字不是研究证明的最优值，也不等于整个 Host 输入预算 |
+| [context-assets.ts](https://github.com/wdx9413/craft-common/blob/main/packages/craft-common-base/src/context-assets.ts) | 共享条数/字符预算、明确版本的资产引用；本地默认 3 条、1,200 字符 | 这些数字不是研究证明的最优值，也不等于整个 Host 输入预算 |
 | [context-resolution.ts](../../core/context-resolution.ts) | 普通知识/记忆按查询选片段，本地普通片段上限 600 字符；有必需引用处理 | 字符短不保证事实完整；跨能力排名和条件覆盖仍要任务评测 |
 | [context-response-projection.ts](../../core/context-response-projection.ts) | 本地 compact 响应保留选中正文与引用，并限制包括元数据在内的响应估算 token；默认上限 1,500，full 需要显式预算 | 这是未提交的本地文件，不能称当前 Host 已使用；响应上限也不控制 Host 历史及其他工具 |
 | [token-budget.ts](../../core/token-budget.ts) | CJK 字符与其他字符分别估算 token | 没有真实 tokenizer；注释称保守并不构成不低估的保证，代码/JSON/不同语言需校准 |
-| [Memory contribution](../../capability/craft-memory/contribution.ts) | 检查范围与可读性，使用检索排名；本地有索引缓存和按选中项取正文 | 首次构建仍需读候选正文，元数据枚举也有成本；缓存不是持久增量索引，不证明大规模性能 |
-| [Experience contribution](../../capability/craft-experience/contribution.ts) | 只召回可路由正式 Procedure，候选和诊断模式不会直接当可执行经验；按范围、查询及预算筛选 | 已有候选或 Procedure 不证明新任务收益；当前片段/步骤投影仍需检查复杂流程的必要前提是否完整 |
+| [Memory contribution](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-memory/contribution.ts) | 检查范围与可读性，使用检索排名；本地有索引缓存和按选中项取正文 | 首次构建仍需读候选正文，元数据枚举也有成本；缓存不是持久增量索引，不证明大规模性能 |
+| [Experience contribution](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/contribution.ts) | 只召回可路由正式 Procedure，候选和诊断模式不会直接当可执行经验；按范围、查询及预算筛选 | 已有候选或 Procedure 不证明新任务收益；当前片段/步骤投影仍需检查复杂流程的必要前提是否完整 |
 | [trace-retention-worker.ts](../../core/interfaces/trace-retention-worker.ts) | 本地把日志维护放到受限子进程，具有超时和单次处理限额 | 隔离不减少数据库扫描和磁盘争用；不是查询性能修复本身 |
-| [Store](../../common/craft-common-store-local/src/store.ts) | 使用 SQLite WAL、事务及 busy timeout | 应用细粒度锁不会使同一 SQLite 文件同时拥有多个写事务；等待超时也不是前台延迟保证 |
+| [Store](https://github.com/wdx9413/craft-common/blob/main/packages/craft-common-store-local/src/store.ts) | 使用 SQLite WAL、事务及 busy timeout | 应用细粒度锁不会使同一 SQLite 文件同时拥有多个写事务；等待超时也不是前台延迟保证 |
 | [config.ts](../../core/config.ts) | 生成文字有语言配置，默认中文，并生成相应指令 | 不能只凭配置证明每个生成入口都已遵守；代码、符号、引用和验证命令不应被语言转换改写 |
 
 本轮还调用了 `craft_context_open`，关闭代码索引并请求小预算。调用超过首次 31 秒等待才取得结果；未准确测量总耗时。返回的 pack 选中条目数为 0，仍含较多审计元数据，且带 `telemetry_error`。这是一次调用的可用性/响应形态证据，不是延迟分布或全系统故障结论。也说明“材料预算”不能冒充“最终响应预算”。本轮未重启 Host，未加载发布候选。

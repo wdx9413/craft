@@ -617,8 +617,8 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     directCandidate(aggregationContent, "project-1", "aggregation-trigger1", "aggregation-topic");
     const aggregationResult = directCandidate(aggregationContent, "project-1", "aggregation-trigger2", "aggregation-topic");
     assert.equal(aggregationResult[0]?.tier, "global");
-    assert.equal(aggregationResult[0]?.status, "insufficient_independence");
-    assert.equal(aggregationResult[0]?.reason, "shared_evidence");
+    assert.equal(aggregationResult[0]?.status, "rejected");
+    assert.equal(aggregationResult[0]?.reason_code, "shared_evidence");
 
     const observationContent = "observation with legacy evidence gap";
     const observationDigest = digestJson(observationContent);

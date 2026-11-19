@@ -10,7 +10,7 @@ Codebase 的 checkpoint 固定、显式激活、摘要与范围校验是优势�
 
 ## Experience：已经具备的基础
 
-- Procedure 的 Entry/Exit/Route/Call 会校验输入输出、子定义版本和摘要、作用域、副作用、递归深度及步数。[组合编译器](../../capability/craft-experience/procedure-composition.ts)
+- Procedure 的 Entry/Exit/Route/Call 会校验输入输出、子定义版本和摘要、作用域、副作用、递归深度及步数。[组合编译器](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-composition.ts)
 - Invocation 已绑定 VerifiedWorkLoop，事务内更新派发、验收及回执；恢复对未回执派发返回 `reconcile_dispatch`，不盲目重放。前置证据校验调用路径、任务、输入摘要、快照、状态修订与 TTL。[调用内核](../../core/application/procedure-invocation.ts)
 - 调用效果可按 Entry/Exit、输入、初始状态、Host、模型和预算配对；外部回执明确标为 `host_attested`，不自动晋级。[evaluate/report](../../core/application/procedure-invocation.ts)
 
@@ -40,7 +40,7 @@ Temporal 用事件历史校验 Replay 产生的 Commands，并通过专门 await
 
 Sourcegraph 官方区分搜索式导航和 SCIP 精确导航，优先精确结果并降级搜索；提供 Go、TS/JS、Java/Kotlin/Scala、Python 等语言索引器，并建议复杂构建复用 CI 环境生成索引。这给 Craft 的启发是接入成熟语言分析器，保留自己的 checkpoint 和授权合同。[Precise Code Navigation](https://sourcegraph.com/docs/code-navigation/precise-code-navigation)
 
-SCIP 的源格式能表示 occurrence、外部符号、引用/实现/类型定义等关系。Craft 当前标准化格式仅接受 file/symbol 节点和 imports/calls 边，不能无损容纳上述关系。[SCIP schema](https://github.com/scip-code/scip/blob/main/scip.proto)、[importAnalysis](../../capability/craft-codebase/codebase-index.ts)
+SCIP 的源格式能表示 occurrence、外部符号、引用/实现/类型定义等关系。Craft 当前标准化格式仅接受 file/symbol 节点和 imports/calls 边，不能无损容纳上述关系。[SCIP schema](https://github.com/scip-code/scip/blob/main/scip.proto)、[importAnalysis](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/codebase-index.ts)
 
 | 优先级 | 当前实现与缺口 | 最小充分改进与验收 |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ SCIP 的源格式能表示 occurrence、外部符号、引用/实现/类型定�
 | P1 | impact 以 imports/calls 边双向广度扩展，只是邻域候选；没有类型/数据流、测试覆盖或运行证据 | 区分 inbound callers、outbound dependencies、test relevance；保留 candidate_only，禁止用空结果证明无影响 |
 | P2 | context_slice 只给 path/span/digest，不给源码；findSymbol 只做名字匹配，没有自然语言语义检索 | 这是内容最小化边界，非必然缺陷。先实测 Host 在符号定位+文件读取中的成本，再决定是否需要受限片段或语义搜索 |
 
-本地依据：[索引模块](../../capability/craft-codebase/codebase-index.ts) 的 7–8、101–177、181–215、237–272 行；[LSP adapter](../../capability/craft-codebase/lsp-adapter.ts)；[LSP 测试](../../tests/codebase-lsp-adapter.test.ts)；[能力归属](../../capability/craft-codebase/ownership.ts)。当前 Codebase 是一个 Workspace checkpoint 的可重建静态视图，跨仓分析应通过显式 federated 查询扩大范围，不应偷偷扩大现有 Workspace 授权。
+本地依据：[索引模块](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/codebase-index.ts) 的 7–8、101–177、181–215、237–272 行；[LSP adapter](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/lsp-adapter.ts)；[LSP 测试](../../tests/codebase-lsp-adapter.test.ts)；[能力归属](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/ownership.ts)。当前 Codebase 是一个 Workspace checkpoint 的可重建静态视图，跨仓分析应通过显式 federated 查询扩大范围，不应偷偷扩大现有 Workspace 授权。
 
 ## 取舍及未验证项
 

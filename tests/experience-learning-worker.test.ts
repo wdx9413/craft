@@ -9,7 +9,7 @@ import { after, default as test } from "node:test";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { McpStdioClient, boundedPollInterval, learningComponents, learningMcpRequestTimeoutMs, learningPollInterval, learningWorkFound, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
+import { McpStdioClient, boundedPollInterval, learningComponents, learningMcpRequestTimeoutMs, learningPollInterval, learningTaskCandidateResult, learningWorkFound, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
 
@@ -173,7 +173,7 @@ test("distillation completion binds a content-free digest when the adapter omits
   assert.match(String(complete?.args.result_digest), /^sha256:[a-f0-9]{64}$/u);
 });
 
-test("evaluation worker drains ordered dispatches and stops on an unconfigured scenario", async () => {
+test("evaluation worker runs automatic gates and waits for an independent held-out evaluator", async () => {
   const calls: string[] = [];
   const client: ExperienceLearningClient = { async call(name, args = {}) {
     calls.push(name);
@@ -181,17 +181,15 @@ test("evaluation worker drains ordered dispatches and stops on an unconfigured s
     if (name === "craft_experience_learning_evaluation_run" && args.dispatch_id === "shadow") return {
       dispatch: { id: "shadow", status: "passed" }, next_dispatch: { id: "heldout", stage: "held_out" },
     };
-    if (name === "craft_experience_learning_evaluation_run" && args.dispatch_id === "heldout") return {
-      dispatch: { id: "heldout", status: "awaiting_adapter" }, status: "awaiting_adapter", reason: "project_scenario_evaluator_not_configured",
-    };
+    if (name === "craft_experience_learning_evaluation_run" && args.dispatch_id === "heldout") throw new Error("held-out evaluation must be handled by a trusted adapter");
     throw new Error(`unexpected tool ${name}`);
   } };
   const result = await runEvaluationOnce(client);
   assert.deepEqual(result, { processed: 2, outcomes: [
     { dispatch_id: "shadow", stage: "shadow", status: "passed" },
-    { dispatch_id: "heldout", stage: "held_out", status: "awaiting_adapter", reason: "project_scenario_evaluator_not_configured" },
+    { dispatch_id: "heldout", stage: "held_out", status: "awaiting_adapter", reason: "trusted_task_effect_evaluation_required" },
   ] });
-  assert.deepEqual(calls, ["craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run", "craft_experience_learning_evaluation_run"]);
+  assert.deepEqual(calls, ["craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run"]);
 });
 
 test("evaluation worker ignores duplicate dispatches and uses safe result fallbacks", async () => {
@@ -208,6 +206,27 @@ test("evaluation worker ignores duplicate dispatches and uses safe result fallba
   assert.deepEqual(await runEvaluationOnce({ async call() { return { dispatches: [] }; } }), { processed: 0, outcomes: [] });
   await assert.rejects(runEvaluationOnce({ async call() { return { dispatches: [{ id: " " }] }; } }), /dispatch\.id/u);
   await assert.rejects(runEvaluationOnce({ async call() { return { dispatches: null }; } }), /must be an array/u);
+});
+
+test("evaluation worker reports adapter reasons without copying arbitrary result fields", async () => {
+  const result = await runEvaluationOnce({ async call(name) {
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [{ id: "shadow-reason", stage: "shadow" }] };
+    return { dispatch: { id: "shadow-reason", status: "awaiting_adapter" }, reason: "project_scenario_evaluator_not_configured" };
+  } });
+  assert.deepEqual(result, { processed: 1, outcomes: [{ dispatch_id: "shadow-reason", stage: "shadow", status: "awaiting_adapter",
+    reason: "project_scenario_evaluator_not_configured" }] });
+});
+
+test("Knowledge candidate summaries omit idle and reconciled skips but retain blocked and failed outcomes", () => {
+  const ingestion = { status: "ok" };
+  assert.deepEqual(learningTaskCandidateResult(ingestion, { status: "idle" }), ingestion);
+  assert.deepEqual(learningTaskCandidateResult(ingestion, { status: "skipped", blocked_skips: 0 }), ingestion);
+  assert.deepEqual(learningTaskCandidateResult(ingestion, { status: "skipped", blocked_skips: 1 }), {
+    ...ingestion, task_candidates: { status: "skipped", blocked_skips: 1 },
+  });
+  assert.deepEqual(learningTaskCandidateResult(ingestion, { status: "failed", failure_kind: "Error" }), {
+    ...ingestion, task_candidates: { status: "failed", failure_kind: "Error" }, failure_kind: "Error",
+  });
 });
 
 test("distillation handles missing provider outputs and sparse sanitized evidence safely", async () => {

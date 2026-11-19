@@ -9,6 +9,7 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { adjudicateKnowledgeCase } from "./helpers/knowledge-evaluation-adjudication.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+import { registerTrustedGlobalKnowledgeSource } from "./helpers/trusted-global-knowledge-source.ts";
 
 test("candidate shadow status rejects regression even with eligible provenance and relaxed thresholds", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-regression-gate-"));
@@ -40,7 +41,8 @@ test("knowledge retrieval evaluation does not change routing", async () => {
   try {
     service.scopeAliasBind({ scope_kind: "project", scope_id: "project:a", alias_kind: "path", alias: root });
     await assert.rejects(Promise.resolve().then(() => service.knowledgeEvaluationRun({})), /at least/);
-    service.knowledgeSourceRegister({ source_id: "alpha-source", kind: "project_note", label: "Alpha source", trust: "verified", scope_kind: "global", scope_id: "global", locator: "fixture", content_digest: "alpha-source-v1" });
+      registerTrustedGlobalKnowledgeSource(args => service.knowledgeSourceRegister(args),
+        { source_id: "alpha-source", kind: "project_note", label: "Alpha source", locator: "fixture", content_digest: "alpha-source-v1" });
     const evidence = service.evidenceRecord({ source_type: "program", claim: "Observed.", confidence: "confirmed", metadata: { source_session_id: "claim-session", task_id: "claim-task" } }); const claim = service.knowledgeClaimSave({ claim_id: "alpha", kind: "fact", content: "alpha rule", scope: "global", source_id: "alpha-source", evidence_ids: [evidence.id] }).claim as JsonObject; attachVerifiedPromotionFixture(store, claim);
     const evaluationEvidence = service.evidenceRecord({ source_type: "program", claim: "Independent held-out result.", confidence: "confirmed", metadata: { source_session_id: "evaluation-session", task_id: "evaluation-task", source_ref_digest: `sha256:${"e".repeat(64)}` } });
     const provenance = { source_session_id: "evaluation-session", source_task_id: "evaluation-task", source_evidence_ids: [evaluationEvidence.id], evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "model_candidate", sanitized: true };
@@ -254,8 +256,8 @@ test("candidate shadow evaluation rejects candidate, source or case changes duri
     const root = await mkdtemp(join(tmpdir(), "craft-knowledge-evaluation-race-"));
     const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
     try {
-      service.knowledgeSourceRegister({ source_id: "source", kind: "project_note", label: "Source", trust: "verified",
-        scope_kind: "global", scope_id: "global", locator: "fixture", content_digest: `sha256:${"a".repeat(64)}` });
+      registerTrustedGlobalKnowledgeSource(args => service.knowledgeSourceRegister(args),
+        { source_id: "source", kind: "project_note", label: "Source", locator: "fixture", content_digest: `sha256:${"a".repeat(64)}` });
       const candidate = store.create("knowledge_claim", "candidate", { status: "candidate", kind: "fact", scope: "global", source_id: "source", content: "unique rule" });
       const case_ = service.knowledgeEvaluationCaseSave({ query: "unique rule", scope: "global", expected_claim_ids: [candidate.id] }).case as JsonObject;
       const compile = service.wikiContextCompile.bind(service); let calls = 0;

@@ -58,6 +58,11 @@ export interface DistillationDependencies {
   env?: NodeJS.ProcessEnv;
 }
 
+export function learningTaskCandidateResult(ingestion: JsonObject, taskCandidates: JsonObject): JsonObject {
+  return { ...ingestion, ...(taskCandidates.status !== "idle" && (taskCandidates.status !== "skipped" || Number(taskCandidates.blocked_skips) > 0)
+    ? { task_candidates: taskCandidates } : {}), ...(taskCandidates.status === "failed" ? { failure_kind: taskCandidates.failure_kind } : {}) };
+}
+
 export async function runEvaluationOnce(client: ExperienceLearningClient): Promise<JsonObject> {
   const queued = await client.call("craft_experience_learning_evaluation_dispatch_list", { limit: 100 });
   const pending = array(queued.dispatches, "evaluation dispatches") as JsonObject[];
@@ -67,6 +72,11 @@ export async function runEvaluationOnce(client: ExperienceLearningClient): Promi
     const dispatchId = string(dispatch.id, "dispatch.id", 200);
     if (seen.has(dispatchId)) continue;
     seen.add(dispatchId);
+    if (dispatch.stage === "held_out") {
+      outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: "awaiting_adapter",
+        reason: "trusted_task_effect_evaluation_required" });
+      continue;
+    }
     const result = await client.call("craft_experience_learning_evaluation_run", { dispatch_id: dispatchId });
     const resolved = object(result.dispatch, "evaluation result dispatch");
     outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: resolved.status ?? result.status ?? "unknown",
@@ -135,8 +145,7 @@ export async function runLearningTick(deps: DistillationDependencies, syncKnowle
         try { taskCandidates = await runSessionKnowledgeCandidateOnce({ client: configuredDeps.client, providers: configuredDeps.providers,
           transport: configuredDeps.transport, contentLanguage: configuredDeps.contentLanguage, env }); }
         catch (error) { taskCandidates = { status: "failed", failure_kind: learningFailureKind(error), raw_content_stored: false }; }
-        return { ...ingestion, ...(taskCandidates.status !== "idle" && (taskCandidates.status !== "skipped" || Number(taskCandidates.blocked_skips) > 0) ? { task_candidates: taskCandidates } : {}),
-          ...(taskCandidates.status === "failed" ? { failure_kind: taskCandidates.failure_kind } : {}) };
+        return learningTaskCandidateResult(ingestion, taskCandidates);
       }
       if (stage === "session_evaluation") {
         let evaluationCases: JsonObject;

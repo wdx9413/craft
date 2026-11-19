@@ -1,13 +1,13 @@
 # Craft 本地 npm 制品仓库规范
 
-状态（2026-11-18）：本机使用 Verdaccio `7.1.1`，监听 `127.0.0.1:4873`。Craft Runtime、Eval、Common 和 Capability 包都经本机 npm Registry 安装；清单和锁文件不再把这些依赖链接到兄弟仓库。Workbench 固定依赖 `craft@0.20.5`。当前本地包版本和依赖仓库映射见“当前依赖审计”。本规范覆盖 `craft`、`craft-common`、`craft-capability`、`craft-eval`、`craft-workbench` 与 `craft-marketplace`。
+状态（2026-11-19）：本机使用 Verdaccio `7.1.1`，监听 `127.0.0.1:4873`。Craft Runtime、Eval、Common 和 Capability 包都经本机 npm Registry 安装；清单和锁文件不再把这些依赖链接到兄弟仓库。Workbench 固定依赖 `craft@0.20.5`。当前本地包版本和依赖仓库映射见“当前依赖审计”。本规范覆盖 `craft`、`craft-common`、`craft-capability`、`craft-eval`、`craft-workbench` 与 `craft-marketplace`。
 
-## 当前本机 Registry 与依赖审计（2026-11-18）
+## 当前本机 Registry 与依赖审计（2026-11-19）
 
 - Registry 为 Verdaccio `7.1.1`，只监听 `127.0.0.1:4873`；最大包体 `100mb`，以容纳约 `53.4 MB` 的 Craft npm 包。配置位于 `~/.config/craft-local-registry/config.yaml`，持久制品位于 `~/.local/share/craft-local-registry/storage/`，本地 npm 用户配置和令牌位于权限为 `600` 的 `~/.config/craft-local-registry/npmrc`。
 - 当前服务以本机前台进程运行；启动命令为 `verdaccio --config "$HOME/.config/craft-local-registry/config.yaml"`，健康检查为 `curl -fsS http://127.0.0.1:4873/-/ping`。服务进程退出后需重新启动；尚未配置登录自启。
 - npm 全局源仍是 `https://registry.npmmirror.com`。Craft 包安装和发布命令必须显式使用上述本地 `userconfig` 或 `--registry=http://127.0.0.1:4873`；仓库中不提交个人 Registry 地址、认证信息或 `.npmrc`。
-- 本机 Registry 当前包含 12 个 npm 包：`craft@0.20.5`、`craft-eval@0.7.2`；`craft-common-store-local`、`craft-common-base`、`craft-common-log`、`craft-common-ontology` 均为 `0.20.4`；`@craft/capability-codebase`、`experience`、`craft-notes-location`、`knowledge`、`memory` 均为 `0.20.4`，`@craft/capability-datasec@0.1.6`。本地 Registry 的这些开发包只供本机安装，不代表它们已发布到公开 npm、团队镜像或远端 Git。
+- 2026-11-18 的完整包版本审计是历史基线；截至 2026-11-19，新版本已发布到本机 Registry：`craft-common-log@0.20.5`、`craft-common-ontology@0.20.6`、`@craft/capability-context@0.20.6`、`@craft/capability-experience@0.20.10`、`@craft/capability-memory@0.20.6`。Craft 主仓库清单与锁文件现消费这些 npm 版本，Capability 锁文件也更新了其三个消费包的依赖。旧版本仍保留；这些开发包只供本机安装，不代表已发布到公开 npm、团队镜像或远端 Git。
 - `craft-common` 的跨包依赖使用普通 semver 版本并从 Registry 解析。`craft-capability` 的包间依赖也使用 semver；`linkWorkspacePackages: false`，锁文件保留 Registry 包的解析记录。
 - `craft` 的 `pnpm-workspace.yaml` 只包含仓库内的适配器，不再包含 `../craft-common` 或 `../craft-capability`；`pnpm-lock.yaml` 不再有 `link:` 或 `file:` 的 Craft 运行时依赖。`build` 不再从兄弟仓库构建依赖。`craft-eval` 通过 `craft-eval@0.7.2` 安装，已移除 `vendor/*.tgz` override。
 - `craft-eval/package-lock.json` 现包含 `craft-common-base` 和 `craft-common-store-local` 的精确版本与完整性摘要。私有包条目不记录本机 Registry URL；在 `craft-eval` 仓库使用本机 Registry 执行 `npm ci --ignore-scripts` 已成功。

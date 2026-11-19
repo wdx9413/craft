@@ -981,6 +981,16 @@
       "branches": true
     },
     {
+      "name": "codex-hook-learning-diagnostic",
+      "include": [
+        "core/interfaces/codex-hook-learning-diagnostic.ts"
+      ],
+      "tests": [
+        "tests/codex-hook-learning-diagnostic.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "verification-plane",
       "include": [
         "core/verification-plane.ts"
@@ -1594,6 +1604,70 @@
         "tests/workspace-checkpoints.test.ts",
         "tests/repository-context.test.ts",
         "tests/workspace-binding.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "host-policy-proposal",
+      "include": [
+        "core/host-policy-proposal.ts"
+      ],
+      "tests": [
+        "tests/host-policy-proposal.test.ts",
+        "tests/evaluation-contract-task-effect-service.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "host-feedback-procedure-demotion",
+      "include": [
+        "core/application/host-feedback-procedure-demotion.ts"
+      ],
+      "tests": [
+        "tests/host-feedback-procedure-demotion.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "ontology-classification",
+      "include": [
+        "core/ontology-classification.ts"
+      ],
+      "tests": [
+        "tests/ontology-classification.test.ts",
+        "tests/ontology-classification-service.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "ontology-classification-projection",
+      "include": [
+        "core/ontology-classification-projection.ts"
+      ],
+      "tests": [
+        "tests/ontology-classification.test.ts",
+        "tests/ontology-classification-service.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "ontology-activation-pointer",
+      "include": [
+        "core/ontology-activation.ts"
+      ],
+      "tests": [
+        "tests/ontology-activation.test.ts",
+        "tests/evaluation-contract-task-effect-service.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "ontology-operator-authorizer",
+      "include": [
+        "core/ontology-operator-authorizer.ts"
+      ],
+      "tests": [
+        "tests/ontology-operator-authorizer.test.ts"
       ],
       "branches": true
     },

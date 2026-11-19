@@ -359,12 +359,14 @@ test("session-only Hook events join one generated turn and stop cannot finalize 
     await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "verify changes" });
     const session = f.store.list("context_hook_session", 10)[0]!;
     assert.equal(session.trace_id, session.id);
+    assert.equal(session.session_host_verified, false, "the Host value from Hook input is a routing hint, not an authenticated identity");
     assert.equal(f.store.traceShards.find("context_hook_session", String(session.id), undefined, String(session.id))?.session_id, "generated-turn");
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     const journal = f.store.list("codex_hook_turn", 10)[0]!;
     assert.equal(journal.turn_id, session.last_turn_id);
     assert.equal(journal.verification_outcome, "passed");
+    assert.equal(journal.session_host_verified, false);
     await bridge.handle("context", { ...base, hook_event_name: "Stop" });
     assert(f.store.list("activation_proof_receipt", 100).some(proof => proof.event === "Stop" && proof.component === "experience" && proof.turn_id === journal.turn_id && proof.observation_written === true));
     await bridge.handle("context", { ...base, hook_event_name: "Stop" });
@@ -492,10 +494,9 @@ test("Hook signal journal safely handles a sessionless verification without a pr
     assert.equal(journal.scenario_key, null);
     assert.equal((journal.verification_receipts as JsonObject[])[0]!.edit_revision, null);
     const unknownInput = { cwd: f.root, turn_id: "sessionless-unknown" };
-    const unknownSignal = bridge.signals.signal({ ...unknownInput, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "sessionless-unknown-check",
-      tool_input: { command: "npm test" }, tool_response: {} });
-    assert(unknownSignal);
-    const explicitUnknown = { ...unknownSignal, kind: "verification", verifier: "npm test", outcome: "unknown" } as never;
+    assert.equal(bridge.signals.signal({ ...unknownInput, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "sessionless-unknown-check",
+      tool_input: { command: "npm test" }, tool_response: {} }), null);
+    const explicitUnknown = { id: "test-unknown-verification", tool: "Bash", kind: "verification", verifier: "sha256:test", outcome: "unknown", digest: "sha256:test" } as never;
     bridge.journal.record(unknownInput, explicitUnknown);
     const unknownJournal = bridge.journal.find(unknownInput, true)!;
     assert.equal((unknownJournal.signals as JsonObject[])[0]!.kind, "verification");
@@ -576,17 +577,14 @@ test("a pre-existing current-format Hook journal keeps its legacy central write 
 test("an explicit scenario is persisted when the verified Hook journal has no scenario yet", async () => {
   const f = await fixture();
   const originalFinalize = f.service.learningCycleFinalize;
+  const originalSelfEvolution = f.service.selfEvolution;
   try {
     const bridge = new CodexHookBridge(f.service), input = { cwd: f.root, session_id: "explicit-scenario-session", turn_id: "explicit-scenario-turn" };
-    const evolution = (f.service as unknown as { selfEvolution?: { captureProgramMemory: (args: JsonObject) => JsonObject };
-      generalEvolution?: { captureProgramMemory: (args: JsonObject) => JsonObject } }).selfEvolution
-      ?? (f.service as unknown as { generalEvolution: { captureProgramMemory: (args: JsonObject) => JsonObject } }).generalEvolution;
-    const originalCaptureProgramMemory = evolution.captureProgramMemory.bind(evolution);
     const capturedDomains: unknown[] = [];
-    evolution.captureProgramMemory = ((args: JsonObject) => {
+    Object.defineProperty(f.service, "selfEvolution", { configurable: true, value: { captureProgramMemory: (args: JsonObject) => {
       capturedDomains.push(args.domain);
-      return originalCaptureProgramMemory(args);
-    }) as typeof evolution.captureProgramMemory;
+      return {};
+    } } });
     const edit = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Edit" });
     const verification = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Bash",
       tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
@@ -595,6 +593,8 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
     bridge.journal.record(input, verification);
     bridge.journal.bindContextReceipt(input, { id: "scenario-context-receipt" });
     const legacyJournal = bridge.journal.find(input)!;
+    assert.equal(legacyJournal.verification_outcome, "passed");
+    assert.equal(legacyJournal.context_receipt_id, "scenario-context-receipt");
     const { trace_id: _traceId, ...legacyPayload } = legacyJournal;
     const timestamp = new Date().toISOString();
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
@@ -604,9 +604,9 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
     assert.equal(result?.status, "observed");
     assert.equal(bridge.journal.find(input)?.scenario_key, "coding.explicit-verification");
     assert.deepEqual(capturedDomains, ["coding"]);
-    evolution.captureProgramMemory = originalCaptureProgramMemory;
   } finally {
     f.service.learningCycleFinalize = originalFinalize;
+    Object.defineProperty(f.service, "selfEvolution", { configurable: true, writable: true, value: originalSelfEvolution });
     await dispose(f);
   }
 });
@@ -1014,8 +1014,10 @@ test("Hook signal sanitizer accepts only local edit or verification metadata", (
   assert.equal(sanitizer.signal({ toolName: "Write", toolInput: { cmd: "ignored" }, toolResponse: { status: "success" } })?.kind, "edit");
   assert.equal(sanitizer.signal({ tool: { name: "Bash" }, input: { script: "go test ./..." }, output: { status: "passed" } })?.kind, "verification");
   assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "git apply patch.diff" }, tool_response: { exit_code: "error" } })?.outcome, "failed");
-  assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "pnpm test" } })?.outcome, "unknown");
+  assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "pnpm test" } }), null);
   assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "node --experimental-strip-types --test tests/craft-notes.test.ts" }, tool_response: { exit_code: 0 } })?.kind, "verification");
+  assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "node --experimental-strip-types --test --test-concurrency=1 tests/craft-notes.test.ts" }, tool_response: { exit_code: 0 } })?.outcome, "passed");
+  assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "node --test --test-concurrency=1 tests/craft-notes.test.ts" } }), null);
   assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "pnpm run build:core && node --experimental-strip-types --test tests/craft-notes.test.ts" }, tool_response: { exit_code: 0 } }), null);
   assert.equal(sanitizer.signal({ tool_name: "unknown" }), null);
   assert.equal(sanitizer.signal({}), null);
@@ -2626,8 +2628,15 @@ test("Stop surfaces a bounded hint when edits have no verification", async () =>
     await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "change something" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "gap-edit" });
     const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
-    assert.match(String(stop.systemMessage), /没有可识别的验证结果/u);
+    assert.match(String(stop.systemMessage), /Hook 未识别到验证回执/u);
+    assert.match(String(stop.systemMessage), /不影响之前保存的知识和记忆/u);
+    assert(!String(stop.systemMessage).includes("未验证观察"));
     assert(f.store.events("codex-hook").some(event => event.event_type === "codex_hook.unverified_edit"));
+    const diagnostic = f.store.events("codex-hook").find(event => event.event_type === "codex_hook.learning_stage_diagnostic")?.payload as JsonObject | undefined;
+    assert.equal(diagnostic?.verification_status, "missing");
+    assert.equal(diagnostic?.observation_status, "not_written");
+    assert.equal(diagnostic?.promotion_status, "not_reached");
+    assert.equal(diagnostic?.content_free, true);
     const reentered = await bridge.handle("context", { ...base, hook_event_name: "Stop", stop_hook_active: true });
     assert.equal(reentered.systemMessage, undefined);
   } finally { await dispose(f); }
@@ -2640,12 +2649,44 @@ test("Stop offers a non-blocking Runbook choice after a verified project edit", 
     await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "verify changes" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "verified-gap-edit" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    f.store.create("program_memory_candidate", "unrelated-with-evidence", { status: "diagnostic", evidence_ids: ["another-observation"] });
+    f.store.create("program_memory_candidate", "unrelated-without-evidence", { status: "diagnostic" });
     const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
     assert.match(String(stop.systemMessage), /craft_experience_runbook_capture/u);
     assert.match(String(stop.systemMessage), /本轮结果/u);
+    const diagnostic = f.store.events("codex-hook").find(event => event.event_type === "codex_hook.learning_stage_diagnostic")?.payload as JsonObject | undefined;
+    assert.equal(diagnostic?.verification_status, "passed");
+    assert.equal(diagnostic?.observation_status, "stored");
+    assert.equal(diagnostic?.program_memory_candidate_status, "diagnostic");
+    assert.equal(diagnostic?.promotion_status, "not_promoted");
     const reentered = await bridge.handle("context", { ...base, hook_event_name: "Stop", stop_hook_active: true });
     assert.equal(reentered.systemMessage, undefined);
   } finally { await dispose(f); }
+});
+
+test("learning diagnostics report promotion separately from verified storage", async () => {
+  const f = await fixture();
+  const evolution = f.service.selfEvolution;
+  const prototype = Object.getPrototypeOf(evolution) as { captureProgramMemory: (args: JsonObject) => JsonObject };
+  const originalCapture = prototype.captureProgramMemory;
+  try {
+    prototype.captureProgramMemory = function (this: typeof evolution, args: JsonObject): JsonObject {
+      const candidate = originalCapture.call(this, args);
+      return this.store.save("program_memory_candidate", String(candidate.id), { ...candidate, status: "promoted" });
+    };
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "promoted-diagnostic", turn_id: "promoted-diagnostic" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "verify and store" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "promoted-edit" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "node --test --test-concurrency=1 tests/x.test.ts" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    const diagnostic = f.store.events("codex-hook").find(event => event.event_type === "codex_hook.learning_stage_diagnostic")?.payload as JsonObject | undefined;
+    assert.equal(diagnostic?.observation_status, "stored");
+    assert.equal(diagnostic?.program_memory_candidate_status, "promoted");
+    assert.equal(diagnostic?.promotion_status, "promoted");
+  } finally {
+    prototype.captureProgramMemory = originalCapture;
+    await dispose(f);
+  }
 });
 
 test("Stop is silent without a journal and still guides when event recording fails", async () => {
@@ -2659,9 +2700,10 @@ test("Stop is silent without a journal and still guides when event recording fai
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "gap-append-edit" });
     const original = f.store.appendEvent.bind(f.store);
     Object.defineProperty(f.store, "appendEvent", { configurable: true, value: (stream: string, type: string, event: JsonObject) =>
-      type === "codex_hook.unverified_edit" ? (() => { throw new Error("storage busy"); })() : original(stream, type, event) });
+      type === "codex_hook.unverified_edit" || type === "codex_hook.learning_stage_diagnostic"
+        ? (() => { throw new Error("storage busy"); })() : original(stream, type, event) });
     const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
-    assert.match(String(stop.systemMessage), /没有可识别的验证结果/u);
+    assert.match(String(stop.systemMessage), /Hook 未识别到验证回执/u);
   } finally { await dispose(f); }
 });
 

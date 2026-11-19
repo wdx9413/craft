@@ -23,7 +23,7 @@
 - [Capability Kit Runtime](../technical/modules/capability-kit-runtime.md) 已把 Manifest、精确版本、依赖、Conformance、Task Activation、阶段性 digest-only Contribution 与撤销分开；Kit 不能直接写核心事实、读取凭据、安装时执行第三方代码，或把 Hook 声明当执行授权。
 - [Experience Skill](../../skills/craft-experience/SKILL.md) 要求两条独立的、脱敏的真实结果才产生 Candidate；`shadow → held_out → signoff → canary` 后才可 routeable。它不因一次成功或写出 `SKILL.md` 而自我发布。
 - [Quality Skill](../../skills/craft-quality/SKILL.md) 规定冻结 Subject、Case、环境、预算与 Grader；使用重复等预算 Trial，结论只能是 `eligible`、`rejected`、`inconclusive`。
-- [`ProcedureAutomationKernel`](../../capability/craft-experience/procedure-automation.ts) 已有 interval `tick`、配额、可重试、checkpoint、receipt、验收 verifier、无进展 handoff；但只自动化已 routeable 的 **linear Workflow**，effect 仅限 `read_only` / `local_write`。Graph、Prompt Procedure、Host/远程副作用必须由独立 Adapter 承担。
+- [`ProcedureAutomationKernel`](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-automation.ts) 已有 interval `tick`、配额、可重试、checkpoint、receipt、验收 verifier、无进展 handoff；但只自动化已 routeable 的 **linear Workflow**，effect 仅限 `read_only` / `local_write`。Graph、Prompt Procedure、Host/远程副作用必须由独立 Adapter 承担。
 - [Durable Action Loop](../technical/modules/durable-action-experience.md) 和 [Verified Work Loop](../technical/modules/verified-work-loop.md) 明确：Host 自述完成、命令退出成功、无正文 action report 都不等于交付；必须有状态再观察和 passed Acceptance。
 
 因此，本报告不把“Skill 被加载”当作“能力已执行”，也不把“Skill 的单元测试通过”当作“Craft 或宿主在真实工程任务中变好”。
@@ -278,5 +278,5 @@ flowchart LR
 - 本机 Ponytail Skill：`/Users/didi/.agents/skills/ponytail/SKILL.md`（历史本机证据，不是仓库内可访问文件）
 - [Craft Capability Kit Runtime](../technical/modules/capability-kit-runtime.md)
 - [Craft Experience Skill](../../skills/craft-experience/SKILL.md) · [Quality Skill](../../skills/craft-quality/SKILL.md)
-- [Procedure Automation 实现](../../capability/craft-experience/procedure-automation.ts) · [对应测试](../../tests/procedure-automation.test.ts)
+- [Procedure Automation 实现](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-automation.ts) · [对应测试](../../tests/procedure-automation.test.ts)
 - [Workflow / Verification / Signoff](../technical/modules/workflow-signoff.md) · [Durable Action Loop](../technical/modules/durable-action-experience.md) · [执行策略](../technical/modules/execution-policy.md)

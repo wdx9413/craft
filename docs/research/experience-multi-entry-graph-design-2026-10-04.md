@@ -72,7 +72,7 @@ Procedure 版本恢复是另一个资产管理操作，不等于当前运行回�
 
 已读取当前工作区代码和测试，以下不代表本次重新执行测试：
 
-- [Procedure composition](../../capability/craft-experience/procedure-composition.ts)已有命名 Entry/Exit、固定 Route、子调用、输入输出验证和独立只读并行声明；`validateProcedureComposition` 明确只接受 workflow，Graph 当前不能直接使用这条组合契约。
+- [Procedure composition](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-composition.ts)已有命名 Entry/Exit、固定 Route、子调用、输入输出验证和独立只读并行声明；`validateProcedureComposition` 明确只接受 workflow，Graph 当前不能直接使用这条组合契约。
 - [Invocation](../../core/application/procedure-invocation.ts)经 ProcedurePlanner 将所选 Route 降为持久工作项；已有入口绑定、出口验收、幂等回执、恢复、受限重试和版本漂移保护。当前 resume 恢复对应失败/阻塞项，不是任意退回上游节点并失效下游。
 - [GraphCompiler](../../core/graph-compiler.ts)调用 [Graph 校验器](../../core/workflow-dag.ts)处理条件、重试、人工恢复和补偿边，输出声明 `host_dispatch:not_performed`。静态编译通过不能证明运行时条件选择、返工、补偿已经执行。
 - [组合测试](../../tests/procedure-composition.test.ts)、[调用测试](../../tests/procedure-invocation.test.ts)覆盖已有固定路径与恢复；[Graph 测试](../../tests/component-procedure-graph.test.ts)覆盖候选生成与协议，不是需求/Bug 多入口动态 Graph 的完整实机验收。

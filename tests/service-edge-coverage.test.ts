@@ -7,6 +7,7 @@ import { CraftService, VERSION } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+import { registerTrustedGlobalKnowledgeSource } from "./helpers/trusted-global-knowledge-source.ts";
 
 test("service facades exercise defaults, compatibility views, and model validation", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-service-edge-"));
@@ -63,8 +64,8 @@ test("service facades exercise defaults, compatibility views, and model validati
     const expiring = attachVerifiedPromotionFixture(store, store.create("knowledge_claim", "expiring", { kind: "fact", content: "old", scope: "global", evidence_ids: [explicitEvidence.id], status: "candidate", valid_until: "2000-01-01T00:00:00.000Z" }));
     assert.equal((service.knowledgeClaimGet({ claim_id: expiring.id, version: expiring.version }).claim as JsonObject).id, expiring.id);
     assert.equal((service.knowledgeClaimReview({ claim_id: unsupportedClaim.id, status: "disputed", reviewer: "r", reason: "conflict" }).claim as JsonObject).status, "disputed");
-    service.knowledgeSourceRegister({ source_id: "history-source-old", kind: "custom", label: "old history source", scope_kind: "global", scope_id: "global", locator: "offline://history-old", content_digest: "sha256:history-old", trust: "verified" });
-    service.knowledgeSourceRegister({ source_id: "history-source-new", kind: "custom", label: "new history source", scope_kind: "global", scope_id: "global", locator: "offline://history-new", content_digest: "sha256:history-new", trust: "verified" });
+    registerTrustedGlobalKnowledgeSource(args => service.knowledgeSourceRegister(args), { source_id: "history-source-old", kind: "custom", label: "old history source", locator: "offline://history-old", content_digest: "sha256:history-old" });
+    registerTrustedGlobalKnowledgeSource(args => service.knowledgeSourceRegister(args), { source_id: "history-source-new", kind: "custom", label: "new history source", locator: "offline://history-new", content_digest: "sha256:history-new" });
     const historical = store.create("knowledge_claim", "historical-scope", { kind: "fact", content: "source changed", source_id: "history-source-old", scope: "global", evidence_ids: [explicitEvidence.id], status: "candidate" });
     store.save("knowledge_claim", String(historical.id), { ...historical, source_id: "history-source-new" });
     const oldSource = store.get("knowledge_source", "history-source-old");

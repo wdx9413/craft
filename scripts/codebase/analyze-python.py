@@ -12,7 +12,8 @@ import sys
 def _implementation():
     here = Path(__file__).resolve().parent
     candidates = [here / "analyzers" / "analyze-python.py",
-                  Path(__file__).resolve().parents[2] / "capability" / "craft-codebase" / "analyzers" / "analyze-python.py"]
+                  Path(__file__).resolve().parents[2] / "capability" / "craft-codebase" / "analyzers" / "analyze-python.py",
+                  Path(__file__).resolve().parents[2] / "node_modules" / "@craft" / "capability-codebase" / "analyzers" / "analyze-python.py"]
     path = next((item for item in candidates if item.is_file()), None)
     if path is None:
         raise RuntimeError("Python analyzer implementation is unavailable")

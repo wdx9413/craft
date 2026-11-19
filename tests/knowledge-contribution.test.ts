@@ -29,6 +29,8 @@ test("Knowledge Context excludes restricted bodies unless explicitly allowed", a
     assert.deepEqual((await f.reader.contribute(request)).items, []);
     const kernel = new ContextResolutionKernel(f.store, [f.reader]);
     assert.deepEqual(((await kernel.resolve({ ...request, members: ["knowledge"] })).contributions as JsonObject[])[0]!.items, []);
+    await assert.doesNotReject(() => kernel.resolve({ ...request, members: ["knowledge"], domain: "coding" }));
+    await assert.rejects(() => kernel.resolve({ ...request, members: ["knowledge"], domain: "unsupported" }), /domain is unsupported/u);
     t.mock.restoreAll();
     assert.equal((await f.reader.contribute({ ...request, allow_restricted: true })).items[0]!.claim_id, "restricted");
     const allowed = await kernel.resolve({ ...request, members: ["knowledge"], allow_restricted: true });
@@ -76,6 +78,7 @@ test("Context projections preserve explicit expansion ranges rather than a cropp
     const repeated = "claim_id" in projection ? projectKnowledgeRetrieval(projection, "Redis") : projectMemoryRetrieval(projection, "Redis", false);
     assert.deepEqual(repeated.content_excerpt, excerpt);
   }
+  assert.equal(projectKnowledgeRetrieval({ concept_kind: "custom-concept" }, "", true).concept_selection_reason, "concept: custom-concept");
 });
 
 test("shared Context ranks expansion-only Knowledge and Memory by bounded matched terms, retaining references", async t => {

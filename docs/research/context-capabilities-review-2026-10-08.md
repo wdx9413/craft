@@ -57,8 +57,8 @@
 | --- | --- | --- |
 | Knowledge | Source/Document/Claim、内容修订、Evidence、scope/audience/tenant、撤销及 reviewed-only 召回；当前文档摘要与 Source 摘要检查。 | 大量材料仍通过 Store 全量取出、正文水合和关键词排名；缺少覆盖真实来源同步、事实过期及矛盾证据的完整评测。优先作用域查询下推、来源变化/撤销同步与按片段的必要事实引用，随后再用实测比较分块、混合检索和 rerank。已有 cursor ingestion，不应描述成完全没有增量导入。 |
 | Memory | 显式用户授权、Candidate→Review→Ledger、topic 冲突、scope 优先级、时间选择、到期与维护候选。 | 冲突依赖明确 topic；[用户陈述捕获](../../core/application/coordinators/cognitive-write.ts)与 Hook 未提供 topic 时，不会自动把语义相反的偏好识别为同一主题。建议有证据的主题分类候选、显式更正/替代、长期条目确认及可查看的治理待办；不得让模型猜测直接覆盖原条目。读侧以及治理/捕获/维护仍有大量逻辑在 core。 |
-| Experience | 场景 Graph、命名入口/出口、版本、候选/晋级、Invocation、有界返工、独立出口验收、配对评价、graph.yml 状态视图。 | [配置保存](../../capability/craft-experience/procedure-configuration.ts)新候选会暂停旧正式版，graph.yml 不能同时表示可运行旧正式版和隔离新测试版。若产品目标要并行正式/测试，需要独立发布指针与测试环境合同，不是改 YAML 数字。还需子场景的意图/前置材料匹配、变更影响及真实跨任务收益；嵌套 Graph、任意并行写仍明确不支持。 |
-| Codebase | 自动识别 Git、ignore/排除/退出控制、checkpoint、内容摘要、增量符号缓存、TS/JS 语义分析与外部分析导入。 | [文件选择](../../capability/craft-codebase/repository-files.ts)按路径排序限 500 文件、8 MiB 总量、单文件 512 KiB；[基础分析](../../capability/craft-codebase/basic-analysis.ts)每文件最多 16 个节点、正则声明、无关系边。Context 中文任务只用整句或最多六个英文词查符号。优先任务相关文件排序、路径/关键词/符号/关系组合检索；Python/Java/Go 等语义 Adapter 要分别验收，不能用“读到文件”称全语言调用分析。 |
+| Experience | 场景 Graph、命名入口/出口、版本、候选/晋级、Invocation、有界返工、独立出口验收、配对评价、graph.yml 状态视图。 | [配置保存](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-configuration.ts)新候选会暂停旧正式版，graph.yml 不能同时表示可运行旧正式版和隔离新测试版。若产品目标要并行正式/测试，需要独立发布指针与测试环境合同，不是改 YAML 数字。还需子场景的意图/前置材料匹配、变更影响及真实跨任务收益；嵌套 Graph、任意并行写仍明确不支持。 |
+| Codebase | 自动识别 Git、ignore/排除/退出控制、checkpoint、内容摘要、增量符号缓存、TS/JS 语义分析与外部分析导入。 | [文件选择](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/repository-files.ts)按路径排序限 500 文件、8 MiB 总量、单文件 512 KiB；[基础分析](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/basic-analysis.ts)每文件最多 16 个节点、正则声明、无关系边。Context 中文任务只用整句或最多六个英文词查符号。优先任务相关文件排序、路径/关键词/符号/关系组合检索；Python/Java/Go 等语义 Adapter 要分别验收，不能用“读到文件”称全语言调用分析。 |
 
 ## 依赖包的判断
 
@@ -68,7 +68,7 @@
 - Knowledge 的 Claim 写入/审核协调在 [CraftService](../../core/application/craft-service.ts)，包里 Source/Contribution 的独立性不能证明所有知识操作都是独立闭环。
 - CodebaseIndex 在子包，仓库 ensure 仍依赖 core 的 Workspace/checkpoint/service 协调。
 - Experience 的资产管理已经有独立 SDK；Invocation/实际 Host 运行在 core 是合理分工，应抽象受治理的执行合同，避免把执行器复制到子包。
-- [CraftStore.list](../../common/craft-common-store-local/src/store.ts)带 predicate 时仍读全量最新记录并先水合正文，再 JS 过滤和截断；Context 长期数据增长会增加 CPU/I/O 和 SQLite 竞争。仓库 ensure 在写事务中同步枚举、读文件、分析；重复索引复用也先进行扫描及 Workspace 保存。应测并发和数据规模，再下推范围查询、缓存失效、后台索引，不能宣称已有这些性能改造。
+- [CraftStore.list](https://github.com/wdx9413/craft-common/blob/main/packages/craft-common-store-local/src/store.ts)带 predicate 时仍读全量最新记录并先水合正文，再 JS 过滤和截断；Context 长期数据增长会增加 CPU/I/O 和 SQLite 竞争。仓库 ensure 在写事务中同步枚举、读文件、分析；重复索引复用也先进行扫描及 Workspace 保存。应测并发和数据规模，再下推范围查询、缓存失效、后台索引，不能宣称已有这些性能改造。
 
 ## 业界借鉴与真实评测
 

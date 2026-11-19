@@ -4,10 +4,10 @@
 
 ## 当前事实
 
-- [Runtime 的互联网产研模板](../../capability/craft-experience/procedure-templates.ts)是候选模板，不是用户当前生效的场景定义。模板已经移出 Skill，由 `craft_experience_graph_inspect(action: template)` 提供；更新插件不能覆盖用户资产，模板也不能授权运行。
-- [配置保存](../../capability/craft-experience/procedure-configuration.ts)通过 `craft_procedure_configuration_save` 校验定义、作用域和 `expected_version`，产生新内容版本，清除旧晋级门禁，保留为候选。
-- [定义存储](../../capability/craft-experience/procedure-definition.ts)已有不可变 JSON、内容摘要和数据库引用。新定义统一位于 `~/.craft_data/experience/graph/<graph-id>/versions/`；历史 `procedures/workflows/` 和 `procedures/graphs/` 引用保持兼容。新建目录直接使用可移植的英文 graph_id（例如 product-development），不附加摘要，改显示标题不换身份；旧摘要目录保持兼容；数据根可以由 `CRAFT_DATA_DIR` 或设置覆盖。它没有把持续演化的定义写回插件 Skill。
-- [Skill 导出](../../capability/craft-experience/procedure-projection.ts)可导出一个已晋级资产的 `SKILL.md` 与相邻 `PROCEDURE.json`，默认禁用；导出是固定版本的分发快照，持续迭代仍属于受管理资产。
+- [Runtime 的互联网产研模板](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-templates.ts)是候选模板，不是用户当前生效的场景定义。模板已经移出 Skill，由 `craft_experience_graph_inspect(action: template)` 提供；更新插件不能覆盖用户资产，模板也不能授权运行。
+- [配置保存](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-configuration.ts)通过 `craft_procedure_configuration_save` 校验定义、作用域和 `expected_version`，产生新内容版本，清除旧晋级门禁，保留为候选。
+- [定义存储](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-definition.ts)已有不可变 JSON、内容摘要和数据库引用。新定义统一位于 `~/.craft_data/experience/graph/<graph-id>/versions/`；历史 `procedures/workflows/` 和 `procedures/graphs/` 引用保持兼容。新建目录直接使用可移植的英文 graph_id（例如 product-development），不附加摘要，改显示标题不换身份；旧摘要目录保持兼容；数据根可以由 `CRAFT_DATA_DIR` 或设置覆盖。它没有把持续演化的定义写回插件 Skill。
+- [Skill 导出](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-projection.ts)可导出一个已晋级资产的 `SKILL.md` 与相邻 `PROCEDURE.json`，默认禁用；导出是固定版本的分发快照，持续迭代仍属于受管理资产。
 - 当前同一场景可声明子场景、命名入口/出口、合法路径、有界返工和固定版本子 Workflow。配置版本漂移需要重新规划；不自动迁移活动 Invocation。
 
 ## 目标组织
@@ -52,7 +52,7 @@ Skill 说明如何发现场景、读取定义、选择入口/出口、提交修�
 
 ## 验证边界
 
-已实现发现/读取/模板/验证/差异、受版本和摘要保护的工作稿保存/提交、旧版本复制迁移及有类型的非执行关系；复用既有配置、门禁、Invocation 和 Trace 链路。相关代码、模板和 SDK 导出见 [Graph 资产模块](../../capability/craft-experience/graph-assets.ts)，验收见 [新增测试](../../tests/experience-graph-assets.test.ts)。
+已实现发现/读取/模板/验证/差异、受版本和摘要保护的工作稿保存/提交、旧版本复制迁移及有类型的非执行关系；复用既有配置、门禁、Invocation 和 Trace 链路。相关代码、模板和 SDK 导出见 [Graph 资产模块](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/graph-assets.ts)，验收见 [新增测试](../../tests/experience-graph-assets.test.ts)。
 
 五个实现模块的行、分支、函数覆盖率均为 100%，已登记 coverage-gates.json；相关回归、类型检查、层级/工具/文档/版本检查及打包 MCP 验证通过。Codex、Claude、DSH、本地 Skill+MCP 产物及两个分发仓库的本地内容保持 0.12.39。
 

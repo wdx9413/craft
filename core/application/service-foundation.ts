@@ -197,7 +197,7 @@ import { ContentMigrationKernel } from "../content-migration.ts";
 import { TraceReviewKernel } from "../trace-review.ts";
 import { MemoryMaintenanceKernel } from "../memory-maintenance.ts";
 import { RuntimeModelProbeKernel } from "../runtime-model-probe.ts";
-import { EvaluationContractKernel } from "../evaluation-contract.ts";
+import { EvaluationContractKernel, type TrustedEvaluatorIdentity } from "../evaluation-contract.ts";
 import { RuntimeExecutionAttemptKernel } from "../runtime-execution-attempt.ts";
 import { ContextWorkingSetKernel } from "../context-working-set.ts";
 import { GraphCompilerKernel } from "../graph-compiler.ts";
@@ -463,7 +463,7 @@ export abstract class ServiceFoundation {
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
     hostProfiles?: readonly HostProfile[], modelProviders?: readonly ModelProviderSpec[],
     modelTransport?: ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[],
-    localSandbox = new LocalProcessSandboxAdapter()) {
+    localSandbox = new LocalProcessSandboxAdapter(), trustedEvaluators?: readonly TrustedEvaluatorIdentity[]) {
     bindProjectKnowledgeContentDirectory(store);
     bindProjectExperienceContentDirectory(store);
     this.store = store; this.catalog = new Catalog(store, semanticProvider); this.isolatedAdapter = isolatedAdapter;
@@ -592,7 +592,6 @@ export abstract class ServiceFoundation {
     this.workRuntimeModes = new WorkRuntimeModeKernel(store, this.hostDrivers.keys());
     this.turnCognitive = new TurnCognitiveRuntime(store, this.memoryLedger);
     this.continualHarness = new ContinualHarnessKernel(store);
-    this.evolutionCycles = new EvolutionCycleKernel(store);
     this.statefulCompute = new StatefulComputeKernel(store);
     this.uncertaintyPolicies = new UncertaintyPolicyKernel(store);
     this.actionGate = new ActionGateKernel(store);
@@ -649,7 +648,9 @@ export abstract class ServiceFoundation {
     this.runtimeModelProbe = new RuntimeModelProbeKernel(store, this.modelProviders, modelTransport ?? null);
     this.mcpTasks = new McpTaskKernel(store);
     this.runtimeProof = new RuntimeProofKernel(store);
-    this.evaluationContracts = new EvaluationContractKernel(store);
+    this.evaluationContracts = new EvaluationContractKernel(store, trustedEvaluators);
+    this.experienceProcedures.setEvaluationVerifier(this.evaluationContracts);
+    this.evolutionCycles = new EvolutionCycleKernel(store, this.evaluationContracts);
     this.contentMigration = new ContentMigrationKernel(store);
     this.remoteInterop = new RemoteInteropKernel(store);
     this.platformOperations = new PlatformOperationsKernel(store);

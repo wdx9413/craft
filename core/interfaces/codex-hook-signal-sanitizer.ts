@@ -18,7 +18,7 @@ type HookInput = Record<string, unknown>;
 
 const SECRET_PATH = /(?:secret|token|credential|password|private|\.env)/iu;
 const SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
-const NODE_TEST = /^node(?:\s+(?:--experimental-strip-types|--experimental-test-coverage|--test-isolation=(?:none|process)|--test-reporter=[\w.-]+|--test-coverage-(?:lines|branches|functions)=\d+|--test-coverage-include=[\w./*:-]+))*\s+--test(?:\s|$)/u;
+const NODE_TEST = /^node(?:\s+(?:--experimental-strip-types|--experimental-test-coverage|--test-isolation=(?:none|process)|--test-concurrency=\d+|--test-reporter=[\w.-]+|--test-coverage-(?:lines|branches|functions)=\d+|--test-coverage-include=[\w./*:-]+))*\s+--test(?:\s|$)/u;
 const VERIFY = /^(?:(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?test(?::[\w-]+)?|pytest|(?:python3?\s+-m\s+pytest)|(?:mvn|gradle|gradlew|\.\/gradlew)\s+(?:test|verify)|go\s+test|cargo\s+test)(?:\s|$)/u;
 const EDIT = /(?:^|[;&|\s])(?:apply_patch|git\s+apply|sed\s+-i|perl\s+-pi)\b/iu;
 
@@ -58,11 +58,12 @@ export class HookSignalSanitizer {
     const tool = text(input.tool_name) ?? text(input.toolName) ?? nestedText(input.tool, ["name"]) ?? "unknown";
     const toolInput = (input.tool_input ?? input.toolInput ?? input.input) as unknown;
     const command = nestedText(toolInput, ["command", "cmd", "script"]);
-    const rawOutcome = nestedText(input.tool_response ?? input.toolResponse ?? input.output, ["exit_code", "exitCode", "status"]);
+    const response = input.tool_response ?? input.toolResponse ?? input.output;
+    const rawOutcome = nestedText(response, ["exit_code", "exitCode", "status"]);
     const outcome = rawOutcome === "0" || rawOutcome === "success" || rawOutcome === "passed" ? "passed"
       : rawOutcome && (/^[1-9]\d*$/u.test(rawOutcome) || rawOutcome === "failed" || rawOutcome === "error") ? "failed" : "unknown";
     const kind = /^(?:apply_patch|Edit|Write)$/iu.test(tool) || Boolean(command && EDIT.test(command)) ? "edit"
-      : Boolean(command && (VERIFY.test(command.trim()) || NODE_TEST.test(command.trim())) && !/[;&|`$\n]/u.test(command)) ? "verification" : "other";
+      : Boolean(command && outcome !== "unknown" && (VERIFY.test(command.trim()) || NODE_TEST.test(command.trim())) && !/[;&|`$\n]/u.test(command)) ? "verification" : "other";
     if (kind === "other") return null;
     const path = kind === "edit" ? observedProjectPath(nestedText(toolInput, ["file_path", "filePath", "path", "filename"]), input.cwd) : null;
     const stable = { tool, kind, outcome, command_digest: command ? digest(command) : null, path, tool_use_id: text(input.tool_use_id) ?? text(input.toolUseId) ?? randomUUID() };

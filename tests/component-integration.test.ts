@@ -429,7 +429,7 @@ test("eligible vector retrieval persists safe configuration, caches embeddings, 
   } finally { globalThis.fetch = originalFetch; if (originalKey === undefined) delete process.env.CRAFT_VECTOR_TEST_KEY; else process.env.CRAFT_VECTOR_TEST_KEY = originalKey; await dispose(f); }
 });
 
-test("semantic review packet is fragment-bound and a routeable Prompt Procedure remains Markdown-native", async () => {
+test("semantic review packet is fragment-bound and a Prompt Procedure cannot route without signed evaluation", async () => {
   const f = await fixture();
   try {
     const root = join(f.root, "source"); await mkdir(root); await writeFile(join(root, "README.md"), "# Delivery rule\nRun focused tests before delivery.\n", "utf8");
@@ -447,19 +447,19 @@ test("semantic review packet is fragment-bound and a routeable Prompt Procedure 
     const proposal = f.service.workflowEvolutionProposalSubmit({ request_id: request.id, workflow_id: "procedure-workflow", name: "Verified delivery", description: "Run focused tests before delivery.", inputs: [], steps: [{ type: "assertion" }] }).proposal as JsonObject;
     const procedure = f.service.experienceProcedureDraft({ proposal_id: proposal.id, procedure_kind: "prompt", allowed_effects: ["read"], evidence_ids: [evidence.id] }).procedure as JsonObject;
     assert.equal(procedure.definition_ref, null);
-    for (const stage of ["shadow", "held_out", "signoff", "canary"]) f.service.experienceProcedures.gate({ procedure_id: procedure.id, stage, evidence_ids: [evidence.id], passed: true });
-    const routeable = f.service.experienceProcedureGet({ procedure_id: procedure.id }).procedure as JsonObject; assert.equal(routeable.lifecycle, "routeable");
+    f.service.experienceProcedures.gate({ procedure_id: procedure.id, stage: "shadow", evidence_ids: [evidence.id], passed: true });
+    assert.throws(() => f.service.experienceProcedures.gate({ procedure_id: procedure.id, stage: "held_out", evidence_ids: [evidence.id], passed: true }), /evaluation_contract_id must not be empty/u);
+    const routeable = f.service.experienceProcedureGet({ procedure_id: procedure.id }).procedure as JsonObject;
+    assert.equal(routeable.lifecycle, "candidate"); assert.equal(routeable.routeable, false);
     const procedurePath = String((routeable.content_ref as JsonObject).path);
     assert.match(procedurePath, /experience[\\/]md[\\/]prompts[\\/]/u);
     const markdown = await readFile(procedurePath, "utf8");
-    assert.match(markdown, /procedure_kind: "prompt"[\s\S]*lifecycle: "routeable"/u);
+    assert.match(markdown, /procedure_kind: "prompt"[\s\S]*lifecycle: "candidate"/u);
     const context = await f.service.contextResolutionResolve({ receipt_id: "procedure-context", query: "delivery tests", scope_kind: "project", scope_id: "p", members: ["experience"] });
-    assert.match(JSON.stringify(context.contributions), /content_digest/u);
-    assert.doesNotMatch(JSON.stringify(context.contributions), /Run focused tests/u);
-    const exported = f.service.experienceProcedureSkillExport({ procedure_id: procedure.id });
-    assert.equal((exported.export as JsonObject).enabled, false);
-    assert.match(String((exported.export as JsonObject).path), /experience[\\/]skills[\\/]/u);
-    assert.equal((exported.export as JsonObject).definition_path, null);
+    const experience = (context.contributions as JsonObject[])[0]!;
+    assert.equal((experience.items as JsonObject[]).length, 0);
+    assert.equal((experience.diagnostics as JsonObject).reason, "no_promoted_release");
+    assert.throws(() => f.service.experienceProcedureSkillExport({ procedure_id: procedure.id }), /Only routeable Experience Procedures/u);
   } finally { await dispose(f); }
 });
 

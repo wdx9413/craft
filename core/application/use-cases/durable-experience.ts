@@ -9,6 +9,7 @@ import { projectIdentityFromRoot } from "../../scope-identity.ts";
 import { realpathSync } from "node:fs";
 import { executeSteps, normalizeSteps, resolveInputs, safePath, substitute } from "../../workflow.ts";
 import { stableDigest } from "../../digest.ts";
+import { autoDemoteFromVerifiedHostFeedback } from "../host-feedback-procedure-demotion.ts";
 
 declare module "../craft-service.ts" {
   interface CraftService { experienceLearningEvaluationRun(args: JsonObject): JsonObject; experienceRunbookCapture(args: JsonObject): JsonObject; experienceRunbookRevoke(args: JsonObject): JsonObject; }
@@ -42,13 +43,65 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
   serviceClass.prototype.experienceRunbookCapture = function (args) { return this.experienceProcedures.runbookCapture(args); };
   serviceClass.prototype.experienceRunbookRevoke = function (args) { return this.experienceProcedures.runbookRevoke(args); };
   serviceClass.prototype.experienceProcedureGate = function (args) {
-    if (args.passed === true) throw new Error("Positive Procedure gates require bound evaluation results");
     return this.experienceProcedures.gate(args);
+  };
+  serviceClass.prototype.contextResolutionFeedback = function (args) {
+    const result = this.contextResolution.feedback(args) as JsonObject;
+    const feedback = result.feedback as JsonObject | undefined;
+    const autoDemotions = autoDemoteFromVerifiedHostFeedback(feedback, this.store, this.experienceProcedures, this.evaluationContracts);
+    return { ...result, auto_demotions: autoDemotions, procedure_release_changed: autoDemotions.length > 0 };
   };
   serviceClass.prototype.experienceLearningEvaluationList = function (args = {}) { return new ExperienceLearningEvaluation(this.store).listPending(args); };
   serviceClass.prototype.experienceLearningEvaluationDispatch = function (args) { return new ExperienceLearningEvaluation(this.store).dispatch(args); };
   serviceClass.prototype.experienceLearningEvaluationResult = function (args) {
-    return new ExperienceLearningEvaluation(this.store).result(args, (gateArgs) => this.experienceProcedures.gate(gateArgs));
+    return this.store.transaction(() => {
+      const dispatch = this.store.get("experience_evaluation_dispatch", String(args.dispatch_id ?? ""));
+      if (dispatch.stage !== "held_out") return new ExperienceLearningEvaluation(this.store).result(args, (gateArgs) => this.experienceProcedures.gate(gateArgs));
+      const contractId = typeof args.evaluation_contract_id === "string" ? args.evaluation_contract_id.trim() : "";
+      const evaluationId = typeof args.evaluation_id === "string" ? args.evaluation_id.trim() : "";
+      if (!contractId || !evaluationId) throw new Error("Held-out Procedure result requires evaluation_contract_id and evaluation_id from a trusted paired task-effect evaluator");
+      const procedure = this.store.get("experience_procedure", String(dispatch.procedure_id), Number(dispatch.procedure_version));
+      const candidateRef = { kind: "experience_procedure", id: String(procedure.id),
+        version: Number(procedure.candidate_version ?? procedure.version), digest: String(procedure.definition_digest ?? "") };
+      const verified = this.evaluationContracts.verifyTaskEffectEvaluation({ contract_id: contractId, evaluation_id: evaluationId, candidate_ref: candidateRef });
+      if (verified.valid !== true) throw new Error("Held-out Procedure report is not valid, trusted, and bound to this candidate");
+      const report = this.store.get("task_effect_evaluation", evaluationId);
+      const contract = this.store.get("evaluation_contract", contractId);
+      const shadowGate = this.store.list("experience_procedure_gate", 10_000,
+        item => item.procedure_id === procedure.id && item.stage === "shadow")
+        .sort((left, right) => Number(right.procedure_version) - Number(left.procedure_version))[0];
+      const shadowEvidenceIds = Array.isArray(shadowGate?.evidence_ids) ? shadowGate.evidence_ids.map(String) : [];
+      const scenarioContractDigest = shadowEvidenceIds.map(id => this.store.get("evidence", id).metadata as JsonObject | undefined)
+        .map(metadata => metadata?.evaluation_contract_digest).find(value => typeof value === "string");
+      if (typeof scenarioContractDigest !== "string") throw new Error("Held-out Procedure report requires a completed Shadow bound to a pinned scenario evaluation contract");
+      const passed = verified.eligible === true;
+      const routes = Array.isArray(procedure.entrypoints)
+        ? (procedure.entrypoints as JsonObject[]).flatMap(entry => Array.isArray(entry.routes)
+          ? (entry.routes as JsonObject[]).map(route => ({ entry_id: entry.id, exit_id: route.exit_id, subscenario_id: route.subscenario_id })) : [])
+        : [];
+      const routeEvidence = routes.length ? routes : [null];
+      const evidenceIds = routeEvidence.map(route => {
+        const evidenceId = `experience_task_effect_evidence_${stableDigest({ dispatch_id: dispatch.id, contract_id: contract.id,
+          evaluation_id: report.id, route }).slice(-20)}`;
+        const evaluator = report.evaluator as JsonObject;
+        const evidence = this.evidenceRecord({ evidence_id: evidenceId, source_type: "program", confidence: "confirmed",
+          claim: `Trusted paired task-effect evaluation ${passed ? "passed" : "failed"} for Experience Procedure Held-out.`,
+          metadata: { experience_evaluation_dispatch_id: dispatch.id, procedure_id: procedure.id,
+            procedure_version: procedure.version, procedure_definition_digest: procedure.definition_digest,
+            definition_digest: procedure.definition_digest, baseline_version: dispatch.baseline_version ?? null,
+            stage: "held_out", status: passed ? "passed" : "failed", evaluator_ref: `${String(evaluator.id)}@${String(evaluator.version)}`,
+            environment_digest: String(report.evaluation_digest), evaluation_contract_digest: scenarioContractDigest,
+            held_out_set_ref: `${String(contract.id)}:${String(contract.contract_digest)}`,
+            independent_of_training: true, evaluation_contract_id: contract.id, task_effect_contract_digest: contract.contract_digest,
+            evaluation_id: report.id, case_count: Array.isArray(report.pairs) ? report.pairs.length : 0,
+            case_results_digest: String(report.evaluation_digest), workflow_run_ids: [], baseline_workflow_run_ids: [],
+            ...(route ?? {}) } });
+        this.store.save("evidence", String(evidence.id), { ...evidence, record_origin: "experience_evaluator" });
+        return String(evidence.id);
+      });
+      return new ExperienceLearningEvaluation(this.store).result({ ...args, evidence_ids: evidenceIds },
+        gateArgs => this.experienceProcedures.gate({ ...gateArgs, evaluation_contract_id: contractId, evaluation_id: evaluationId }));
+    });
   };
   serviceClass.prototype.experienceLearningEvaluationRun = function (args) {
     const execute = (input: JsonObject): JsonObject => {

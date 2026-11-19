@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
@@ -12,6 +13,12 @@ import { McpServer } from "../core/mcp.ts";
 import { payload, stableDigest } from "../core/digest.ts";
 import { adjudicateKnowledgeCase } from "./helpers/knowledge-evaluation-adjudication.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+import { CONCEPT_KINDS, RELATION_KINDS } from "craft-common-ontology";
+import { digestJson } from "craft-common-base/digest";
+import { EvaluationContractKernel } from "../core/evaluation-contract.ts";
+import { requiredPairedSampleSize, taskEffectSamplePlanDigest, type TaskEffectSamplePlan } from "craft-common-log/evaluation-contract";
+import { TraceKernel } from "../core/trace-kernel.ts";
+import { HostSessionEventKernel } from "../core/host-session-events.ts";
 
 function terminalHostSession(service: CraftService, taskId: string, sessionId: string): void {
   service.hostSessionOpen({ session_id: sessionId, task_id: taskId, host_id: "codex", environment_fingerprint: "test-env",
@@ -19,13 +26,18 @@ function terminalHostSession(service: CraftService, taskId: string, sessionId: s
   service.hostSessionAppend({ session_id: sessionId, kind: "session.completed" });
 }
 
-async function fixture() {
+async function fixture(trustedEvaluators: readonly { id: string; version: string; digest: string; public_key_pem: string }[] = []) {
   const root = await mkdtemp(join(tmpdir(), "craft-evolution-cycle-")), dataRoot = join(root, "data"), projectRoot = join(root, "project");
   await mkdir(join(projectRoot, "src"), { recursive: true });
   await writeFile(join(projectRoot, "src", "a.ts"), "export const a = 1;\n");
   await writeFile(join(projectRoot, "src", "b.ts"), "export const b = 2;\n");
   execFileSync("git", ["init", "-q", projectRoot]);
-  const store = await new CraftStore(craftPaths(dataRoot)).open(), service = new CraftService(store);
+  const store = await new CraftStore(craftPaths(dataRoot)).open();
+  const previousTrust = process.env.CRAFT_TRUSTED_EVALUATORS;
+  if (trustedEvaluators.length) process.env.CRAFT_TRUSTED_EVALUATORS = JSON.stringify(trustedEvaluators);
+  const service = new CraftService(store);
+  if (previousTrust === undefined) delete process.env.CRAFT_TRUSTED_EVALUATORS;
+  else process.env.CRAFT_TRUSTED_EVALUATORS = previousTrust;
   const task = store.create("task", "task", { title: "Verified task", status: "active" });
   const identity = service.scopeIdentityResolveProject({ project_root: projectRoot }).identity as JsonObject;
   const projectScopeId = String((identity.canonical_scope as JsonObject).id);
@@ -118,6 +130,123 @@ test("Evolution Cycle binds a real project snapshot and records a safe append-on
     const result = await mcp.handle({ id: 1, method: "tools/call", params: { name: "craft_evolution_cycle_get", arguments: { cycle_id: "cycle" } } });
     assert.equal((result?.result as JsonObject).isError, false);
     assert.equal(typeof ((((result?.result as JsonObject).structuredContent as JsonObject).candidate_workspace as JsonObject).path), "string");
+  } finally { await f.close(); }
+});
+
+test("Evolution Cycle routes Ontology candidates through the signed task-effect contract validator", async () => {
+  const f = await fixture();
+  try {
+    let cycle = f.service.evolutionCycleStart({ ...f.startArgs, cycle_id: "ontology-cycle" }).cycle as JsonObject;
+    const advance = (stage: string, extra: JsonObject = {}) => {
+      cycle = f.service.evolutionCycleAdvance({ cycle_id: cycle.id, expected_version: cycle.version,
+        transition_id: `ontology-${stage}`, stage, ...extra }).cycle as JsonObject;
+    };
+    advance("retrieve"); advance("act"); advance("feedback", { outcome: "passed" }); advance("attribute");
+    const registered = f.service.ontologyVersionRegister({ ontology: { version: "ontology-cycle-v1", concept_kinds: [...CONCEPT_KINDS], relation_kinds: [...RELATION_KINDS] },
+      scope: { kind: "project", id: f.projectScopeId } }).ontology as JsonObject;
+    advance("candidate", { artifact_refs: [{ kind: "ontology_version", id: registered.id, version: registered.version }],
+      evidence_refs: [{ kind: "evidence", id: "observed", version: 1 }] });
+    const report = f.store.create("task_effect_evaluation", "untrusted-ontology-report", {
+      contract_id: "missing-ontology-contract", evaluation_digest: "sha256:fixture-report",
+      candidate_ref: { kind: "ontology_version", id: registered.id, version: registered.version, digest: registered.identity_digest },
+    });
+    assert.throws(() => f.service.evolutionCycleAdvance({ cycle_id: cycle.id, expected_version: cycle.version,
+      transition_id: "reject-untrusted-ontology-evaluation", stage: "evaluate",
+      artifact_refs: [{ kind: "ontology_version", id: registered.id, version: registered.version }],
+      evaluation_refs: [{ kind: "task_effect_evaluation", id: report.id, version: report.version }] }), /Unknown evaluation_contract/u);
+    assert.equal((f.service.evolutionCycleGet({ cycle_id: cycle.id }).cycle as JsonObject).stage, "candidate");
+  } finally { await f.close(); }
+});
+
+test("Evolution Cycle promotes an Ontology candidate only through its exact routeable paired task-effect contract", async () => {
+  const evaluationKeys = generateKeyPairSync("ed25519");
+  const evaluator = { id: "independent-ontology-evaluator", version: "1", digest: digestJson("ontology-evaluator"),
+    public_key_pem: evaluationKeys.publicKey.export({ type: "spki", format: "pem" }).toString() };
+  const f = await fixture([evaluator]);
+  try {
+    let cycle = f.service.evolutionCycleStart({ ...f.startArgs, cycle_id: "ontology-promotion-cycle" }).cycle as JsonObject;
+    const advance = (stage: string, extra: JsonObject = {}) => {
+      cycle = f.service.evolutionCycleAdvance({ cycle_id: cycle.id, expected_version: cycle.version,
+        transition_id: `ontology-promotion-${stage}`, stage, ...extra }).cycle as JsonObject;
+    };
+    advance("retrieve"); advance("act"); advance("feedback", { outcome: "passed" }); advance("attribute");
+
+    const baselineOntology = f.service.ontologyVersionRegister({ ontology: { version: "ontology-promote-baseline-v1", concept_kinds: [...CONCEPT_KINDS], relation_kinds: [...RELATION_KINDS] },
+      scope: { kind: "project", id: f.projectScopeId } }).ontology as JsonObject;
+    const ontology = f.service.ontologyVersionRegister({ ontology: { version: "ontology-promote-v1", concept_kinds: [...CONCEPT_KINDS], relation_kinds: [...RELATION_KINDS] },
+      scope: { kind: "project", id: f.projectScopeId } }).ontology as JsonObject;
+    const contractKernel = new EvaluationContractKernel(f.store, [evaluator]);
+    const environment = "sha256:ontology-test-environment";
+    const baselineRef = contractKernel.artifactRef("ontology_version", String(baselineOntology.id), Number(baselineOntology.version));
+    const candidateRef = contractKernel.artifactRef("ontology_version", String(ontology.id), Number(ontology.version));
+    const heldOutTasks = ["ontology-held-out-1", "ontology-held-out-2"].map(id => f.store.create("task", id, { title: id, status: "completed" }));
+    const taskSet = { id: "ontology-paired-v1", development_task_refs: [contractKernel.taskRef(String(f.task.id), Number(f.task.version))],
+      held_out_task_refs: heldOutTasks.map(task => contractKernel.taskRef(String(task.id), Number(task.version))) };
+    const effectBase = { candidate_family: "ontology_version", baseline_ref: baselineRef, candidate_ref: candidateRef,
+      task_set: { ...taskSet, digest: digestJson(taskSet) }, environment_fingerprint: environment,
+      primary_metric: { name: "classification_accuracy", direction: "higher" as const, minimum_delta: 0.1 },
+      tolerated_regressions: { harmful_reclassification_rate: 0 }, latency_budget_ms: 120_000, cost_budget: 8,
+      evaluator, hard_assertions: ["scope_isolation", "core_policy_unchanged"] };
+    const unsignedPlan: TaskEffectSamplePlan = { method: "chebyshev-mean-precision-v1", pilot_pair_count: 5,
+      pilot_paired_difference_variance: 0, pilot_report_digest: digestJson("ontology-pilot"), minimum_meaningful_effect: 0.1,
+      confidence_level: 0.95, planned_task_pairs: heldOutTasks.length, repeats_per_task: 1,
+      required_pair_count: requiredPairedSampleSize({ pilotVariance: 0, minimumMeaningfulEffect: 0.1, confidenceLevel: 0.95 }), pilot_signature: "pending" };
+    const samplePlan = { ...unsignedPlan, pilot_signature: sign(null, Buffer.from(taskEffectSamplePlanDigest(effectBase, unsignedPlan)), evaluationKeys.privateKey).toString("base64") };
+    const contract = f.service.evaluationContractDefine({ contract_id: "ontology-promotion-contract", capability_id: "craft.ontology.classification",
+      capability_version: 1, input_contract: "Versioned Claim and source", output_contract: "Safe versioned classification projection",
+      effect: "task_effect", scope: { kind: "project", id: f.projectScopeId }, task_effect: { ...effectBase, sample_plan: samplePlan } }).contract as JsonObject;
+
+    for (const stage of ["mechanism_passed", "fixture_passed", "conformance_passed", "integration_passed", "host_verified"]) {
+      const planId = `ontology-contract-${stage}`;
+      f.store.create("verification_plan", planId, { change_ref: `${contract.id}:${stage}`, requires_real_host: stage === "host_verified", candidate_change: true });
+      f.store.create("verification_assessment", `assessment-${planId}`, { verdict: "eligible", verification_id: planId });
+      f.service.evaluationContractRecord({ contract_id: String(contract.id), stage, evidence: [`assessment-${planId}`] });
+    }
+
+    const host = new HostSessionEventKernel(f.store, new TraceKernel(f.store));
+    const hostRef = (task: JsonObject, suffix: string) => {
+      const sessionId = `ontology-session-${suffix}`;
+      host.open({ session_id: sessionId, task_id: task.id, host_id: "codex", environment_fingerprint: environment,
+        policy_fingerprint: "sha256:policy", capability_fingerprint: "sha256:capability" });
+      const ended = host.append({ session_id: sessionId, kind: "session.completed", event_id: `${sessionId}:completed` });
+      return contractKernel.hostSessionRef(sessionId, Number((ended.session as JsonObject).version));
+    };
+    const pairs = heldOutTasks.map((task, index) => {
+      const common = { metrics: { classification_accuracy: 0.5, harmful_reclassification_rate: 0 }, latency_ms: 5_000, cost: 1,
+        assertions: { scope_isolation: true, core_policy_unchanged: true } };
+      return { case_ref: contractKernel.taskRef(String(task.id), Number(task.version)),
+        baseline: { ...common, session_ref: hostRef(task, `baseline-${index}`) },
+        candidate: { ...common, session_ref: hostRef(task, `candidate-${index}`), metrics: { classification_accuracy: 0.8, harmful_reclassification_rate: 0 } } };
+    });
+    const evaluationInput = { contract_id: String(contract.id), evaluation_id: "ontology-promotion-evaluation", candidate_ref: candidateRef,
+      candidate_source_task_refs: [contractKernel.taskRef(String(f.task.id), Number(f.task.version))], evaluator, pairs };
+    const evaluationDigest = digestJson({ contract_digest: contract.contract_digest, ...evaluationInput });
+    const evaluation = contractKernel.recordTaskEffectEvaluation({ ...evaluationInput,
+      evaluator_signature: sign(null, Buffer.from(evaluationDigest), evaluationKeys.privateKey).toString("base64") });
+    f.service.evaluationContractRecord({ contract_id: String(contract.id), stage: "business_eligible", evidence: [String(evaluation.id)] });
+    f.service.evaluationContractRecord({ contract_id: String(contract.id), stage: "routeable", evidence: [String(evaluation.id)] });
+
+    advance("candidate", { artifact_refs: [{ kind: "ontology_version", id: String(ontology.id), version: Number(ontology.version) }],
+      evidence_refs: [{ kind: "evidence", id: "observed", version: 1 }] });
+    const storedGet = f.store.get.bind(f.store);
+    f.store.get = ((kind: string, id: string, version?: number) => {
+      const record = storedGet(kind, id, version);
+      if (kind !== "task_effect_evaluation" || id !== String(evaluation.id)) return record;
+      const { evaluation_digest: _digest, ...withoutEvaluationDigest } = record;
+      return withoutEvaluationDigest;
+    }) as CraftStore["get"];
+    try {
+      assert.throws(() => f.service.evolutionCycleAdvance({ cycle_id: cycle.id, expected_version: cycle.version,
+        transition_id: "ontology-promotion-evaluate-missing-digest", stage: "evaluate",
+        artifact_refs: [{ kind: "ontology_version", id: String(ontology.id), version: Number(ontology.version) }],
+        evaluation_refs: [{ kind: "task_effect_evaluation", id: String(evaluation.id), version: Number(evaluation.version) }] }), /immutable task-effect digest/u);
+    } finally { f.store.get = storedGet; }
+    advance("evaluate", { artifact_refs: [{ kind: "ontology_version", id: String(ontology.id), version: Number(ontology.version) }],
+      evaluation_refs: [{ kind: "task_effect_evaluation", id: String(evaluation.id), version: Number(evaluation.version) }] });
+    const currentContract = f.service.evaluationContractGet({ contract_id: String(contract.id) }).contract as JsonObject;
+    advance("promote", { authority_refs: [{ kind: "evaluation_contract", id: String(contract.id), version: Number(currentContract.version) }] });
+    assert.equal(cycle.stage, "promote");
+    assert.equal((f.service.evolutionCycleGet({ cycle_id: String(cycle.id) }).events as JsonObject[]).at(-1)?.event_type, "promote");
   } finally { await f.close(); }
 });
 

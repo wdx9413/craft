@@ -100,3 +100,13 @@ test("declared Craft package exports participate in direction, cycle and deep-im
   const deep = auditLayerGraph({ "core/consumer.ts": "import 'craft-common-base/internal';" }, exports);
   assert.deepEqual(deep, [{ kind: "unresolved", path: ["core/consumer.ts", "craft-common-base/internal"] }]);
 });
+
+test("installed Craft dependency exports are package boundaries, while unexported paths remain unresolved", () => {
+  const installedExports = new Set(["craft-common-base", "craft-common-base/scope-policy"]);
+  assert.deepEqual(auditLayerGraph({
+    "core/consumer.ts": "import 'craft-common-base'; import 'craft-common-base/scope-policy';",
+  }, {}, installedExports), []);
+  assert.deepEqual(auditLayerGraph({
+    "core/consumer.ts": "import 'craft-common-base/private';",
+  }, {}, installedExports), [{ kind: "unresolved", path: ["core/consumer.ts", "craft-common-base/private"] }]);
+});

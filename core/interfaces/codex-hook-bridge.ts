@@ -27,6 +27,7 @@ import { evaluateEvolutionValue } from "../evolution-value-gate.ts";
 import { extractUserStatedOperatingSteps } from '@craft/capability-context';
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import { HookSignalSanitizer, nestedText, type HookSignal } from "./codex-hook-signal-sanitizer.ts";
+import { codexHookLearningStageDiagnostic } from "./codex-hook-learning-diagnostic.ts";
 import { queueHookMaintenance } from "./memory-archive-worker.ts";
 export { HookSignalSanitizer } from "./codex-hook-signal-sanitizer.ts";
 
@@ -91,6 +92,7 @@ function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+/** Caller-provided Host hint used for routing; it is not authenticated Host identity. */
 function hookHost(input: HookInput): "codex" | "claude" {
   if (input.session_host === "codex" || input.session_host === "claude") return input.session_host;
   return /claude/iu.test(text(input.source) ?? "") ? "claude" : "codex";
@@ -164,7 +166,7 @@ export function extractDurableStatements(prompt: string): { kind: "rule" | "fact
 function experienceTaskGoalArgs(service: CraftService, input: HookInput, scope: HookProjectScope | null) {
   const root = text(input.cwd), sessionId = text(input.session_id), turnId = text(input.turn_id);
   if (!root || !sessionId || !turnId || !scope) return null;
-  return { experience_dir: projectExperienceDirectory(service.store, scope.id, root, true), scope: scope.id, session_host: hookHost(input), session_id: sessionId, turn_id: turnId };
+  return { experience_dir: projectExperienceDirectory(service.store, scope.id, root, true), scope: scope.id, session_host: hookHost(input), session_host_verified: false, session_id: sessionId, turn_id: turnId };
 }
 
 type Signal = HookSignal;
@@ -244,7 +246,7 @@ export class HookTurnJournal {
       const signalId = signal.id;
       return this.service.store.traceTransaction(signalId, () => {
         const existing = this.service.store.traceShards.find("codex_hook_signal", signalId, undefined, signalId);
-        return existing ?? this.service.store.create("codex_hook_signal", signalId, { scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown",
+        return existing ?? this.service.store.create("codex_hook_signal", signalId, { scope, session_host: hookHost(input), session_host_verified: false, session_id: text(input.session_id) ?? "unknown",
           turn_id: turn, trace_id: signalId, signal: signal as unknown as JsonObject,
           observed_at_ms: performance.timeOrigin + performance.now(), content_stored: false });
       });
@@ -265,7 +267,7 @@ export class HookTurnJournal {
         && new Set(verifications.map(item => String(item.scenario_key))).size === 1 ? String(verifications[0]!.scenario_key) : null;
       const coarseScenarioKey = scenarioKey && verifications.every(item => (item.coarse_scenario_key ?? null) === (verifications[0]!.coarse_scenario_key ?? null))
         ? text(verifications[0]!.coarse_scenario_key) : null;
-      const next = { scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown", turn_id: turn, trace_id: currentId, signals,
+      const next = { scope, session_host: hookHost(input), session_host_verified: false, session_id: text(input.session_id) ?? "unknown", turn_id: turn, trace_id: currentId, signals,
         has_edit: signals.some((item) => item.kind === "edit"),
         verification_outcome: !outcomes.length || outcomes.includes("unknown") ? null : outcomes.includes("failed") ? "failed" : "passed",
         edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest,
@@ -285,7 +287,7 @@ export class HookTurnJournal {
     const existing = this.find(input, false, scope);
     const id = existing ? String(existing.id) : this.journalId(scope, turn, input);
     const prior = existing ?? this.findById(id);
-    this.service.store.save("codex_hook_turn", id, { ...(prior ?? { scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals: [], has_edit: false, verification_outcome: null, content_stored: false }), trace_id: String(prior?.trace_id ?? id), context_receipt_id: receipt.id, content_free: true });
+    this.service.store.save("codex_hook_turn", id, { ...(prior ?? { scope, session_host: hookHost(input), session_host_verified: false, session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals: [], has_edit: false, verification_outcome: null, content_stored: false }), trace_id: String(prior?.trace_id ?? id), context_receipt_id: receipt.id, content_free: true });
   }
 
   find(input: HookInput, includePendingSignals = process.env.CRAFT_HOOK_MODE === "1", projectScope?: HookProjectScope | null): JsonObject | null {
@@ -317,7 +319,7 @@ export class HookTurnJournal {
       && new Set(verifications.map(item => String(item.scenario_key))).size === 1 ? String(verifications[0]!.scenario_key) : null;
     const coarseScenarioKey = scenarioKey && verifications.every(item => (item.coarse_scenario_key ?? null) === (verifications[0]!.coarse_scenario_key ?? null))
       ? text(verifications[0]!.coarse_scenario_key) : null;
-    return { ...(journal ? payload(journal) : { scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown", turn_id: turn, trace_id: journalId }),
+    return { ...(journal ? payload(journal) : { scope, session_host: hookHost(input), session_host_verified: false, session_id: text(input.session_id) ?? "unknown", turn_id: turn, trace_id: journalId }),
       id: String(journal?.id ?? journalId), signals, has_edit: signals.some(item => item.kind === "edit"),
       verification_outcome: !outcomes.length || outcomes.includes("unknown") ? null : outcomes.includes("failed") ? "failed" : "passed",
       edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest,
@@ -338,7 +340,7 @@ export class HookTurnJournal {
     const existing = this.find(input, undefined, scope);
     const journalId = existing ? String(existing.id) : this.journalId(scope, turn, input);
     if (existing?.closed_at) return;
-    const next = { ...(existing ? payload(existing) : { scope, session_host: hookHost(input), session_id: text(input.session_id) ?? "unknown", turn_id: turn,
+    const next = { ...(existing ? payload(existing) : { scope, session_host: hookHost(input), session_host_verified: false, session_id: text(input.session_id) ?? "unknown", turn_id: turn,
       signals: [], has_edit: false, verification_outcome: null, content_stored: false }), trace_id: String(existing?.trace_id ?? journalId), closed_at: new Date().toISOString() };
     if (existing) this.service.store.save("codex_hook_turn", journalId, next);
     else this.service.store.create("codex_hook_turn", journalId, next);
@@ -411,7 +413,7 @@ export class HookLearningCoordinator {
     const lastVerifier = [...signals].reverse().find(signal => signal.kind === "verification" && typeof signal.verifier === "string");
     const observedPaths = [...new Set(signals.filter(signal => signal.kind === "edit" && typeof signal.observed_path === "string")
       .map(signal => String(signal.observed_path)))].slice(0, 16);
-    const finalized = this.service.learningCycleFinalize({ host: hookHost(input), task_id: String(journal.id), turn_id: String(journal.turn_id), context_receipt_id: journal.context_receipt_id,
+    const finalized = this.service.learningCycleFinalize({ host: hookHost(input), host_identity_verified: false, task_id: String(journal.id), turn_id: String(journal.turn_id), context_receipt_id: journal.context_receipt_id,
       ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
       verified: true, project_root: projectRoot, verification_outcome: journal.verification_outcome, verification_ref: stableDigest(journal.verification_receipts), ...(scenario ? { scenario_key: scenario } : {}),
       ...(taskGoal ? { scenario_context: { task_goal: taskGoal,
@@ -566,7 +568,7 @@ export class CodexHookBridge {
         turnId ??= `hook_turn_${sessionKey.slice(-24)}_${sequence}`;
         if (!pending.includes(turnId)) pending = [...pending, turnId];
         ambiguous ||= pending.length > 1;
-        this.service.store.save("context_hook_session", sessionKey, { trace_id: sessionKey, scope, session_host: hookHost(input), session_id: sessionId, sequence, last_turn_id: turnId, pending_turn_ids: pending, ambiguous, content_free: true });
+        this.service.store.save("context_hook_session", sessionKey, { trace_id: sessionKey, scope, session_host: hookHost(input), session_host_verified: false, session_id: sessionId, sequence, last_turn_id: turnId, pending_turn_ids: pending, ambiguous, content_free: true });
       } else if (event === "Stop") {
         // Overlapping turns stay ambiguous until all are closed; a delayed event
         // must never be attributed to whichever turn happens to remain.
@@ -725,7 +727,7 @@ export class CodexHookBridge {
       if (statement && sessionId) {
         try {
           this.service.store.bindSessionStorageHost(sessionId, hookHost(input));
-          const captured = this.service.memoryCaptureUserStatement({ content: statement, kind: "preference", session_id: sessionId, session_host: hookHost(input),
+          const captured = this.service.memoryCaptureUserStatement({ content: statement, kind: "preference", session_id: sessionId, session_host: hookHost(input), session_host_verified: false,
             scope_kind: "session", scope_id: sessionId, project_scope_id: scope.id, project_root: input.cwd, sensitivity: "internal" });
           memoryWritten = captured.auto_committed === true;
           captureSummary = { candidate_id: (captured.candidate as JsonObject | null)?.id ?? null, next_action: captured.next_action,
@@ -738,7 +740,7 @@ export class CodexHookBridge {
         }
       }
     }
-    const resolved = await this.service.contextWorkingSets.resolve({ query: effectiveQuery, session_id: sessionId ?? undefined, session_scope_id: sessionId ?? undefined, session_host: hookHost(input), turn_id: turnId ?? undefined, scope_kind: scope.kind, scope_id: scope.id,
+    const resolved = await this.service.contextWorkingSets.resolve({ query: effectiveQuery, session_id: sessionId ?? undefined, session_scope_id: sessionId ?? undefined, session_host: hookHost(input), session_host_verified: false, turn_id: turnId ?? undefined, scope_kind: scope.kind, scope_id: scope.id,
       members: [...members], include_global: true });
     const items = resolved.items as JsonObject[];
     const contributions = resolved.contributions as JsonObject[];
@@ -813,7 +815,7 @@ export class CodexHookBridge {
     const sessionId = text(input.session_id);
     if (!sessionId) return {};
     try {
-      this.service.contextExtensionsCheckpointResume({ session_id: sessionId, session_host: hookHost(input),
+      this.service.contextExtensionsCheckpointResume({ session_id: sessionId, session_host: hookHost(input), session_host_verified: false,
         ...(projectScope ? { scope: `${projectScope.kind}:${projectScope.id}` } : {}),
         files_touched: input.files_touched, tasks: input.tasks, errors: input.errors,
         decisions: input.decisions, open_questions: input.open_questions });
@@ -835,6 +837,7 @@ export class CodexHookBridge {
     this.service.activationProofRecord({ host: hookHost(input), component: member, event: "Stop", session_id: text(input.session_id) ?? "unknown",
       turn_id: text(input.turn_id), memory_written: false, observation_written: finalized !== null,
       plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
+    if (member === "experience") this.recordLearningStageDiagnostic(input, journal, finalized);
     this.lifecycle(member, "Stop", input);
     const guidance = this.verificationGapGuidance(input, journal) ?? this.runbookCaptureGuidance(input, journal, finalized);
     return guidance ? { systemMessage: guidance } : {};
@@ -866,7 +869,21 @@ export class CodexHookBridge {
         session_id: input.session_id, turn_id: journal.turn_id,
         reason: "edit_without_verification", content_stored: false });
     } catch { /* The hint must never block Stop. */ }
-    return "Craft：本轮修改了文件，但最后一次编辑后没有可识别的验证结果。请运行相关测试后再结束，以便记录为已验证；否则该回合只会作为未验证观察。";
+    return "Craft Hook 未识别到验证回执；本轮未生成已验证的 Experience 观察。这不影响之前保存的知识和记忆。若本轮已运行测试，请确认测试命令及退出码被 Hook 接收；否则运行相关测试后再结束。";
+  }
+
+  /** Record content-free progress across verification, observation, candidate and promotion stages. */
+  private recordLearningStageDiagnostic(input: HookInput, journal: JsonObject | null, finalized: JsonObject | null): void {
+    try {
+      const observation = finalized?.observation as JsonObject | undefined;
+      const observationId = typeof observation?.id === "string" ? observation.id : null;
+      const candidates = observationId ? this.service.store.list("program_memory_candidate", 100, candidate =>
+        Array.isArray(candidate.evidence_ids) && (candidate.evidence_ids as unknown[]).includes(observationId)) : [];
+      this.service.store.appendEvent("codex-hook", "codex_hook.learning_stage_diagnostic", {
+        member: "experience", session_id: text(input.session_id) ?? "unknown", turn_id: text(input.turn_id), content_free: true,
+        ...codexHookLearningStageDiagnostic(journal, finalized, candidates),
+      });
+    } catch { /* Diagnostics must never block Stop. */ }
   }
 
   /** Record that exact Context assets were shown and the turn's observed outcome, without calling them helpful. */

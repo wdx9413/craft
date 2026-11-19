@@ -16,7 +16,7 @@
 | 已晋级流程无法迁移 | 导入强制要求定义版本等于状态版本，晋级后的 1/5 被拒绝 | 分开校验定义引用版本、摘要与状态版本；父子组合晋级后导入另一个临时数据域，重新生成相同计划 |
 | 诊断未覆盖核心新接口 | 检测旧 Experience 工具集时不要求 plan | expected_tools 包含 get/gate/plan；缺 plan 被明确归类为 bundle_or_surface_mismatch |
 
-实现入口：[ProcedureStore](../../capability/craft-experience/procedure-projection.ts)、[组合计划](../../capability/craft-experience/procedure-composition.ts)、[Bundle](../../core/knowledge-memory-bundle.ts)、[MCP schema](../../core/mcp/tool-schema.ts)。回归：[Procedure 测试](../../tests/procedure-projection.test.ts)、[组合测试](../../tests/procedure-composition.test.ts)。
+实现入口：[ProcedureStore](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-projection.ts)、[组合计划](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-composition.ts)、[Bundle](../../core/knowledge-memory-bundle.ts)、[MCP schema](../../core/mcp/tool-schema.ts)。回归：[Procedure 测试](../../tests/procedure-projection.test.ts)、[组合测试](../../tests/procedure-composition.test.ts)。
 
 ## 仍缺的能力，按优先级排序
 

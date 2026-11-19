@@ -6,7 +6,7 @@ import { experienceGraphTemplate } from '@craft/capability-experience/procedure-
 import { discoverContextTools } from "../core/mcp/context-tools.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 
-test("graph diagnosis distinguishes scoped draft, candidate and qualified release; Chinese subscenarios are recallable", async () => {
+test("graph diagnosis keeps a Procedure candidate unavailable until its signed evaluation contract is bound", async () => {
   const f = await fixture();
   try {
     const inspect = () => f.service.experienceGraphInspect({ action: "diagnose", scope, graph_id: "engineering" });
@@ -19,8 +19,10 @@ test("graph diagnosis distinguishes scoped draft, candidate and qualified releas
     const request = { query: "诊断", scope_kind: "project", scope_id: scope.slice("project:".length), max_items: 10, max_chars: 20000 } as const;
     const candidate = await reader.contribute(request);
     assert.equal(candidate.items.length, 0); assert.equal(candidate.diagnostics?.reason, "no_promoted_release");
-    // Fixture-only gate proofs exercise the same promotion contract as the runtime tests.
-    for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
+    // A positive held-out verdict without the bound Evaluation Contract must not
+    // make a fixture look routeable. The signed promotion path is covered by the
+    // Procedure Evaluation Contract service test.
+    for (const stage of ["shadow"]) {
       const ids: string[] = [];
       for (const entry of p.entrypoints as JsonObject[]) for (const route of entry.routes as JsonObject[]) {
         const id = `${stage}:${route.subscenario_id}`; ids.push(id);
@@ -29,14 +31,21 @@ test("graph diagnosis distinguishes scoped draft, candidate and qualified releas
       }
       p = f.service.experienceProcedures.gate({ procedure_id: p.id, stage, passed: true, evidence_ids: ids }).procedure as JsonObject;
     }
+    const heldOutIds = (p.entrypoints as JsonObject[]).flatMap((entry) => (entry.routes as JsonObject[]).map((route) => {
+      const id = `held_out:${route.subscenario_id}`;
+      f.store.create("evidence", id, { confidence: "confirmed", metadata: { procedure_definition_digest: p.definition_digest,
+        entry_id: entry.id, exit_id: route.exit_id, subscenario_id: route.subscenario_id, stage: "held_out", status: "passed" } });
+      return id;
+    }));
+    assert.throws(() => f.service.experienceProcedures.gate({ procedure_id: p.id, stage: "held_out", passed: true, evidence_ids: heldOutIds }), /evaluation_contract_id must not be empty/u);
+    assert.equal((f.service.experienceProcedureGet({ procedure_id: p.id }).procedure as JsonObject).routeable, false);
     const recalled = await reader.contribute(request);
-    assert.equal(recalled.items.length, 1); assert.equal(recalled.items[0].execution_started, false);
-    assert.equal(recalled.items[0].host_next_step, "match_graph_then_plan_and_bind");
-    assert.equal((inspect().graphs as JsonObject[])[0].usage_status, "available_requires_host_binding");
+    assert.equal(recalled.items.length, 0);
+    assert.equal((inspect().graphs as JsonObject[])[0].usage_status, "no_promoted_release");
     assert.equal((await reader.contribute({ ...request, scope_id: "other" })).items.length, 0);
     assert.throws(() => f.service.experienceGraphInspect({ action: "diagnose", scope: "project:other", graph_id: "engineering" }), /root is not registered/u);
     const result = await f.service.contextResolutionResolve({ query: "诊断", scope_kind: "project", scope_id: scope, members: ["experience"], max_items: 10, max_chars: 20_000 });
-    assert.equal(((result.contributions as JsonObject[])[0].diagnostics as JsonObject).reason, "recalled_not_bound");
+    assert.equal(((result.contributions as JsonObject[])[0].diagnostics as JsonObject).reason, "no_promoted_release");
   } finally { await f.close(); }
 });
 

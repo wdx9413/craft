@@ -1,3 +1,7 @@
+# 历史状态说明（2026-11-19）
+
+本文保留 2026-11-18 的调研结论，反映当时检查到的仓库状态，不应作为当前实现清单。后续 ADR、代码和规划已更新部分能力边界。当前自进化目标见[Codex 自进化理想态规划](../product/craft-context-codex-self-evolution-ideal-state.zh-CN.md)，最新行业资料见[2026-11-19 调研](./2026-11-19-craft-context-self-evolution-industry-research.md)。历史内容中的“缺少/未实现”结论应按其原始日期理解，并在作当前判断前复核代码与运行证据。
+
 # 通用自进化缺口：场景覆盖、价值沉淀与业界对照
 
 调研日期：2026-11-18。范围：agent memory / self-evolving agent 的近期论文、综述、基准和开源项目。资料来自 AnySearch 检索到的论文摘要、项目页与官方仓库链接；本文区分“资料的结论”和“由资料推导的 Craft 设计判断”，不把论文结果当成 Craft 已实现或已验证的运行证据。

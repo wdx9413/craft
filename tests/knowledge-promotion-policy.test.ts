@@ -11,6 +11,7 @@ import { adjudicateKnowledgeCase } from "./helpers/knowledge-evaluation-adjudica
 import { createActionHandlers } from "../core/application/actions/action-handlers.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
 import { knowledgeClaimPromotionProofVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
+import { registerTrustedGlobalKnowledgeSource } from "./helpers/trusted-global-knowledge-source.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-promotion-"));
@@ -204,7 +205,8 @@ test("automatic Knowledge review requires one explicit scope and rejects cross-s
   const f = await fixture();
   try {
     const { claim } = candidate(f.service, "project-claim");
-    f.service.knowledgeSourceRegister({ source_id: "global-source", kind: "project_note", label: "Global source", trust: "verified", scope_kind: "global", scope_id: "global", locator: "global.md", content_digest: `sha256:${"f".repeat(64)}` });
+    registerTrustedGlobalKnowledgeSource(args => f.service.knowledgeSourceRegister(args),
+      { source_id: "global-source", kind: "project_note", label: "Global source", locator: "global.md", content_digest: `sha256:${"f".repeat(64)}` });
     f.store.create("knowledge_claim", "global-claim", { status: "candidate", scope: "global", source_id: "global-source", content: "Global fact." });
     assert.throws(() => f.service.knowledgeAutoReview({ claim_ids: [claim.id], auto_promote: false }), /scope_kind and scope_id/u);
     assert.throws(() => f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "demo", claim_ids: ["global-claim"], auto_promote: false }), /requested Knowledge scope/u);

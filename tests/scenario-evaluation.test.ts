@@ -12,7 +12,7 @@ import { CraftService } from "../core/service.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "../core/digest.ts";
-import { ExperienceLearningEvaluation } from '@craft/capability-experience/learning-evaluation';
+import { ExperienceLearningEvaluation } from "../../craft-capability/capability/craft-experience/learning-evaluation.ts";
 import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
 
 function set(cases: JsonObject[], independent = false): JsonObject {
@@ -139,35 +139,28 @@ async function fixture() {
   return { dataRoot, projectRoot, store, service, procedure, scenarioDir, close: async () => { store.close(); await Promise.all([rm(dataRoot, { recursive: true, force: true }), rm(projectRoot, { recursive: true, force: true })]); } };
 }
 
-test("the local evaluator runs pinned stages, writes content-free Evidence, applies automatic Signoff, and promotes after Canary", async () => {
+test("the local evaluator records Shadow and waits for the trusted paired Held-out report", async () => {
   const f = await fixture();
   try {
-    let dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }).dispatch as JsonObject;
-    for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
-      assert.equal(dispatch.stage, stage);
-      const result = f.service.experienceLearningEvaluationRun({ dispatch_id: dispatch.id });
-      assert.equal((result.dispatch as JsonObject).status, "passed", JSON.stringify({ result, workflow: f.store.find("workflow", "auto-workflow"), runs: f.store.list("workflow_run") }));
-      if (stage === "canary") {
-        assert.equal((result.current as JsonObject).id, f.procedure.id);
-        assert.equal((result.current as JsonObject).lifecycle, "routeable");
-      } else dispatch = result.next_dispatch as JsonObject;
-    }
+    const dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }).dispatch as JsonObject;
+    const shadow = f.service.experienceLearningEvaluationRun({ dispatch_id: dispatch.id });
+    assert.equal((shadow.dispatch as JsonObject).status, "passed");
+    const heldOutDispatch = shadow.next_dispatch as JsonObject;
+    assert.equal(heldOutDispatch.stage, "held_out");
+    const heldOut = f.service.experienceLearningEvaluationRun({ dispatch_id: heldOutDispatch.id });
+    assert.equal(heldOut.status, "awaiting_adapter");
+    assert.equal(heldOut.reason, "trusted_task_effect_evaluation_required");
+    assert.equal((heldOut.dispatch as JsonObject).status, "awaiting_adapter");
+    assert.equal(f.store.find("experience_release", String(f.procedure.id)), null);
     const evidence = f.store.list("evidence", 20, item => (item.metadata as JsonObject | undefined)?.experience_evaluation_dispatch_id !== undefined);
-    assert.equal(evidence.length, 4);
-    const signoff = evidence.find(item => (item.metadata as JsonObject).stage === "signoff")!;
-    assert.equal((signoff.metadata as JsonObject).signoff_policy_ref, AUTOMATIC_SIGNOFF_POLICY);
-    assert.equal((signoff.metadata as JsonObject).signoff_ref, undefined);
-    const heldOut = evidence.find(item => (item.metadata as JsonObject).stage === "held_out")!;
-    assert.equal((heldOut.metadata as JsonObject).independent_of_training, true);
-    assert.match(String((heldOut.metadata as JsonObject).held_out_set_ref), /^sha256:/u);
+    assert.equal(evidence.length, 1);
+    assert.equal((evidence[0]!.metadata as JsonObject).stage, "shadow");
     const run = f.store.list("workflow_run", 10, item => item.evaluator_dispatch_id !== undefined)[0]!;
     assert.equal(JSON.stringify(run).includes("do not persist this file body"), false);
     assert.equal(JSON.stringify(run).includes(f.projectRoot), false);
     assert.match(String(run.environment_digest), /^sha256:/u);
     assert.equal(run.environment_stable, true);
     assert.equal(JSON.stringify(run.results).includes("actual"), false);
-    const canaryEvidence = evidence.filter(item => (item.metadata as JsonObject).experience_evaluation_dispatch_id === dispatch.id).map(item => String(item.id));
-    assert.equal((f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: canaryEvidence }).dispatch as JsonObject).status, "passed");
   } finally { await f.close(); }
 });
 
@@ -254,7 +247,7 @@ test("retired scenarios stop dispatch, execution, and adapter results", async ()
   } finally { await f.close(); }
 });
 
-test("changing the pinned scenario evaluation contract between gates stops promotion", async () => {
+test("local held-out evaluation does not substitute for the trusted paired report", async () => {
   const f = await fixture();
   try {
     const shadow = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }).dispatch as JsonObject;
@@ -268,9 +261,31 @@ test("changing the pinned scenario evaluation contract between gates stops promo
     const stages = evaluation.stages as JsonObject;
     stages.canary = set([{ case_id: "changed-canary", project_root: f.projectRoot, inputs: { case_path: "sentinel.txt" } }]);
     await writeFile(path, JSON.stringify(catalog));
-    assert.throws(() => f.service.experienceLearningEvaluationRun({ dispatch_id: heldOut.id }), /contract changed after an earlier gate/u);
+    const result = f.service.experienceLearningEvaluationRun({ dispatch_id: heldOut.id });
+    assert.equal(result.status, "awaiting_adapter");
+    assert.equal(result.reason, "trusted_task_effect_evaluation_required");
     assert.equal(f.store.list("evidence", 20, item => (item.metadata as JsonObject | undefined)?.evaluation_contract_digest !== undefined).length, 1);
     assert.equal((f.store.get("experience_evaluation_dispatch", String(heldOut.id))).status, "awaiting_adapter");
+  } finally { await f.close(); }
+});
+
+test("a caller cannot pass a Held-out dispatch through the adapter result without contract references", async () => {
+  const f = await fixture();
+  try {
+    const shadowDispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }).dispatch as JsonObject;
+    const shadow = f.service.experienceLearningEvaluationRun({ dispatch_id: shadowDispatch.id });
+    const dispatch = shadow.next_dispatch as JsonObject;
+    const procedure = f.store.get("experience_procedure", String(dispatch.procedure_id), Number(dispatch.procedure_version));
+    const evidence = f.service.evidenceRecord({ evidence_id: "unqualified-held-out", source_type: "program", confidence: "confirmed",
+      claim: "Untrusted local held-out claim.", metadata: { experience_evaluation_dispatch_id: dispatch.id, procedure_id: procedure.id,
+        procedure_version: procedure.version, definition_digest: procedure.definition_digest, baseline_version: dispatch.baseline_version,
+        stage: "held_out", status: "passed", evaluator_ref: "local-read-only-v1", environment_digest: "sha256:local",
+        held_out_set_ref: "local-fixture", independent_of_training: true } });
+    f.store.save("evidence", String(evidence.id), { ...evidence, record_origin: "experience_evaluator" });
+    assert.throws(() => new ExperienceLearningEvaluation(f.store).result({ dispatch_id: dispatch.id, evidence_ids: [evidence.id] }, () => {
+      assert.fail("the held-out gate must not run without a trusted Evaluation Contract reference");
+    }), /trusted task-effect Evaluation Contract result/u);
+    assert.equal(f.store.get("experience_evaluation_dispatch", String(dispatch.id)).status, "awaiting_adapter");
   } finally { await f.close(); }
 });
 
@@ -369,7 +384,9 @@ test("automatic evaluator guard branches preserve dispatches and require a compl
     const procedure = missingPriorGate.store.save("experience_procedure", String(missingPriorGate.procedure.id), { ...missingPriorGate.procedure, completed_gates: ["shadow"] });
     const dispatch = missingPriorGate.service.experienceLearningEvaluationDispatch({ procedure_id: procedure.id }).dispatch as JsonObject;
     assert.equal(dispatch.stage, "held_out");
-    assert.throws(() => missingPriorGate.service.experienceLearningEvaluationRun({ dispatch_id: dispatch.id }), /contract changed after an earlier gate/u);
+    const awaiting = missingPriorGate.service.experienceLearningEvaluationRun({ dispatch_id: dispatch.id });
+    assert.equal(awaiting.status, "awaiting_adapter");
+    assert.equal(awaiting.reason, "trusted_task_effect_evaluation_required");
   } finally { await missingPriorGate.close(); }
 
   const noRunReceipt = await fixture();
@@ -397,145 +414,48 @@ test("candidate exceptions without a current baseline are recorded as failed wit
   } finally { await f.close(); }
 });
 
-test("held-out failure stops automatic evolution before Signoff and preserves current", async () => {
+test("local evaluator cannot mark Held-out passed or rejected without a trusted report", async () => {
   const f = await fixture();
   try {
     const old = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }).dispatch as JsonObject;
     const passed = f.service.experienceLearningEvaluationRun({ dispatch_id: old.id });
     const held = passed.next_dispatch as JsonObject;
     await rm(join(f.projectRoot, "held-out-sentinel.txt"));
-    const failed = f.service.experienceLearningEvaluationRun({ dispatch_id: held.id });
-    assert.equal((failed.dispatch as JsonObject).status, "failed");
-    assert.equal(failed.next_dispatch, null);
-    assert.equal((failed.procedure as JsonObject).lifecycle, "rejected");
+    const heldOut = f.service.experienceLearningEvaluationRun({ dispatch_id: held.id });
+    assert.equal(heldOut.status, "awaiting_adapter");
+    assert.equal((heldOut.dispatch as JsonObject).status, "awaiting_adapter");
+    assert.equal((heldOut.procedure as JsonObject | undefined)?.lifecycle, undefined);
     assert.equal(f.store.find("experience_release", String(f.procedure.id)), null);
   } finally { await f.close(); }
 });
 
-test("Canary runs the pinned current Procedure and binds both run receipts", async () => {
+test("Canary regression runs only after trusted Held-out qualification and binds its run receipts", async () => {
   const f = await fixture();
   try {
-    let dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }).dispatch as JsonObject;
-    let current: JsonObject | null = null;
-    for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
-      const result = f.service.experienceLearningEvaluationRun({ dispatch_id: dispatch.id });
-      if (stage === "canary") current = result.current as JsonObject;
-      else dispatch = result.next_dispatch as JsonObject;
-    }
-    assert.equal(current?.id, f.procedure.id);
-    await writeFile(join(f.projectRoot, "sentinel-v2.txt"), "candidate");
-    const signature = f.procedure.scenario_signature as JsonObject;
-    const sourceEvidenceId = String((f.procedure.evidence_ids as string[])[0]);
-    const first = f.service.workflowEvolutionObserve({ scenario_key: "scenario:auto-build", scenario_signature: signature, scope: String(f.procedure.scope),
-      source_kind: "test", source_id: "task-3", source_digest: "source-3", outcome: "passed", evidence_ids: [sourceEvidenceId], sanitized: true }).observation as JsonObject;
-    const second = f.service.workflowEvolutionObserve({ scenario_key: "scenario:auto-build", scenario_signature: signature, scope: String(f.procedure.scope),
-      source_kind: "test", source_id: "task-4", source_digest: "source-4", outcome: "passed", evidence_ids: [sourceEvidenceId], sanitized: true }).observation as JsonObject;
-    const request = f.service.workflowEvolutionPropose({ scenario_key: "scenario:auto-build", observation_ids: [first.id, second.id],
-      hypothesis: "Check both established markers", design_axes: ["output"], output_contract_ref: "acceptance:both" }).request as JsonObject;
-    f.store.create("evaluation_model_ticket", "ticket-next", { purpose: "workflow_evolution", target: { id: request.id, version: request.version } });
-    await writeFile(join(f.projectRoot, "held-out-sentinel-v2.txt"), "independent candidate fixture");
-    const next = f.service.workflowEvolutionProposalSubmit({ request_id: request.id, model_ticket_id: "ticket-next", workflow_id: "auto-workflow-v2",
-      name: "Auto workflow v2", description: "Two read-only assertions", inputs: ["project_root", "case_path"], steps: [
-        { id: "sentinel", type: "assertion", evaluator: "file_exists", path: "{{case_path}}", side_effect: "read_only" },
-        { id: "sentinel-v2", type: "assertion", evaluator: "file_exists", path: "sentinel-v2.txt", side_effect: "read_only" },
-      ] });
-    const candidate = next.procedure as JsonObject;
-    assert.equal(candidate.id, f.procedure.id);
-    const shadowCases = [{ case_id: "shadow-v2", project_root: f.projectRoot, inputs: { case_path: "sentinel.txt" } }];
-    const heldOutCases = [{ case_id: "held-out-v2", project_root: f.projectRoot, inputs: { case_path: "held-out-sentinel-v2.txt" } }];
-    const canaryCases = [
-      { case_id: "baseline-error", project_root: f.projectRoot, inputs: { case_path: "sentinel.txt" } },
-      { case_id: "candidate-string-error", project_root: f.projectRoot, inputs: { case_path: "sentinel.txt" } },
-      { case_id: "candidate-error", project_root: f.projectRoot, inputs: { case_path: "sentinel.txt" } },
-    ];
-    await writeFile(join(f.scenarioDir, "experience-scenarios.json"), JSON.stringify({ schema: "craft.experience-scenario-catalog.v1", scenarios: [{ scenario_key: "auto-build", verification_commands: ["pnpm test"], evaluation: {
-      schema: "craft.experience-evaluation.v1", signoff_policy_ref: AUTOMATIC_SIGNOFF_POLICY,
-      stages: { shadow: set(shadowCases), held_out: set(heldOutCases, true), canary: set(canaryCases) },
-    } }] }));
-    dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: candidate.id }).dispatch as JsonObject;
-    assert.equal(dispatch.baseline_version, current!.version);
-    for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
-      const result = f.service.experienceLearningEvaluationRun({ dispatch_id: dispatch.id });
-      if (stage === "canary") {
-        assert.equal(Number((result.current as JsonObject).version), Number(candidate.version) + 4);
-        const metadata = f.store.get("evidence", String((result.dispatch as JsonObject).evidence_ids && ((result.dispatch as JsonObject).evidence_ids as string[])[0])).metadata as JsonObject;
-        assert.equal((metadata.baseline_workflow_run_ids as string[]).length, 3);
-        assert.equal((metadata.workflow_run_ids as string[]).length, 3);
-        assert.notEqual((metadata.baseline_workflow_run_ids as string[])[0], (metadata.workflow_run_ids as string[])[0]);
-      } else dispatch = result.next_dispatch as JsonObject;
-    }
-
-    const observe = (sourceId: string) => f.service.workflowEvolutionObserve({ scenario_key: "scenario:auto-build", scenario_signature: signature,
-      scope: String(f.procedure.scope), source_kind: "test", source_id: sourceId, source_digest: sourceId,
-      outcome: "passed", evidence_ids: [sourceEvidenceId], sanitized: true }).observation as JsonObject;
-    const third = observe("task-5"), fourth = observe("task-6");
-    const nextRequest = f.service.workflowEvolutionPropose({ scenario_key: "scenario:auto-build", observation_ids: [third.id, fourth.id],
-      hypothesis: "Check both established markers again", design_axes: ["output"], output_contract_ref: "acceptance:both-v3" }).request as JsonObject;
-    f.store.create("evaluation_model_ticket", "ticket-v3", { purpose: "workflow_evolution", target: { id: nextRequest.id, version: nextRequest.version } });
-    const thirdCandidate = f.service.workflowEvolutionProposalSubmit({ request_id: nextRequest.id, model_ticket_id: "ticket-v3", workflow_id: "auto-workflow-v3",
-      name: "Auto workflow v3", description: "Two read-only assertions", inputs: ["project_root", "case_path"], steps: [
-        { id: "sentinel", type: "assertion", evaluator: "file_exists", path: "{{case_path}}", side_effect: "read_only" },
-        { id: "sentinel-v2", type: "assertion", evaluator: "file_exists", path: "sentinel-v2.txt", side_effect: "read_only" },
-      ] }).procedure as JsonObject;
-    let thirdDispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: thirdCandidate.id }).dispatch as JsonObject;
+    const catalog = JSON.parse(await readFile(join(f.scenarioDir, "experience-scenarios.json"), "utf8")) as JsonObject;
+    const scenario = (catalog.scenarios as JsonObject[])[0]!;
+    const evaluationContractDigest = stableDigest(scenario.evaluation);
+    const existing = f.store.get("experience_procedure", String(f.procedure.id));
+    f.store.save("experience_procedure", String(existing.id), { ...existing,
+      completed_gates: ["shadow", "held_out", "signoff"], evaluation_contract_id: "trusted-contract", evaluation_id: "trusted-report" });
     for (const stage of ["shadow", "held_out", "signoff"]) {
-      const result = f.service.experienceLearningEvaluationRun({ dispatch_id: thirdDispatch.id });
-      thirdDispatch = result.next_dispatch as JsonObject;
+      const id = `prior-${stage}-evidence`;
+      f.store.create("evidence", id, { source_type: "program", confidence: "confirmed", record_origin: "experience_evaluator",
+        metadata: { evaluation_contract_digest: evaluationContractDigest } });
+      f.store.create("experience_procedure_gate", `prior-${stage}-gate`, { procedure_id: f.procedure.id, stage,
+        procedure_version: existing.version, evidence_ids: [id] });
     }
-    assert.notEqual(thirdDispatch.baseline_version, null);
-    const scenarioCatalogPath = join(f.scenarioDir, "experience-scenarios.json");
-    const scenarioCatalogBytes = await readFile(scenarioCatalogPath, "utf8");
-    await writeFile(scenarioCatalogPath, "[]");
-    assert.throws(() => f.service.experienceLearningEvaluationRun({ dispatch_id: thirdDispatch.id }), /Canary baseline changed/u);
-    await writeFile(scenarioCatalogPath, "not-json");
-    assert.throws(() => f.service.experienceLearningEvaluationRun({ dispatch_id: thirdDispatch.id }), SyntaxError);
-    await writeFile(scenarioCatalogPath, scenarioCatalogBytes);
-    const originalLstat = fs.lstatSync;
-    let catalogReads = 0;
-    fs.lstatSync = ((...call: Parameters<typeof fs.lstatSync>) => {
-      if (String(call[0]) === scenarioCatalogPath && ++catalogReads === 2) throw new Error("scenario catalog read failed");
-      return originalLstat(...call);
-    }) as typeof fs.lstatSync;
-    syncBuiltinESMExports();
-    try {
-      assert.throws(() => f.service.experienceLearningEvaluationRun({ dispatch_id: thirdDispatch.id }), /scenario catalog read failed/u);
-    } finally { fs.lstatSync = originalLstat; syncBuiltinESMExports(); }
-    const proxyStore = new Proxy(f.store, { get(target, property, receiver) {
-      if (property === "get") return (kind: string, id: string, version?: number) => {
-        const record = target.get(kind, id, version);
-        return kind === "experience_procedure" && id === thirdCandidate.id && version === Number(thirdDispatch.baseline_version)
-          ? { ...record, definition_ref: null } : record;
-      };
-      const value = Reflect.get(target, property, receiver) as unknown;
-      return typeof value === "function" ? value.bind(target) : value;
-    } });
-    const unsupportedBaseline = new ExperienceLearningEvaluation(proxyStore).run({ dispatch_id: thirdDispatch.id }, () => ({ passed: true }), () => {},
-      input => { const record = f.service.evidenceRecord(input); return f.store.save("evidence", String(record.id), { ...record, record_origin: "experience_evaluator" }); }, input => f.service.experienceProcedures.gate(input));
-    assert.equal(unsupportedBaseline.reason, "canary_baseline_requires_external_adapter");
-    const release = f.store.find("experience_release", String(thirdCandidate.id))!;
-    const revoked = f.store.save("experience_release", String(release.id), { ...release, status: "revoked" });
-    const staleEvidence = f.service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "Stale Canary proof", metadata: {
-      experience_evaluation_dispatch_id: thirdDispatch.id, procedure_id: thirdDispatch.procedure_id, procedure_version: thirdDispatch.procedure_version,
-      definition_digest: thirdDispatch.definition_digest, baseline_version: thirdDispatch.baseline_version, stage: "canary", status: "passed",
-      evaluator_ref: "test-evaluator", environment_digest: "sha256:test",
-    } });
-    f.store.save("evidence", String(staleEvidence.id), { ...staleEvidence, record_origin: "experience_evaluator" });
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: thirdDispatch.id, evidence_ids: [staleEvidence.id] }), /baseline changed/u);
-    assert.throws(() => f.service.experienceLearningEvaluationRun({ dispatch_id: thirdDispatch.id }), /baseline changed/u);
-    f.store.save("experience_release", String(release.id), { ...revoked, status: "active" });
-    const runner = new ExperienceLearningEvaluation(f.store);
-    const rejected = runner.run({ dispatch_id: thirdDispatch.id }, input => {
-      if (input.case_id === "baseline-error:current") throw new Error("baseline execution failed");
-      if (input.case_id === "baseline-error") return { passed: true, workflow_run_id: "candidate-run" };
-      if (input.case_id === "candidate-string-error:current") throw "baseline execution failed";
-      if (input.case_id === "candidate-error:current") return { passed: true, workflow_run_id: "baseline-instance", inputs_digest: "shared", environment_digest: "sha256:baseline" };
-      if (input.case_id === "candidate-string-error") throw "candidate execution failed";
-      throw new Error("candidate execution failed");
-    }, () => {}, input => { const record = f.service.evidenceRecord(input); return f.store.save("evidence", String(record.id), { ...record, record_origin: "experience_evaluator" }); }, input => f.service.experienceProcedures.gate(input));
-    assert.equal((rejected.dispatch as JsonObject).status, "failed");
-    const failedEvidenceId = ((rejected.dispatch as JsonObject).evidence_ids as string[])[0]!;
-    const failedMetadata = f.store.get("evidence", failedEvidenceId).metadata as JsonObject;
-    assert.deepEqual(failedMetadata.baseline_workflow_run_ids, ["baseline-instance"]);
-    assert.deepEqual(failedMetadata.workflow_run_ids, ["candidate-run"]);
+    const dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }).dispatch as JsonObject;
+    assert.equal(dispatch.stage, "canary");
+    const evaluated = new ExperienceLearningEvaluation(f.store).run({ dispatch_id: dispatch.id }, input => ({ passed: true,
+      workflow_run_id: `run-${String(input.case_id)}`, environment_digest: "sha256:canary", inputs_digest: "sha256:inputs" }), () => {},
+      input => { const evidence = f.service.evidenceRecord(input); return f.store.save("evidence", String(evidence.id), { ...evidence, record_origin: "experience_evaluator" }); },
+      gateArgs => ({ gate: { id: gateArgs.gate_id }, procedure: { ...f.procedure, routeable: true, lifecycle: "routeable" } }));
+    assert.equal((evaluated.dispatch as JsonObject).status, "passed");
+    const evidenceId = String(((evaluated.dispatch as JsonObject).evidence_ids as string[])[0]);
+    const evidence = f.store.get("evidence", evidenceId);
+    assert.equal((evidence.metadata as JsonObject).stage, "canary");
+    assert.deepEqual((evidence.metadata as JsonObject).workflow_run_ids, ["run-canary"]);
+    assert.equal((evaluated.dispatch as JsonObject).status, "passed");
   } finally { await f.close(); }
 });

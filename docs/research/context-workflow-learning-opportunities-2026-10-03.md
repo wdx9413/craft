@@ -39,11 +39,11 @@ Craft 已有知识/记忆管理、受限上下文、Experience 候选与晋级�
 | --- | --- | --- |
 | 人工管理上下文 | [资源页（已迁移）](../technical/modules/presentation-separation.md)提供记忆新增、编辑、停用；[主界面（已迁移）](../technical/modules/presentation-separation.md)的 `viewKnowledge` 展示 Claim、页面、知识包，支持编辑。 | 已有管理面，不能说 Craft 只服务 Agent 或没有 UI。 |
 | 人工设计工作流 | `openWorkflowEditor` 要求填写输入与步骤 JSON；[输入适配](../../core/application/use-cases/workbench-workflow-input.ts)转为现有 DAG 草稿。 | 最接近 loop-me 的现有入口，但仍偏开发者表单，缺少此入口内的访谈式规格整理。 |
-| 经验形成 | [WorkflowEvolutionKernel](../../capability/craft-experience/workflow-evolution.ts)校验同 Scenario Signature、至少两条独立来源、最多两个设计轴。 | 已有证据驱动链，用户口述不能冒充两次实际运行。 |
-| 验证后才能复用 | [ProcedureStore](../../capability/craft-experience/procedure-projection.ts)保存 candidate，按 shadow、held_out、signoff、canary 晋级；[ExperienceContribution](../../capability/craft-experience/contribution.ts)仅注入匹配 scope 的 routeable Procedure。 | 应保持既有门禁；增加前端入口不应降低可信度要求。 |
-| 规格与执行分开 | [ProcedurePlanner](../../capability/craft-experience/procedure-composition.ts)返回 `execution_authorized:false` 与 `acceptance_status:not_evaluated`。 | 与 loop-me 设计后交接的思路一致。 |
+| 经验形成 | [WorkflowEvolutionKernel](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/workflow-evolution.ts)校验同 Scenario Signature、至少两条独立来源、最多两个设计轴。 | 已有证据驱动链，用户口述不能冒充两次实际运行。 |
+| 验证后才能复用 | [ProcedureStore](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-projection.ts)保存 candidate，按 shadow、held_out、signoff、canary 晋级；[ExperienceContribution](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/contribution.ts)仅注入匹配 scope 的 routeable Procedure。 | 应保持既有门禁；增加前端入口不应降低可信度要求。 |
+| 规格与执行分开 | [ProcedurePlanner](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-composition.ts)返回 `execution_authorized:false` 与 `acceptance_status:not_evaluated`。 | 与 loop-me 设计后交接的思路一致。 |
 | 受控运行和恢复 | [ProcedureInvocationKernel](../../core/application/procedure-invocation.ts)已有 bind/dispatch/report/resume/get/evaluate，复用 DurableActionLoop。 | 不应另造一个 Ralph 式循环。实际动作仍由 Host 执行。 |
-| 有限自动化 | [ProcedureAutomationKernel](../../capability/craft-experience/procedure-automation.ts)固定版本/摘要，要求验证步骤，限制 effect、次数、配额、无进展与超时；未知结果转对账/交接。 | 已有六环节文章所强调的多项机制，具体外部操作是否可补偿仍需逐项声明。 |
+| 有限自动化 | [ProcedureAutomationKernel](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-automation.ts)固定版本/摘要，要求验证步骤，限制 effect、次数、配额、无进展与超时；未知结果转对账/交接。 | 已有六环节文章所强调的多项机制，具体外部操作是否可补偿仍需逐项声明。 |
 | 下一次是否拿到经验 | [ContextResolutionKernel](../../core/context-resolution.ts)记录范围、条目引用、预算和 contribution；现有代码已统一候选排序。 | 可以复用回执做用户解释；不要照抄旧报告，把已补齐的统一检索再列为缺口。 |
 | 是否改善结果 | Invocation 的 `evaluate` 比较 3–100 对终态调用，固定 scope、Entry/Exit、输入、初始快照、Host、模型和预算；结果保留 `host_attested`，不自动晋级。 | 评测接口已存在；本次没有运行真实配对实验，不能宣称已证明学习收益。 |
 
@@ -127,7 +127,7 @@ Knowledge 与 Experience readiness 均实际成功返回；共享 `craft_context
 
 | 会话公开参数类型 | 实际调用结果 | 当前源码对照 |
 | --- | --- | --- |
-| `craft_procedure_list.scope` 暴露为 object | 传对象返回 `scope must not be empty`，不能视为空 Procedure 库。 | [ProcedureStore.list](../../capability/craft-experience/procedure-projection.ts)要求非空字符串；[当前 schema](../../core/mcp/tool-schema.ts)也写 string。 |
+| `craft_procedure_list.scope` 暴露为 object | 传对象返回 `scope must not be empty`，不能视为空 Procedure 库。 | [ProcedureStore.list](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-projection.ts)要求非空字符串；[当前 schema](../../core/mcp/tool-schema.ts)也写 string。 |
 | `craft_component_diagnose.observed_tool_names` 暴露为 string | 传字符串返回 `observed_tool_names must be an array`。省略可选字段后诊断成功。 | 当前运行时实际要求数组，与会话描述不一致。 |
 
 已证实的是本次 Host 工具描述与实际行为不一致。究竟是 Host 缓存、插件包还是 Schema 转译导致，本次未定位，不推断根因。建议验证完整的参数契约与真实业务调用，不能只验证工具名、readiness 或安装状态。也不能把当前源码的正确 schema 当成当前 Host 已更新的证据。

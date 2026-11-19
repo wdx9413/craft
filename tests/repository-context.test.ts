@@ -2312,7 +2312,7 @@ test("project Knowledge discovery fails closed on unsafe roots and isolates indi
     } });
     const result = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
     assert.equal(result.sources_registered, 1);
-    assert.equal(result.skipped_sources, 2);
+    assert.equal(result.skipped_sources, 1);
     assert.equal(result.failed_ingests, 1);
     assert.equal(result.status, "partial");
     assert.equal(result.reason, "source_ingest_incomplete");
@@ -2320,12 +2320,13 @@ test("project Knowledge discovery fails closed on unsafe roots and isolates indi
   } finally { f.close(); }
 });
 
-test("project Knowledge discovery checks only its three deterministic source records", async () => {
+test("project Knowledge discovery checks only bounded deterministic source records", async () => {
   const f = await fixture();
   try {
     f.write("README.md", "# Stable source\n");
     const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
-    f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    const initial = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    assert.equal(initial.skipped_sources, 0, "absent optional convention paths are not reported as skipped");
     const originalListScoped = f.store.listScoped.bind(f.store);
     let wideKnowledgeSourceScans = 0;
     f.store.listScoped = ((kind, scopes, limit, predicate, temporal, options) => {
@@ -2354,8 +2355,6 @@ test("project Knowledge source merging never hydrates claims from unrelated scop
       }
       return originalList(kind, limit, predicate, hydrate, dependencies, storedScope);
     }) as typeof f.store.list;
-    Object.assign(f.service.knowledgeSources, { sourceIngest() { return { status: "completed", candidates: [] }; } });
-
     const result = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
 
     assert.equal(result.status, "ready");
@@ -2506,7 +2505,7 @@ test("project Knowledge discovery rejects a resolved source path outside the rep
     const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
     const result = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
     assert.equal(result.sources_registered, 0);
-    assert.equal(result.skipped_sources, 3);
+    assert.equal(result.skipped_sources, 1);
     assert.equal(f.store.count("knowledge_source"), 0);
   } finally { f.close(); }
 });

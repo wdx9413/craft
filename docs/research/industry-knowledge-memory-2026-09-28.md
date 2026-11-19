@@ -17,17 +17,17 @@ Craft 已有证据、作用域、候选审核、撤销、TTL、内容摘要及�
 
 ## 已存在，不能再列成“缺失”
 
-- Knowledge：来源注册/信任边界、不可变 revision、fragment→Evidence→candidate、旧审核 Claim 标为 stale；只把 reviewed 且来源可用的 Claim 放入执行上下文。[来源接入](../../capability/craft-knowledge/knowledge-source-registry.ts)、[实际读取路径](../../capability/craft-knowledge/contribution.ts)。
-- Memory：working/episodic/preference/procedural、TTL、observed_at/effective_from、替代/撤销、expected_version、scope precedence、同 topic 冲突弃答。[Ledger](../../capability/craft-memory/memory-ledger.ts)、[时间选择](../../core/retrieval-port.ts)、[冲突治理](../../core/memory-governance.ts)。
+- Knowledge：来源注册/信任边界、不可变 revision、fragment→Evidence→candidate、旧审核 Claim 标为 stale；只把 reviewed 且来源可用的 Claim 放入执行上下文。[来源接入](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/knowledge-source-registry.ts)、[实际读取路径](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/contribution.ts)。
+- Memory：working/episodic/preference/procedural、TTL、observed_at/effective_from、替代/撤销、expected_version、scope precedence、同 topic 冲突弃答。[Ledger](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-memory/memory-ledger.ts)、[时间选择](../../core/retrieval-port.ts)、[冲突治理](../../core/memory-governance.ts)。
 - 检索：真实 OpenAI-compatible embedding 请求、响应验证、进程缓存、Memory 的 RRF hybrid、熔断和可解释降级。**不是一个空的 vector 配置壳。**[检索适配器](../../core/retrieval-port.ts)、[Context resolution](../../core/context-resolution.ts)。
 - Knowledge Markdown 索引有真正的 Bm25Index 排序；`LIKE` 是其候选预筛。不要把这一事实推广到另一个 governed Claim 检索路径。[KnowledgeIndex.search](../../core/knowledge-index.ts)。
-- 维护：已有去重、过期、孤立语义记忆诊断及 proposal-only deep maintenance。不能说 Craft 完全没有 consolidation/maintenance。[维护](../../core/memory-maintenance.ts)、[consolidation](../../core/memory-consolidation.ts)。
+- 维护：已有去重、过期、孤立语义记忆诊断及 proposal-only deep maintenance。不能说 Craft 完全没有 consolidation/maintenance。[维护](../../core/memory-maintenance.ts)、[consolidation](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-memory/memory-consolidation.ts)。
 
 ## 具体缺口与优先级
 
 ### P0：统一读取路径与预算竞争
 
-**已证实实现缺口。** `KnowledgeContribution.search` 扫描最多 10,000 条 Claim，按 query term `includes` 个数排序；不会调用已有 KnowledgeIndex 或配置的向量适配器。`ContextResolutionKernel` 的向量/hybrid 只对 Memory documents 运行，随后顺序拼接其他 contribution。Mem0 的向量+可选重排提供的是检索路径上的能力；Craft 目前只有部分路径达到这一层。[Craft Claim 检索](../../capability/craft-knowledge/contribution.ts)、[Memory 路由与顺序预算](../../core/context-resolution.ts)、[Mem0 对照](https://docs.mem0.ai/core-concepts/memory-operations/search)。
+**已证实实现缺口。** `KnowledgeContribution.search` 扫描最多 10,000 条 Claim，按 query term `includes` 个数排序；不会调用已有 KnowledgeIndex 或配置的向量适配器。`ContextResolutionKernel` 的向量/hybrid 只对 Memory documents 运行，随后顺序拼接其他 contribution。Mem0 的向量+可选重排提供的是检索路径上的能力；Craft 目前只有部分路径达到这一层。[Craft Claim 检索](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/contribution.ts)、[Memory 路由与顺序预算](../../core/context-resolution.ts)、[Mem0 对照](https://docs.mem0.ai/core-concepts/memory-operations/search)。
 
 还有一个命名误导：`KeywordRetrievalPort` 输出 `reason: keyword_bm25`，实现其实是关键词命中计数，没有 BM25 的词频、逆文档频率或长度归一。独立 KnowledgeIndex 才是真 BM25。[两种实现](../../core/retrieval-port.ts)、[真实 BM25 索引](../../core/knowledge-index.ts)。
 
@@ -47,13 +47,13 @@ Craft 已有证据、作用域、候选审核、撤销、TTL、内容摘要及�
 
 **实现能力有限，效果未验证。** Embedding 适配器使用静态进程 Map 缓存，冷启动对 query+全部合格正文一次请求，再逐条 cosine 排序；没有持久向量索引、批次大小控制或缓存淘汰。读取列表也限制 10,000。小规模可用不等于支持长期大规模资料库。[适配器](../../core/retrieval-port.ts)、[候选列表](../../core/context-resolution.ts)。
 
-`retrievalEvaluate` 接收调用方提交的 recall/leak/latency/cost 数值并设置 eligible，没有在该路径运行数据集，也没有绑定 dataset/corpus digest、逐条结果或证据 ID。已有验证门不能直接宣称真实召回率达标。[门禁实现](../../core/context-resolution.ts)。另外 usage/decay 信号函数存在，但 resolver 最终排序只用 retrieval hit score，未消费它们；“记忆会随成功使用变得更有效”还不是默认读取路径的事实。[信号](../../capability/craft-memory/memory-signals.ts)、[默认排序](../../core/context-resolution.ts)。
+`retrievalEvaluate` 接收调用方提交的 recall/leak/latency/cost 数值并设置 eligible，没有在该路径运行数据集，也没有绑定 dataset/corpus digest、逐条结果或证据 ID。已有验证门不能直接宣称真实召回率达标。[门禁实现](../../core/context-resolution.ts)。另外 usage/decay 信号函数存在，但 resolver 最终排序只用 retrieval hit score，未消费它们；“记忆会随成功使用变得更有效”还不是默认读取路径的事实。[信号](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-memory/memory-signals.ts)、[默认排序](../../core/context-resolution.ts)。
 
 建议先补可复跑评估：同义问法、中文+代码符号、跨 scope 泄漏、时间变化、错误记忆反例；记录 Recall@k/MRR、任务正确率、token、P95 与真实成本。实现持久索引或 reranker 前后用同一数据集比较。不能引用 Mem0/Zep 自报分数替代 Craft 实测。
 
 ### P1：来源摄取仍是受限文本扫描
 
-**已证实实现缺口。** 当前 sourceIngest 支持目录里的 `.md/.mdx/.txt`，按固定字符数切片；没有在此路径实现结构化 PDF/表格解析、远程 connector 增量游标或 ACL 变更同步。一次 revision 绑定所选文件集合，集合变更会使旧 revision 的已审核 Claim stale，包括没有改变的文件内容；治理安全但重复审核成本高。`max_files` 截断也未返回 has_more/cursor，不能把一次 completed 当作整源已摄取。[扫描与 revision 实现](../../capability/craft-knowledge/knowledge-source-registry.ts)。
+**已证实实现缺口。** 当前 sourceIngest 支持目录里的 `.md/.mdx/.txt`，按固定字符数切片；没有在此路径实现结构化 PDF/表格解析、远程 connector 增量游标或 ACL 变更同步。一次 revision 绑定所选文件集合，集合变更会使旧 revision 的已审核 Claim stale，包括没有改变的文件内容；治理安全但重复审核成本高。`max_files` 截断也未返回 has_more/cursor，不能把一次 completed 当作整源已摄取。[扫描与 revision 实现](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/knowledge-source-registry.ts)。
 
 对照 LlamaIndex 的 per-document hash、转换缓存、upsert/delete：Craft 应补文档级稳定身份、结构边界、增量依赖失效和显式未完成状态，保留 Source→Evidence→reviewed 的既有门禁。[LlamaIndex 当前 API](https://developers.llamaindex.ai/python/framework-api-reference/ingestion/)。
 
@@ -61,7 +61,7 @@ Craft 已有证据、作用域、候选审核、撤销、TTL、内容摘要及�
 
 ### P1：日常记忆整理仍需 Host 补足
 
-**已有维护 API，自动效果未验证。** deep maintenance 当前产物是 content-free candidate；legacy consolidation 是传入摘要或拼接，不能等同于持续完成“抽取→归纳→比较旧记忆→验证→生效”。Letta 的 dreaming/doctor 是可参考的用户流程，但它由自己的 Host 执行；Craft 仅靠 MCP 暴露工具不会获得每轮触发保证。[Craft 维护](../../core/memory-maintenance.ts)、[Craft consolidation](../../core/memory-consolidation.ts)、[Letta 流程](https://docs.letta.com/configuration/memory)。
+**已有维护 API，自动效果未验证。** deep maintenance 当前产物是 content-free candidate；legacy consolidation 是传入摘要或拼接，不能等同于持续完成“抽取→归纳→比较旧记忆→验证→生效”。Letta 的 dreaming/doctor 是可参考的用户流程，但它由自己的 Host 执行；Craft 仅靠 MCP 暴露工具不会获得每轮触发保证。[Craft 维护](../../core/memory-maintenance.ts)、[Craft consolidation](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-memory/memory-consolidation.ts)、[Letta 流程](https://docs.letta.com/configuration/memory)。
 
 建议保留 Skill+MCP 可移植边界，以显式 checkpoint/end-task 协议和外部调度完成可重试整理；低风险、高证据项可走已有 governed policy，高风险仍留候选。验收看新会话是否能正确用到已整理记忆，而不是只看 maintenance 返回 completed。无需为了追平 Letta 引入强制 Hook 或重建一个完整聊天 Host。
 

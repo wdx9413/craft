@@ -295,7 +295,7 @@ test("approval strategy is human-trusted, exact-action scoped, and cannot be spo
   const packageRoot = join(root, "approval-mod");
   await mkdir(packageRoot);
   await writeFile(join(packageRoot, "register.mjs"), `export function register(on) {
-    on("craft.approval.decide@1", async (event) => ({ kind: "approval", decision: event.action === "task.execute" ? "allow" : "deny" }));
+    on("craft.approval.decide@1", async (event) => ({ kind: "approval", decision: ["task.execute", "host_policy_proposal_review"].includes(event.action) ? "allow" : "deny" }));
   }\n`);
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
   const service = new CraftService(store);
@@ -314,6 +314,15 @@ test("approval strategy is human-trusted, exact-action scoped, and cannot be spo
     assert.equal(await service.modRuntime.approvalStrategy("account.delete", "side_effect", {}), null);
     service.setInternalApprovalPolicy(() => "ask");
     assert.equal(await service.internalApprovalBroker.policy("task.execute", "side_effect", {}), "allow");
+    service.modRuntimeApprovalPolicySet({ actions: ["task.execute", "host_policy_proposal_review"], actor: "user:test" });
+    assert.equal(await service.modRuntime.approvalStrategy("host_policy_proposal_review", "external_write", {}), "allow",
+      "the trusted Mod is deliberately configured to allow this action");
+    assert.equal(await service.internalApprovalBroker.policy("host_policy_proposal_review", "external_write", {}), "ask",
+      "Host Policy review remains a human decision even when a Mod would auto-allow it");
+    service.setInternalApprovalPolicy((action) => action === "host_policy_proposal_review" ? "allow" : "ask");
+    assert.equal(await service.internalApprovalBroker.policy("host_policy_proposal_review", "external_write", {}), "ask",
+      "even a baseline allow policy cannot bypass the Workbench human review");
+    service.setInternalApprovalPolicy(() => "ask");
     const authorization = await service.internalApprovalBroker.authorize("task.execute", {}, "side_effect");
     const approvalRecord = store.find("internal_action_approval", String(authorization.approval_ref));
     assert.equal(approvalRecord?.status, "approved", "the configured strategy enters Craft's normal approval broker");

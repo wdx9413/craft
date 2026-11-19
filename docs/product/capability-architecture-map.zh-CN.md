@@ -76,7 +76,7 @@ Workbench 可持有界面偏好和短期视图状态，但 Task、Run、Launch�
 |---|---|---|
 | Control | 任务、运行及状态变化：[Task Run](../../core/task-run.ts)、[Craft 服务](../../core/application/craft-service.ts) | Craft 决定并写入；Workbench 通过服务操作并投影；Eval 观察结果 |
 | Context | 按范围解析可用上下文：[Context resolution](../../core/context-resolution.ts) | Craft 解析；Workbench 展示；Eval 独立评估选取与遗漏 |
-| Capability | 版本化能力与经验入口：[Experience capability](../../capability/craft-experience/capability.ts) | Craft 管理能力和门禁；Workbench 展示；Eval 提供评测证据 |
+| Capability | 版本化能力与经验入口：[Experience capability](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/capability.ts) | Craft 管理能力和门禁；Workbench 展示；Eval 提供评测证据 |
 | Execution | 调度并观察 Host：[Host Run](../../core/host-run.ts) | Craft 管理执行和回执；Workbench 发起受控动作；Eval 测试执行行为 |
 | Trust | 执行策略与事件：[执行策略](../../core/execution-policy.ts)、[Trace](../../core/trace-kernel.ts) | Craft 执行策略并记录事实；Workbench 展示批准；Eval 检查约束，不授予权限 |
 
@@ -154,5 +154,5 @@ Trace、成本、延迟、权限结果与用户修改横切所有能力支柱，
 - [三仓实施与验收清单](../technical/modules/three-repository-delivery.md)
 - [当前能力矩阵](../technical/current-capability-matrix.md)
 - [评测合同与能力晋级门槛](../technical/modules/assured-pilot.md)
-- 可审计的实现入口：[Craft 服务](../../core/application/craft-service.ts)、[Workbench 服务](../../core/interfaces/workbench-server.ts)、[Task Run](../../core/task-run.ts)、[模型网关](../../core/model-gateway.ts)、[内置评测入口](../../capability/craft-eval/suite.ts)。文档链接审计检查这些声明路径是否仍存在；它不能证明运行行为或跨仓验收。
+- 可审计的实现入口：[Craft 服务](../../core/application/craft-service.ts)、[Workbench 服务](../../core/interfaces/workbench-server.ts)、[Task Run](../../core/task-run.ts)、[模型网关](../../core/model-gateway.ts)、[内置评测入口](https://github.com/wdx9413/craft-eval/blob/main/src/suite.ts)。文档链接审计检查这些声明路径是否仍存在；它不能证明运行行为或跨仓验收。
 - 在三仓并列检出时运行 `pnpm run audit:architecture-integration`，检查本文声明的 Workbench 和 Eval 本地路径；缺少仓库或文件会失败，但本地检查不确认远端版本或仓库身份。独立[集成工作流](../../.github/workflows/capability-architecture.yml)检出指定三仓并记录提交，再执行同一检查；单仓文档审计不检查网络链接或假定兄弟仓存在。

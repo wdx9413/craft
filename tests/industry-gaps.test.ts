@@ -25,6 +25,7 @@ import { runRetrievalEvaluation } from "../core/retrieval-evaluation.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+import { registerTrustedGlobalKnowledgeSource } from "./helpers/trusted-global-knowledge-source.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -415,8 +416,8 @@ test("global source revision reports an unscoped legacy scenario claim without a
     const root = join(f.root, "global-source"); await mkdir(root);
     const readme = join(root, "README.md"); await writeFile(readme, "Initial global source text.");
     const sources = new KnowledgeSourceRegistry(f.store);
-    const source = sources.sourceRegister({ source_id: "global-legacy-source", kind: "custom", label: "Global fixture",
-      scope_kind: "global", scope_id: "global", locator: root, content_digest: "initial", trust: "verified", access: "read_only" }).source as JsonObject;
+    const source = (registerTrustedGlobalKnowledgeSource(args => sources.sourceRegister(args),
+      { source_id: "global-legacy-source", kind: "custom", label: "Global fixture", locator: root, content_digest: "initial" }).source as JsonObject);
     const first = sources.sourceIngest({ source_id: source.id });
     const revisionId = String((first.revision as JsonObject).id);
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
@@ -470,8 +471,8 @@ test("source transitions route valid string, object and content-reference scopes
   try {
     const root = join(f.root, "transition-source"); await mkdir(root);
     const sources = new KnowledgeSourceRegistry(f.store);
-    const source = sources.sourceRegister({ source_id: "transition-source", kind: "custom", label: "Transition fixture",
-      scope_kind: "global", scope_id: "global", locator: root, content_digest: "fixture", trust: "verified", access: "read_only" }).source as JsonObject;
+    const source = (registerTrustedGlobalKnowledgeSource(args => sources.sourceRegister(args),
+      { source_id: "transition-source", kind: "custom", label: "Transition fixture", locator: root, content_digest: "fixture" }).source as JsonObject);
     const now = new Date().toISOString();
     const records: Array<[string, JsonObject]> = [
       ["transition-string-scope", { scope: "global" }],
@@ -502,7 +503,7 @@ test("Knowledge source ingestion skips hidden, generated, linked and unsupported
     await writeFile(join(root, ".git", "ignored.md"), "must not ingest");
     await writeFile(join(root, "node_modules", "ignored.md"), "must not ingest");
     await writeFile(join(root, ".private", "ignored.md"), "must not ingest");
-    await writeFile(join(root, "ignored.json"), "unsupported");
+    await writeFile(join(root, "ignored.exe"), "unsupported");
     // POSIX fixtures a real FIFO; Windows cannot, so it links a directory at a
     // ".pipe" name instead. Both entries are non-regular and the walker must skip
     // them either way (a junction reports as a symbolic link on Windows).
@@ -530,7 +531,8 @@ test("Knowledge source ingestion skips hidden, generated, linked and unsupported
     const documents = f.store.list("knowledge_document", 10, item => item.source_id === source.id);
     assert.equal(documents.some(item => item.path === "README.md"), true);
     assert.equal(documents.some(item => item.path === join("docs", "nested.md")), true);
-    assert.equal(documents.some(item => String(item.path).includes("ignored") || String(item.path).includes("outside")), false);
+    assert.equal(documents.some(item => String(item.path).includes("ignored") || String(item.path).includes("outside")), false,
+      JSON.stringify(documents.map(item => item.path)));
     assert.throws(() => sources.sourceIngest({ source_id: source.id, root: external }), /outside the registered Source locator/u);
 
     const disabled = sources.sourceRegister({ source_id: "disabled-source", kind: "custom", label: "Disabled source", ...f.scope,

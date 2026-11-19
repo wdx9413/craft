@@ -9,6 +9,8 @@ import { assessKnowledgeEvaluationProvenance, knowledgeClaimPromotionProofVerifi
 import { MemoryLedgerKernel } from '@craft/capability-memory/memory-ledger';
 import { activeProcedure } from '@craft/capability-experience/procedure-release';
 import { WorkspaceState } from "./workspace.ts";
+import { assertOntologyPromotionAuthority, assertOntologyTaskEffectEvaluation } from "./ontology-classification.ts";
+import { EvaluationContractKernel } from "./evaluation-contract.ts";
 
 const STAGES = new Set(["observe", "retrieve", "act", "feedback", "attribute", "candidate", "evaluate", "promote", "reject", "rollback", "replan"]);
 const OUTCOMES = new Set(["passed", "failed", "blocked", "inconclusive", "cancelled"]);
@@ -90,9 +92,16 @@ function candidateSourceIdentities(store: CraftStore, cycle: JsonObject): { task
   }
   return { taskIds, sessionIds };
 }
-function assertHeldOutEvaluation(store: CraftStore, cycle: JsonObject, artifactRefs: JsonObject[], evaluationRefs: JsonObject[]): boolean {
+function assertHeldOutEvaluation(store: CraftStore, cycle: JsonObject, artifactRefs: JsonObject[], evaluationRefs: JsonObject[], verifier?: EvaluationContractKernel): boolean {
   if (artifactRefs.length !== 1 || evaluationRefs.length !== 1) throw new Error("Evaluation must bind one exact candidate and one held-out run");
   const candidate = artifactRefs[0]!, evaluationRef = evaluationRefs[0]!;
+  if (candidate.kind === "ontology_version") {
+    assertOntologyTaskEffectEvaluation(store,
+      { kind: String(candidate.kind), id: String(candidate.id), version: Number(candidate.version) },
+      { kind: String(evaluationRef.kind), id: String(evaluationRef.id), version: Number(evaluationRef.version) },
+      String(cycle.project_scope_id), verifier);
+    return true;
+  }
   if (evaluationRef.kind === "evaluation_run") {
     const evaluation = store.get("evaluation_run", String(evaluationRef.id), Number(evaluationRef.version));
     if (evaluation.split !== "held_out" || evaluation.subject_type !== candidate.kind || evaluation.subject_id !== candidate.id
@@ -150,8 +159,14 @@ function assertHeldOutEvaluation(store: CraftStore, cycle: JsonObject, artifactR
   }
   throw new Error("Evaluation reference type is unsupported for independent held-out verification");
 }
-function assertPromotionAuthority(store: CraftStore, cycle: JsonObject, candidateRefs: JsonObject[], authorityRefs: JsonObject[]): void {
+function assertPromotionAuthority(store: CraftStore, cycle: JsonObject, candidateRefs: JsonObject[], authorityRefs: JsonObject[], verifier?: EvaluationContractKernel): void {
   const candidate = candidateRefs[0]!;
+  if (candidate.kind === "ontology_version") {
+    assertOntologyPromotionAuthority(store, cycle,
+      candidateRefs.map((item) => ({ kind: String(item.kind), id: String(item.id), version: Number(item.version) })),
+      authorityRefs.map((item) => ({ kind: String(item.kind), id: String(item.id), version: Number(item.version) })), verifier);
+    return;
+  }
   if (candidate.kind === "experience_procedure") {
     const releaseRef = authorityRefs.find(reference => reference.kind === "experience_release" && reference.id === candidate.id);
     const release = releaseRef ? store.get("experience_release", String(releaseRef.id), Number(releaseRef.version)) : null;
@@ -224,7 +239,11 @@ export class EvolutionCycleKernel {
   readonly store: CraftStore;
   readonly candidateWorkspaces: EvolutionCandidateWorkspace;
   readonly workspaceState: WorkspaceState;
-  constructor(store: CraftStore) { this.store = store; this.candidateWorkspaces = new EvolutionCandidateWorkspace(store, store.paths); this.workspaceState = new WorkspaceState(store, store.paths); }
+  readonly evaluationVerifier: EvaluationContractKernel;
+  constructor(store: CraftStore, evaluationVerifier = new EvaluationContractKernel(store)) {
+    this.store = store; this.evaluationVerifier = evaluationVerifier;
+    this.candidateWorkspaces = new EvolutionCandidateWorkspace(store, store.paths); this.workspaceState = new WorkspaceState(store, store.paths);
+  }
 
   start(args: JsonObject): JsonObject {
     const task = this.store.get("task", text(args.task_id, "task_id"));
@@ -306,6 +325,12 @@ export class EvolutionCycleKernel {
     const cycle = this.store.get("evolution_cycle", cycleId);
     const evidenceRefs = refs(this.store, args.evidence_refs, "evidence_refs"), artifactRefs = refs(this.store, args.artifact_refs, "artifact_refs");
     const evaluationRefs = refs(this.store, args.evaluation_refs, "evaluation_refs"), authorityRefs = refs(this.store, args.authority_refs, "authority_refs");
+    const ontologyCandidate = (stage === "evaluate" ? artifactRefs : cycle.candidate_refs) as JsonObject[];
+    if (ontologyCandidate[0]?.kind === "ontology_version" && evaluationRefs.length === 1 && evaluationRefs[0]?.kind === "task_effect_evaluation") {
+      const report = this.store.get("task_effect_evaluation", String(evaluationRefs[0].id), Number(evaluationRefs[0].version));
+      if (typeof report.evaluation_digest !== "string") throw new Error("Ontology Cycle evaluation requires an immutable task-effect digest");
+      evaluationRefs[0] = { ...evaluationRefs[0], digest: report.evaluation_digest };
+    }
     const traceRefs = refs(this.store, args.trace_refs, "trace_refs"), reportedMetrics = metrics(args.metrics);
     if (traceRefs.length && hasMeasuredMetrics(reportedMetrics)) throw new Error("Supply measured metrics through trace_refs or caller metrics, not both");
     const metricsValue = traceRefs.length ? traceMetrics(this.store, cycle, traceRefs) : reportedMetrics;
@@ -355,7 +380,7 @@ export class EvolutionCycleKernel {
     if (stage === "evaluate") {
       if (!artifactRefs.length || !evaluationRefs.length) throw new Error("Evaluation requires candidate artifacts and evaluation references");
       if (stableDigest(artifactRefs) !== stableDigest(cycle.candidate_refs)) throw new Error("Evaluation candidate differs from the recorded candidate version");
-      assertHeldOutEvaluation(this.store, cycle, artifactRefs, evaluationRefs);
+      assertHeldOutEvaluation(this.store, cycle, artifactRefs, evaluationRefs, this.evaluationVerifier);
     }
     // Candidate and evaluation stay bound to the immutable checkpoint. Only a
     // promotion also needs a live working-tree scan; doing that at every stage
@@ -366,9 +391,9 @@ export class EvolutionCycleKernel {
       if (!(cycle.evaluation_refs as JsonObject[]).length) throw new Error("A decision requires the previously recorded evaluation");
       if (stage === "promote") {
         if (!authorityRefs.length) throw new Error("Promotion record requires capability authority references");
-        if (!assertHeldOutEvaluation(this.store, cycle, cycle.candidate_refs as JsonObject[], cycle.evaluation_refs as JsonObject[]))
+        if (!assertHeldOutEvaluation(this.store, cycle, cycle.candidate_refs as JsonObject[], cycle.evaluation_refs as JsonObject[], this.evaluationVerifier))
           throw new Error("Promotion requires a passing held-out evaluation for the exact candidate version");
-        assertPromotionAuthority(this.store, cycle, cycle.candidate_refs as JsonObject[], authorityRefs);
+        assertPromotionAuthority(this.store, cycle, cycle.candidate_refs as JsonObject[], authorityRefs, this.evaluationVerifier);
       }
       if (stage !== "promote" && !evidenceRefs.length) throw new Error("Reject or rollback requires evidence references");
     }

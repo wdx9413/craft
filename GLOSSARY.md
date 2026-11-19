@@ -47,12 +47,28 @@ A bounded projection that preserves verifiable references, versions, digests, co
 _Avoid_: Full-text recall, global prompt, maximal context
 
 **Governed Learning Loop**:
-The evidence-gated chain from sanitized observations to independently verified task effects, Signoff, Canary and a rollback target.
+The evidence-gated chain from scoped, sanitized observations to independently evaluated task effects under a pre-bound Evaluation Contract, staged activation, automatic rollback and user revocation.
 _Avoid_: Self-modifying Agent, automatic publication
+
+**Evolution Value Gate**:
+A versioned decision step that routes a task observation to a durable asset candidate, review, or discard with an auditable reason; it does not verify truth or grant authority.
+_Avoid_: Truth validator, scenario allowlist
+
+**Cross-project generalization**:
+Promotion of a project-scoped candidate into user-level reuse after de-identification, independent evidence from multiple projects and evaluation under a pre-bound contract.
+_Avoid_: Global tag, automatic sharing
 
 **Readiness Doctor**:
 A content-free readiness projection that separates configured state from observed Host execution, worker state, Context usage and learning outcomes.
 _Avoid_: Health check, installation proof
+
+**Verification Receipt**:
+A recognized test or verification command paired with its explicit terminal result after the latest edit; it supports a Host outcome observation but does not itself promote an Experience asset.
+_Avoid_: Test command alone, promotion proof
+
+**Verification Gap**:
+A Hook state in which an edit was observed but no supported verification receipt was recognized; this does not mean prior Knowledge or Memory was lost, nor that an unverified Experience observation was stored.
+_Avoid_: Runtime error, unverified observation
 
 ## Extension language
 
@@ -89,6 +105,14 @@ _Avoid_: Candidate-authored benchmark, generic pass score
 **Semantic Reclassification**:
 An append-only, versioned change to a record's concept assignment that preserves its stable identity, original statement and evidence provenance.
 _Avoid_: Rewriting a fact, silent migration
+
+**Ontology Activation Pointer**:
+The scope-bound decision that selects which Ontology version and classification projection currently applies to a request.
+_Avoid_: Latest classification, Ontology candidate
+
+**Coding Constraint Knowledge**:
+A source-backed, scope-bound claim about a project's or organization's technology, architecture, development or security requirements; it guides interpretation but does not itself enforce code changes.
+_Avoid_: Prompt rule, executable policy
 
 **Unresolved Classification**:
 A classification result whose evidence is insufficient or ambiguous; it is retained pending stronger evidence and does not change the record's retrieval or promotion behavior.

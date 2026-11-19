@@ -14,7 +14,11 @@ function rank(path: string): number {
 }
 
 /** Resolve actual barrel destinations, not the directory of a compatibility entry. */
-export function auditLayerGraph(sources: SourceMap, packageExports: Readonly<Record<string, string>> = {}): LayerFinding[] {
+export function auditLayerGraph(
+  sources: SourceMap,
+  packageExports: Readonly<Record<string, string>> = {},
+  externalPackageExports: ReadonlySet<string> = new Set(),
+): LayerFinding[] {
   const findings: LayerFinding[] = [];
   type Edge = { target: string; runtime: boolean; reexport: boolean; names?: string[]; exports?: Record<string, string> };
   const edges = new Map<string, Edge[]>();
@@ -45,6 +49,7 @@ export function auditLayerGraph(sources: SourceMap, packageExports: Readonly<Rec
       const internal = item.specifier.startsWith(".");
       const craftPackage = item.specifier.startsWith("craft-common-") || item.specifier.startsWith("@craft/capability-");
       if (!internal && !craftPackage) return [];
+      if (craftPackage && externalPackageExports.has(item.specifier) && !(item.specifier in packageExports)) return [];
       const joined = internal ? posix.normalize(posix.join(posix.dirname(path), item.specifier)) : packageExports[item.specifier];
       const target = joined && [joined, joined.replace(/\.js$/u, ".ts"), joined.replace(/\.js$/u, ".d.ts"), `${joined}.ts`, `${joined}/index.ts`].find((candidate) => candidate in sources);
       if (!target) findings.push({ kind: "unresolved", path: [path, item.specifier] });

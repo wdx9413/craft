@@ -31,7 +31,7 @@
 代码依据：
 
 - [repository-context.ts](../../core/application/use-cases/repository-context.ts) 的 `openContext` 只向 `contextResolutionResolve` 传递 query、scope、预算和 members，未传递现有 `principal_id`、`principal_ids`、`tenant_id`、`cognitive_purpose`。有明确 ACL 的材料会因此被拒绝，表现为“独立能力能查到、聚合查不到”。这是可用性错误，不能据此声称该入口已证明跨租户泄漏。
-- [context-resolution.ts](../../core/context-resolution.ts) 将 `scopeAccess()` 结果以 `...access` 传给 contributor，其中用途键为 `purpose`；[Knowledge contributor](../../capability/craft-knowledge/contribution.ts) 与 [Experience contributor](../../capability/craft-experience/contribution.ts) 读取的是 `request.cognitive_purpose`，导致用途过滤丢失。
+- [context-resolution.ts](../../core/context-resolution.ts) 将 `scopeAccess()` 结果以 `...access` 传给 contributor，其中用途键为 `purpose`；[Knowledge contributor](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/contribution.ts) 与 [Experience contributor](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/contribution.ts) 读取的是 `request.cognitive_purpose`，导致用途过滤丢失。
 - [memory-maintenance.ts](../../core/memory-maintenance.ts) 的条件为 `scope === null || scopeMatches && scopeAllows`，省略 scope 就跳过 ACL；返回 run 的 `memory_ids` 和 findings 能透露未授权记录标识。其 legacy/semantic 分支也应同样检查。
 
 隔离复现：临时数据库中建立 Alice / tenant-a 的私有记忆，由 Bob / tenant-b 不带 scope 调用维护，实际得到：
@@ -49,7 +49,7 @@
 
 类型：与“读取前遵循忽略规则”承诺冲突的实现缺陷。涉及 Codebase。
 
-[repository-files.ts](../../capability/craft-codebase/repository-files.ts) 使用 `git ls-files --cached --others --exclude-standard`。`--cached` 包含全部已跟踪文件；Git 的默认忽略机制不排除已跟踪文件。官方 `check-ignore --no-index` 正是为忽略 Git 索引、按规则检查这些路径提供的能力。[git-ls-files](https://git-scm.com/docs/git-ls-files)、[git-check-ignore](https://git-scm.com/docs/git-check-ignore)
+[repository-files.ts](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/repository-files.ts) 使用 `git ls-files --cached --others --exclude-standard`。`--cached` 包含全部已跟踪文件；Git 的默认忽略机制不排除已跟踪文件。官方 `check-ignore --no-index` 正是为忽略 Git 索引、按规则检查这些路径提供的能力。[git-ls-files](https://git-scm.com/docs/git-ls-files)、[git-check-ignore](https://git-scm.com/docs/git-check-ignore)
 
 隔离复现：在临时 Git 仓库先 `git add secret.ts`，再向 `.gitignore` 添加 `secret.ts`。实际 `repositoryFiles` 仍返回：
 
@@ -79,7 +79,7 @@
 
 类型：已隔离复现的实现缺陷；近似语义去重另属可选增强。
 
-[context-resolution.ts](../../core/context-resolution.ts) 对 Memory 使用原始 body 计算去重键，对 Knowledge 使用 `retrieval_text`；[Knowledge contribution](../../capability/craft-knowledge/contribution.ts) 的 `retrieval_text` 会转小写并追加 tags。因此同一正文存在于 Knowledge 和 Memory 时，只要大小写或 tags 不同，就无法去重。
+[context-resolution.ts](../../core/context-resolution.ts) 对 Memory 使用原始 body 计算去重键，对 Knowledge 使用 `retrieval_text`；[Knowledge contribution](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/contribution.ts) 的 `retrieval_text` 会转小写并追加 tags。因此同一正文存在于 Knowledge 和 Memory 时，只要大小写或 tags 不同，就无法去重。
 
 使用真实 contributor 与临时数据库，Memory 和 Claim 都为 `Alpha testing`，Claim 增加 `tags:["tests"]`，实际结果：
 
@@ -97,7 +97,7 @@ Graphiti 官方实现把来源追踪和事实变化放在模型中，因此可�
 
 类型：可由代码顺序确认的容量边界缺陷，尚未运行大规模端到端基准。
 
-[Knowledge contribution](../../capability/craft-knowledge/contribution.ts)、[Experience contribution](../../capability/craft-experience/contribution.ts) 与 [Context Memory 读取](../../core/context-resolution.ts) 均先 `store.list(kind, 10_000)` 再按 scope/ACL 过滤。[CraftStore.list](../../core/infrastructure/store.ts) 不带 predicate 时先在 SQL 按更新时间 LIMIT。其他项目写入足够多的新条目后，目标项目较旧条目在检索前就消失；当前 `omitted_count` 无法反映这部分未扫描记录。
+[Knowledge contribution](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/contribution.ts)、[Experience contribution](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/contribution.ts) 与 [Context Memory 读取](../../core/context-resolution.ts) 均先 `store.list(kind, 10_000)` 再按 scope/ACL 过滤。[CraftStore.list](../../core/infrastructure/store.ts) 不带 predicate 时先在 SQL 按更新时间 LIMIT。其他项目写入足够多的新条目后，目标项目较旧条目在检索前就消失；当前 `omitted_count` 无法反映这部分未扫描记录。
 
 最小实现：先按作用域与授权候选范围过滤，再应用明确候选上限；短期可复用已有带 predicate 的 list 以修正语义，但它仍读取全表，不能宣称大规模性能已解决。后续可做 scope/source/status 索引或有游标扫描。达到扫描上限必须返回 `partial/candidate_scan_limit`，不能包装成成功空结果。
 
@@ -109,7 +109,7 @@ Graphiti 官方实现把来源追踪和事实变化放在模型中，因此可�
 
 类型：生命周期能力增强；不应误判为完全没有时效治理。
 
-当前 Knowledge 已检查来源状态、文档 digest 和过期时间，Memory 已支持 TTL、有效时间/观察时间、冲突弃权，Experience 有版本化定义、按 route 的门禁和独立执行证据。相关实现见 [Knowledge contribution](../../capability/craft-knowledge/contribution.ts)、[Memory Ledger](../../capability/craft-memory/memory-ledger.ts)、[Procedure gate](../../capability/craft-experience/procedure-projection.ts)、[Invocation](../../core/application/procedure-invocation.ts)。这些能力不需要重做。
+当前 Knowledge 已检查来源状态、文档 digest 和过期时间，Memory 已支持 TTL、有效时间/观察时间、冲突弃权，Experience 有版本化定义、按 route 的门禁和独立执行证据。相关实现见 [Knowledge contribution](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/contribution.ts)、[Memory Ledger](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-memory/memory-ledger.ts)、[Procedure gate](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-projection.ts)、[Invocation](../../core/application/procedure-invocation.ts)。这些能力不需要重做。
 
 剩余缺口是默认 `context_pack_receipt` 只有一次选择的快照，未提供“这份首包现在还能用吗”的统一入口。长任务中 Source 撤销、Memory 被 supersede、Procedure 失去 routeable、代码改变后，宿主需自行逐个拼接检查。旧 [ContextPlane audit](../../core/context-plane.ts) 只比较 manifest 自身 digest，不能替代所引用材料的当前状态校验。
 
@@ -123,7 +123,7 @@ Memory 保存 `source_version`，resolve 主要检查当前 source 的 active/tr
 
 类型：明确的产品能力限制和性能增强。
 
-[repository-files.ts](../../capability/craft-codebase/repository-files.ts) 按路径排序后选前 500 个源文件；默认入口未接收任务文件范围。排在第 501 个之后的目标可能永远进不了默认索引。每次还会读取并摘要全部选中文件；[basic-analysis.ts](../../capability/craft-codebase/basic-analysis.ts) 复用的是摘要相同文件的解析结果。当前文档对此已有预算声明，不应把它宣传成整个仓库的编译器增量分析。
+[repository-files.ts](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/repository-files.ts) 按路径排序后选前 500 个源文件；默认入口未接收任务文件范围。排在第 501 个之后的目标可能永远进不了默认索引。每次还会读取并摘要全部选中文件；[basic-analysis.ts](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/basic-analysis.ts) 复用的是摘要相同文件的解析结果。当前文档对此已有预算声明，不应把它宣传成整个仓库的编译器增量分析。
 
 最小实现：在仓库根身份不变的前提下提供有界 `focus_paths`/changed paths 或一次性范围查询；仍应用统一 ignore 和安全边界，并把 `coverage/omitted_reason` 放入结果。基础缓存键还应固定 analyzer 版本及影响结果的配置，否则升级解析器但文件未变时可能继续使用旧缓存。IO 快速路径须有可靠失效依据，不能只凭 mtime 判断内容完全相同。
 

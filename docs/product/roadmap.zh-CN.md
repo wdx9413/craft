@@ -306,6 +306,7 @@ M1 的安全前置项见 [沙箱缺口与验收](../technical/modules/execution-
 
 ## 长期验证
 
+- Codex 的 `craft-context` 自进化以[理想态规划](craft-context-codex-self-evolution-ideal-state.zh-CN.md)为验收基线：默认项目隔离和低成本 Context，长期只存脱敏后的必要资产及来源回执，不存原始会话；候选用预绑定合同做配对/留出评测，真实 Host 效果与模拟验证分开报告。
 - 生成多个执行架构候选，使用廉价估算逐级筛选，最终做高可信 Signoff。
 - 从 Case 级记录提炼带适用条件的全局经验。
 - 学习“什么条件下哪种配置有效”，而不是无限追加聊天摘要。

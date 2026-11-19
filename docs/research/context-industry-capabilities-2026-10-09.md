@@ -30,7 +30,7 @@
 
 **外部事实。** [LlamaIndex CitationQueryEngine](https://developers.llamaindex.ai/python/framework-api-reference/query_engine/citation/)提供 citation chunk 粒度与 source nodes；[官方评价模块](https://developers.llamaindex.ai/python/framework-api-reference/evaluation/)分别评价 Context 对问题的相关性、回答对给定 Context 的支持程度。两种检查不等价。
 
-**当前已实现。** [Claim Governance](../../capability/craft-knowledge/claim-governance.ts)具备候选审核、证据与来源检查、过期/变更/矛盾同步；[Source Registry](../../capability/craft-knowledge/knowledge-source-registry.ts)导入片段保留源偏移、版本及 cursor 漂移检查。因此“没有来源同步或片段引用”不是当前事实。
+**当前已实现。** [Claim Governance](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/claim-governance.ts)具备候选审核、证据与来源检查、过期/变更/矛盾同步；[Source Registry](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-knowledge/knowledge-source-registry.ts)导入片段保留源偏移、版本及 cursor 漂移检查。因此“没有来源同步或片段引用”不是当前事实。
 
 **优化候选。** 对 held-out 知识任务分别验收检索覆盖、来源片段支持与最终答案；以人工校准的 judge 或可执行断言判断支持关系，不能只因 Evidence 存在或格式正确就认定结论成立。源码 `synchronize` 当前全量读取 reviewed Claims 与活动矛盾边，规模扩大时值得按失效 Source/Document 反向依赖定位待重验条目。只有出现真实 connector 需求才加增量远端 connector，不先搭完整连接器平台。
 
@@ -38,7 +38,7 @@
 
 **外部事实。** Graphiti [EntityEdge 官方源码](https://raw.githubusercontent.com/getzep/graphiti/main/graphiti_core/edges.py)区分事实生效/失效与记录创建/失效时间；[SearchFilters 官方源码](https://raw.githubusercontent.com/getzep/graphiti/main/graphiti_core/search/search_filters.py)允许对应时间过滤。因此“当时发生什么”和“当时系统知道什么”可以是不同查询。
 
-**当前已实现。** [Memory Ledger](../../capability/craft-memory/memory-ledger.ts)已有 `observed_at`、`effective_from`、`valid_until`；[Context Resolution](../../core/context-resolution.ts)已有 `as_of`、`known_at`、诊断历史与当前授权重检。另有 topic 冲突、范围优先栈、衰减及证据反馈，不能再把这些整项列为缺失。
+**当前已实现。** [Memory Ledger](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-memory/memory-ledger.ts)已有 `observed_at`、`effective_from`、`valid_until`；[Context Resolution](../../core/context-resolution.ts)已有 `as_of`、`known_at`、诊断历史与当前授权重检。另有 topic 冲突、范围优先栈、衰减及证据反馈，不能再把这些整项列为缺失。
 
 **可证实的局部不足。** Resolution 的历史路径查询全库版本，`store.get` 水合后再过滤 readable，最后才检查候选数量；当前 `listScoped` 优化未覆盖此路径。这是成本与 locality 问题，不等于已向调用者泄漏。排序的 pool 先比较 retrieval score，再比较 decay weight，因此衰减目前主要是同分排序条件，而非主分融合。是否改变衰减权重属于实验判断，不是必然 bug。
 
@@ -48,7 +48,7 @@
 
 **外部事实。** [Aider Repository Map](https://aider.chat/docs/repomap.html)用文件依赖图排名选择重要符号，按 token 预算生成紧凑地图，并随聊天状态调整。地图用于定位随后要读的文件，不替代源码。
 
-**当前已实现。** [context-search.ts](../../capability/craft-codebase/context-search.ts)对 name/path 和固定中文别名打分；[repository-files.ts](../../capability/craft-codebase/repository-files.ts)按任务词优先读取文件，但仍保留 500 文件、8 MiB 合计、512 KiB 单文件上限。[Codebase Index](../../capability/craft-codebase/codebase-index.ts)已有静态 nodes/edges、TS/JS 分析及 checkpoint Adapter 导入，外部边记录 `partial`，不是无条件准确的运行时调用链。
+**当前已实现。** [context-search.ts](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/context-search.ts)对 name/path 和固定中文别名打分；[repository-files.ts](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/repository-files.ts)按任务词优先读取文件，但仍保留 500 文件、8 MiB 合计、512 KiB 单文件上限。[Codebase Index](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-codebase/codebase-index.ts)已有静态 nodes/edges、TS/JS 分析及 checkpoint Adapter 导入，外部边记录 `partial`，不是无条件准确的运行时调用链。
 
 **优化候选。** 从任务已命中位置出发，纳入 imports/callers 的有界邻域及符号定义，生成包含签名、位置、快照和省略原因的地图。用“词法命中但实际调用路径在邻近文件”“未索引区域关键符号”案例验收。现有图关系能复用；先不增加独立语义数据库。真正多语言语义分析需要实际 language server 的完整工程配置及 conformance，预检命令存在或 Adapter Schema 合法均不证明完成。
 
@@ -58,7 +58,7 @@
 
 **外部研究。** [Skill-Pro v3](https://arxiv.org/abs/2602.01869v3)，2026-05-28 修订，以激活、执行、终止条件形成可复用过程，再通过候选验证和质量维护管理它们；搜索缓存的旧标题 ProcMEM 不应覆盖当前论文标题。[Agentic Context Engineering v1](https://arxiv.org/abs/2510.04618v1)，2025-10-06，研究增量生成、反思和整理上下文，提醒反复整体重写可能丢失细节。这些是研究机制，不能据其结果预测 Craft 收益。
 
-**当前已实现。** [Procedure Release](../../capability/craft-experience/procedure-release.ts)正式记录与最新候选分离，test 可选择候选并检查隔离工作区；Graph authoring、Entry/Exit、组合、Invocation 固定版本和验收已存在。不是需要再新增一个 workflow 框架。
+**当前已实现。** [Procedure Release](https://github.com/wdx9413/craft-capability/blob/main/capability/craft-experience/procedure-release.ts)正式记录与最新候选分离，test 可选择候选并检查隔离工作区；Graph authoring、Entry/Exit、组合、Invocation 固定版本和验收已存在。不是需要再新增一个 workflow 框架。
 
 **优化候选。** 利用可公开的动作、工具结果和终态证据生成“本次失败是否应修改 Graph”的建议，绑定受影响节点和旧验收，维持候选→测试→晋级。分别评价跨入口、跨仓库、跨模型/Host 的适用性；场景外拒用同样要计分。不要把成功一次的 transcript 自动升级为通用程序，不保存隐藏 chain of thought，也不让 feedback 自动修改正式版本。
 

@@ -13,6 +13,7 @@ import { CognitiveSearchCoordinator } from "../core/application/coordinators/cog
 import { stableDigest } from "../core/digest.ts";
 import { projectStorageDirectory } from 'craft-common-store-local/paths';
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+import { registerTrustedGlobalKnowledgeSource } from "./helpers/trusted-global-knowledge-source.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-memory-operability-"));
@@ -144,8 +145,8 @@ test("diagnostic Knowledge search filters claim scope, sensitivity, expiry and c
     claim("search-not-expiring", { valid_until: null });
     claim("search-string-tags", { content: "beta body", tags: "alpha tag" });
     claim("search-empty-content", { content: undefined, tags: ["alpha"] });
-    const source = f.service.knowledgeSourceRegister({ source_id: "diagnostic-global-source", kind: "project_note", label: "Diagnostic source",
-      trust: "verified", scope_kind: "global", scope_id: "global", locator: "diagnostic.md", content_digest: `sha256:${"f".repeat(64)}` });
+    const source = registerTrustedGlobalKnowledgeSource(args => f.service.knowledgeSourceRegister(args),
+      { source_id: "diagnostic-global-source", kind: "project_note", label: "Diagnostic source", locator: "diagnostic.md", content_digest: `sha256:${"f".repeat(64)}` });
     const evidence = f.service.evidenceRecord({ claim: "Independent diagnostic search evidence", source_type: "observation", confidence: "confirmed" });
     let reviewed = f.service.knowledgeClaimSave({ claim_id: "search-reviewed", kind: "fact", content: "alpha reviewed rule", scope: "global",
       source_id: source.id, evidence_ids: [evidence.id] }).claim as JsonObject;
@@ -165,6 +166,9 @@ test("diagnostic Knowledge search filters claim scope, sensitivity, expiry and c
     const formalOnly = f.service.knowledgeSearch({ query: "alpha", scope_kind: "global", scope_id: "global", include_candidates: false });
     assert.deepEqual((formalOnly.hits as JsonObject[]).map(hit => hit.claim_id), ["search-reviewed"]);
     assert.equal((formalOnly.hits as JsonObject[])[0]?.status, "reviewed");
+    assert.deepEqual((formalOnly.hits as JsonObject[])[0]?.semantic_classification,
+      { ontology_version: "legacy", concept_kind: "fact", revision_id: null });
+    assert.equal((formalOnly.hits as JsonObject[])[0]?.classification_unresolved, null);
     assert.equal((f.service.knowledgeSearch({ query: "alpha", scope: "global", limit: 1 }).hits as JsonObject[]).length, 1);
     assert.equal((f.service.knowledgeSearch({ query: "unmatched", scope: "global" }).hits as JsonObject[]).length, 0);
     assert.equal((f.service.knowledgeSearch({ query: "!!!", scope: "global", scenario_key: "test.scene" }).hits as JsonObject[]).length, 0);
@@ -391,7 +395,9 @@ test("Knowledge scenario keys require bounded project or global fine and coarse 
     assert.throws(() => f.service.knowledgeClaimSave({ ...base, coarse_scenario_key: "engineering" }), /requires scenario_key/u);
     assert.throws(() => f.service.knowledgeClaimSave({ ...base, scenario_key: "Bad Key" }), /bounded stable identifiers/u);
     assert.throws(() => f.service.knowledgeClaimSave({ ...base, scenario_key: "engineering", coarse_scenario_key: "engineering" }), /distinct bounded/u);
-    assert.throws(() => f.service.knowledgeClaimSave({ ...base, scope: "global", scenario_key: "Bad Key" }), /bounded stable identifiers/u);
+    registerTrustedGlobalKnowledgeSource(args => f.service.knowledgeSourceRegister(args),
+      { source_id: "global-notes", kind: "project_note", label: "Global notes", locator: "global-notes.md", content_digest: `sha256:${"b".repeat(64)}` });
+    assert.throws(() => f.service.knowledgeClaimSave({ ...base, scope: "global", source_id: "global-notes", scenario_key: "Bad Key" }), /bounded stable identifiers/u);
     assert.throws(() => f.service.knowledgeClaimSave({ ...base, scope: "session:one", scenario_key: "engineering" }), /requires project or global scope/u);
     assert.throws(() => f.service.knowledgeClaimSave({ ...base, scenario_key: "engineering", coarse_scenario_definition:
       { summary: "x", applies_when: "x", excludes: "x" } }), /requires coarse_scenario_key/u);
@@ -401,9 +407,12 @@ test("Knowledge scenario keys require bounded project or global fine and coarse 
 test("global Knowledge classification and scenario search stay isolated from project taxonomies", async () => {
   const f = await fixture();
   try {
-    const createSource = (sourceId: string, scopeKind: "project" | "global", scopeId: string) => f.service.knowledgeSourceRegister({
-      source_id: sourceId, kind: "project_note", label: sourceId, trust: "verified", scope_kind: scopeKind, scope_id: scopeId,
-      locator: `${sourceId}.md`, content_digest: `sha256:${sourceId.padEnd(64, "a").slice(0, 64)}` });
+    const createSource = (sourceId: string, scopeKind: "project" | "global", scopeId: string) => {
+      const args = { source_id: sourceId, kind: "project_note", label: sourceId, scope_kind: scopeKind, scope_id: scopeId,
+        locator: `${sourceId}.md`, content_digest: `sha256:${sourceId.padEnd(64, "a").slice(0, 64)}` };
+      return scopeKind === "global" ? registerTrustedGlobalKnowledgeSource(value => f.service.knowledgeSourceRegister(value), args)
+        : f.service.knowledgeSourceRegister({ ...args, trust: "verified" });
+    };
     const saveReviewed = (id: string, sourceId: string, scope: string, text: string) => {
       const evidence = f.service.evidenceRecord({ claim: `Evidence for ${id}`, source_type: "observation", confidence: "confirmed" });
       const claim = f.service.knowledgeClaimSave({ claim_id: id, kind: "rule", content: text, scope, source_id: sourceId,

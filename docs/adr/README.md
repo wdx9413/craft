@@ -38,6 +38,7 @@
 | [0032](0032-versioned-evolution-ontology-and-immutable-core-policy.md) | 本体论可自动版本化演进；Core Policy 由 Runtime 独立执行且不可自改 |
 | [0033](0033-experience-runbooks-are-governed-procedures.md) | 经验手册属于 Experience Procedure；Context 编排捕获和召回，Notes 只存位置短备注 |
 | [0034](0034-codex-context-plugin-self-evolution-plan.md) | Codex 的 craft-context 是入口；Value Gate 场景无关，自进化状态机归 craft-context，内核保持薄 |
+| [0035](0035-craft-context-learning-scope-and-data-boundary.md) | Craft Context 学习遵循最小持久化与作用域晋级 |
 
 ## 与技术文档的关系
 
@@ -58,3 +59,4 @@
 | 0032 | [自进化本体论与评测闭环](../technical/modules/self-evolution-ontology.md) |
 | 0033 | [Experience / Eval](../technical/modules/experience-eval.md)、[Context 成员](../technical/modules/context-members.md) |
 | 0034 | [通用自进化缺口分析](../research/2026-11-18-general-self-evolution-gap-analysis.md)、[自进化 Mod](../technical/modules/self-evolution-mod.md) |
+| 0035 | [Codex 自进化理想态规划](../product/craft-context-codex-self-evolution-ideal-state.zh-CN.md)、[Craft Context 接入](../technical/modules/craft-context.md) |

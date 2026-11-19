@@ -20,6 +20,7 @@ import { TOOLS } from "../core/mcp/tool-catalog.ts";
 import type { ContentRef } from 'craft-common-store-local/content-store';
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
+import { registerTrustedGlobalKnowledgeSource } from "./helpers/trusted-global-knowledge-source.ts";
 
 type Ref = { kind: string; id: string; version: number };
 type Mapping = { source: Ref; target: Ref };
@@ -161,7 +162,8 @@ test("migration rejects malformed legacy records, foreign parents and unsafe con
 test("neutral Sources stay pinned, neutral Evidence loses confidence, and independent source ACLs stay narrow", async () => {
   const f = await fixture();
   try {
-    const source = new KnowledgeSourceRegistry(f.store).sourceRegister({ source_id: "neutral-source", kind: "custom", label: "Neutral source", scope_kind: "global", scope_id: "global", locator: f.root, content_digest: "neutral", trust: "verified" }).source as JsonObject;
+    const source = (registerTrustedGlobalKnowledgeSource(args => new KnowledgeSourceRegistry(f.store).sourceRegister(args),
+      { source_id: "neutral-source", kind: "custom", label: "Neutral source", locator: f.root, content_digest: "neutral" }).source as JsonObject);
     f.store.save("knowledge_source", "neutral-source", { ...source, label: "Updated neutral source" });
     f.raw("evidence", "neutral-evidence", { scope: "global", source_id: "neutral-source", source_type: "synthetic", claim: "neutral proof", confidence: "confirmed" });
     for (const id of ["one", "two"]) f.raw("memory_candidate", id, { scope: "project:legacy", source_id: "neutral-source", kind: "preference", content: "Synthetic neutral candidate", evidence_ids: ["neutral-evidence"], valid_until: null, scope_envelope: { applicability: { kind: "project", id: "legacy" }, custody: { kind: "user", id: "owner" }, audience: { mode: "public", principal_ids: [] } } });
@@ -590,7 +592,8 @@ test("verified content ownership, sensitivity and negative manifest state surviv
       f.raw(kind, id, { scope: "project:legacy", source_id: "old-source", kind: index ? "fact" : "preference", content_ref: content, status: index ? "reviewed" : "active", sensitivity: "public" });
       refs.push({ kind, id, version: 1 });
     }
-    const globalSource = new KnowledgeSourceRegistry(f.store).sourceRegister({ source_id: "global-body-source", kind: "custom", label: "Global descriptor", scope_kind: "global", scope_id: "global", locator: f.root, content_digest: "test", trust: "verified" }).source as JsonObject;
+    const globalSource = (registerTrustedGlobalKnowledgeSource(args => new KnowledgeSourceRegistry(f.store).sourceRegister(args),
+      { source_id: "global-body-source", kind: "custom", label: "Global descriptor", locator: f.root, content_digest: "test" }).source as JsonObject);
     const globalMemory = f.store.contentStore.writeSync({ kind: "memory", record_id: "global-backed-memory", version: 1, scope: "project:legacy", status: "active", sensitivity: "restricted", source_id: String(globalSource.id), body: "Synthetic restricted global-backed memory" });
     f.raw("memory_ledger", "global-backed-memory", { project_id: "legacy", source_id: globalSource.id, kind: "preference", content_ref: globalMemory, scope_envelope: f.memory.scope_envelope });
     refs.push({ kind: "memory_ledger", id: "global-backed-memory", version: 1 });
