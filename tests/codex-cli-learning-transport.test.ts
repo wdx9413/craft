@@ -247,6 +247,10 @@ test("Claude Code learning transport uses only the Claude CLI and checks the ret
   assert.deepEqual(await transport.complete(spec, input), { text: '{"result":"ok"}', model, usage: { input_tokens: 20, output_tokens: 5 } });
   const incompatible = createLearningModelTransport("claude-code", async () => ({ ...success(), stdout: JSON.stringify({ ...response, modelUsage: { other: {} } }) }))!;
   await assert.rejects(incompatible.complete(spec, input), { code: "ERR_CLAUDE_HOST_RESPONSE_INVALID" });
+  const unstructured = createLearningModelTransport("claude-code", async () => ({ ...success(), stdout: JSON.stringify({
+    ...response, structured_output: ["invalid"],
+  }) }))!;
+  await assert.rejects(unstructured.complete(spec, input), { code: "ERR_CLAUDE_HOST_RESPONSE_INVALID" });
 });
 
 test("Claude Code learning transport rejects bounded process failures without returning partial output", async () => {
@@ -265,6 +269,7 @@ test("Claude Code learning transport rejects bounded process failures without re
     [{ ...returned, cancelled: true }, "ERR_CLAUDE_HOST_RESPONSE_INVALID"],
     [{ ...returned, stdout: "{" }, "ERR_CLAUDE_HOST_RESPONSE_INVALID"],
     [{ ...returned, stdout: "[]" }, "ERR_CLAUDE_HOST_RESPONSE_INVALID"],
+    [{ ...returned, stdout: JSON.stringify({ ...JSON.parse(response), result: 7 }) }, "ERR_CLAUDE_HOST_RESPONSE_INVALID"],
   ] as const) {
     await assert.rejects(createLearningModelTransport("claude-code", async () => output)!.complete(spec, input), { code });
   }
@@ -284,4 +289,20 @@ test("Claude Code learning transport rejects bounded process failures without re
   await assert.rejects(transport.complete(spec, { ...input, body: { ...input.body, model: "unbound" } }), /model must be/u);
   await assert.rejects(transport.complete(spec, { ...input, body: { ...input.body,
     messages: [{ role: "user", content: "token ".repeat(40_000) }] } }), { code: "ERR_CLAUDE_INPUT_BUDGET_EXCEEDED" });
+});
+
+test("Claude Code learning transport rejects an incompatible executable without model output", async () => {
+  const previous = process.env.CRAFT_CLAUDE_EXECUTABLE;
+  process.env.CRAFT_CLAUDE_EXECUTABLE = process.execPath;
+  try {
+    const spec = PROVIDER_CATALOG.find(item => item.provider === "claude-code")!;
+    const input = buildChatRequest(spec, { model: "claude-sonnet-4-6", messages: [{ role: "user", content: "Synthetic test" }] });
+    const signal = new AbortController().signal;
+    await assert.rejects(createLearningModelTransport("claude-code")!.complete(spec, input, signal), {
+      code: "ERR_CLAUDE_HOST_RESPONSE_INVALID",
+    });
+  } finally {
+    if (previous === undefined) delete process.env.CRAFT_CLAUDE_EXECUTABLE;
+    else process.env.CRAFT_CLAUDE_EXECUTABLE = previous;
+  }
 });
