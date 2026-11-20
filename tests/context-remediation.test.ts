@@ -173,8 +173,9 @@ test("discovery and Chinese code matching are bounded hints", () => {
   assert.equal((found.symbols as JsonObject[])[0]!.id, "a"); assert.equal(found.omitted_count, 1);
   assert.equal((codeContextCandidates({ nodes: [] }, "x").symbols as unknown[]).length, 0);
   const discoveryIntentSchema = (((TOOLS.find(tool => tool.name === "craft_context_tools_discover")!.inputSchema.properties as JsonObject).intent) as JsonObject);
-  assert.deepEqual(discoveryIntentSchema.enum, ["recall", "knowledge", "memory", "experience", "code", "code-analysis"]);
-  for (const intent of [undefined, "recall", "knowledge", "memory", "experience", "code", "code-analysis"]) { const discovery = discoverContextTools({ intent }); assert((discovery.tools as unknown[]).length > 0); assert(Number(discovery.schema_estimated_tokens) > 0); }
+  const intents = ["recall", "knowledge", "memory", "experience", "code", "code-analysis", "evolution"];
+  assert.deepEqual(discoveryIntentSchema.enum, intents);
+  for (const intent of [undefined, ...intents]) { const discovery = discoverContextTools({ intent }); assert((discovery.tools as unknown[]).length > 0); assert(Number(discovery.schema_estimated_tokens) > 0); }
   assert((discoverContextTools({ intent: "experience" }).tools as JsonObject[]).some(tool => tool.name === "craft_experience_scenario_list"));
   assert((discoverContextTools({ intent: "experience" }).tools as JsonObject[]).some(tool => tool.name === "craft_learning_cycle_finalize"));
   const experienceTools = discoverContextTools({ intent: "experience" }).tools as JsonObject[];
@@ -220,7 +221,7 @@ test("discovery and Chinese code matching are bounded hints", () => {
   assert.throws(() => discoverContextTools({ intent: "bad" }), (error: unknown) => {
     const failure = error as { code?: string; stage?: string; safeDetails?: JsonObject };
     assert.equal(failure.code, "INVALID_INPUT"); assert.equal(failure.stage, "input_validation");
-    assert.deepEqual(failure.safeDetails?.allowed, ["recall", "knowledge", "memory", "experience", "code", "code-analysis"]);
+    assert.deepEqual(failure.safeDetails?.allowed, intents);
     return true;
   });
 });
