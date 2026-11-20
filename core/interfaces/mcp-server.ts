@@ -19,6 +19,8 @@ import { validateJsonSchema, type JsonValue } from "../json-schema.ts";
 import { CraftOperationError } from "../operation-error.ts";
 import { DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from 'craft-common-base/context-assets';
 import { CONTEXT_ROUTED_TOOL_NAMES } from "../mcp/context-tools.ts";
+import { PROJECT_EVOLUTION_TOOL_NAMES } from "../mcp/evolution-tools.ts";
+import { projectBindingFreeInput } from "../evolution-project-binding.ts";
 import { formatContextResponse, resolveContextResponseDetail } from "../context-response-projection.ts";
 export { COMPONENT_SURFACES, COMPONENT_SURFACE_NAMES, DOMAIN_SURFACE_NAMES, SURFACE_NAMES, SURFACE_RULES, domainSurfaceOf } from "./mcp/surface-registry.ts";
 
@@ -180,7 +182,8 @@ export class McpServer {
     // The two hook phases that stand in front of and behind an effect. `tool_before` is a gating
     // phase, so this is the point where "a hook can stop a tool call" stops being a comment: a
     // refusal returns without dispatching, and `tool_after` therefore does not run for it either.
-    const context = this.hooks === undefined ? undefined : HookPlane.toolContext(name, supplied, classifyTool);
+    const observedInput = projectBindingFreeInput(supplied) as JsonObject;
+    const context = this.hooks === undefined ? undefined : HookPlane.toolContext(name, observedInput, classifyTool);
     const requestId = String(request.id);
     let readOnlyHookChecked = false;
     const readOnly = this.tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint === true;
@@ -192,7 +195,7 @@ export class McpServer {
           const refusal = gate.outcomes.find((entry) => entry.outcome.kind === "denied")!;
           const reason = refusal.outcome.kind === "denied" ? refusal.outcome.reason : "denied";
           const denied = { denied: true, hook: refusal.hook, capability: refusal.capability ?? null, reason };
-          const captured = await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: "hook.denied", input: supplied as JsonObject, handler: () => denied });
+          const captured = await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: "hook.denied", input: observedInput, handler: () => denied });
           return { ...denied, trace_correlation: captured.correlation, ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) };
         }
       }
@@ -232,20 +235,20 @@ export class McpServer {
             const refusal = gate.outcomes.find(entry => entry.outcome.kind === "denied")!;
             const reason = refusal.outcome.kind === "denied" ? refusal.outcome.reason : "denied";
             const denied = { denied: true, hook: refusal.hook, capability: refusal.capability ?? null, reason };
-            captured = await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: "hook.denied", input: supplied as JsonObject, handler: () => denied });
+            captured = await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: "hook.denied", input: observedInput, handler: () => denied });
           } else {
             readOnlyHookChecked = true;
             captured = { ok: true, result: await withoutOperationPersistence(this.service.store,
-              () => observeOperation(this.service.store, "craft-mcp", name, { ...supplied as JsonObject, request_id: requestId }, dispatch),
+              () => observeOperation(this.service.store, "craft-mcp", name, { ...observedInput, request_id: requestId }, dispatch),
               event => this.recordReadOperation(event)), correlation: null };
           }
         } else if (readOnly) {
           captured = { ok: true, result: await withoutOperationPersistence(this.service.store,
-            () => observeOperation(this.service.store, "craft-mcp", name, { ...supplied as JsonObject, request_id: requestId }, dispatch),
+            () => observeOperation(this.service.store, "craft-mcp", name, { ...observedInput, request_id: requestId }, dispatch),
             event => this.recordReadOperation(event)), correlation: null };
         } else if (traced) {
           const contextCall = name === "craft_context_open" || name === "craft_run" && (supplied as JsonObject).resource === "context" && (supplied as JsonObject).operation === "open";
-          const capture = () => this.componentTrace.capture({ requestId, component: "craft-mcp", operation: name, input: supplied as JsonObject, handler: dispatch });
+          const capture = () => this.componentTrace.capture({ requestId, component: "craft-mcp", operation: name, input: observedInput, handler: dispatch });
           captured = await (contextCall ? withContextLockBudget(capture) : capture());
         } else {
           captured = { ok: true, result: await dispatch(), correlation: null };
@@ -277,14 +280,18 @@ export class McpServer {
 
   private async reject(requestId: unknown, message: string, input: unknown): Promise<JsonObject> {
     const captured = await this.componentTrace.capture({ requestId: String(requestId), component: "craft-mcp", operation: "protocol.reject",
-      input: { envelope: input }, handler: () => { throw Object.assign(new Error(message), { code: "ERR_INVALID_PARAMS" }); } });
+      input: { envelope: projectBindingFreeInput(input) }, handler: () => { throw Object.assign(new Error(message), { code: "ERR_INVALID_PARAMS" }); } });
     return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message, data: { trace_correlation: captured.correlation,
       ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) } } };
   }
 
   private dispatchTool(name: string, args: JsonObject): JsonObject | Promise<JsonObject> | undefined {
     const handler = this.handlers[name];
-    return handler ? handler(args) : undefined;
+    if (!handler) return undefined;
+    if (!PROJECT_EVOLUTION_TOOL_NAMES.has(name)) return handler(args);
+    const tool = ACTIVE_TOOLS.find(item => item.name === name)!;
+    validateJsonSchema(args as JsonValue, tool.inputSchema);
+    return handler(args);
   }
 
   private recordReadOperation(event: OperationEvent): void {
@@ -321,10 +328,12 @@ export class McpServer {
       ...(nested && typeof nested === "object" && !Array.isArray(nested) ? nested as JsonObject : {}) };
     if (this.mode === "component-context-agent") {
       if (!CONTEXT_ROUTED_TOOL_NAMES.has(entry.tool)) throw new Error(`Craft operation is not available on the Context Agent surface: ${entry.tool}`);
-      const target = ACTIVE_TOOLS.find(tool => tool.name === entry.tool);
-      validateJsonSchema(forwarded as JsonValue, target!.inputSchema);
+      if (!PROJECT_EVOLUTION_TOOL_NAMES.has(entry.tool)) {
+        const target = ACTIVE_TOOLS.find(tool => tool.name === entry.tool);
+        validateJsonSchema(forwarded as JsonValue, target!.inputSchema);
+      }
     }
-    return handler(forwarded);
+    return this.dispatchTool(entry.tool, forwarded)!;
   }
   private ok(requestId: unknown, result: JsonObject): JsonObject { return { jsonrpc: "2.0", id: requestId, result }; }
   private error(requestId: unknown, code: number, message: string): JsonObject {

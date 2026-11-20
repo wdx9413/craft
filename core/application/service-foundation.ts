@@ -504,12 +504,10 @@ export abstract class ServiceFoundation {
     // 内置目录仅作为无配置时的可发现兜底；CLI host-managed auth 只在显式开关下注入。
     const catalog = policy.hostManagedAuthProvider ? PROVIDER_CATALOG : PROVIDER_CATALOG.filter((provider) => provider.host_managed_auth !== true);
     const hostManaged = policy.hostManagedAuthProvider ? PROVIDER_CATALOG.filter((provider) => provider.host_managed_auth === true) : [];
-    // The Codex learning Host drives Experience classification through the
-    // codex-cli provider even when general host-managed auth is off. Include
-    // that one provider so the evaluation-profile kernel can resolve it.
-    const learningHost = PROVIDER_CATALOG.find((provider) => provider.provider === "codex-cli");
-    const learningHostSpec = process.env.CRAFT_LEARNING_MODEL_HOST === "codex-cli" && learningHost
-      && !catalog.some((provider) => provider.provider === "codex-cli") ? [learningHost] : [];
+    // Include only the declared learning Host when general Host auth is off.
+    const learningHost = PROVIDER_CATALOG.find((provider) => provider.host_managed_auth
+      && provider.provider === process.env.CRAFT_LEARNING_MODEL_HOST);
+    const learningHostSpec = learningHost && !catalog.some((provider) => provider.provider === learningHost.provider) ? [learningHost] : [];
     this.modelProviders = modelProviders && modelProviders.length ? [...modelProviders, ...hostManaged.filter((host) => !modelProviders.some((provider) => provider.provider === host.provider))]
       : configuredModels.length ? [...configuredModels, ...hostManaged, ...learningHostSpec.filter((host) => !configuredModels.some((provider) => provider.provider === host.provider))]
         : [...catalog, ...learningHostSpec];

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { CodexCliModelTransport, createLearningModelTransport } from "../deploy/experience-learning/codex-cli-transport.ts";
 import type { HostExecutionRequest, HostExecutionResult } from "../core/host-driver.ts";
 import type { ChatRequest, ModelProviderSpec } from "../core/model-gateway.ts";
-import { buildChatRequest } from "../core/model-gateway.ts";
+import { buildChatRequest, PROVIDER_CATALOG } from "../core/model-gateway.ts";
 
 const provider: ModelProviderSpec = { provider: "codex-cli", label: "Codex CLI Host", protocol: "openai-compatible",
   base_url: "https://codex-cli-host.invalid", api_key_env: "CODEX_CLI_AUTH_STORE", chat_path: "/host/exec",
@@ -222,4 +222,66 @@ test("Codex catalog omission notice is accepted while configuration and other er
       (error: NodeJS.ErrnoException) => error.code === "ERR_CODEX_HOST_RESPONSE_INVALID");
   }
   await assert.rejects(new CodexCliModelTransport(async () => withItem({ type: "error", message: notice }, "item.started")).complete(provider, request));
+});
+
+test("Claude Code learning transport uses only the Claude CLI and checks the returned model", async () => {
+  const spec = PROVIDER_CATALOG.find(item => item.provider === "claude-code")!;
+  const model = "claude-sonnet-4-6";
+  const schema = { type: "object", properties: { result: { type: "string" } } };
+  const input = { ...buildChatRequest(spec, { model, messages: [{ role: "user", content: "password=example-secret-123" }] }),
+    body: { model, messages: [{ role: "user", content: "password=example-secret-123" }], codex_output_schema: schema } };
+  const response = { type: "result", subtype: "success", is_error: false, structured_output: { result: "ok" },
+    usage: { input_tokens: 20, output_tokens: 5 }, modelUsage: { [model]: {} } };
+  const transport = createLearningModelTransport("claude-code", async observed => {
+    assert.match(observed.executable, /(?:^|\/)claude(?:\.exe)?$/u);
+    assert.equal(observed.argv.includes("--safe-mode"), true);
+    assert.equal(observed.argv.includes("--strict-mcp-config"), true);
+    assert.equal(observed.argv.includes("--no-session-persistence"), true);
+    assert.equal(observed.argv[observed.argv.indexOf("--tools") + 1], "");
+    assert.deepEqual(JSON.parse(observed.argv[observed.argv.indexOf("--json-schema") + 1]!), schema);
+    assert.equal(observed.stdin.includes("example-secret-123"), false);
+    return { ...success(), stdout: JSON.stringify(response) };
+  })!;
+  assert.equal(transport.acquireCall?.("claude-code"), true);
+  assert.equal(transport.acquireCall?.("claude-code"), false);
+  assert.deepEqual(await transport.complete(spec, input), { text: '{"result":"ok"}', model, usage: { input_tokens: 20, output_tokens: 5 } });
+  const incompatible = createLearningModelTransport("claude-code", async () => ({ ...success(), stdout: JSON.stringify({ ...response, modelUsage: { other: {} } }) }))!;
+  await assert.rejects(incompatible.complete(spec, input), { code: "ERR_CLAUDE_HOST_RESPONSE_INVALID" });
+});
+
+test("Claude Code learning transport rejects bounded process failures without returning partial output", async () => {
+  const spec = PROVIDER_CATALOG.find(item => item.provider === "claude-code")!;
+  const model = "claude-sonnet-4-6";
+  const input = buildChatRequest(spec, { model, messages: [{ role: "user", content: "Return JSON." }] });
+  const response = JSON.stringify({ type: "result", subtype: "success", is_error: false, result: '{"result":"ok"}', modelUsage: { [model]: {} } });
+  const returned = { ...success(), stdout: response };
+  for (const [output, code] of [
+    [{ ...returned, timedOut: true }, "ERR_CLAUDE_HOST_TIMEOUT"],
+    [{ ...returned, outputLimited: true }, "ERR_CLAUDE_OUTPUT_BUDGET_EXCEEDED"],
+    [{ ...returned, exitCode: 1 }, "ERR_CLAUDE_HOST_RESPONSE_INVALID"],
+    [{ ...returned, exitCode: 1, stdout: JSON.stringify({ type: "result", subtype: "success", is_error: true,
+      result: "Not logged in. Please run /login." }) }, "ERR_CLAUDE_HOST_AUTHENTICATION"],
+    [{ ...returned, signal: "SIGTERM" }, "ERR_CLAUDE_HOST_RESPONSE_INVALID"],
+    [{ ...returned, cancelled: true }, "ERR_CLAUDE_HOST_RESPONSE_INVALID"],
+    [{ ...returned, stdout: "{" }, "ERR_CLAUDE_HOST_RESPONSE_INVALID"],
+    [{ ...returned, stdout: "[]" }, "ERR_CLAUDE_HOST_RESPONSE_INVALID"],
+  ] as const) {
+    await assert.rejects(createLearningModelTransport("claude-code", async () => output)!.complete(spec, input), { code });
+  }
+  const missing = createLearningModelTransport("claude-code", async () => {
+    throw Object.assign(new Error("internal executable path"), { code: "ENOENT" });
+  })!;
+  await assert.rejects(missing.complete(spec, input), { name: "ClaudeHostUnavailable" });
+  const generic = new Error("cancelled child launch");
+  await assert.rejects(createLearningModelTransport("claude-code", async () => { throw generic; })!.complete(spec, input),
+    error => error === generic);
+  const transport = createLearningModelTransport("claude-code", async () => returned)!;
+  assert.deepEqual(await transport.complete(spec, input), { text: '{"result":"ok"}', model, usage: null });
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(transport.complete(spec, input, controller.signal), { name: "AbortError" });
+  await assert.rejects(transport.complete({ ...spec, host_managed_auth: false }, input), /Host-managed provider/u);
+  await assert.rejects(transport.complete(spec, { ...input, body: { ...input.body, model: "unbound" } }), /model must be/u);
+  await assert.rejects(transport.complete(spec, { ...input, body: { ...input.body,
+    messages: [{ role: "user", content: "token ".repeat(40_000) }] } }), { code: "ERR_CLAUDE_INPUT_BUDGET_EXCEEDED" });
 });

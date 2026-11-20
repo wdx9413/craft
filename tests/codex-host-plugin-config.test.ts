@@ -23,3 +23,10 @@ test("Codex Context Stop allows bounded completion of all three members", async 
   assert.equal(manifest.hooks.PostToolUse?.[0]?.hooks[0]?.timeout, 3);
   assert.equal(manifest.hooks.UserPromptSubmit?.[0]?.hooks[0]?.timeout, 20);
 });
+
+test("packaged Claude Context MCP opts into Claude Code for learning", async () => {
+  const manifest = JSON.parse(await readFile(join(root, "plugins/craft-context/.claude-plugin/plugin.json"), "utf8")) as {
+    mcpServers: Record<string, { env?: Record<string, string> }>;
+  };
+  assert.equal(manifest.mcpServers["craft-context"]?.env?.CRAFT_LEARNING_MODEL_HOST, "claude-code");
+});

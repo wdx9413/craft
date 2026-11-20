@@ -31,11 +31,9 @@ for (const domain of ["coding", "office", "travel", "research"] as const) {
         research: "论文假设需要实验复现与反例验证",
       }[domain], scope: inScope, evidence_ids: [`${domain}-evidence`] }) as JsonObject;
       assert.equal(captured.status, "candidate");
-      const inScopeItems = f.kernel.listProgramMemory({ status: "diagnostic" }).items as JsonObject[];
+      const inScopeItems = f.kernel.listProgramMemory({ status: "diagnostic", scope: inScope }).items as JsonObject[];
       assert.equal(inScopeItems.some((item) => item.domain === domain), true);
-      // A different scope must not recall the candidate.
-      const leaked = inScopeItems.filter((item) => item.domain === domain
-        && JSON.stringify(item.scope) === JSON.stringify(otherScope));
+      const leaked = f.kernel.listProgramMemory({ status: "diagnostic", scope: otherScope }).items;
       assert.deepEqual(leaked, []);
     } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
   });
@@ -64,7 +62,7 @@ test("unpromoted general candidates never become routeable assets", async () => 
   try {
     const candidate = f.kernel.captureProgramMemory({ statement: "验证过的工作流", evidence_ids: ["e1"], scope: inScope }) as JsonObject;
     assert.equal(candidate.status, "diagnostic");
-    assert.throws(() => f.kernel.promoteProgramMemory({ id: candidate.id, evaluation_ref: "eval-1" }), /not submitted/);
+    assert.throws(() => f.kernel.promoteProgramMemory({ id: candidate.id, evaluation_ref: "eval-1", scope: inScope }), /not submitted/);
     assert.equal((f.store.find("experience_procedure", String(candidate.id)) ?? null), null, "no procedure asset exists before gates");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
@@ -85,9 +83,9 @@ test("long-tail work without a named adapter is captured and recallable", async 
       // regardless of whether any adapter matched.
       assert.ok(["general", "coding", "office", "travel", "creation", "research"].includes(String(captured.domain)));
     }
-    const items = (f.kernel.listProgramMemory({}) as JsonObject).items as JsonObject[];
+    const items = f.kernel.listProgramMemory({ scope: inScope }).items as JsonObject[];
     assert.equal(items.length >= samples.length, true);
     // Cross-scope recall must still be denied even for the general path.
-    assert.deepEqual(items.filter((item) => JSON.stringify(item.scope) === JSON.stringify(otherScope)), []);
+    assert.deepEqual(f.kernel.listProgramMemory({ scope: otherScope }).items, []);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -93,6 +93,35 @@ test("Context Doctor and correction status are declared in the canonical tool sc
     ["pending_review", "confirmed", "dismissed", "resolved", "decided"]);
   const limitSchema = ((discover?.inputSchema.properties as JsonObject).limit as JsonObject);
   assert.equal(limitSchema.type, "integer");
+});
+
+test("Readiness Doctor distinguishes model configuration from execution proof", async () => {
+  const f = await fixture();
+  const previous = process.env.CRAFT_LEARNING_MODEL_HOST;
+  try {
+    delete process.env.CRAFT_LEARNING_MODEL_HOST;
+    assert.deepEqual(contextReadinessDoctor(f.store).learning_model,
+      { status: "blocked", reason: "no_configured_model", execution: "unverified" });
+    await assert.rejects(access(f.store.paths.settingsFile), { code: "ENOENT" });
+    await writeFile(f.store.paths.settingsFile, "invalid settings");
+    assert.deepEqual(contextReadinessDoctor(f.store).learning_model,
+      { status: "blocked", reason: "invalid_model_configuration", execution: "unverified" });
+    await writeFile(f.store.paths.settingsFile, JSON.stringify({ models: [
+      { id: "fixture", name: "Fixture", baseUrl: "https://example.invalid/v1", model: "fixture-model", apiKeyEnv: "CRAFT_FIXTURE_KEY" },
+    ] }));
+    assert.deepEqual(contextReadinessDoctor(f.store).learning_model,
+      { status: "gateway_models_configured", configured_models: 1, execution: "unverified" });
+    process.env.CRAFT_LEARNING_MODEL_HOST = "claude-code";
+    assert.deepEqual(contextReadinessDoctor(f.store).learning_model,
+      { status: "host_declared", host: "claude-code", model: "claude-sonnet-4-6", execution: "unverified" });
+    process.env.CRAFT_LEARNING_MODEL_HOST = "unsupported";
+    assert.deepEqual(contextReadinessDoctor(f.store).learning_model,
+      { status: "blocked", reason: "unsupported_learning_model_host", execution: "unverified" });
+  } finally {
+    if (previous === undefined) delete process.env.CRAFT_LEARNING_MODEL_HOST;
+    else process.env.CRAFT_LEARNING_MODEL_HOST = previous;
+    await dispose(f);
+  }
 });
 
 test("Readiness Doctor reports sparse migration and oversized or unknown state without guessing", async () => {

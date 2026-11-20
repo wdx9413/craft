@@ -244,6 +244,7 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
     let responseText: string | null = null;
     let traceId: string | null = null;
     let modelFingerprint = "";
+    const modelSource = provider.host_managed_auth ? `${provider.provider}-learning-transport` : "model-gateway";
     try {
       const messages: ChatMessage[] = [{ role: "system", content: system }, { role: "user", content: JSON.stringify(packet) }];
       const model = String(profile.model);
@@ -266,21 +267,21 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
           taxonomy_version: taxonomy.catalog_version } }), "classification Trace start");
       traceId = String(object(traceStart.trace, "classification Trace").id);
       await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.request", actor: "knowledge-classification-worker",
-        source: "codex-cli-learning-transport", trust: "observed", operation_id: ticketId, input_refs: [inputDigest],
+        source: modelSource, trust: "observed", operation_id: ticketId, input_refs: [inputDigest],
         model_fingerprint: modelFingerprint, data: { purpose: isCandidateReview ? "knowledge_evidence_review" : "knowledge_scenario_classification", claim_id: claim.id,
           claim_version: claim.version, input_digest: inputDigest, taxonomy_version: taxonomy.catalog_version },
         summary: isCandidateReview ? "Bounded Knowledge Evidence review request" : "Bounded Knowledge scenario classification request" });
       const startedAt = Date.now();
       const modelRequest = buildChatRequest(provider, { model: String(profile.model), messages,
         max_tokens: Math.min(Number(profile.max_output_tokens ?? 2_048), 2_048), temperature: Number(profile.temperature ?? 0) });
-      if (provider.provider === "codex-cli") modelRequest.body.codex_output_schema = isCandidateReview ? outputReviewSchema : outputDecisionSchema;
+      if (provider.host_managed_auth) modelRequest.body.codex_output_schema = isCandidateReview ? outputReviewSchema : outputDecisionSchema;
       const response = await transport.complete(provider, modelRequest);
       responseText = response.text;
       processingStage = "response_parse";
       await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.completed", actor: "knowledge-classification-worker",
-        source: "codex-cli-learning-transport", trust: "observed", operation_id: ticketId, model_fingerprint: modelFingerprint,
+        source: modelSource, trust: "observed", operation_id: ticketId, model_fingerprint: modelFingerprint,
         duration_ms: Math.max(0, Date.now() - startedAt), usage: response.usage ?? {},
-        data: { model: response.model, response_digest: stableDigest(response.text) }, summary: "Codex Host returned a bounded Knowledge worker response" });
+        data: { model: response.model, response_digest: stableDigest(response.text) }, summary: "Model returned a bounded Knowledge worker response" });
       const decision = parse(response.text);
       processingStage = "response_validate";
       if (isCandidateReview) {
@@ -290,7 +291,7 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
         const source = object(reviewPacket.source, "review packet Source");
         if (typeof source.content_digest !== "string" || !source.content_digest || !reviewPacketDigest) throw new Error("exact Knowledge review packet digests are required");
         processingStage = "host_review";
-        const reviewResult = await deps.client.call("craft_knowledge_host_review", { claim_id: claim.id, host_kind: "codex-cli",
+        const reviewResult = await deps.client.call("craft_knowledge_host_review", { claim_id: claim.id, host_kind: provider.host_managed_auth ? provider.provider : "independent",
           host_run_key: `learning:${ticketId}`, model_ref: `${response.model}:knowledge-evidence-review`, source_digest: source.content_digest,
           packet_digest: reviewPacketDigest, decision: reviewDecision,
           reason_code: reviewDecision === "supported" ? "evidence_supports_claim" : reviewDecision === "rejected" ? "evidence_contradicts_claim" : "evidence_insufficient" });
@@ -382,7 +383,7 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
       if (traceId) {
         const failureKind = safeErrorClass(error);
         await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: processingStage === "model_request" ? "model.failed" : "classification.failed",
-          actor: "knowledge-classification-worker", source: processingStage === "model_request" ? "codex-cli-learning-transport" : "craft-knowledge",
+          actor: "knowledge-classification-worker", source: processingStage === "model_request" ? modelSource : "craft-knowledge",
           trust: "observed", operation_id: ticketId, model_fingerprint: modelFingerprint,
           error_class: failureKind, status: "failed",
           data: { failure_kind: failureKind, failure_stage: processingStage, failure_code: failureCode,

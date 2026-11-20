@@ -6,6 +6,8 @@ import { contextUsageStatusline } from "./context-usage-statusline.ts";
 import { CRAFT_RELEASE_VERSION } from "./version.ts";
 import { dataSpaceId } from "./data-space.ts";
 import { learningWorkerDiagnostic } from "./learning-worker-diagnostic.ts";
+import { PROVIDER_CATALOG } from "./model-gateway.ts";
+import { normalizeSettings } from "./settings.ts";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 
 const COMPONENTS = ["knowledge", "memory", "experience"] as const;
@@ -58,6 +60,26 @@ function latestInjectedTokens(store: CraftStore): number | null {
   return null;
 }
 
+function learningModelDiagnostic(store: CraftStore): JsonObject {
+  const host = process.env.CRAFT_LEARNING_MODEL_HOST;
+  if (host === "codex-cli" || host === "claude-code") {
+    const model = PROVIDER_CATALOG.find(provider => provider.provider === host)?.models.small ?? null;
+    return { status: "host_declared", host, model, execution: "unverified" };
+  }
+  if (host) return { status: "blocked", reason: "unsupported_learning_model_host", execution: "unverified" };
+  const absent = { status: "blocked", reason: "no_configured_model", execution: "unverified" };
+  if (!store.paths.settingsFile) return absent;
+  try {
+    const settings = normalizeSettings(JSON.parse(readFileSync(store.paths.settingsFile, "utf8").replace(/^\uFEFF/u, "")), store.paths);
+    return settings.models.length
+      ? { status: "gateway_models_configured", configured_models: settings.models.length, execution: "unverified" }
+      : absent;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return absent;
+    return { status: "blocked", reason: "invalid_model_configuration", execution: "unverified" };
+  }
+}
+
 export function contextReadinessDoctor(store: CraftStore, args: JsonObject = {}): JsonObject {
   const projectRoot = typeof args.project_root === "string" && args.project_root.trim() ? args.project_root.trim() : null;
   const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id.trim() : null;
@@ -84,6 +106,7 @@ export function contextReadinessDoctor(store: CraftStore, args: JsonObject = {})
       knowledge: learningWorkerDiagnostic(store.paths.runtimeDir, "knowledge", CRAFT_RELEASE_VERSION),
       experience: learningWorkerDiagnostic(store.paths.runtimeDir, "experience", CRAFT_RELEASE_VERSION),
     },
+    learning_model: learningModelDiagnostic(store),
     learning_state: {
       knowledge: boundedState(store.paths.knowledgeDir, "learning-worker-state.json"),
       stage_cursor: boundedState(store.paths.knowledgeDir, "learning-stage-cursor.json"),

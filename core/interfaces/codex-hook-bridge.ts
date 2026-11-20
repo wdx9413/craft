@@ -29,6 +29,7 @@ import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import { HookSignalSanitizer, nestedText, type HookSignal } from "./codex-hook-signal-sanitizer.ts";
 import { codexHookLearningStageDiagnostic } from "./codex-hook-learning-diagnostic.ts";
 import { queueHookMaintenance } from "./memory-archive-worker.ts";
+import { evolutionHostTurnSource, expireEvolutionProjectBinding, mintEvolutionProjectBinding } from "../evolution-project-binding.ts";
 export { HookSignalSanitizer } from "./codex-hook-signal-sanitizer.ts";
 
 type ComponentHookMember = "knowledge" | "memory" | "experience";
@@ -427,6 +428,15 @@ export class HookLearningCoordinator {
       try {
         const goalText = taskGoal || scenario || observedPaths.join(" ") || "verified project workflow";
         const scope = journal.scope as JsonObject;
+        const evidence = finalizedObject.evidence as JsonObject | undefined;
+        const source = observation.source as JsonObject | undefined;
+        if (resolvedProjectScope && lastVerifier && typeof input.session_id === "string" && source?.session_id === input.session_id
+          && source.scope === resolvedProjectScope.id && typeof evidence?.id === "string"
+          && !this.service.store.find("program_memory_verified_observation", observation.id)) {
+          this.service.store.create("program_memory_verified_observation", observation.id, { scope: resolvedProjectScope, evidence_id: evidence.id,
+            source_digest: source.digest, source_session_id: source.session_id, task_id: source.id,
+            turn_id: journal.turn_id, context_receipt_id: journal.context_receipt_id, content_stored: false });
+        }
         this.service.selfEvolution.captureProgramMemory({
           scenario_key: scenario || "coding",
           domain: evolutionDomainFor(goalText),
@@ -447,9 +457,11 @@ export class CodexHookBridge {
   readonly journal: HookTurnJournal;
   readonly learning: HookLearningCoordinator;
   readonly launchArchiveWorker?: () => void;
-  constructor(service: CraftService, launchArchiveWorker?: () => void) {
+  private readonly issueEvolutionBinding: boolean;
+  constructor(service: CraftService, launchArchiveWorker?: () => void, issueEvolutionBinding = process.env.CRAFT_HOOK_MODE === "1") {
     this.service = service; this.signals = new HookSignalSanitizer(); this.journal = new HookTurnJournal(service); this.learning = new HookLearningCoordinator(service, this.journal);
     this.launchArchiveWorker = launchArchiveWorker;
+    this.issueEvolutionBinding = issueEvolutionBinding;
   }
 
   async handle(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
@@ -521,6 +533,8 @@ export class CodexHookBridge {
       if (member === "context") {
         if (event === "SessionStart") return {};
         if (event === "SessionEnd") {
+          const sessionId = text(input.session_id);
+          if (this.issueEvolutionBinding && sessionId) expireEvolutionProjectBinding(this.service.store, hookHost(input), sessionId);
           // Only Memory has lifecycle work here: archive temporary facts and
           // schedule maintenance. Readiness-only records for the other members
           // added repeated SQLite writes without representing capability use.
@@ -708,13 +722,14 @@ export class CodexHookBridge {
     // narrow set of preferences.
     const autoAccumulation = this.accumulateDurableStatements(prompt, input, scope, members);
     memoryWritten = memoryWritten || autoAccumulation.written;
-    // User-stated operating steps become a diagnostic-only Runbook candidate,
-    // never an executable Procedure. The capture is best-effort and never blocks.
+    // Project-bound operating steps become diagnostic Program Memory.
+    // Keep the original Runbook behavior for existing embedded callers.
     try {
-      const sessionId = text(input.session_id), turnId = text(input.turn_id);
-      if (sessionId && turnId && extractUserStatedOperatingSteps(prompt).length) {
-        this.service.evolutionRunbookCapture({ statement: prompt, session_id: sessionId, turn_id: turnId,
-          source_refs: [{ kind: "hook-user-statement", id: turnId, version: 1, member: "codex-hook", session_id: sessionId }] });
+      const statement = extractUserStatedOperatingSteps(prompt)[0];
+      if (members.includes("experience") && sessionId && turnId && statement) {
+        const sourceRefs = [evolutionHostTurnSource({ host: hookHost(input), session_id: sessionId, turn_id: turnId, scope })];
+        this.service.evolutionDomainCapture({ statement, scope, source_refs: sourceRefs });
+        if (!this.issueEvolutionBinding) this.service.evolutionRunbookCapture({ statement, session_id: sessionId, turn_id: turnId, source_refs: sourceRefs });
       }
     } catch { /* A malformed or already-captured Runbook must not block the prompt. */ }
     if (members.includes("memory")) {
@@ -741,7 +756,8 @@ export class CodexHookBridge {
       }
     }
     const resolved = await this.service.contextWorkingSets.resolve({ query: effectiveQuery, session_id: sessionId ?? undefined, session_scope_id: sessionId ?? undefined, session_host: hookHost(input), session_host_verified: false, turn_id: turnId ?? undefined, scope_kind: scope.kind, scope_id: scope.id,
-      members: [...members], include_global: true });
+      members: [...members], include_global: true,
+      ...(member === "context" && this.issueEvolutionBinding ? { program_memory_scope_id: scope.id } : {}) });
     const items = resolved.items as JsonObject[];
     const contributions = resolved.contributions as JsonObject[];
     const candidates: HookCandidate[] = [
@@ -763,9 +779,13 @@ export class CodexHookBridge {
     if (receipt) this.journal.bindContextReceipt(input, receipt, scope);
     return this.service.store.transaction(() => {
       assertContextReadCurrent(this.service.store, receipt);
+      const projectBinding = member === "context" && this.issueEvolutionBinding && sessionId && turnId && input.cwd
+        ? mintEvolutionProjectBinding(this.service.store, { host: hookHost(input), session_id: sessionId, turn_id: turnId, project_root: input.cwd, scope })
+        : undefined;
       let available: HookEmissionCandidate[] = candidateRefs ?? candidates.map(candidate => ({ candidate, ref: null }));
       available = available.map(entry => ({ ...entry, candidate: { ...entry.candidate, output: { ...entry.candidate.output } } }));
       const response = (selected: JsonObject[]) => JSON.stringify({ source: `craft-${member}`, scope, receipt_id: receipt?.id ?? null,
+        ...(projectBinding ? { project_binding: projectBinding } : {}),
         ...(captureSummary ? { memory_capture: captureSummary } : {}),
         ...(modContextAdditions.length ? { mod_context_additions: modContextAdditions } : {}), selected });
       let selected = available.map(entry => entry.candidate.output);
@@ -796,7 +816,7 @@ export class CodexHookBridge {
       for (const component of members) this.service.activationProofRecord({ host: hookHost(input), component, event: "UserPromptSubmit", session_id: text(input.session_id) ?? "unknown",
         turn_id: text(input.turn_id), context_receipt_id: receipt?.id ?? undefined, memory_written: component === "memory" && memoryWritten, observation_written: false,
         plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
-      if (!selected.length && !captureSummary && !modContextAdditions.length) return {};
+      if (!selected.length && !captureSummary && !modContextAdditions.length && !projectBinding) return {};
       return { additionalContext };
     });
   }

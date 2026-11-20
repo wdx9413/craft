@@ -284,7 +284,7 @@ export async function runDistillationOnce(deps: DistillationDependencies): Promi
         input_digest: inputDigest, content_stored: false } }), "Experience distillation Trace start");
     const traceId = String(object(started.trace, "Experience distillation Trace").id ?? "");
     if (!traceId) throw new Error("Experience distillation Trace has no id");
-    const modelSource = provider.provider === "codex-cli" ? "codex-cli-learning-transport" : "model-gateway";
+    const modelSource = provider.host_managed_auth ? `${provider.provider}-learning-transport` : "model-gateway";
     let processingStage = "trace_request";
     let responseDigest: string | null = null;
     try {
@@ -506,9 +506,10 @@ async function main(): Promise<void> {
     do {
       const syncKnowledge = knowledgeEnabled && Date.now() - lastKnowledgeSync >= knowledgePollMs;
       const recheckVerified = Date.now() - lastVerifiedRecheck >= 300_000;
-      const modelTransport = createLearningModelTransport(process.env.CRAFT_LEARNING_MODEL_HOST);
+      const modelHost = process.env.CRAFT_LEARNING_MODEL_HOST;
+      const modelTransport = createLearningModelTransport(modelHost);
       const result = await runLearningTick({ client, ...(modelTransport ? { transport: modelTransport } : {}) }, syncKnowledge, components,
-        () => collectCodexSessionsWithLock(client, recheckVerified));
+        modelHost === "claude-code" ? undefined : () => collectCodexSessionsWithLock(client, recheckVerified));
       const sessionCollection = result.session_collection as JsonObject | undefined;
       if (recheckVerified && sessionCollection && !sessionCollection.failure_kind && sessionCollection.status !== "skipped_locked"
         && (sessionCollection.evidence_reconciliation as JsonObject | undefined)?.status !== "partial") lastVerifiedRecheck = Date.now();

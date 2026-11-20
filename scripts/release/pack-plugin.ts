@@ -95,7 +95,8 @@ for (const component of components) {
   const selected = component.replace("craft-", "");
   for (const host of ["codex", "claude"]) {
     await mkdir(resolve(componentRoot, `.${host}-plugin`), { recursive: true });
-    const mcp = host === "codex" ? "./.mcp.json" : { [component]: { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", selected] } };
+    const claudeEnv = component === "craft-context" ? { env: { CRAFT_LEARNING_MODEL_HOST: "claude-code" } } : {};
+    const mcp = host === "codex" ? "./.mcp.json" : { [component]: { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", selected], ...claudeEnv } };
     const previousPath = resolve(componentRoot, `.${host}-plugin`, "plugin.json");
     const previous = existsSync(previousPath) ? JSON.parse(await readFile(previousPath, "utf8")) : {};
     const description = component === "craft-context" ? "Complete Knowledge, Memory, Experience, and Codebase tools in one Craft entry point" : `${component} governed context and repository tools`;

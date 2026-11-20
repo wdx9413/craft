@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { SelfEvolutionKernel } from "@craft/capability-context";
-import { CraftStore } from "../core/infrastructure/store.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { stableDigest } from "../core/digest.ts";
+import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-general-evolution-"));
@@ -25,26 +28,83 @@ test("domain adapters register deterministically and candidate adapters stay can
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("program memory candidate is diagnostic until repetitions and evidence pass threshold", async () => {
+test("program memory cannot qualify from repeated capture of an unverified evidence reference", async () => {
   const f = await fixture();
   try {
     f.kernel.ensureAdapters();
-    const first = f.kernel.captureProgramMemory({ statement: "先打开页面再点击登录", domain: "office", scope: { project: "demo" } }) as Record<string, unknown>;
+    const scope = { kind: "project", id: "project:demo" };
+    const first = f.kernel.captureProgramMemory({ statement: "先打开页面再点击登录", domain: "office", scope }) as Record<string, unknown>;
     assert.equal(first.status, "diagnostic");
-    assert.throws(() => f.kernel.submitProgramMemory(String(first.id)), /threshold/);
     f.store.create("evidence", "obs1", { source_type: "test", claim: "observed login flow", confidence: "bounded" });
-    f.kernel.captureProgramMemory({ statement: "先打开页面再点击登录", domain: "office", scope: { project: "demo" }, evidence_ids: ["obs1"] });
-    const submitted = f.kernel.submitProgramMemory(String(first.id)) as Record<string, unknown>;
+    f.kernel.captureProgramMemory({ statement: "先打开页面再点击登录", domain: "office", scope, evidence_ids: ["obs1"] });
+    assert.throws(() => f.kernel.submitProgramMemory(String(first.id), scope), /contract|independent/i);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("program memory submits an exact Experience candidate and blocks substitute evaluation and post-revocation gates", async () => {
+  const f = await fixture();
+  try {
+    const service = new CraftService(f.store);
+    const scope = { kind: "project", id: "project:demo" };
+    for (const id of [scope.id, "project:foreign"]) {
+      const projectRoot = join(f.root, id.slice("project:".length));
+      await mkdir(projectRoot);
+      f.store.create("scope_alias", `alias-${id}`, { status: "active", alias_kind: "path", alias: projectRoot,
+        alias_digest: stableDigest(projectRoot), scope: { ...scope, id } });
+      projectExperienceDirectory(f.store, id, projectRoot, true);
+    }
+    const design = service.evaluationContractDefine({ contract_id: "memory-design", capability_id: "verify-project-operating-procedure",
+      capability_version: 1, input_contract: "project-scoped observation", output_contract: "accepted procedure",
+      scope, effect: "program_memory_design", budget: { task_effect_design: { candidate_family: "experience_procedure" } } }).contract as JsonObject;
+    const observation = (sourceId: string, sessionId: string, project: string) => {
+      const evidence = service.evidenceRecord({ source_type: "host_completion_signal", confidence: "bounded", claim: "Verified task",
+        metadata: { provenance: "host_completion_signal", project_scope_id: project, verification_outcome: "passed",
+          source_session_id: sessionId, task_id: sourceId, content_stored: false } });
+      const result = service.workflowEvolutionObserve({ sanitized: true, content_stored: false, outcome: "passed",
+        source_kind: "host:codex", source_id: sourceId, source_session_id: sessionId, source_digest: sourceId,
+        scope: project, scenario_key: "verified-release", evidence_ids: [evidence.id] }).observation as JsonObject;
+      f.store.create("program_memory_verified_observation", String(result.id), { scope: { ...scope, id: project }, evidence_id: evidence.id,
+        source_digest: sourceId, source_session_id: sessionId, task_id: sourceId });
+      return result;
+    };
+    const a = observation("task-a", "session-a", scope.id);
+    const duplicate = observation("task-a2", "session-a", scope.id);
+    const foreign = observation("task-foreign", "session-foreign", "project:foreign");
+    const b = observation("task-b", "session-b", scope.id);
+    const input = { statement: "Verify the release checklist", scenario_key: "verified-release", domain: "coding",
+      scope, evaluation_contract_id: design.id };
+    const candidate = service.evolutionProgramMemoryCapture({ ...input, evidence_ids: [a.id, duplicate.id, foreign.id] });
+    assert.equal(candidate.independent_evidence_count, 1);
+    assert.equal(service.evolutionProgramMemoryCapture({ ...input, evidence_ids: [a.id] }).version, candidate.version);
+    const request = { id: candidate.id, scope };
+    assert.throws(() => service.evolutionProgramMemorySubmit(request), /independent/);
+    assert.equal(service.evolutionProgramMemoryCapture({ ...input, evidence_ids: [b.id] }).independent_evidence_count, 2);
+    const submitted = service.evolutionProgramMemorySubmit(request);
     assert.equal(submitted.status, "submitted");
+    assert.equal(service.evolutionProgramMemorySubmit(request).procedure_id, submitted.procedure_id);
+    assert.throws(() => service.evolutionProgramMemoryPromote({ ...request, evaluation_ref: "unverified" }), /qualified/);
+
+    const evaluation = service.evaluationContractDefine({ contract_id: "unrelated", capability_id: "unrelated",
+      capability_version: 1, input_contract: "unrelated", output_contract: "unrelated", scope }).contract as JsonObject;
+    const procedure = service.experienceProcedureGet({ procedure_id: submitted.procedure_id }).procedure as JsonObject;
+    const stageProof = service.evidenceRecord({ source_type: "program", claim: "Verified procedure entry and exit", confidence: "confirmed",
+      metadata: { procedure_definition_digest: procedure.definition_digest, entry_id: "inspect", exit_id: "verified", stage: "shadow", status: "passed" } });
+    const gate = { procedure_id: submitted.procedure_id, passed: true, evidence_ids: [stageProof.id] };
+    service.experienceProcedureGate({ ...gate, stage: "shadow" });
+    assert.throws(() => service.experienceProcedureGate({ ...gate, stage: "held_out", evaluation_contract_id: evaluation.id,
+      evaluation_id: "unverified" }), /frozen Program Memory design/);
+    assert.equal(service.evolutionProgramMemoryFeedback({ ...request, outcome: "revoked" }).status, "revoked");
+    assert.throws(() => service.experienceProcedureGate({ ...gate, stage: "shadow" }), /no longer authorizes/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
 test("artifact lineage stores metadata and recalls by artifact type with reliability floor", async () => {
   const f = await fixture();
   try {
-    f.kernel.recordArtifactLineage({ artifact_type: "slides", source_refs: ["doc1"], prompt: "make a deck", parameters: { theme: "dark" }, tool: "slides", reliability: 0.9, user_choice: "accepted" });
-    f.kernel.recordArtifactLineage({ artifact_type: "slides", source_refs: ["doc2"], reliability: 0.2 });
-    const recalled = f.kernel.recallArtifactLineage({ artifact_type: "slides" }) as { items: unknown[] };
+    const scope = { kind: "project", id: "project:office" };
+    f.kernel.recordArtifactLineage({ artifact_type: "slides", source_refs: ["doc1"], prompt: "make a deck", parameters: { theme: "dark" }, tool: "slides", reliability: 0.9, user_choice: "accepted", scope });
+    f.kernel.recordArtifactLineage({ artifact_type: "slides", source_refs: ["doc2"], reliability: 0.2, scope });
+    const recalled = f.kernel.recallArtifactLineage({ artifact_type: "slides", scope }) as { items: unknown[] };
     assert.equal(recalled.items.length, 1);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
@@ -52,9 +112,16 @@ test("artifact lineage stores metadata and recalls by artifact type with reliabi
 test("prospective intention records trigger outcomes and research links are typed", async () => {
   const f = await fixture();
   try {
-    const intention = f.kernel.createProspectiveIntention({ intention: "明天提醒我提交报告", trigger: { date: "2026-11-18" } }) as Record<string, unknown>;
-    const hit = f.kernel.fireProspectiveIntention({ id: String(intention.id), trigger: { date: "2026-11-18" } }) as Record<string, unknown>;
-    assert.equal(hit.status, "delivered");
+    const scope = { kind: "project", id: "project:office" };
+    const other = { kind: "project", id: "project:other" };
+    const intention = f.kernel.createProspectiveIntention({ intention: "提醒我提交报告", trigger: { state: "report-ready" },
+      scope, expires_at: "2099-01-01T00:00:00.000Z" });
+    assert.throws(() => f.kernel.fireProspectiveIntention({ id: intention.id, trigger: { state: "report-ready" }, scope: other }), /not in scope/u);
+    const miss = f.kernel.fireProspectiveIntention({ id: intention.id, trigger: { state: "draft" }, scope });
+    assert.equal(miss.status, "pending");
+    const hit = f.kernel.fireProspectiveIntention({ id: intention.id, trigger: { state: "report-ready" }, scope });
+    assert.equal(hit.status, "awaiting_host");
+    assert.deepEqual(hit.receipt, { matched: true, at: (hit.receipt as Record<string, unknown>).at, action_authorized: false });
     const link = f.kernel.linkResearch({ source_id: "paper1", target_id: "exp1", relation: "derives_from", layer: "interpretation" }) as Record<string, unknown>;
     assert.equal(link.relation, "derives_from");
     assert.equal(link.layer, "interpretation");
@@ -75,7 +142,7 @@ test("general fallback captures long-tail work without any matching adapter", as
     assert.equal(consoleOp.status, "candidate");
     assert.equal(consoleOp.domain, "general");
 
-    const items = (f.kernel.listProgramMemory({}) as { items: Record<string, unknown>[] }).items;
+    const items = (f.kernel.listProgramMemory({ scope: { kind: "project", id: "project:x" } }) as { items: Record<string, unknown>[] }).items;
     assert.ok(items.some((item) => item.domain === "general"), "general candidates are persisted");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
@@ -84,7 +151,8 @@ test("an unknown or mismatched adapter hint degrades to general instead of dropp
   const f = await fixture();
   try {
     assert.throws(() => f.kernel.captureDomainStatement({ domain: "legal", statement: "x" }), /unsupported domain adapter/u);
-    const mismatched = f.kernel.captureDomainStatement({ domain: "travel", statement: "产品需求文档约定：上线前必须评审" }) as Record<string, unknown>;
+    const mismatched = f.kernel.captureDomainStatement({ domain: "travel", statement: "产品需求文档约定：上线前必须评审",
+      scope: { kind: "project", id: "project:x" } }) as Record<string, unknown>;
     assert.equal(mismatched.status, "candidate");
     assert.equal(mismatched.domain, "general");
     assert.equal(mismatched.adapter_match, false);

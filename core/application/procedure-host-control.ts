@@ -39,8 +39,8 @@ export function procedureHostControl(service: CraftService, args: JsonObject): J
   if (action === "start") return service.store.transaction(() => {
     // Reuse the same planner and bind contract; no alternate authority or execution path.
     const binding = { ...input };
-    for (const key of ["principal_id", "principal_ids", "tenant_id", "cognitive_purpose"]) delete binding[key];
-    for (const key of ["scope", "principal_id", "principal_ids", "tenant_id", "cognitive_purpose"]) if (args[key] !== undefined) binding[key] = args[key];
+    for (const key of ["principal_id", "principal_ids", "tenant_id", "cognitive_purpose", "program_memory_scope_id"]) delete binding[key];
+    for (const key of ["scope", "principal_id", "principal_ids", "tenant_id", "cognitive_purpose", "program_memory_scope_id"]) if (args[key] !== undefined) binding[key] = args[key];
     const plan = service.experienceProcedurePlan(binding);
     const state = service.procedureInvocationBind(binding);
     return { ...state, plan, usage_status: "bound", next_tool: "craft_procedure_host_control", next_action: "next", host_execution_authority: false };

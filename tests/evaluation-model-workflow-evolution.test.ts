@@ -513,6 +513,29 @@ test("Codex Host creates a purpose-bound gpt-6-luna profile without an API crede
   }
 });
 
+test("Claude Code learning selects its declared profile and rejects unsupported Host values", async () => {
+  const previous = process.env.CRAFT_LEARNING_MODEL_HOST;
+  process.env.CRAFT_LEARNING_MODEL_HOST = "claude-code";
+  const f = await fixture();
+  try {
+    const purpose = "knowledge_scenario_classification";
+    const result = f.service.evaluationModelProfileEnsureSingle({ purpose });
+    assert.equal(result.status, "ready_for_adapter");
+    const profile = result.profile as JsonObject;
+    assert.equal(profile.provider, "claude-code");
+    assert.equal(profile.model, "claude-sonnet-4-6");
+    assert.equal(f.service.evaluationModelProfileEnsureSingle({ purpose }).idempotent, true);
+    process.env.CRAFT_LEARNING_MODEL_HOST = "codex-cli";
+    assert.equal(f.service.evaluationModelProfileEnsureSingle({ purpose }).reason, "host_model_provider_unavailable");
+    process.env.CRAFT_LEARNING_MODEL_HOST = "unknown-host";
+    assert.equal(f.service.evaluationModelProfileEnsureSingle({ purpose }).reason, "unsupported_learning_model_host");
+  } finally {
+    await close(f);
+    if (previous === undefined) delete process.env.CRAFT_LEARNING_MODEL_HOST;
+    else process.env.CRAFT_LEARNING_MODEL_HOST = previous;
+  }
+});
+
 test("Workflow-evolution ticket completion records the exact submitted candidate idempotently", async () => {
   const f = await fixture();
   try {

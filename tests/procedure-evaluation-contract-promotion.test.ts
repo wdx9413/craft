@@ -44,7 +44,7 @@ function createHostSession(store: CraftStore, taskId: string, id: string): JsonO
   return session;
 }
 
-async function fixture(options: { candidateSuccess?: number; includeRoutes?: boolean } = {}) {
+async function fixture(options: { candidateSuccess?: number; includeRoutes?: boolean; programMemory?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "craft-procedure-contract-promotion-"));
   const store = await new CraftStore(craftPaths(root)).open();
   const previousTrust = process.env.CRAFT_TRUSTED_EVALUATORS;
@@ -57,13 +57,9 @@ async function fixture(options: { candidateSuccess?: number; includeRoutes?: boo
   store.create("workflow_evolution_request", "request", { scenario_key: "inspect", scenario_signature: { project: { id: "project:test" } },
     observation_refs: [{ source: { scope: "project:test" }, evidence_ids: ["gate-evidence"] }], output_contract_ref: "acceptance:inspect" });
   store.create("workflow_evolution_proposal", "proposal", { request_id: "request", request_version: 1, name: "Inspect", description: "Read only inspection", inputs: [], steps: [] });
-  let procedure = service.experienceProcedureDraft({ proposal_id: "proposal", procedure_id: "procedure-under-evaluation" }).procedure as JsonObject;
-  if (options.includeRoutes) procedure = store.save("experience_procedure", String(procedure.id), { ...procedure, entrypoints: [{ id: "main",
-    routes: [{ exit_id: "accepted" }, { exit_id: "review", subscenario_id: "needs-review" }] }] });
   store.create("experience_procedure", "procedure-baseline", { content_digest: stableDigest("baseline"), lifecycle: "candidate", routeable: false });
   const kernel = new EvaluationContractKernel(store, [evaluator]);
   const baselineRef = kernel.artifactRef("experience_procedure", "procedure-baseline", 1);
-  const candidateRef = kernel.artifactRef("experience_procedure", String(procedure.id), Number(procedure.candidate_version ?? procedure.version));
   const developmentTask = createTask(store, "dev-task"), heldOutTask = createTask(store, "held-out-task"), heldOutTask2 = createTask(store, "held-out-task-2");
   const baselineSession = createHostSession(store, String(heldOutTask.id), "held-out-baseline");
   const candidateSession = createHostSession(store, String(heldOutTask.id), "held-out-candidate");
@@ -78,16 +74,44 @@ async function fixture(options: { candidateSuccess?: number; includeRoutes?: boo
   const candidateSessionRef2 = kernel.hostSessionRef(String(candidateSession2.id), Number(candidateSession2.version));
   const heldOutTaskRefs = [heldOutRef, heldOutRef2];
   const taskSet = { id: "procedure-held-out-v1", development_task_refs: [devRef], held_out_task_refs: heldOutTaskRefs };
-  const taskEffectBase = { candidate_family: "experience_procedure", baseline_ref: baselineRef, candidate_ref: candidateRef, task_set: { ...taskSet,
+  const taskEffectBase = { candidate_family: "experience_procedure", baseline_ref: baselineRef, task_set: { ...taskSet,
       digest: digestJson(taskSet) }, environment_fingerprint: environment, primary_metric: { name: "success_rate", direction: "higher" as const, minimum_delta: 0.1 },
       tolerated_regressions: { failure_rate: 0 }, latency_budget_ms: 100, cost_budget: 2, evaluator, hard_assertions: ["scope_isolation"] };
   const samplePlanUnsigned: TaskEffectSamplePlan = { method: "chebyshev-mean-precision-v1", pilot_pair_count: 5, pilot_paired_difference_variance: 0,
     pilot_report_digest: stableDigest("pilot"), minimum_meaningful_effect: 0.1, confidence_level: 0.95, planned_task_pairs: heldOutTaskRefs.length,
     repeats_per_task: 1, required_pair_count: requiredPairedSampleSize({ pilotVariance: 0, minimumMeaningfulEffect: 0.1, confidenceLevel: 0.95 }), pilot_signature: "pending" };
   const samplePlan = { ...samplePlanUnsigned, pilot_signature: sign(null, Buffer.from(taskEffectSamplePlanDigest(taskEffectBase, samplePlanUnsigned)), evaluatorKeys.privateKey).toString("base64") };
+  const scope = { kind: "project", id: "project:test" };
+  let programMemory: JsonObject | null = null;
+  let procedure: JsonObject;
+  if (options.programMemory) {
+    const design = kernel.define({ contract_id: "program-memory-design", capability_id: "verify-program-memory", capability_version: 1,
+      input_contract: "Project observation", output_contract: "Procedure acceptance and recovery", scope,
+      effect: "program_memory_design", budget: { task_effect_design: { ...taskEffectBase, sample_plan: samplePlan } } }).contract as JsonObject;
+    const observations = ["source-a", "source-b"].map(id => {
+      const evidence = service.evidenceRecord({ source_type: "host_completion_signal", confidence: "bounded", claim: "Verified source task",
+        metadata: { provenance: "host_completion_signal", project_scope_id: scope.id, verification_outcome: "passed",
+          source_session_id: `session-${id}`, task_id: id, content_stored: false } });
+      const observation = service.workflowEvolutionObserve({ sanitized: true, content_stored: false, outcome: "passed", source_kind: "host:codex",
+        source_id: id, source_session_id: `session-${id}`, source_digest: id, scope: scope.id, scenario_key: "inspect",
+        evidence_ids: [evidence.id] }).observation as JsonObject;
+      store.create("program_memory_verified_observation", String(observation.id), { scope, evidence_id: evidence.id, source_digest: id,
+        source_session_id: `session-${id}`, task_id: id });
+      return observation;
+    });
+    const candidate = service.evolutionProgramMemoryCapture({ statement: "Inspect project using verified observations", scenario_key: "inspect",
+      scope, evaluation_contract_id: design.id, evidence_ids: observations.map(observation => observation.id) });
+    programMemory = service.evolutionProgramMemorySubmit({ id: candidate.id, scope });
+    procedure = service.experienceProcedureGet({ procedure_id: programMemory.procedure_id }).procedure as JsonObject;
+  } else {
+    procedure = service.experienceProcedureDraft({ proposal_id: "proposal", procedure_id: "procedure-under-evaluation" }).procedure as JsonObject;
+    if (options.includeRoutes) procedure = store.save("experience_procedure", String(procedure.id), { ...procedure, entrypoints: [{ id: "main",
+      routes: [{ exit_id: "accepted" }, { exit_id: "review", subscenario_id: "needs-review" }] }] });
+  }
+  const candidateRef = kernel.artifactRef("experience_procedure", String(procedure.id), Number(procedure.candidate_version ?? procedure.version));
   const contract = kernel.define({ contract_id: "procedure-contract", capability_id: `experience-procedure:${String(procedure.id)}`,
     capability_version: Number(procedure.candidate_version), input_contract: "Procedure scenario and trigger", output_contract: "Procedure acceptance and recovery",
-    effect: "task_effect", task_effect: { ...taskEffectBase, sample_plan: samplePlan } }).contract as JsonObject;
+    scope, effect: "task_effect", task_effect: { ...taskEffectBase, candidate_ref: candidateRef, sample_plan: samplePlan } }).contract as JsonObject;
   for (const stage of ["mechanism_passed", "fixture_passed", "conformance_passed", "integration_passed", "host_verified"] as const) {
     const planId = `plan-${stage}`, assessmentId = `assessment-${stage}`;
     store.create("verification_plan", planId, { change_ref: `procedure-contract:${stage}`, requires_real_host: stage === "host_verified", candidate_change: false });
@@ -104,8 +128,33 @@ async function fixture(options: { candidateSuccess?: number; includeRoutes?: boo
   const receiptDigest = digestJson({ contract_digest: contract.contract_digest, ...evaluationInput });
   kernel.recordTaskEffectEvaluation({ ...evaluationInput, evaluator_signature: sign(null, Buffer.from(receiptDigest), evaluatorKeys.privateKey).toString("base64") });
   kernel.record({ contract_id: String(contract.id), stage: "business_eligible", evidence: [String(evaluationInput.evaluation_id)] });
-  return { root, store, service, procedure, contract, evaluationId: evaluationInput.evaluation_id, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
+  return { root, store, service, procedure, programMemory, scope, contract, evaluationId: evaluationInput.evaluation_id, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
 }
+
+test("Program Memory follows the exact signed Experience release and withdraws it on revocation", async () => {
+  const f = await fixture({ programMemory: true });
+  try {
+    const memory = { id: f.programMemory!.id, scope: f.scope };
+    const read = () => f.service.evolutionProgramMemoryGet(memory).candidate as JsonObject;
+    assert.equal(read().routeable, false);
+    let canary: JsonObject | undefined;
+    for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
+      const proof = f.service.evidenceRecord({ source_type: "program", claim: "Verified procedure entry and exit", confidence: "confirmed",
+        metadata: { procedure_definition_digest: f.procedure.definition_digest, entry_id: "inspect", exit_id: "verified", stage, status: "passed" } });
+      canary = f.service.experienceProcedureGate({ procedure_id: f.procedure.id, passed: true, stage, evidence_ids: [proof.id],
+        evaluation_contract_id: f.contract.id, evaluation_id: f.evaluationId }).procedure as JsonObject;
+    }
+    assert.equal(read().active_procedure_version, canary!.version);
+    const plan = { procedure_id: f.procedure.id, procedure_version: canary!.version, entry_id: "inspect", exit_id: "verified",
+      scope: f.scope.id, program_memory_scope_id: f.scope.id, allowed_effects: ["read_only"], input_refs: {} };
+    assert.equal(f.service.experienceProcedurePlan(plan).expanded_step_count, 1);
+    assert.equal(f.service.evolutionProgramMemoryPromote({ ...memory, evaluation_ref: f.evaluationId }).status, "promoted");
+    assert.equal(f.service.evolutionProgramMemoryFeedback({ ...memory, outcome: "revoked" }).status, "revoked");
+    assert.equal(read().routeable, false);
+    assert.throws(() => f.service.experienceProcedurePlan(plan), /unavailable|revoked/);
+    assert.throws(() => f.service.experienceProcedureGet({ procedure_id: f.procedure.id, release_channel: "current" }), /unavailable/);
+  } finally { f.close(); }
+});
 
 test("Procedure Service requires and pins a trusted held-out contract before routeability", async () => {
   const f = await fixture();

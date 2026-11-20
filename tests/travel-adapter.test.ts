@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { CraftService } from "../core/service.ts";
-import { SelfEvolutionKernel, TravelAdapter } from "@craft/capability-context";
+import { TravelAdapter } from "@craft/capability-context";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
@@ -16,7 +16,7 @@ async function fixture() {
   const service = new CraftService(store);
   store.create("scope_alias", "project-travel-trip-tokyo", { scope: { kind: "project", id: "travel:trip-tokyo" },
     alias_kind: "path", alias: projectRoot, status: "active" });
-  const adapter = new TravelAdapter({ selfEvolution: new SelfEvolutionKernel(store), memory: service, store });
+  const adapter = new TravelAdapter({ memory: service, store });
   return { root, projectRoot, store, service, adapter };
 }
 
@@ -27,7 +27,7 @@ function remember(service: CraftService, projectRoot: string, args: JsonObject):
     return service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "episodic", project_root: projectRoot,
     scope_kind: "project", scope_id: "travel:trip-tokyo", content: String(args.content),
     evidence_ids: [evidence.id], valid_until: args.valid_until, concept_kind: "fact",
-    ...(args.topic === undefined ? {} : { topic: args.topic }) }).memory as JsonObject;
+    topic: args.topic ?? "travel:plan" }).memory as JsonObject;
 }
 
 test("travel adapter extracts typed preferences and temporal-bound plan facts", () => {
@@ -102,14 +102,18 @@ test("stale plans are hidden by default and carry an advisory with include_stale
 test("travel apply and forget stay inside the travel domain", async () => {
   const f = await fixture();
   try {
-    f.store.create("evidence", "booking-1", { source_type: "booking", claim: "flight and hotel booked", confidence: "bounded" });
-    const applied = f.adapter.apply({ statement: "先订机票，再订酒店", scope: { scope_kind: "project", scope_id: "travel:trip-tokyo" },
-      verification: "passed", evidence_ids: ["booking-1"] }) as JsonObject;
-    assert.equal(applied.status, "submitted");
-    assert.equal(applied.domain, "travel");
+    const scope = { scope_kind: "project", scope_id: "travel:trip-tokyo" };
     const memory = remember(f.service, f.projectRoot, { content: "Tokyo trip: avoid night trains" });
-    const forgotten = f.adapter.forget({ scope: { scope_kind: "project", scope_id: "travel:trip-tokyo" }, memory_id: memory.id }) as JsonObject;
+    const applied = f.adapter.apply({ memory_id: memory.id, scope });
+    assert.equal(applied.status, "applied");
+    assert.equal(applied.domain, "travel");
+    assert.equal((applied.memory as JsonObject).content, "Tokyo trip: avoid night trains");
+    const neighbor = { kind: "project", id: "travel:neighbour" };
+    assert.throws(() => f.adapter.apply({ memory_id: memory.id, scope: neighbor }), /not in scope/u);
+    assert.throws(() => f.adapter.forget({ memory_id: memory.id, scope: neighbor }), /not in scope/u);
+    const forgotten = f.adapter.forget({ scope, memory_id: memory.id }) as JsonObject;
     assert.equal((forgotten.memory as JsonObject).status, "revoked");
+    assert.throws(() => f.adapter.apply({ scope, memory_id: memory.id }), /unavailable/u);
     const recalled = f.adapter.recall({ scope: { scope_kind: "project", scope_id: "travel:trip-tokyo" }, query: "night trains" }) as JsonObject;
     assert.deepEqual(recalled.items, []);
     const otherDomain = f.adapter.apply({ statement: "先打开文件，再选择模板", domain: "office",

@@ -49,7 +49,7 @@ import { defaultHooks, defineHooks, runHooks, type HookSpec } from "../hooks.ts"
 import { decideExecution } from "../execution-policy.ts";
 import { assessMcpMigration, createCredentialResolver, distributionPlan, firstRunReadiness, isolationCapability, negotiateProtocolVersion, readCredentialFile } from "../distribution-and-first-run.ts";
 import { Bm25Index, buildExperienceRecord, decideExperienceCapture, fuseRankings } from "../context-retrieval-capture.ts";
-import { belongsToRetiredScenario } from '@craft/capability-experience/procedure-release';
+import { activeProcedure, belongsToRetiredScenario } from '@craft/capability-experience/procedure-release';
 import { DEFAULT_RULES, Sanitizer } from '@craft/capability-datasec/rules';
 import { pilotRecordId, pilotStatusProjection, reconcilePilotWorker, reviewPilotPlan, routeWorker, splitPilotInput } from "../pilot-orchestrator.ts";
 import { detectCoordinatorConflicts, resolveCoordinatorDirectory, type CoordinatorDirectory } from "../pilot-coordinator.ts";
@@ -356,7 +356,7 @@ export class CraftService extends ServiceFoundation {
     migrateCraftNotesLocationNotes(store);
     this.mods = new ModRegistry(store);
     this.modRuntime = new ModRuntime(store);
-    this.travelAdapter = new TravelAdapter({ selfEvolution: this.selfEvolution, memory: this, store });
+    this.travelAdapter = new TravelAdapter({ memory: this, store });
     this.inbox = new MessageInbox(store);
     this.pluginDiscovery = new PluginDiscovery(store);
     const calls = new ComponentTraceKernel(this.trace, "sdk");
@@ -512,18 +512,98 @@ export class CraftService extends ServiceFoundation {
   evolutionValueDecide(args: JsonObject): JsonObject { return evaluateEvolutionValue(args) as unknown as JsonObject; }
   evolutionDomainAdapters(args: JsonObject): JsonObject { return args.register === true ? this.selfEvolution.registerAdapter(args) : this.selfEvolution.ensureAdapters(); }
   evolutionProgramMemoryCapture(args: JsonObject): JsonObject { return this.selfEvolution.captureProgramMemory(args); }
-  evolutionProgramMemoryList(args: JsonObject): JsonObject { return this.selfEvolution.listProgramMemory(args); }
-  evolutionProgramMemorySubmit(args: JsonObject): JsonObject { return this.selfEvolution.submitProgramMemory(text(args.id, "id")); }
+  evolutionProgramMemoryList(args: JsonObject): JsonObject {
+    const result = this.selfEvolution.listProgramMemory(args);
+    return { ...result, items: (result.items as JsonObject[]).map(candidate => this.projectProgramMemory(candidate)) };
+  }
+  evolutionProgramMemoryGet(args: JsonObject): JsonObject {
+    const { candidate } = this.selfEvolution.getProgramMemory(args);
+    return { candidate: this.projectProgramMemory(candidate as JsonObject) };
+  }
+  private currentProgramMemoryProcedure(candidate: JsonObject): JsonObject | null {
+    if (typeof candidate.procedure_id !== "string" || typeof candidate.request_id !== "string"
+      || !this.store.find("experience_procedure", candidate.procedure_id)) return null;
+    const binding = this.store.find("program_memory_procedure_binding", candidate.request_id);
+    if (binding?.candidate_id !== candidate.id || binding?.candidate_digest !== candidate.digest) return null;
+    const procedure = activeProcedure(this.store, candidate.procedure_id);
+    return procedure?.request_id === candidate.request_id && procedure?.scope === (candidate.scope as JsonObject).id
+      && procedure?.candidate_version === candidate.procedure_candidate_version ? procedure : null;
+  }
+  private projectProgramMemory(candidate: JsonObject): JsonObject {
+    if (candidate.status !== "promoted" && candidate.status !== "submitted") return { ...candidate, routeable: false };
+    const active = this.currentProgramMemoryProcedure(candidate);
+    return { ...candidate, routeable: active !== null,
+      ...(candidate.status === "promoted" && !active ? { status: "review_required" } : {}),
+      ...(active ? { active_procedure_version: active.version } : {}) };
+  }
+  evolutionProgramMemorySubmit(args: JsonObject): JsonObject {
+    return this.store.transaction(() => {
+      const id = text(args.id, "id");
+      const { candidate, design, observations } = this.selfEvolution.submitProgramMemory(id, args.scope as JsonObject) as {
+        candidate: JsonObject; design: JsonObject; observations: JsonObject[];
+      };
+      if (candidate.status === "submitted" || candidate.status === "promoted") return candidate;
+      if (candidate.status !== "diagnostic") throw new Error("Program Memory candidate is no longer eligible for submission");
+      const observationRefs = observations.map(item => ({ id: item.id, version: item.version, evidence_ids: item.evidence_ids }));
+      const requestId = `workflow_evolution_request_${stableDigest({ id, digest: candidate.digest, observations: observationRefs }).slice(-24)}`;
+      const procedureId = `experience_procedure_${stableDigest({ request_id: requestId }).slice(-24)}`;
+      const binding = { candidate_id: id, candidate_digest: candidate.digest, design_id: design.id,
+        design_digest: design.contract_digest, procedure_id: procedureId, scope: candidate.scope };
+      this.workflowEvolutionPropose({ request_id: requestId, scenario_key: observations[0]!.scenario_key,
+        observation_ids: observations.map(item => item.id), hypothesis: "Validate this project operating procedure against the frozen evaluation design.",
+        design_axes: ["orchestration"], procedure_kind: "workflow", output_contract_ref: design.output_contract });
+      this.store.create("program_memory_procedure_binding", requestId, binding);
+      const result = this.workflowEvolutionProposalSubmit({ request_id: requestId, procedure_id: procedureId,
+        proposal_id: `workflow_evolution_proposal_${stableDigest(binding).slice(-24)}`, workflow_id: procedureId,
+        name: "Verify project operating procedure", description: candidate.statement,
+        steps: [{ id: "observe", type: "instruction", instruction: [candidate.statement, ...(candidate.steps as string[])].join("\n"),
+          side_effect: "read_only", requires: [], provides: ["verification_result"] }],
+        composition: {
+          entries: [{ id: "inspect", title: "Inspect project context", required_inputs: [], preconditions: [],
+            routes: [{ exit_id: "verified", step_ids: ["observe"] }] }],
+          exits: [{ id: "verified", title: "Verification result", required_outputs: ["verification_result"], acceptance_ref: design.output_contract }],
+        } });
+      const procedure = result.procedure as JsonObject;
+      return this.store.save("program_memory_candidate", id, { ...recordPayload(candidate), status: "submitted",
+        request_id: requestId, procedure_id: procedureId, procedure_candidate_version: procedure.candidate_version,
+        independent_evidence_count: observations.length, submitted_at: new Date().toISOString() });
+    });
+  }
   evolutionArtifactLineageRecord(args: JsonObject): JsonObject { return this.selfEvolution.recordArtifactLineage(args); }
   evolutionArtifactLineageRecall(args: JsonObject): JsonObject { return this.selfEvolution.recallArtifactLineage(args); }
+  evolutionArtifactLineageApply(args: JsonObject): JsonObject { return this.selfEvolution.applyArtifactLineage(args); }
+  evolutionArtifactLineageForget(args: JsonObject): JsonObject { return this.selfEvolution.forgetArtifactLineage(args); }
   evolutionProspectiveCreate(args: JsonObject): JsonObject { return this.selfEvolution.createProspectiveIntention(args); }
+  evolutionProspectiveList(args: JsonObject): JsonObject { return this.selfEvolution.listProspectiveIntentions(args); }
   evolutionProspectiveFire(args: JsonObject): JsonObject { return this.selfEvolution.fireProspectiveIntention(args); }
+  evolutionProspectiveRevoke(args: JsonObject): JsonObject { return this.selfEvolution.revokeProspectiveIntention(args); }
   evolutionResearchLink(args: JsonObject): JsonObject { return this.selfEvolution.linkResearch(args); }
   evolutionEvalSummary(args: JsonObject = {}): JsonObject { return this.selfEvolution.evalSummary(); }
   evolutionDomainCapture(args: JsonObject): JsonObject { return this.selfEvolution.captureDomainStatement(args); }
   evolutionFailureCapture(args: JsonObject): JsonObject { return this.selfEvolution.captureFailureCandidate(args); }
-  evolutionProgramMemoryPromote(args: JsonObject): JsonObject { return this.selfEvolution.promoteProgramMemory(args); }
-  evolutionProgramMemoryFeedback(args: JsonObject): JsonObject { return this.selfEvolution.recordProgramMemoryFeedback(args); }
+  evolutionProgramMemoryPromote(args: JsonObject): JsonObject {
+    return this.store.transaction(() => {
+      const { candidate } = this.selfEvolution.getProgramMemory(args);
+      if (!this.currentProgramMemoryProcedure(candidate as JsonObject)) throw new Error("Program Memory requires the current qualified Experience release");
+      return this.selfEvolution.promoteProgramMemory(args);
+    });
+  }
+  evolutionProgramMemoryFeedback(args: JsonObject): JsonObject {
+    return this.store.transaction(() => {
+      const candidate = this.selfEvolution.recordProgramMemoryFeedback(args);
+      if (!["revoked", "rejected"].includes(String(candidate.status)) || typeof candidate.procedure_id !== "string") return candidate;
+      const release = this.store.find("experience_release", candidate.procedure_id);
+      if (release?.status === "active" && (typeof release.valid_until !== "string" || Date.parse(release.valid_until) >= Date.now())) {
+        const evidenceId = `evidence_program_memory_revocation_${stableDigest({ candidate: candidate.id, version: candidate.version }).slice(-24)}`;
+        const revocation = this.evidenceRecord({ evidence_id: evidenceId, source_type: "program", confidence: "bounded",
+          claim: "Program Memory use was withdrawn for this project.", metadata: { project_scope_id: (candidate.scope as JsonObject).id,
+            candidate_id: candidate.id, content_stored: false } });
+        this.experienceProcedures.gate({ procedure_id: candidate.procedure_id, stage: "canary", passed: false,
+          release_channel: "current", expected_version: release.record_version, evidence_ids: [revocation.id] });
+      }
+      return candidate;
+    });
+  }
   evolutionRunbookCapture(args: JsonObject): JsonObject {
     return captureUserStatedRunbook(this.store, {
       statement: text(args.statement, "statement"), session_id: text(args.session_id, "session_id"),
@@ -537,8 +617,14 @@ export class CraftService extends ServiceFoundation {
   evolutionResearchImpact(args: JsonObject): JsonObject { return this.selfEvolution.applyResearchImpact(args); }
   evolutionResearchForget(args: JsonObject): JsonObject { return this.selfEvolution.forgetResearchNode(args); }
   evolutionReplicationPropose(args: JsonObject): JsonObject { return this.selfEvolution.proposeReplicationProcedure(args); }
-  evolutionTravelCapture(args: JsonObject): JsonObject { return this.travelAdapter.capture(args); }
-  evolutionTravelRecall(args: JsonObject): JsonObject { return this.travelAdapter.recall(args); }
+  evolutionTravelCapture(args: JsonObject): JsonObject {
+    const { now: _ignoredTime, ...input } = args;
+    return this.travelAdapter.capture(input);
+  }
+  evolutionTravelRecall(args: JsonObject): JsonObject {
+    const { now: _ignoredTime, include_stale: _ignoredHistory, ...input } = args;
+    return this.travelAdapter.recall(input);
+  }
   evolutionTravelApply(args: JsonObject): JsonObject { return this.travelAdapter.apply(args); }
   evolutionTravelForget(args: JsonObject): JsonObject { return this.travelAdapter.forget(args); }
   evolutionCreationWrite(args: JsonObject): JsonObject { return this.creationAdapter.write(args); }
@@ -1038,19 +1124,26 @@ export class CraftService extends ServiceFoundation {
     this.evaluationModelTicketList({ purpose, limit: 1 }); // Reuse the profile kernel's canonical purpose validator before any setup work.
     const active = (this.evaluationModelProfileList({ limit: 1_000 }).profiles as JsonObject[])
       .filter(profile => profile.lifecycle === "active" && Array.isArray(profile.purposes) && (profile.purposes as unknown[]).includes(purpose));
-    if (process.env.CRAFT_LEARNING_MODEL_HOST === "codex-cli") {
-      const codexProfiles = active.filter(profile => profile.provider === "codex-cli");
-      if (codexProfiles.length > 1) return { status: "ambiguous", reason: "multiple_active_profiles_for_purpose", profile_count: codexProfiles.length, profile: null };
-      if (codexProfiles.length === 1) {
-        const profile = codexProfiles[0]!;
+    const learningHost = process.env.CRAFT_LEARNING_MODEL_HOST;
+    if (learningHost === "codex-cli" || learningHost === "claude-code") {
+      const provider = this.modelProviders.find(item => item.provider === learningHost && item.host_managed_auth);
+      if (!provider?.models.small) return { status: "unavailable", reason: "host_model_provider_unavailable", profile: null };
+      const hostProfiles = active.filter(profile => profile.provider === learningHost);
+      if (hostProfiles.length > 1) return { status: "ambiguous", reason: "multiple_active_profiles_for_purpose", profile_count: hostProfiles.length, profile: null };
+      if (hostProfiles.length === 1) {
+        const profile = hostProfiles[0]!;
+        if (profile.model !== provider.models.small) return { status: "unavailable", reason: "host_model_profile_mismatch", profile: null };
         return { status: (profile.readiness as JsonObject | undefined)?.status ?? "unavailable", profile, idempotent: true };
       }
-      const profileId = `evaluation_model_profile_auto_codex_${stableDigest({ purpose, model: "gpt-6-luna" }).slice(-16)}`;
-      const created = this.evaluationModelProfileSave({ profile_id: profileId, provider: "codex-cli", model: "gpt-6-luna", purposes: [purpose],
+      const model = provider.models.small;
+      const hostName = learningHost === "codex-cli" ? "codex" : "claude";
+      const profileId = `evaluation_model_profile_auto_${hostName}_${stableDigest({ purpose, model }).slice(-16)}`;
+      const created = this.evaluationModelProfileSave({ profile_id: profileId, provider: learningHost, model, purposes: [purpose],
         network_execution_enabled: true, max_attempts: 1, max_output_tokens: 2_048 });
       const profile = created.profile as JsonObject;
       return { status: (created.readiness as JsonObject | undefined)?.status ?? "unavailable", profile, idempotent: created.idempotent === true };
     }
+    if (learningHost) return { status: "unavailable", reason: "unsupported_learning_model_host", profile: null };
     if (active.length > 1) return { status: "ambiguous", reason: "multiple_active_profiles_for_purpose", profile_count: active.length, profile: null };
     if (active.length === 1) {
       const profile = active[0]!;

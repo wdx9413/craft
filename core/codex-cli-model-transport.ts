@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executeHostProcess, type HostExecutor } from "./host-driver.ts";
+import { findClaudeExecutable } from "./infrastructure/claude-executable.ts";
 import type { JsonObject } from "./infrastructure/store.ts";
 import type { ChatRequest, ChatResult, ModelProviderSpec, ModelTransport } from "./model-gateway.ts";
 import { createFetchTransport } from "./model-gateway.ts";
@@ -9,6 +10,7 @@ import { sanitizeModelEgressRequest } from "./model-egress-security.ts";
 import { estimateTokens } from "./token-budget.ts";
 
 const MODEL = "gpt-6-luna";
+const CLAUDE_MODEL = "claude-sonnet-4-6";
 const TIMEOUT_MS = 120_000;
 const OUTPUT_LIMIT = 65_536;
 const OUTPUT_SCHEMA_LIMIT = 16_384;
@@ -116,9 +118,55 @@ export class CodexCliModelTransport implements ModelTransport {
   }
 }
 
-/** Route only the Codex Host profile to CLI; configured API profiles keep the standard gateway. */
+async function completeClaudeLearning(executor: HostExecutor | undefined, spec: ModelProviderSpec, request: ChatRequest, signal?: AbortSignal): Promise<ChatResult> {
+  signal?.throwIfAborted();
+  if (!spec.host_managed_auth) throw new Error("Claude Code transport requires a Host-managed provider");
+  const outbound = sanitizeModelEgressRequest(spec, request);
+  if (outbound.body.model !== CLAUDE_MODEL) throw new Error(`Claude Code model must be ${CLAUDE_MODEL}`);
+  const prompt = messagesFrom(outbound).map(message => `## ${message.role}\n${message.content}`).join("\n\n");
+  if (estimateTokens(prompt) > DEFAULT_LEARNING_INPUT_TOKEN_LIMIT) throw Object.assign(new Error("Claude Code input exceeds its token budget"), { code: "ERR_CLAUDE_INPUT_BUDGET_EXCEEDED" });
+  const schema = outputSchemaFrom(outbound);
+  const argv = ["--print", "--safe-mode", "--strict-mcp-config", "--tools", "", "--no-session-persistence",
+    "--max-turns", "1", "--model", CLAUDE_MODEL, "--output-format", "json"];
+  if (schema) argv.push("--json-schema", JSON.stringify(schema));
+  let result;
+  try {
+    const executable = executor ? "claude" : findClaudeExecutable();
+    result = await (executor ?? executeHostProcess)({ executable, argv, cwd: tmpdir(), stdin: prompt, timeoutMs: TIMEOUT_MS, outputLimit: OUTPUT_LIMIT, signal });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | null)?.code !== "ENOENT") throw error;
+    throw Object.assign(new Error("Claude Code executable is unavailable"), { name: "ClaudeHostUnavailable", code: "ERR_CLAUDE_HOST_UNAVAILABLE" });
+  }
+  signal?.throwIfAborted();
+  const failure = (code: string, name = "ClaudeHostResponseInvalid") => Object.assign(new Error("Claude Code did not return one complete model response"), { name, code });
+  if (result.timedOut) throw failure("ERR_CLAUDE_HOST_TIMEOUT", "ClaudeHostTimeout");
+  if (result.outputLimited) throw failure("ERR_CLAUDE_OUTPUT_BUDGET_EXCEEDED", "ClaudeHostOutputLimit");
+  if (result.signal !== null || result.cancelled) throw failure("ERR_CLAUDE_HOST_RESPONSE_INVALID");
+  let parsed: JsonObject;
+  try {
+    const value: unknown = JSON.parse(result.stdout);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw failure("ERR_CLAUDE_HOST_RESPONSE_INVALID");
+    parsed = value as JsonObject;
+  } catch { throw failure("ERR_CLAUDE_HOST_RESPONSE_INVALID"); }
+  if (parsed.is_error === true && typeof parsed.result === "string" && /\b(?:please run \/login|not logged in)\b/iu.test(parsed.result)) {
+    throw failure("ERR_CLAUDE_HOST_AUTHENTICATION", "ClaudeHostAuthentication");
+  }
+  const modelUsage = parsed.modelUsage;
+  const structured = parsed.structured_output;
+  const message = schema
+    ? structured && typeof structured === "object" && !Array.isArray(structured) ? JSON.stringify(structured) : null
+    : typeof parsed.result === "string" ? parsed.result : null;
+  if (result.exitCode !== 0 || parsed.type !== "result" || parsed.subtype !== "success" || parsed.is_error !== false
+    || !modelUsage || typeof modelUsage !== "object" || Object.keys(modelUsage).length !== 1
+    || !Object.hasOwn(modelUsage, CLAUDE_MODEL) || !message) throw failure("ERR_CLAUDE_HOST_RESPONSE_INVALID");
+  const usage = parsed.usage as JsonObject | undefined;
+  return { text: message, model: CLAUDE_MODEL, usage: usage && Number.isSafeInteger(usage.input_tokens) && Number.isSafeInteger(usage.output_tokens)
+    ? { input_tokens: Number(usage.input_tokens), output_tokens: Number(usage.output_tokens) } : null };
+}
+
+/** Keep model-only learning calls on the selected CLI and API profiles on the standard gateway. */
 export function createLearningModelTransport(host: string | undefined, executor?: HostExecutor): ModelTransport | undefined {
-  if (host !== "codex-cli") return undefined;
+  if (host !== "codex-cli" && host !== "claude-code") return undefined;
   const codex = new CodexCliModelTransport(executor);
   const api = createFetchTransport({ maxAttempts: 1 });
   let used = false;
@@ -129,6 +177,10 @@ export function createLearningModelTransport(host: string | undefined, executor?
       used = true;
       return true;
     },
-    complete: (spec, request, signal) => spec.provider === "codex-cli" ? codex.complete(spec, request, signal) : api.complete(spec, request, signal),
+    complete: (spec, request, signal) => {
+      if (spec.provider === host) return host === "codex-cli" ? codex.complete(spec, request, signal)
+        : completeClaudeLearning(executor, spec, request, signal);
+      return api.complete(spec, request, signal);
+    },
   };
 }

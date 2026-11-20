@@ -28,7 +28,7 @@ test("request output caps are valid positive integers for both wire protocols", 
 
 test("the provider catalog declares every requested family and no secret material", () => {
   assert.deepEqual(PROVIDER_CATALOG.map((spec) => spec.provider),
-    ["codex-cli", "deepseek", "volcengine", "qwen", "kimi", "glm", "minimax", "gpt", "claude"]);
+    ["codex-cli", "claude-code", "deepseek", "volcengine", "qwen", "kimi", "glm", "minimax", "gpt", "claude"]);
   const serialized = JSON.stringify(PROVIDER_CATALOG);
   for (const spec of PROVIDER_CATALOG) {
     assert.match(spec.api_key_env, /^[A-Z_][A-Z0-9_]*$/u);

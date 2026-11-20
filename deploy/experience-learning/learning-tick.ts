@@ -16,6 +16,7 @@ const SAFE_CLASSIFICATION_SKIP_REASONS = new Set([
   "ambiguous", "model_profile_unavailable", "model_profile_not_ready", "multiple_active_profiles_for_purpose",
   "multiple_models_require_explicit_profile", "needs_credential", "needs_enablement", "no_configured_model",
   "provider_unavailable", "unavailable", "explicitly_enable_network_execution",
+  "host_model_provider_unavailable", "host_model_profile_mismatch", "unsupported_learning_model_host",
 ]);
 
 function classificationSkipReason(classification: JsonObject): string {

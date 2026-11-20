@@ -1,9 +1,10 @@
 import type { JsonObject } from "../infrastructure/store.ts";
 import { DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } from 'craft-common-base/context-assets';
+import { PROJECT_BOUND_EXPERIENCE_TOOL_NAMES, PROJECT_EVOLUTION_TOOL_NAMES } from "./evolution-tools.ts";
 
 export type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 export type ParamType = "boolean" | "integer" | "number" | "object" | "array" | "string";
-export const CONTEXT_TOOL_INTENTS = ["recall", "knowledge", "memory", "experience", "code", "code-analysis"] as const;
+export const CONTEXT_TOOL_INTENTS = ["recall", "knowledge", "memory", "experience", "code", "code-analysis", "evolution"] as const;
 
 /**
  * Parameter types are inferred from the parameter *name*, not declared per tool. That
@@ -85,6 +86,9 @@ const ENUMS_BY_TOOL: Readonly<Record<string, Readonly<Record<string, readonly st
 // Domain contracts override the legacy name heuristic. Keep ambiguous names local
 // to their tool so fixing one product cannot change unrelated admin operations.
 const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>>> = {
+  craft_evolution_artifact_lineage_record: { reliability: "number" },
+  craft_evolution_creation_write: { reliability: "number" },
+  craft_evolution_research_impact: { max_nodes: "integer" },
   craft_task_replan_prepare: { task_version: "integer", launch_version: "integer", host_run_version: "integer", total_timeout_ms: "integer", total_budget_usd: "number", evidence_refs: "array" },
   craft_task_replan_decide: { proposal_version: "integer", confirmed_new_plan_and_budget: "boolean" },
   craft_task_replan_execute: { proposal_version: "integer" },
@@ -240,5 +244,9 @@ const objectSchema = (toolName: string, required: string[] = [], optional: strin
 
 export const tool = (name: string, description: string, required: string[] = [], readOnly = false,
   optional: string[] = []): Tool => ({
-  name, description, inputSchema: objectSchema(name, required, optional), ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
+  name, description, inputSchema: PROJECT_EVOLUTION_TOOL_NAMES.has(name)
+    ? objectSchema(name, [...required.filter(field => field !== "scope"), "project_binding"],
+      [...new Set([...optional, "scope"])])
+    : objectSchema(name, required, PROJECT_BOUND_EXPERIENCE_TOOL_NAMES.has(name) ? [...optional, "project_binding"] : optional),
+  ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
 });

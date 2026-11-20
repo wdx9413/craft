@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { surfaceToolNames, TOOLS } from "../core/mcp.ts";
+import { discoverContextTools } from "../core/mcp/context-tools.ts";
 
 const GENERAL_EVOLUTION_TOOLS = [
   "craft_evolution_value_decide", "craft_evolution_domain_adapters", "craft_evolution_domain_capture",
@@ -15,12 +16,25 @@ const GENERAL_EVOLUTION_TOOLS = [
   "craft_evolution_prospective_create", "craft_evolution_prospective_fire", "craft_evolution_eval_summary",
 ] as const;
 
-test("general self-evolution tools are projected by the full surface only", () => {
+test("the full surface exposes general self-evolution tools", () => {
   const full = new Set(surfaceToolNames("full"));
   for (const name of GENERAL_EVOLUTION_TOOLS) {
     assert.ok(full.has(name), `${name} must exist in the full surface`);
     assert.ok(TOOLS.some((tool) => tool.name === name), `${name} must exist in the live catalog`);
   }
+});
+
+test("Context discovery exposes project-bound evolution operations with a binding requirement", () => {
+  const { tools } = discoverContextTools({ intent: "evolution" }) as { tools: {
+    name: string; inputSchema: { required: string[] }; syscall_route: { tool: string };
+  }[] };
+  const byName = new Map(tools.map(tool => [tool.name, tool]));
+  for (const name of ["craft_evolution_program_memory_submit", "craft_evolution_artifact_lineage_forget",
+    "craft_evolution_prospective_fire", "craft_evolution_travel_apply", "craft_evolution_research_impact"]) {
+    assert.ok(byName.get(name)?.inputSchema.required.includes("project_binding"), name);
+    assert.equal(byName.get(name)?.syscall_route.tool, "craft_run");
+  }
+  assert.equal(byName.has("craft_evolution_domain_adapters"), false);
 });
 
 test("split component surfaces never own independent self-evolution state", () => {

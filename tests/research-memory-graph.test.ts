@@ -79,19 +79,19 @@ test("research adapter validates required fields and research layers", async () 
   try {
     assert.throws(() => f.kernel.captureResearchNode({ layer: "literature_fact", content: "x", scope: projectScope }), /id and content are required/u);
     assert.throws(() => f.kernel.captureResearchNode({ id: "x", layer: "unsupported", content: "x", scope: projectScope }), /layer must be one of/u);
-    assert.throws(() => f.kernel.captureResearchNode({ id: "x", layer: "literature_fact", content: "x", scope: {} }), /scope must declare/u);
-    assert.throws(() => f.kernel.recallResearch({ scope: {} }), /scope must declare/u);
+    assert.throws(() => f.kernel.captureResearchNode({ id: "x", layer: "literature_fact", content: "x", scope: {} }), /authorized project scope/u);
+    assert.throws(() => f.kernel.recallResearch({ scope: {} }), /authorized project scope/u);
     assert.throws(() => f.kernel.applyResearchImpact({ scope: projectScope }), /node_id is required/u);
     assert.throws(() => f.kernel.linkResearch({ source_id: "a", target_id: "b", relation: "derives_from", scope: projectScope, layer: "bad" }), /layer must be one of/u);
     const candidate = f.kernel.captureProgramMemory({
       id: "no-evidence", statement: "Reproduce without evidence", domain: "research", scope: projectScope,
     }) as JsonObject;
-    assert.throws(() => f.kernel.submitProgramMemory(String(candidate.id)), /threshold/u);
+    assert.throws(() => f.kernel.submitProgramMemory(String(candidate.id), projectScope), /evaluation design contract/u);
     f.kernel.captureProgramMemory({
       id: "no-evidence", statement: "Reproduce without evidence", domain: "research", scope: projectScope,
     });
-    assert.throws(() => f.kernel.submitProgramMemory(String(candidate.id)), /threshold/u);
-    assert.equal(((f.kernel.listProgramMemory({ status: "diagnostic" }) as JsonObject).items as JsonObject[]).length > 0, true);
+    assert.throws(() => f.kernel.submitProgramMemory(String(candidate.id), projectScope), /evaluation design contract/u);
+    assert.equal((f.kernel.listProgramMemory({ status: "diagnostic", scope: projectScope }).items as JsonObject[]).length > 0, true);
   } finally {
     f.store.close();
     await rm(f.root, { recursive: true, force: true });
@@ -173,16 +173,8 @@ test("replication steps become gated procedure candidates but never execute dire
     assert.equal(candidate.status, "diagnostic");
     assert.equal(candidate.domain, "research");
     assert.deepEqual(candidate.steps, ["load dataset", "run baseline"]);
-    assert.throws(() => f.kernel.submitProgramMemory(String(candidate.program_memory_id)), /threshold/);
-
-    for (const evidenceId of ["exp-18", "exp-19"]) {
-      f.kernel.captureProgramMemory({
-        id: "replication", statement: "Reproduce: Reproduce study 17", domain: "research",
-        scope: projectScope, evidence_ids: ["exp-17", evidenceId],
-      });
-    }
-    const submitted = f.kernel.submitProgramMemory(String(candidate.program_memory_id)) as JsonObject;
-    assert.equal(submitted.status, "submitted");
+    assert.deepEqual(candidate.source_ref, { kind: "knowledge_claim", id: "paper-claim", version: 1 });
+    assert.throws(() => f.kernel.submitProgramMemory(String(candidate.program_memory_id), projectScope), /evaluation design contract/u);
     assert.equal(f.store.find("procedure_configuration", "replication"), null);
   } finally {
     f.store.close();
@@ -205,6 +197,54 @@ test("research recall never leaks across project scopes", async () => {
       }),
       /not in scope/u,
     );
+  } finally {
+    f.store.close();
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("research impact and replication exclude foreign or forgotten source nodes", async () => {
+  const f = await fixture();
+  try {
+    f.kernel.captureResearchNode({ id: "public", layer: "literature_fact", content: "Known premise.", scope: projectScope });
+    f.kernel.captureResearchNode({ id: "foreign", layer: "experiment_observation", content: "Hidden premise.", scope: otherScope });
+    f.store.create("knowledge_claim", "global-unrelated", { content: "Other Knowledge.", scope: "global", kind: "fact" });
+    f.store.create("knowledge_relation", "legacy-cross-project", { source: { kind: "knowledge_claim", id: "global-unrelated" },
+      target: { kind: "knowledge_claim", id: "public" }, relation: "contradicts", confidence: "bounded",
+      valid_from: "2020-01-01T00:00:00.000Z", valid_to: null });
+    const impact = f.kernel.applyResearchImpact({ node_id: "public", scope: projectScope });
+    assert.equal(impact.root_challenged, false);
+    assert.deepEqual(impact.challenge_relation_ids, []);
+    const replication = { id: "replica", title: "Repeat measurement", steps: ["Measure once"], scope: projectScope };
+    assert.throws(() => f.kernel.proposeReplicationProcedure({ ...replication, source_id: "foreign" }), /not in scope/u);
+    f.kernel.forgetResearchNode({ id: "public", scope: projectScope });
+    assert.throws(() => f.kernel.applyResearchImpact({ node_id: "public", scope: projectScope }), /not in scope|unavailable/u);
+    assert.throws(() => f.kernel.linkResearch({ source_id: "public", target_id: "foreign", relation: "supports", scope: projectScope }), /not in scope|unavailable/u);
+  } finally {
+    f.store.close();
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("research links use only verified evidence from the bound project and retain bounded confidence", async () => {
+  const f = await fixture();
+  try {
+    f.kernel.captureResearchNode({ id: "premise", layer: "literature_fact", content: "Published claim.", scope: projectScope });
+    f.kernel.captureResearchNode({ id: "result", layer: "experiment_observation", content: "Measured result.", scope: projectScope });
+    const evidence = { source_type: "program", claim: "Measurement was recorded.", confidence: "confirmed" };
+    f.store.create("evidence", "global", evidence);
+    f.store.create("evidence", "foreign", { ...evidence, scope: otherScope });
+    f.store.create("evidence", "asserted", { ...evidence, scope: projectScope, record_origin: "caller_asserted" });
+    f.store.create("evidence", "local", { ...evidence, metadata: { project_scope_id: projectScope.id } });
+    const args = { source_id: "result", target_id: "premise", relation: "derives_from", scope: projectScope };
+    for (const id of ["global", "foreign", "asserted", "missing"]) {
+      assert.throws(() => f.kernel.linkResearch({ ...args, evidence_ids: [id] }), /research evidence is unavailable/u);
+    }
+    f.kernel.linkResearch({ ...args, evidence_ids: ["local"], confidence: "confirmed" });
+    const report = f.kernel.applyResearchImpact({ node_id: "premise", scope: projectScope });
+    assert.equal((report.impacted as JsonObject[])[0]?.relation_confidence, "bounded");
+    f.store.save("evidence", "local", { ...evidence, metadata: { project_scope_id: projectScope.id, revoked: true } });
+    assert.deepEqual(f.kernel.applyResearchImpact({ node_id: "premise", scope: projectScope }).impacted, []);
   } finally {
     f.store.close();
     await rm(f.root, { recursive: true, force: true });

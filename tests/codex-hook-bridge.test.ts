@@ -632,6 +632,9 @@ test("verified Experience finalization derives evolution domains and bounded wor
       const candidate = f.store.list("program_memory_candidate", 100, item => String(item.statement).startsWith("Verified workflow: " + prompt))[0];
       assert.ok(candidate, `a program memory candidate is captured for ${expectedDomain}`);
       assert.equal(candidate.domain, expectedDomain);
+      const proof = f.store.get("program_memory_verified_observation", String((candidate.evidence_ids as string[])[0]));
+      assert.equal(proof.source_session_id, base.session_id);
+      assert.equal(proof.turn_id, base.turn_id);
     }
 
     const pathBase = { cwd: f.root, session_id: "fallback-path", turn_id: "fallback-path-turn" };

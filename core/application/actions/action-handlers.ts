@@ -13,6 +13,8 @@ import { capabilityIterationGaps } from "../../capability-iteration-gaps.ts";
 import { contextUsageStatusline } from "../../context-usage-statusline.ts";
 import { codebaseLspReadiness } from "../../codebase-lsp-readiness.ts";
 import { lspCommandIsAbsolute } from "../../codebase-lsp-readiness.ts";
+import { bindEvolutionProjectArgs, bindProgramMemoryExperienceArgs } from "../../evolution-project-binding.ts";
+import { PROJECT_BOUND_EXPERIENCE_TOOLS, PROJECT_EVOLUTION_TOOLS } from "../../mcp/evolution-tools.ts";
 
 /** Caller identity is local; transport construction does not change internal dispatch. */
 export function createActionHandlers(service: CraftService, mountedComponent?: ComponentName): McpHandlerGroup {
@@ -21,7 +23,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
     if (args.members !== undefined && (!Array.isArray(args.members) || args.members.length !== 1 || args.members[0] !== mountedComponent)) throw new Error("Context members must match the mounted component");
     return { ...args, members: [mountedComponent] };
   };
-  return {
+  const handlers: McpHandlerGroup = {
       ...createRuntimeHandlers(service),
       ...createWorkHandlers(service),
       ...createEvaluationHandlers(service),
@@ -60,11 +62,16 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_evolution_domain_adapters: service.evolutionDomainAdapters.bind(service),
       craft_evolution_program_memory_capture: service.evolutionProgramMemoryCapture.bind(service),
       craft_evolution_program_memory_list: service.evolutionProgramMemoryList.bind(service),
+      craft_evolution_program_memory_get: service.evolutionProgramMemoryGet.bind(service),
       craft_evolution_program_memory_submit: service.evolutionProgramMemorySubmit.bind(service),
       craft_evolution_artifact_lineage_record: service.evolutionArtifactLineageRecord.bind(service),
       craft_evolution_artifact_lineage_recall: service.evolutionArtifactLineageRecall.bind(service),
+      craft_evolution_artifact_lineage_apply: service.evolutionArtifactLineageApply.bind(service),
+      craft_evolution_artifact_lineage_forget: service.evolutionArtifactLineageForget.bind(service),
       craft_evolution_prospective_create: service.evolutionProspectiveCreate.bind(service),
+      craft_evolution_prospective_list: service.evolutionProspectiveList.bind(service),
       craft_evolution_prospective_fire: service.evolutionProspectiveFire.bind(service),
+      craft_evolution_prospective_revoke: service.evolutionProspectiveRevoke.bind(service),
       craft_evolution_research_link: service.evolutionResearchLink.bind(service),
       craft_evolution_eval_summary: service.evolutionEvalSummary.bind(service),
       craft_evolution_domain_capture: service.evolutionDomainCapture.bind(service),
@@ -806,4 +813,13 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_a2a_message_stream: (a) => service.a2aMessageStream(a),
       craft_a2a_task_list: (a) => service.a2aTaskList(a),
     };
+  for (const name of PROJECT_EVOLUTION_TOOLS) {
+    const handler = handlers[name]!;
+    handlers[name] = args => handler(bindEvolutionProjectArgs(service.store, args, name));
+  }
+  for (const name of PROJECT_BOUND_EXPERIENCE_TOOLS) {
+    const handler = handlers[name]!;
+    handlers[name] = args => handler(bindProgramMemoryExperienceArgs(service.store, args));
+  }
+  return handlers;
 }

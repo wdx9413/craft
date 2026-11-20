@@ -264,6 +264,8 @@ export class ContextResolutionKernel {
         max_items: Math.min(MAX_CANDIDATE_POOL_ITEMS, Math.max(DEFAULT_CANDIDATE_POOL_ITEMS, maxItems * 2)),
         max_chars: Math.max(DEFAULT_CANDIDATE_POOL_CHARS, maxChars), candidate_mode: true,
         now: now.toISOString(), source_ids: sourceIds, scope_stack: scopeResolution.attempted_scopes, ...access, cognitive_purpose: access.purpose,
+        ...(typeof args.program_memory_scope_id === "string" && args.program_memory_scope_id === scopeResolution.canonical_scope.id
+          ? { program_memory_scope_id: args.program_memory_scope_id } : {}),
         memory_ids: requestedIds, required_refs: requiredRefs, allow_restricted: allowRestricted, include_working_notes: args.include_working_notes === true, include_stale: args.include_stale === true, domain: domain as EvalDomain | undefined, history_view: args.history_view === true, as_of: args.as_of as string | undefined, known_at: args.known_at as string | undefined });
         if (contribution.member !== contributor.member || !Number.isSafeInteger(contribution.omitted_count) || contribution.omitted_count < 0) throw new Error("Context contributor returned invalid member or omission count");
         if (contribution.items.length > 10_000 || contribution.items.reduce((n, item) => n + JSON.stringify(item).length, 0) > 8_000_000)

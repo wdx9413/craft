@@ -3,6 +3,7 @@ import test from "node:test";
 import { createActionHandlers } from "../core/application/actions/action-handlers.ts";
 import { McpServer } from "../core/interfaces/mcp-server.ts";
 import type { CraftService } from "../core/application/craft-service.ts";
+import { PROJECT_EVOLUTION_TOOL_NAMES } from "../core/mcp/evolution-tools.ts";
 
 test("all neutral action bindings use the supplied application and preserve caller arguments", async () => {
   const calls: Array<{ method: string; args: unknown[] }> = [];
@@ -27,6 +28,11 @@ test("all neutral action bindings use the supplied application and preserve call
   for (const [name, handler] of Object.entries(neutral)) {
     calls.length = 0;
     const args = name === "craft_memory_governance" ? { action: "tasks" } : supplied;
+    if (PROJECT_EVOLUTION_TOOL_NAMES.has(name)) {
+      assert.throws(() => handler(args), /active Host project binding/u, name);
+      assert.equal(calls.length, 0, name);
+      continue;
+    }
     const result = await handler(args);
     if (STORE_DIRECT.has(name)) { assert.equal(typeof result, "object", name); continue; }
     assert.ok(calls.length > 0, name);
