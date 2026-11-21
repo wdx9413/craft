@@ -13,8 +13,8 @@ export interface HookCliResult { exitCode: number; stdout?: string; stderr?: str
 export function runDataSecHookCli(args: string[], raw: string, env: NodeJS.ProcessEnv = process.env,
   onTiming?: (stage: "input_parse_ms" | "rules_load_ms" | "handler_ms", durationMs: number) => void): HookCliResult {
   const [host, event] = args as [Host, Event];
-  if (!(["claude", "codex"] as string[]).includes(host) || !(["PreToolUse", "PostToolUse", "UserPromptSubmit", "SessionEnd"] as string[]).includes(event)) {
-    return { exitCode: 2, stderr: "craft-datasec: expected <claude|codex> <PreToolUse|PostToolUse|UserPromptSubmit|SessionEnd>\n" };
+  if (!(["claude", "codex"] as string[]).includes(host) || !(["PreToolUse", "PostToolUse", "UserPromptSubmit"] as string[]).includes(event)) {
+    return { exitCode: 2, stderr: "craft-datasec: expected <claude|codex> <PreToolUse|PostToolUse|UserPromptSubmit>\n" };
   }
   let input: HookInput = {};
   try {
@@ -24,7 +24,7 @@ export function runDataSecHookCli(args: string[], raw: string, env: NodeJS.Proce
     onTiming?.("input_parse_ms", performance.now() - parseStarted);
     const rulesStarted = performance.now();
     const config = env.CRAFT_DATASEC_RULES;
-    const rules = (event === "UserPromptSubmit" || event === "SessionEnd") ? [] : config ? JSON.parse(readFileSync(config, "utf8")) as Rule[] : enabledBuiltinRules(env.CRAFT_DATASEC_ENABLE_RULES);
+    const rules = event === "UserPromptSubmit" ? [] : config ? JSON.parse(readFileSync(config, "utf8")) as Rule[] : enabledBuiltinRules(env.CRAFT_DATASEC_ENABLE_RULES);
     onTiming?.("rules_load_ms", performance.now() - rulesStarted);
     const root = env.CRAFT_DATASEC_DIR ?? join(homedir(), ".craft-datasec");
     const handlerStarted = performance.now();
@@ -58,7 +58,7 @@ let inputBytes = 0;
 const timings: { input_parse_ms?: number; rules_load_ms?: number; handler_ms?: number } = {};
 const result = runIfInvoked(process.argv[1], fileURLToPath(import.meta.url), () => {
   const args = process.argv.slice(2), [host, event] = args;
-  if (!(host === "claude" || host === "codex") || !(event === "PreToolUse" || event === "PostToolUse" || event === "UserPromptSubmit" || event === "SessionEnd")) {
+  if (!(host === "claude" || host === "codex") || !(event === "PreToolUse" || event === "PostToolUse" || event === "UserPromptSubmit")) {
     return runDataSecHookCli(args, readFileSync(0, "utf8"));
   }
   try { diagnostic = beginHookRuntimeDiagnostic({ data_root: craftPaths().root, request_id: randomUUID(), member: "datasec", event, host }); }

@@ -23,6 +23,7 @@ test("Datasec CLI validates events, uses configured rules, and emits closed fail
     assert.equal(runDataSecHookCli([], "{}").exitCode, 2);
     assert.equal(runDataSecHookCli(["bad", "PostToolUse"], "{}").exitCode, 2);
     assert.equal(runDataSecHookCli(["codex", "bad"], "{}").exitCode, 2);
+    assert.equal(runDataSecHookCli(["codex", "SessionEnd"], "{}").exitCode, 2);
     writeFileSync(join(f.temp, "rules.json"), JSON.stringify([{ name: "secret", pattern: "secret" }]));
     const result = runDataSecHookCli(["claude", "PostToolUse"], JSON.stringify({ hook_event_name: "PostToolUse", session_id: "fixture-session", tool_response: { text: "secret" } }), {
       CRAFT_DATASEC_DIR: f.root, CRAFT_DATASEC_RULES: join(f.temp, "rules.json"),
@@ -54,7 +55,7 @@ test("Datasec executable guard and output writer are deterministic", () => {
   assert.deepEqual(seen, ["warn\n", "ok\n"]);
   const built = JSON.parse(readFileSync(join(project, "plugins/craft-datasec/dist/build.json"), "utf8"));
   assert.equal(built.name, "craft-datasec");
-  assert.equal(built.version, "0.2.0");
+  assert.equal(built.version, "0.2.1");
   const bundle = readFileSync(join(project, "plugins/craft-datasec/dist/hook.mjs"), "utf8");
   assert.doesNotMatch(bundle, /from\s+["'](?:craft-common-store-local|@craft\/capability-datasec)(?:\/|["'])/u);
 });
@@ -65,7 +66,7 @@ test("independent Datasec is discoverable in release catalogs without joining th
   assert.equal(allReleaseProducts().length, 10);
   assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context", "craft-datasec"]);
   const contract = externalDistributionContract();
-  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.2.0");
+  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.2.1");
   assert.equal(contract.products.find(product => product.name === "craft-context")!.hook_member, "context");
   assert(releaseManifest().plugins.some(product => product.name === "craft-datasec"));
 });
@@ -400,7 +401,7 @@ test("independent plugin builds and executes both packaged hook manifests withou
       const manifest = JSON.parse(readFileSync(join(directory, `.${host}-plugin/plugin.json`), "utf8"));
       assert.equal(manifest.name, "craft-datasec"); assert.equal(manifest.mcpServers, undefined);
       const hooks = JSON.parse(readFileSync(join(directory, manifest.hooks), "utf8")).hooks;
-      assert.deepEqual(Object.keys(hooks).sort(), ["PostToolUse", "PreToolUse", "SessionEnd"]);
+      assert.deepEqual(Object.keys(hooks).sort(), ["PostToolUse", "PreToolUse"]);
       for (const [event, groups] of Object.entries(hooks)) {
         const handler = (groups as any)[0].hooks[0];
         assert(!handler.async); assert.equal(handler.timeout, 10);
@@ -417,7 +418,7 @@ test("independent plugin builds and executes both packaged hook manifests withou
 });
 
 
-test("Datasec native CLI SessionEnd keeps Host boundaries and ignores broken rule config", () => {
+test("Datasec leaves session mappings available for resumed sessions", () => {
   const f = fixture();
   try {
     const session = "cleanup-session";
@@ -426,12 +427,13 @@ test("Datasec native CLI SessionEnd keeps Host boundaries and ignores broken rul
       assert.equal(result.status, 0);
       assert(existsSync(join(f.root,host,createHash("sha256").update(session).digest("hex"))));
     }
-    const end = invoke(["codex", "SessionEnd"], JSON.stringify({hook_event_name:"SessionEnd",session_id:session}), f.root, join(f.temp,"missing-rules.json"));
-    assert.equal(end.status, 0);
-    assert.deepEqual(JSON.parse(end.stdout), {});
-    assert(!existsSync(join(f.root,"codex",createHash("sha256").update(session).digest("hex"))));
+    for (const host of ["claude", "codex"] as const) {
+      const end = invoke([host, "SessionEnd"], JSON.stringify({hook_event_name:"SessionEnd",session_id:session}), f.root, join(f.temp,"missing-rules.json"));
+      assert.equal(end.status, 2);
+      assert.match(end.stderr, /UserPromptSubmit/u);
+    }
+    assert(existsSync(join(f.root,"codex",createHash("sha256").update(session).digest("hex"))));
     assert(existsSync(join(f.root,"claude",createHash("sha256").update(session).digest("hex"))));
-    const empty = runDataSecHookCli(["codex","SessionEnd"], JSON.stringify({hook_event_name:"SessionEnd"}), {CRAFT_DATASEC_DIR:f.root});
-    assert.deepEqual(JSON.parse(empty.stdout!), {systemMessage:FAILURE});
+    assert.equal(runDataSecHookCli(["codex","SessionEnd"], JSON.stringify({hook_event_name:"SessionEnd"}), {CRAFT_DATASEC_DIR:f.root}).exitCode, 2);
   } finally { f.close(); }
 });

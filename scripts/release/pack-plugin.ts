@@ -44,6 +44,7 @@ for (const bundle of sourceBundles) {
 }
 
 writeComponentBuildInputs(root, pluginRoot, "craft", CRAFT_RELEASE_VERSION);
+writeComponentBuildInputs(root, root, "craft", CRAFT_RELEASE_VERSION);
 }
 
 for (const component of components) {
