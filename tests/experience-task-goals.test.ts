@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGoal, type ExperienceTaskGoalArgs } from "../core/experience-task-goals.ts";
+import { pruneExperienceTaskGoals, deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGoal, type ExperienceTaskGoalArgs } from "../core/experience-task-goals.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-task-goal-"));
@@ -190,5 +190,27 @@ test("Experience task goal paths reject links and handle unavailable directories
     await rm(queue);
     await mkdir(queue);
     assert.equal(readExperienceTaskGoal(f.args), null);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+
+test("abandoned asynchronous task goals expire and are pruned without following unrelated files", async () => {
+  const f = await fixture();
+  try {
+    assert.equal(pruneExperienceTaskGoals(join(f.root, "missing")), 0);
+    storeExperienceTaskGoal(f.args);
+    const pending = join(f.experienceDir, "scenario-classification", "pending");
+    const path = join(pending, (await readdir(pending))[0]!);
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    fs.utimesSync(path, old, old);
+    assert.equal(readExperienceTaskGoal(f.args), null);
+    assert.equal(fs.existsSync(path), false);
+    storeExperienceTaskGoal(f.args); fs.utimesSync(path, old, old);
+    await writeFile(join(pending, "unrelated.txt"), "unrelated");
+    assert.equal(pruneExperienceTaskGoals(f.experienceDir), 1);
+    assert.equal(pruneExperienceTaskGoals(f.experienceDir), 0);
+    assert.equal(fs.existsSync(join(pending, "unrelated.txt")), true);
+    storeExperienceTaskGoal(f.args);
+    assert.equal(readExperienceTaskGoal(f.args), f.args.task_goal);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });

@@ -1,3 +1,5 @@
+import { catalogOwner } from "./infrastructure/owned-catalog.ts";
+import { hookVerificationGap, type HookHostReadiness } from "./interfaces/codex-hook-signal-sanitizer.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ActivationProofKernel } from "./activation-proof.ts";
@@ -26,11 +28,12 @@ function boundedState(directory: string, name: string): JsonObject {
   }
 }
 
-function countStatus(store: CraftStore, kind: string): { counts: Record<string, number>; status: "available" | "incomplete" } {
+function countStatus(store: CraftStore | null, kind: string): { counts: Record<string, number>; status: "available" | "incomplete" | "owner_unavailable" } {
+  if (!store) return { counts: {}, status: "owner_unavailable" };
   const counts: Record<string, number> = {};
   try {
     for (const item of store.list(kind, 10_001, undefined, false)) {
-      const status = typeof item.status === "string" ? item.status : "unknown";
+      const status = typeof item.status === "string" ? item.status : typeof item.lifecycle === "string" ? item.lifecycle : "unknown";
       counts[status] = (counts[status] ?? 0) + 1;
     }
     return { counts, status: "available" };
@@ -80,59 +83,90 @@ function learningModelDiagnostic(store: CraftStore): JsonObject {
   }
 }
 
-export function contextReadinessDoctor(store: CraftStore, args: JsonObject = {}): JsonObject {
+export interface ContextDoctorSources { stores?: ReadonlyMap<string, CraftStore>; readiness?: HookHostReadiness }
+function recordCount(store: CraftStore | null, kind: string): number | null {
+  if (!store) return null;
+  try { return store.count(kind); } catch { return null; }
+}
+
+export function contextReadinessDoctor(store: CraftStore, args: JsonObject = {}, sources: ContextDoctorSources = {}): JsonObject {
+  const own = catalogOwner(store.paths.databaseDir), owned = sources.stores !== undefined || own !== undefined;
+  const owner = (name: string): CraftStore | null => sources.stores?.get(name) ?? (own === name || !owned ? store : null);
+  const contextStore = owner("context"), runtimeStore = owner("runtime"), knowledgeStore = owner("knowledge");
+  const count = (name: string, kind: string) => recordCount(owner(name), kind);
+
   const projectRoot = typeof args.project_root === "string" && args.project_root.trim() ? args.project_root.trim() : null;
   const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id.trim() : null;
-  const correctionStatus = countStatus(store, "context_correction_task");
+  const correctionStatus = countStatus(contextStore, "context_correction_task");
   let identity: JsonObject | null = null;
   let registryMigration: JsonObject | null = null;
-  if (projectRoot !== null) {
-    const aliases = store.list("scope_alias", 100, item => typeof item.alias === "string" && item.alias === projectRoot, false);
+  if (projectRoot !== null && contextStore) {
+    const aliases = contextStore.list("scope_alias", 100, item => typeof item.alias === "string" && item.alias === projectRoot, false);
     const canonicalId = aliases[0] ? (aliases[0].scope as JsonObject | undefined)?.id : null;
-    try { identity = typeof canonicalId === "string" ? store.get("project_identity", canonicalId) : null; } catch { identity = null; }
-    registryMigration = store.list("project_registry_migration", 1, item => item.project_root === projectRoot, false)[0] ?? null;
+    try { identity = typeof canonicalId === "string" ? contextStore.get("project_identity", canonicalId) : null; } catch { identity = null; }
+    registryMigration = contextStore.list("project_registry_migration", 1, item => item.project_root === projectRoot, false)[0] ?? null;
   }
+  const journals = runtimeStore ? runtimeStore.list("codex_hook_turn", 100, item => sessionId === null || item.session_id === sessionId, false) : [];
+  const latest = journals.filter(item => item.has_edit === true).at(-1) ?? journals.at(-1) ?? null;
+  const proofStores = [contextStore, knowledgeStore, owner("memory"), owner("experience"), runtimeStore].filter((source): source is CraftStore => source !== null);
+  const activation = proofStores.length ? new ActivationProofKernel(contextStore ?? proofStores[0]!, proofStores).doctor(sessionId ? { session_id: sessionId } : {}) : { status: "owner_unavailable", components: [] };
+  const trustStates = (activation.components as JsonObject[]).map(component => component.hook_trust_status);
+  const readiness: HookHostReadiness = { hook_trust: trustStates.includes("untrusted") ? "untrusted" : trustStates.includes("trusted") ? "trusted" : "unknown", ...sources.readiness };
   return {
     release: CRAFT_RELEASE_VERSION,
     surface: typeof args.surface === "string" ? args.surface : null,
     data_space_id: dataSpaceId(store.paths.root),
     project_root: projectRoot,
     session_id: sessionId,
-    identity: identity === null ? { status: "not_requested" } : { status: "registry_record_observed", id: String(identity.id) },
+    identity: identity === null ? { status: projectRoot && !contextStore ? "owner_unavailable" : "not_requested" } : { status: "registry_record_observed", id: String(identity.id) },
     migration: registryMigration === null ? { state: "not_observed" } : { state: registryMigration.state ?? "unknown",
       legacy_scope_id: registryMigration.legacy_scope_id ?? null, data_migrated: registryMigration.data_migrated === true },
-    activation: new ActivationProofKernel(store).doctor(sessionId ? { session_id: sessionId } : {}),
+    activation: { ...activation, data: { context_receipts: count("context", "context_resolution_receipt"),
+      memory_ledger: count("memory", "memory_ledger"), experience_observations: count("experience", "workflow_evolution_observation") } },
+    verification_gap: { ...hookVerificationGap(latest, readiness), readiness_source: sources.readiness ? "observed_host_readiness_port" : "not_probed" },
+    learning_chain: Object.fromEntries([
+      ["observations", "experience", "workflow_evolution_observation"], ["legacy_observations", "experience", "experience_observation"], ["candidates", "context", "program_memory_candidate"],
+      ["submission_operations", "context", "program_memory_submission"], ["enrollments", "context", "context_learning_enrollment"],
+      ["dispatches", "experience", "experience_evaluation_dispatch"], ["releases", "experience", "experience_release"],
+      ["contracts", "eval", "evaluation_contract"], ["task_effect_reports", "eval", "task_effect_evaluation"],
+    ].map(([stage, owning, kind]) => [stage!, { owner: owning, kind, records: count(owning!, kind!), ...countStatus(owner(owning!), kind!) }])),
     learning_workers: {
-      knowledge: learningWorkerDiagnostic(store.paths.runtimeDir, "knowledge", CRAFT_RELEASE_VERSION),
-      experience: learningWorkerDiagnostic(store.paths.runtimeDir, "experience", CRAFT_RELEASE_VERSION),
+      knowledge: runtimeStore ? learningWorkerDiagnostic(runtimeStore.paths.runtimeDir, "knowledge", CRAFT_RELEASE_VERSION) : { status: "owner_unavailable" },
+      experience: runtimeStore ? learningWorkerDiagnostic(runtimeStore.paths.runtimeDir, "experience", CRAFT_RELEASE_VERSION) : { status: "owner_unavailable" },
     },
-    learning_model: learningModelDiagnostic(store),
+    learning_model: runtimeStore ? learningModelDiagnostic(runtimeStore) : { status: "owner_unavailable", execution: "unverified" },
     learning_state: {
-      knowledge: boundedState(store.paths.knowledgeDir, "learning-worker-state.json"),
-      stage_cursor: boundedState(store.paths.knowledgeDir, "learning-stage-cursor.json"),
-      session_adjudication: boundedState(store.paths.knowledgeDir, "session-adjudication-cursor.json"),
-      classification_attempts: boundedState(store.paths.knowledgeDir, "classification-attempts.json"),
+      knowledge: knowledgeStore ? boundedState(knowledgeStore.paths.knowledgeDir, "learning-worker-state.json") : { status: "owner_unavailable" },
+      stage_cursor: knowledgeStore ? boundedState(knowledgeStore.paths.knowledgeDir, "learning-stage-cursor.json") : { status: "owner_unavailable" },
+      session_adjudication: knowledgeStore ? boundedState(knowledgeStore.paths.knowledgeDir, "session-adjudication-cursor.json") : { status: "owner_unavailable" },
+      classification_attempts: knowledgeStore ? boundedState(knowledgeStore.paths.knowledgeDir, "classification-attempts.json") : { status: "owner_unavailable" },
     },
     components: Object.fromEntries(COMPONENTS.map(component => {
-      const kind = component === "experience" ? "experience_observation" : component === "memory" ? "memory_ledger" : "knowledge_claim";
-      const status = countStatus(store, kind);
-      return [component, { records: store.count(kind), status_counts: status.counts, status_counts_status: status.status }];
+      const kind = component === "experience" ? "workflow_evolution_observation" : component === "memory" ? "memory_ledger" : "knowledge_claim";
+      const status = countStatus(owner(component), kind);
+      return [component, { owner: component, kind, records: count(component, kind), status_counts: status.counts, status_counts_status: status.status }];
     })),
     context: {
-      receipts: store.count("context_resolution_receipt"),
-      working_sets: store.count("context_working_set_receipt"),
-      emissions: store.count("context_emission"),
-      feedback: store.count("context_feedback"),
-      feedback_outcomes: feedbackOutcomes(store),
+      receipts: recordCount(contextStore, "context_resolution_receipt"),
+      working_sets: recordCount(contextStore, "context_working_set_receipt"),
+      emissions: recordCount(contextStore, "context_emission"),
+      feedback: recordCount(contextStore, "context_feedback"),
+      feedback_outcomes: contextStore ? feedbackOutcomes(contextStore) : {},
       corrections: correctionStatus.counts,
       correction_status_counts_status: correctionStatus.status,
       correction_states: CORRECTION_STATES,
-      resume_snapshots: store.count("context_resume_snapshot"),
-      latest_injected_tokens: latestInjectedTokens(store),
+      resume_snapshots: recordCount(contextStore, "context_resume_snapshot"),
+      latest_injected_tokens: contextStore ? latestInjectedTokens(contextStore) : null,
     },
-    usage_statusline: contextUsageStatusline(store, { session_id: sessionId ?? undefined }),
+    usage_statusline: contextStore ? contextUsageStatusline(contextStore, { session_id: sessionId ?? undefined }) : { status: "owner_unavailable" },
     iteration_plan: (() => {
-      try { return buildCapabilityIterationPlan(store, { project_scope_id: String(args.project_scope_id ?? "global") }); }
+      try {
+        if (!contextStore) return { status: "owner_unavailable" };
+        const plan = buildCapabilityIterationPlan(contextStore, { project_scope_id: String(args.project_scope_id ?? "global") });
+        return { ...plan, readiness: { knowledge_claim_statuses: countStatus(knowledgeStore, "knowledge_claim").counts,
+          knowledge_evaluation_cases: count("knowledge", "knowledge_evaluation_case"), memory_ledger: count("memory", "memory_ledger"),
+          experience_observations: count("experience", "workflow_evolution_observation"), context_emissions: count("context", "context_emission"), context_feedback: count("context", "context_feedback") } };
+      }
       catch { return { status: "requires_explicit_project_scope" }; }
     })(),
     execution_context: false,

@@ -9,7 +9,8 @@
       ],
       "cwd": ".",
       "env": {
-        "CRAFT_LEARNING_MODEL_HOST": "codex-cli"
+        "CRAFT_LEARNING_MODEL_HOST": "codex-cli",
+        "CRAFT_CONTEXT_MEMBERS": "knowledge,memory,experience,codebase,notes,eval,runtime"
       }
     }
   }

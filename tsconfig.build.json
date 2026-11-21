@@ -9,6 +9,6 @@
     "declaration": true,
     "sourceMap": true
   },
-  "include": ["core/**/*.ts", "bin/**/*.ts"],
+  "include": ["core/**/*.ts", "bin/**/*.ts", "scripts/owner-history-archive.ts", "scripts/owner-history-compress.ts", "scripts/owner-history-import.ts", "scripts/owner-storage-cutover.ts", "scripts/storage-capacity.ts"],
   "exclude": ["tests", "adapters"]
 }

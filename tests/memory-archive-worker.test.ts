@@ -14,6 +14,7 @@ import { MemoryFileStore } from '@craft/capability-memory/memory-files';
 import { launchMemoryArchiveWorker, queueHookMaintenance, runMemoryArchiveWorker } from "../core/interfaces/memory-archive-worker.ts";
 import { CraftService } from "../core/service.ts";
 import { acquireLearningWorkerLocks } from "../core/infrastructure/learning-worker-lock.ts";
+import { openCapabilityService } from "../core/interfaces/mcp/runtime.ts";
 import { pathToFileURL } from "node:url";
 
 test("maintenance request enqueue handles races and rejects identity conflicts", () => {
@@ -49,22 +50,22 @@ test("worker launch uses the proper runtime flags and tolerates spawn errors", t
 
 test("the Claude Hook uses its explicit Host even when source is an event reason", { timeout: 20_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-claude-hook-host-"));
-  let store: CraftStore | undefined;
+  let service: Awaited<ReturnType<typeof openCapabilityService>> | undefined;
   try {
     const hook = spawn(process.execPath, ["--experimental-strip-types", resolve("bin/craft-codex-hook.ts"), "--member", "memory", "--host", "claude"],
       { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "0" } });
     hook.stdout.resume(); hook.stderr.resume();
     hook.stdin.end(JSON.stringify({ hook_event_name: "SessionEnd", source: "clear", cwd: process.cwd(), session_id: "same-session" }));
     assert.equal(await new Promise<number | null>((resolveExit, reject) => { hook.once("error", reject); hook.once("exit", resolveExit); }), 0);
-    store = await new CraftStore(craftPaths(root)).open();
+    service = await openCapabilityService("memory", { CRAFT_DATA_DIR: root });
     const deadline = Date.now() + 15_000;
-    while (!store.list("memory_session_archive", 1).some(row => row.status === "archived") && Date.now() < deadline) await delay(100);
-    const archive = store.list("memory_session_archive", 1)[0];
+    while (!service.store.list("memory_session_archive", 1).some(row => row.status === "archived") && Date.now() < deadline) await delay(100);
+    const archive = service.store.list("memory_session_archive", 1)[0];
     assert.equal(archive?.session_digest, createHash("sha256").update(sessionStorageScopeId("claude", "same-session")).digest("hex"));
     const lock = join(craftPaths(root).runtimeDir, "learning-worker-memory-session-archive.lock.json");
     while (existsSync(lock) && Date.now() < deadline) await delay(50);
     assert.equal(existsSync(lock), false);
-  } finally { store?.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally { service?.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
 test("SessionEnd Hook returns while its detached worker completes the durable archive", { timeout: 30_000 }, async t => {

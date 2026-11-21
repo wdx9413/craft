@@ -1,3 +1,4 @@
+import { procedureTaskEffectFixture } from "./helpers/procedure-task-effect-fixture.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -12,7 +13,7 @@ import { WorkflowDesignWorkbench, DESIGN_QUESTIONS, rollupFeedbackByDay } from "
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { KnowledgeContribution } from '@craft/capability-knowledge/contribution';
 import { ExperienceContribution } from '@craft/capability-experience/contribution';
-import { payload } from "../core/digest.ts";
+import { stableDigest, payload } from "../core/digest.ts";
 import { contextFeedbackWeight } from "../core/context-feedback-weight.ts";
 
 async function fixture() {
@@ -315,7 +316,7 @@ test("a candidate becomes recallable only after ordered gates, and then earns we
   try {
     const procedureId = "proc-gated";
     f.store.create("experience_procedure", procedureId, { scope: "project:demo", lifecycle: "candidate", routeable: false,
-      completed_gates: [], trigger: "gated export", title: "gated", content_digest: "pg", procedure_kind: "prompt",
+      candidate_version: 1, completed_gates: [], trigger: "gated export", title: "gated", content_digest: stableDigest("pg"), procedure_kind: "prompt",
       acceptance_ref: "file", scenario_signature: {}, identity_digest: "pg" });
     const gateEvidence = service.evidenceRecord({ source_type: "program", confidence: "confirmed",
       claim: "gate evidence", locator: "gate.md" }) as JsonObject;
@@ -324,9 +325,10 @@ test("a candidate becomes recallable only after ordered gates, and then earns we
       required_refs: [{ member: "experience", id: procedureId }] };
     // Candidate: honestly unavailable to recall.
     await assert.rejects(reader.resolve(query), /Required Context reference is unavailable/u);
+    const qualification = procedureTaskEffectFixture(service, f.store.get("experience_procedure", procedureId));
     // Every ordered gate must pass before the asset becomes routeable.
     for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
-      service.experienceProcedures.gate({ procedure_id: procedureId, stage, passed: true, verdict: "passed",
+      service.experienceProcedures.gate({ ...qualification, procedure_id: procedureId, stage, passed: true, verdict: "passed",
         evidence_ids: [String(gateEvidence.id)] });
     }
     const promoted = f.store.get("experience_procedure", procedureId);

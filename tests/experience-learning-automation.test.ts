@@ -1,3 +1,4 @@
+import { procedureTaskEffectFixture } from "./helpers/procedure-task-effect-fixture.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
@@ -5,6 +6,12 @@ import type { JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "../core/digest.ts";
 import { AUTOMATIC_SIGNOFF_POLICY } from '@craft/capability-experience/scenario-evaluation';
 import { McpServer } from "../core/mcp.ts";
+
+const qualifications = new Map<string, JsonObject>();
+function evaluationResult(f: Awaited<ReturnType<typeof fixture>>, args: JsonObject): JsonObject {
+  const dispatch = f.store.get("experience_evaluation_dispatch", String(args.dispatch_id));
+  return f.service.experienceLearningEvaluationResult({ ...qualifications.get(String(dispatch.procedure_id)), ...args });
+}
 
 function evidence(f: Awaited<ReturnType<typeof fixture>>, dispatch: JsonObject, status = "passed", extra: JsonObject = {}): string {
   const id = `proof-${String(dispatch.id)}-${stableDigest({ status, extra }).slice(-8)}`;
@@ -15,7 +22,7 @@ function evidence(f: Awaited<ReturnType<typeof fixture>>, dispatch: JsonObject, 
     experience_evaluation_dispatch_id: dispatch.id, procedure_id: dispatch.procedure_id,
     procedure_version: dispatch.procedure_version, definition_digest: dispatch.definition_digest,
     procedure_definition_digest: dispatch.definition_digest,
-    baseline_version: dispatch.baseline_version, stage: dispatch.stage, status, evaluator_ref: "adapter:test", environment_digest: "sha256:environment",
+    baseline_version: dispatch.baseline_version, stage: dispatch.stage, status, evaluation_contract_digest: stableDigest({ scenario: dispatch.scenario_key, definition: dispatch.definition_digest }), evaluator_ref: "adapter:test", environment_digest: "sha256:environment",
     ...(entry && route ? { entry_id: entry.id, exit_id: route.exit_id, subscenario_id: route.subscenario_id } : {}), ...extra,
   } });
   return id;
@@ -23,8 +30,10 @@ function evidence(f: Awaited<ReturnType<typeof fixture>>, dispatch: JsonObject, 
 
 async function candidate(f: Awaited<ReturnType<typeof fixture>>, id: string): Promise<JsonObject> {
   f.service.evidenceRecord({ evidence_id: `source-${id}`, source_type: "program", confidence: "confirmed", claim: "verified source" });
-  return f.service.procedureConfigurationSave({ procedure_id: id, scope, title: "Verified workflow", scenario_id: id,
+  const procedure = f.service.procedureConfigurationSave({ procedure_id: id, scope, title: "Verified workflow", scenario_id: id,
     procedure_kind: "workflow", definition: spec(), evidence_ids: [`source-${id}`] }).procedure as JsonObject;
+  qualifications.set(String(procedure.id), procedureTaskEffectFixture(f.service, procedure, f.service.experienceProcedures, id === "pending-queue" ? 0.4 : 0.8));
+  return procedure;
 }
 
 test("public procedure gate cannot promote a candidate from caller-declared passes", async () => {
@@ -32,7 +41,7 @@ test("public procedure gate cannot promote a candidate from caller-declared pass
   try {
     const p = await candidate(f, "direct-gate-closed");
     assert.throws(() => f.service.experienceProcedureGate({ procedure_id: p.id, stage: "shadow", passed: true,
-      evidence_ids: ["source-direct-gate-closed"] }), /bound evaluation/i);
+      evidence_ids: ["source-direct-gate-closed"] }), /bound evaluation|route Evidence/i);
     assert.equal((f.service.experienceProcedureGet({ procedure_id: p.id }).procedure as JsonObject).routeable, false);
     const rejected = f.service.experienceProcedureGate({ procedure_id: p.id, stage: "shadow", passed: false,
       evidence_ids: ["source-direct-gate-closed"] });
@@ -54,7 +63,7 @@ test("caller-asserted evidence cannot impersonate an evaluator result", async ()
     const forged = f.store.get("evidence", "forged-evidence");
     const { record_origin: _origin, id: _id, version: _version, created_at: _created, updated_at: _updated, ...legacy } = forged;
     f.store.create("evidence", "legacy-unverified-origin", legacy);
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: ["legacy-unverified-origin"] }), /not confirmed and bound/i);
+    assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: ["legacy-unverified-origin"] }), /not confirmed and bound/i);
     assert.equal((f.service.experienceProcedureGet({ procedure_id: p.id }).procedure as JsonObject).routeable, false);
   } finally { await f.close(); }
 });
@@ -72,13 +81,13 @@ test("evaluation adapter can poll only bounded pending dispatches and resolved w
     assert.throws(() => f.service.experienceLearningEvaluationList({ limit: 1_001 }), /between 1 and 1000/u);
 
     const passedShadow = evidence(f, shadow);
-    const heldOut = f.service.experienceLearningEvaluationResult({ dispatch_id: shadow.id, evidence_ids: [passedShadow] }).next_dispatch as JsonObject;
+    const heldOut = evaluationResult(f, { dispatch_id: shadow.id, evidence_ids: [passedShadow] }).next_dispatch as JsonObject;
     const afterShadow = f.service.experienceLearningEvaluationList({ limit: 1 }) as JsonObject;
     assert.equal(afterShadow.count, 1);
     assert.equal((afterShadow.dispatches as JsonObject[])[0]?.id, heldOut.id);
 
     const failedHeldOut = evidence(f, heldOut, "failed", { held_out_set_ref: "held-out:v1", independent_of_training: true });
-    f.service.experienceLearningEvaluationResult({ dispatch_id: heldOut.id, evidence_ids: [failedHeldOut] });
+    evaluationResult(f, { dispatch_id: heldOut.id, evidence_ids: [failedHeldOut] });
     assert.deepEqual(f.service.experienceLearningEvaluationList({}), { dispatches: [], count: 0 });
   } finally { await f.close(); }
 });
@@ -94,9 +103,13 @@ test("Experience evaluation queues ordered gates and publishes only after Canary
       assert.equal(dispatch.stage, stage);
       const extra = stage === "held_out" ? { held_out_set_ref: "dataset:independent-v1", independent_of_training: true } : stage === "signoff" ? { signoff_policy_ref: AUTOMATIC_SIGNOFF_POLICY } : {};
       const id = evidence(f, dispatch, "passed", extra);
-      const result = f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [id] });
-      assert.equal(f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [id] }).idempotent, true);
-      assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: ["different-proof"] }), /already resolved with different evidence/u);
+      const result = evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [id] });
+      assert.equal(evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [id] }).idempotent, true);
+      if (stage === "held_out") {
+        // Held-out authority is the exact signed report; unused caller Evidence cannot change that operation.
+        assert.equal(evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: ["different-proof"] }).idempotent, true);
+        assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evaluation_id: "wrong-report" }), /not valid, trusted|Unknown task_effect/);
+      } else assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: ["different-proof"] }), /already resolved with different evidence/u);
       if (stage !== "canary") dispatch = result.next_dispatch as JsonObject;
       else {
         assert.equal((result.procedure as JsonObject).routeable, true);
@@ -113,21 +126,21 @@ test("Experience evaluation rejects unbound, weak, duplicate and out-of-order ev
     const p = await candidate(f, "reject-unbound");
     const dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: p.id }).dispatch as JsonObject;
     // A report claiming success has no authority to mutate the release gate.
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id,
+    assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id,
       report: { status: "complete", passed: 1 }, evidence_ids: ["external-eval-report"] }), /Unknown evidence/u);
     assert.equal((f.service.experienceProcedureGet({ procedure_id: p.id }).procedure as JsonObject).routeable, false);
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [] }), /between 1 and 20/u);
+    assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [] }), /between 1 and 20/u);
     const weak = `weak-${String(dispatch.id)}`;
     f.store.create("evidence", weak, { source_type: "program", confidence: "bounded", metadata: { experience_evaluation_dispatch_id: dispatch.id } });
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [weak] }), /not confirmed and bound/u);
+    assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [weak] }), /not confirmed and bound/u);
     const valid = evidence(f, dispatch);
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [valid, valid] }), /unique/u);
+    assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [valid, valid] }), /unique/u);
     const failed = evidence(f, dispatch, "failed");
-    const result = f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [failed] });
+    const result = evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [failed] });
     assert.equal((result.procedure as JsonObject).lifecycle, "rejected");
     assert.equal(result.next_dispatch, null);
     assert.throws(() => f.service.experienceLearningEvaluationDispatch({ procedure_id: p.id }), /unpublished candidate/u);
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [valid] }), /already resolved/u);
+    assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [valid] }), /already resolved/u);
     assert.throws(() => f.service.experienceLearningEvaluationDispatch({ procedure_id: "missing" }), /Unknown experience_procedure/u);
   } finally { await f.close(); }
 });
@@ -138,22 +151,27 @@ test("Held-out and Signoff require their distinct independent records", async ()
     const p = await candidate(f, "require-gates");
     let dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: p.id }).dispatch as JsonObject;
     const wrongBaseline = evidence(f, dispatch, "passed", { baseline_version: 999 });
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [wrongBaseline] }), /not confirmed and bound/u);
+    assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [wrongBaseline] }), /not confirmed and bound/u);
     for (const stage of ["shadow", "held_out"] as const) {
       const id = evidence(f, dispatch, "passed");
       if (stage === "held_out") {
-        assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [id] }), /independent case set/u);
-        const nonIndependent = evidence(f, dispatch, "passed", { held_out_set_ref: "training-set:v1", independent_of_training: false });
-        assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [nonIndependent] }), /independent case set/u);
+        assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [id] }), /requires evaluation_contract_id/);
+        const qualification = qualifications.get(String(p.id))!;
+        const report = f.store.get("task_effect_evaluation", String(qualification.evaluation_id));
+        const contract = f.store.get("evaluation_contract", String(qualification.evaluation_contract_id));
+        const heldOutTasks = ((contract.task_effect as JsonObject).task_set as JsonObject).held_out_task_refs;
+        f.store.save("task_effect_evaluation", String(report.id), { ...report, candidate_source_task_refs: heldOutTasks });
+        assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [id] }), /not valid, trusted/);
+        f.store.save("task_effect_evaluation", String(report.id), report);
       }
-      else dispatch = f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [id] }).next_dispatch as JsonObject;
+      else dispatch = evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [id] }).next_dispatch as JsonObject;
       if (stage === "held_out") {
         const proof = evidence(f, dispatch, "passed", { held_out_set_ref: "held-out:v1", independent_of_training: true });
-        dispatch = f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [proof] }).next_dispatch as JsonObject;
+        dispatch = evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [proof] }).next_dispatch as JsonObject;
       }
     }
     const missingSignoff = evidence(f, dispatch);
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [missingSignoff] }), /automatic policy Evidence/u);
+    assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: [missingSignoff] }), /automatic policy Evidence/u);
   } finally { await f.close(); }
 });
 
@@ -193,13 +211,13 @@ test("candidate digest drift blocks result application and unresolved replay inp
     const p = await candidate(f, "digest-drift");
     const dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: p.id }).dispatch as JsonObject;
     f.store.save("experience_evaluation_dispatch", String(dispatch.id), { ...dispatch, definition_digest: "sha256:tampered" });
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: ["unused"] }), /definition drifted/u);
+    assert.throws(() => evaluationResult(f, { dispatch_id: dispatch.id, evidence_ids: ["unused"] }), /definition drifted/u);
 
     const p2 = await candidate(f, "missing-replay-list");
     const dispatch2 = f.service.experienceLearningEvaluationDispatch({ procedure_id: p2.id }).dispatch as JsonObject;
     const proof = evidence(f, dispatch2);
-    f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch2.id, evidence_ids: [proof] });
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch2.id }), /already resolved with different evidence/u);
+    evaluationResult(f, { dispatch_id: dispatch2.id, evidence_ids: [proof] });
+    assert.throws(() => evaluationResult(f, { dispatch_id: dispatch2.id }), /already resolved with different evidence/u);
   } finally { await f.close(); }
 });
 

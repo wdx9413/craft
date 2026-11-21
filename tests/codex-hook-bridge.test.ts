@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { activeProcedure } from '@craft/capability-experience/procedure-release';
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { linkDirectory } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
@@ -599,7 +599,7 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
     const timestamp = new Date().toISOString();
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run("codex_hook_turn", String(legacyJournal.id), 1, JSON.stringify(legacyPayload), timestamp, timestamp);
-    f.service.learningCycleFinalize = (() => ({ status: "observed", observation: { id: "observation" } })) as typeof f.service.learningCycleFinalize;
+    f.service.learningCycleFinalize = (() => ({ status: "observed", observation: { id: "observation", scenario_key: "coding.explicit-verification" } })) as typeof f.service.learningCycleFinalize;
     const result = bridge.learning.finalize({ ...input, scenario_key: "coding.explicit-verification" });
     assert.equal(result?.status, "observed");
     assert.equal(bridge.journal.find(input)?.scenario_key, "coding.explicit-verification");
@@ -1033,11 +1033,20 @@ test("Hook signal sanitizer resolves observed edit paths only inside the project
     writeFileSync(join(root, "local.txt"), "ok");
     mkdirSync(join(root, "outside"));
     writeFileSync(join(root, "outside", "secret.txt"), "private");
+    symlinkSync(join(root, "local.txt"), join(root, "local-link.txt"));
+    const longDirectory = join(root, ...Array.from({ length: 9 }, (_, index) => `directory-${index}-0123456789abcdef`));
+    mkdirSync(longDirectory, { recursive: true });
+    writeFileSync(join(longDirectory, "file.txt"), "long path");
     const sanitizer = new HookSignalSanitizer();
     assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: "local.txt" } })?.observed_path, "local.txt");
+    assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: join(root, "local.txt") } })?.observed_path, "local.txt",
+      "absolute paths through a filesystem alias are compared by their real in-project target");
     assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: "../secret.txt" } })?.observed_path, undefined);
     assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: "missing.txt" } })?.observed_path, undefined);
     assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: "outside/secret.txt" } })?.observed_path, undefined);
+    assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: "outside" } })?.observed_path, undefined);
+    assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: "local-link.txt" } })?.observed_path, undefined);
+    assert.equal(sanitizer.signal({ tool_name: "Write", cwd: root, tool_input: { file_path: join(...Array.from({ length: 9 }, (_, index) => `directory-${index}-0123456789abcdef`), "file.txt") } })?.observed_path, undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -1801,6 +1810,27 @@ test("MCP learning completion rejects unbound, malformed, or unverified terminal
     f.store.create("context_resolution_receipt", "task-bound", { scope: { kind: "project", id: "project" }, task_id: "owner-task" });
     assert.equal((await call({ ...base, context_receipt_id: "task-bound" })).result.isError, true);
     const failed = await call({ ...base, verification_outcome: "failed" }); assert.equal(failed.result.structuredContent.status, "observed");
+  } finally { await dispose(f); }
+});
+
+test("verified Experience completion records Notes for absolute directories of observed project files", async () => {
+  const f = await fixture();
+  try {
+    const context = await f.service.contextOpen({ project_root: f.root, query: "completion", include_codebase: false });
+    const receiptId = String((context.receipt as JsonObject).id);
+    const projectScope = `project:${String(((context.receipt as JsonObject).scope as JsonObject).id).replace(/^project:/u, "")}`;
+    f.service.craftNotesCreateDevice({ id: "local", note: "Fixture local device authored for Notes lifecycle test" });
+
+    f.service.learningCycleFinalize({ host: "codex", session_id: "notes-session", task_id: "notes-task", turn_id: "notes-turn",
+      context_receipt_id: receiptId, verified: true, verification_outcome: "passed", verification_ref: "test:notes",
+      project_root: f.root, observed_paths: ["src/validation.ts", "src/lib/helper.ts", "../outside.ts", "/outside.ts", "src\\outside.ts", null] });
+
+    const usage = f.store.list("craft_note_usage", 20, item => item.session_id === "notes-session");
+    assert.deepEqual(usage.map(item => item.subject_key).sort(), [
+      `local:${join(f.root, "src")}`, `local:${join(f.root, "src", "lib")}`,
+    ]);
+    assert(usage.every(item => item.subject_type === "directory"));
+    assert(usage.every(item => item.project_id === undefined || item.project_id === projectScope));
   } finally { await dispose(f); }
 });
 
@@ -2728,5 +2758,83 @@ test("Stop stays quiet when the turn made no edits", async () => {
     await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "just answer" });
     const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
     assert.equal(stop.systemMessage, undefined);
+  } finally { await dispose(f); }
+});
+
+test("Claude native background completion finalizes its original receipt after a later notification turn", async () => {
+  const { nativeAsyncVerificationResults } = await import("../core/interfaces/codex-hook-command-result.ts");
+  for (const hookMode of [undefined, "1"]) {
+    const f = await fixture(), previous = process.env.CRAFT_HOOK_MODE;
+    if (hookMode) process.env.CRAFT_HOOK_MODE = hookMode; else delete process.env.CRAFT_HOOK_MODE;
+    try {
+      const bridge = new CodexHookBridge(f.service);
+      const origin = { session_host: "claude", session_id: "background-session", prompt_id: "origin-prompt", cwd: f.root };
+      await bridge.handle("context", { ...origin, hook_event_name: "UserPromptSubmit", prompt: "Fix the synthetic project check and verify it." });
+      await bridge.handle("context", { ...origin, hook_event_name: "PostToolUse", tool_name: "Write", tool_use_id: "edit",
+        tool_input: { file_path: join(f.root, "source.ts") }, tool_response: { success: true } });
+      await bridge.handle("context", { ...origin, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "sync-check", tool_input: { command: "node --test sync.test.mjs" }, tool_response: { exit_code: 0 } });
+      await bridge.handle("context", { ...origin, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "background-call", tool_input: { command: "node --test fixture.test.mjs" }, tool_response: { backgroundTaskId: "background-task" } });
+      const waiting = await bridge.handle("context", { ...origin, hook_event_name: "Stop" });
+      assert.match(String(waiting.systemMessage), /后台验证/);
+      assert.equal(f.store.list("workflow_evolution_observation", 10).length, 0, "one passed verifier must not finalize while another remains pending");
+      const old = bridge.journal.find({ ...origin, turn_id: origin.prompt_id })!;
+      assert.ok(old.closed_at); assert.equal(old.verification_outcome, null);
+      const notification = { ...origin, prompt_id: "notification-prompt" };
+      await bridge.handle("context", { ...notification, hook_event_name: "UserPromptSubmit", prompt: "Background task completed." });
+      const home = join(f.root, "native-host"), projects = join(home, "projects"); mkdirSync(projects, { recursive: true });
+      const transcript = join(projects, origin.session_id + ".jsonl");
+      const identity = { sessionId: origin.session_id, cwd: realpathSync(f.root) };
+      const records = [
+        { ...identity, type: "user", promptId: origin.prompt_id },
+        { ...identity, type: "assistant", uuid: "start", message: { content: [{ type: "tool_use", id: "background-call", name: "Bash", input: { command: "node --test fixture.test.mjs" } }] } },
+        { ...identity, type: "user", promptId: origin.prompt_id, sourceToolAssistantUUID: "start", toolUseResult: { interrupted: false, backgroundTaskId: "background-task" }, message: { content: [{ type: "tool_result", tool_use_id: "background-call" }] } },
+        { ...identity, type: "attachment", attachment: { type: "queued_command", commandMode: "task-notification", origin: { kind: "task-notification", producer: "session-task" }, prompt: "<task-notification><task-id>background-task</task-id><tool-use-id>background-call</tool-use-id><status>completed</status></task-notification>" } },
+      ];
+      writeFileSync(transcript, records.map(value => JSON.stringify(value)).join("\n"));
+      const completions = nativeAsyncVerificationResults({ ...notification, hook_event_name: "Stop", transcript_path: transcript }, home);
+      assert.equal(completions.length, 1); assert.equal(completions[0]!.turn_id, origin.prompt_id);
+      for (let retry = 0; retry < 2; retry++) {
+        await bridge.handle("context", completions[0]!);
+        await bridge.handle("context", { ...completions[0], hook_event_name: "Stop" });
+      }
+      const observations = f.store.list("workflow_evolution_observation", 10);
+      assert.equal(observations.length, 1); assert.equal(observations[0]!.outcome, "passed");
+      assert.equal(bridge.journal.find({ ...origin, turn_id: origin.prompt_id })!.context_receipt_id, old.context_receipt_id);
+      assert.equal(bridge.journal.find({ ...notification, turn_id: notification.prompt_id })!.verification_outcome, null);
+    } finally { if (previous === undefined) delete process.env.CRAFT_HOOK_MODE; else process.env.CRAFT_HOOK_MODE = previous; await dispose(f); }
+  }
+});
+
+
+test("Stop exposes an unsupported native terminal envelope without claiming Host authentication failure", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "unsupported-terminal", turn_id: "unsupported-terminal" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "update and verify" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "unsupported-edit" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "unsupported-verify", tool_input: { command: "node --test fixture.test.mjs" }, tool_response: "completed without a native exit status" });
+    const stopped = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert.match(String(stopped.systemMessage), /原生回执格式不受支持/);
+    assert.equal(bridge.journal.find(base)!.verification_outcome, null);
+  } finally { await dispose(f); }
+});
+
+
+test("an observation missing its scene identity never creates a differently classified Program Memory candidate", async () => {
+  const f = await fixture();
+  try {
+    const original = f.service.learningCycleFinalize.bind(f.service);
+    f.service.learningCycleFinalize = args => {
+      const result = original(args);
+      return { ...result, observation: { ...(result.observation as JsonObject), scenario_key: null } };
+    };
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "missing-observation-scene", turn_id: "missing-observation-scene" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "change this output" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "missing-scene-edit" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "missing-scene-verify", tool_input: { command: "node --test fixture.test.mjs" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert.equal(f.store.count("workflow_evolution_observation"), 1);
+    assert.equal(f.store.count("program_memory_candidate"), 0);
+    assert.ok(f.store.events("codex-hook").some(event => event.event_type === "codex_hook.failed" && (event.payload as JsonObject).error_type === "program_memory_capture_failed"));
   } finally { await dispose(f); }
 });

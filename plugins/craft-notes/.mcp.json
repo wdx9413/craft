@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "craft-notes": {
+      "command": "node",
+      "args": [
+        "dist/plugin/craft-mcp.cjs",
+        "--product",
+        "notes"
+      ],
+      "cwd": "."
+    }
+  }
+}

@@ -397,3 +397,26 @@ function unratedFromClaude(statusline: JsonObject): void {
   assert.equal(outcomes.irrelevant, 1);
   assert.equal(outcomes.stale, 1);
 }
+
+test("owned Doctor leaves absent or inaccessible owners unknown and accepts only objective trust", async () => {
+  const f = await fixture();
+  try {
+    const absent = contextReadinessDoctor(f.store, { project_root: f.root }, { stores: new Map() });
+    assert.equal((absent.identity as JsonObject).status, "owner_unavailable");
+    assert.equal((absent.activation as JsonObject).status, "owner_unavailable");
+    assert.equal((absent.iteration_plan as JsonObject).status, "owner_unavailable");
+    const peerOnly = contextReadinessDoctor(f.store, {}, { stores: new Map([["memory", f.store]]) });
+    assert.ok((peerOnly.activation as JsonObject).components);
+    f.store.create("activation_proof_receipt", "untrusted", { component: "memory", session_id: "s", plugin_release: CRAFT_RELEASE_VERSION, hook_trust_status: "untrusted" });
+    f.store.create("codex_hook_turn", "journal", { trace_id: "doctor-journal", session_id: "s", has_edit: true, signals: [] });
+    const untrusted = contextReadinessDoctor(f.store, { session_id: "s" });
+    assert.equal((untrusted.verification_gap as JsonObject).reason, "hook_untrusted");
+    const originalCount = f.store.count.bind(f.store), originalList = f.store.list.bind(f.store);
+    f.store.count = (kind: string) => { if (kind === "knowledge_claim") throw new Error("OwnerReadUnavailable"); return originalCount(kind); };
+    f.store.list = (kind, ...args) => { if (kind === "knowledge_claim") throw new Error("OwnerReadUnavailable"); return originalList(kind, ...args); };
+    const unavailable = contextReadinessDoctor(f.store);
+    assert.equal(((unavailable.components as JsonObject).knowledge as JsonObject).records, null);
+    assert.equal(((unavailable.components as JsonObject).knowledge as JsonObject).status_counts_status, "incomplete");
+    f.store.count = originalCount; f.store.list = originalList;
+  } finally { await dispose(f); }
+});

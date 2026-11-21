@@ -15,6 +15,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { initializeConfig } from "../core/config.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
+import { openCapabilityService } from "../core/interfaces/mcp/runtime.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 
 test("Context open advertises the actual material budget bounds", () => {
@@ -190,7 +191,7 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     assert.equal(invalidDiscoveryResult.isError, true);
     assert.equal(invalidDiscoveryFailure.error_code, "INVALID_INPUT");
     assert.equal(invalidDiscoveryFailure.stage, "input_validation");
-    assert.deepEqual((invalidDiscoveryFailure.details as Record<string, unknown>).allowed, ["recall", "knowledge", "memory", "experience", "code", "code-analysis"]);
+    assert.deepEqual((invalidDiscoveryFailure.details as Record<string, unknown>).allowed, ["recall", "knowledge", "memory", "experience", "code", "code-analysis", "evolution"]);
     server.handlers.craft_throw_string = () => { throw "string failure"; };
     const stringFailure = await server.handle({ id: 5, method: "tools/call", params: { name: "craft_throw_string" } });
     assert.equal((((stringFailure?.result as Record<string, unknown>).content as Record<string, unknown>[])[0]).text, "string failure");
@@ -567,12 +568,14 @@ test("Context MCP keeps background read polls out of Trace storage and MCP stdou
     const lines = output.trim().split("\n");
     assert.equal(lines.length, 1);
     assert.equal(JSON.parse(lines[0]!).result.serverInfo.version, CRAFT_RELEASE_VERSION);
-    const store = await new CraftStore(craftPaths(root)).open();
-    try {
-      const readPolls = new Set(["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list", "craft_knowledge_source_list"]);
-      assert.equal(store.list("trace_event", 10_000, event => readPolls.has(String(event.operation_id))).length, 0);
-      assert.equal(store.list("telemetry_event", 10_000, event => readPolls.has(String(event.operation))).length, 0);
-    } finally { store.close(); }
+    const readPolls = new Set(["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list", "craft_knowledge_source_list"]);
+    for (const owner of ["context", "eval", "experience", "knowledge", "runtime"] as const) {
+      const service = await openCapabilityService(owner, { CRAFT_DATA_DIR: root, CRAFT_CONTEXT_MEMBERS: "" });
+      try {
+        assert.equal(service.store.list("trace_event", 10_000, event => readPolls.has(String(event.operation_id))).length, 0, owner);
+        assert.equal(service.store.list("telemetry_event", 10_000, event => readPolls.has(String(event.operation))).length, 0, owner);
+      } finally { service.close(); }
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

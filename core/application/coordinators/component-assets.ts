@@ -10,23 +10,49 @@ const KINDS: Record<string, string[]> = { knowledge: ["knowledge_claim", "knowle
 const array = (v: unknown): JsonObject[] => Array.isArray(v) ? v as JsonObject[] : [];
 function version(v: unknown, key: string): number { if (!Number.isSafeInteger(v) || Number(v) < 1) throw new Error(`${key} must be a positive integer`); return Number(v); }
 
+function referenceDigest(record: JsonObject): string {
+  const identity = { ...record };
+  for (const key of ["content_ref", "definition_ref"]) {
+    const ref = record[key];
+    if (ref && typeof ref === "object" && !Array.isArray(ref)) {
+      const { path: _machinePath, ...contentIdentity } = ref as JsonObject;
+      identity[key] = contentIdentity;
+      if (key === "content_ref") { delete identity.content; delete identity.content_unavailable; }
+    }
+  }
+  return stableDigest(identity);
+}
+
 /** Shared revision reads; each product keeps authority over restoration and promotion. */
 export class ComponentAssets {
   readonly store: CraftStore;
   constructor(store: CraftStore) { this.store = store; }
-  private locate(member: string, args: JsonObject): { kind: string; current: JsonObject } {
+  private locate(member: string, args: JsonObject, hydrate = true): { kind: string; current: JsonObject } {
     const kind = String(args.kind ?? KINDS[member]?.[0]);
     if (!KINDS[member]?.includes(kind)) throw new Error("Asset kind does not belong to this component");
-    const current = this.store.get(kind, text(args.asset_id, "asset_id")); this.authorize(current, args);
+    const id = text(args.asset_id, "asset_id");
+    const metadata = this.requireMetadata(kind, id);
+    this.authorize(metadata, args, true);
+    if (!hydrate) return { kind, current: metadata };
+    const current = this.store.get(kind, id); this.authorize(current, args);
     return { kind, current };
   }
-  private authorize(record: JsonObject, args: JsonObject): void {
-    const value = record.scope ?? (record.workspace_id ? { kind: "workspace", id: record.workspace_id } : this.store.get("knowledge_source", String(record.source_id)).scope);
+  private requireMetadata(kind: string, id: string, recordVersion?: number): JsonObject {
+    const record = this.store.findMetadata(kind, id, recordVersion);
+    if (!record) throw new Error("Asset version is unavailable");
+    return record;
+  }
+  private authorize(record: JsonObject, args: JsonObject, metadata = false): void {
+    const readSource = (id: string) => metadata ? this.requireMetadata("knowledge_source", id) : this.store.get("knowledge_source", id);
+    const value = record.scope ?? (record.workspace_id ? { kind: "workspace", id: record.workspace_id } : readSource(String(record.source_id)).scope);
     const scope = typeof value === "string" ? scopeFromKey(value) : object(value, "scope") as { kind: string; id: string };
-    if (scope.kind !== text(args.scope_kind, "scope_kind") || scope.id !== text(args.scope_id, "scope_id")
+    const requestedId = text(args.scope_id, "scope_id");
+    // Experience stores a canonical project ID directly; legacy claims use kind:id.
+    const canonicalProjectId = scope.kind === "project" && typeof value === "string" && !scope.id.startsWith("project:") && value === requestedId;
+    if (scope.kind !== text(args.scope_kind, "scope_kind") || scope.id !== requestedId && !canonicalProjectId
       || !scopeAllows(scopeEnvelope(record.scope_envelope, scope), scopeAccess(args)) || record.sensitivity === "restricted" && args.allow_restricted !== true) throw new Error("Asset scope or audience denied");
     if (record.source_id) {
-      const source = this.store.get("knowledge_source", String(record.source_id));
+      const source = readSource(String(record.source_id));
       const sourceScope = source.scope as { kind: string; id: string };
       if (!scopeAllows(scopeEnvelope(source.scope_envelope, sourceScope), scopeAccess(args))) throw new Error("Asset source audience denied");
     }
@@ -36,23 +62,77 @@ export class ComponentAssets {
       state: item.status ?? item.lifecycle ?? "unknown", created_at: item.created_at, author: item.proposed_by ?? item.author ?? "unknown", source_id: item.source_id ?? null };
   }
   inspect(member: string, args: JsonObject): JsonObject {
-    const { kind, current } = this.locate(member, args), action = String(args.action ?? "history");
+    const action = String(args.action ?? "history");
+    if (action === "resolve") return this.resolve(member, args);
+    const { kind, current } = this.locate(member, args, action !== "history");
+    if (action === "reference") {
+      this.authorize(this.requireMetadata(kind, String(current.id), version(args.version, "version")), args, true);
+      const selected = this.store.get(kind, String(current.id), version(args.version, "version"));
+      this.authorize(selected, args);
+      return { reference: { owner: member, kind, id: selected.id, version: selected.version,
+        digest: referenceDigest(selected), scope: { kind: args.scope_kind, id: args.scope_id } } };
+    }
     if (action === "explain") return this.explain(member, kind, current, args);
     if (action === "history") {
       const limit = args.limit === undefined ? 30 : version(args.limit, "limit"); if (limit > 100) throw new Error("History limit exceeds 100");
       const before = args.before_version === undefined ? Number.MAX_SAFE_INTEGER : version(args.before_version, "before_version");
-      const records = this.store.history(kind, String(current.id), before, limit + 1).filter(item => { this.authorize(item, args); return true; });
+      const records = this.store.historyMetadata(kind, String(current.id), before, limit + 1).filter(item => { this.authorize(item, args, true); return true; });
       return { member, kind, current: this.summary(current), versions: records.slice(0, limit).map(item => this.summary(item)), has_more: records.length > limit, next_before_version: records.length > limit ? records[limit - 1]!.version : null, restorations: this.store.list("asset_restoration", 100, r => r.member === member && (r.asset_id === current.id || r.restored_id === current.id)) };
     }
+    this.authorize(this.requireMetadata(kind, String(current.id), version(args.version, "version")), args, true);
     const selected = this.store.get(kind, String(current.id), version(args.version, "version")); this.authorize(selected, args);
     if (action === "read") return { member, kind, version: this.summary(selected), asset: selected, execution_authorized: false, historical: selected.version !== current.version };
     if (action !== "diff") throw new Error("Unknown asset inspection action");
     const otherId = String(args.target_asset_id ?? current.id);
+    this.authorize(this.requireMetadata(kind, otherId), args, true);
     this.authorize(this.store.get(kind, otherId), args);
+    this.authorize(this.requireMetadata(kind, otherId, version(args.target_version, "target_version")), args, true);
     const other = this.store.get(kind, otherId, version(args.target_version, "target_version")); this.authorize(other, args);
     const keys = [...new Set([...Object.keys(payload(selected)), ...Object.keys(payload(other))])].sort();
     const changes = keys.filter(key => stableDigest(selected[key] ?? null) !== stableDigest(other[key] ?? null)).map(key => ({ field: key, before: selected[key] ?? null, after: other[key] ?? null }));
     return { member, kind, from: this.summary(selected), to: this.summary(other), content_changed: this.summary(selected).content_revision === null || this.summary(other).content_revision === null ? null : this.summary(selected).content_revision !== this.summary(other).content_revision, changes };
+  }
+  private resolve(member: string, args: JsonObject): JsonObject {
+    const ref = object(args.reference, "reference");
+    const scope = object(ref.scope, "reference.scope");
+    // Reject a foreign owner and scope before looking up an asset, including its existence.
+    if (ref.owner !== member || !KINDS[member]?.includes(String(ref.kind))
+      || scope.kind !== args.scope_kind || scope.id !== args.scope_id) return { status: "denied" };
+    const requestedVersion = version(ref.version, "reference.version");
+    const digest = text(ref.digest, "reference.digest");
+    const id = text(ref.id, "reference.id");
+    const current = this.store.findMetadata(String(ref.kind), id);
+    if (!current) return { status: "missing" };
+    this.authorize(current, args, true);
+    if (["revoked", "retracted", "superseded"].includes(String(current.status ?? current.lifecycle))) return { status: "revoked" };
+    if (current.status === "expired" || current.valid_until && Date.parse(String(current.valid_until)) <= Date.now()) return { status: "expired" };
+    const metadata = this.store.findMetadata(String(ref.kind), id, requestedVersion);
+    if (!metadata) return { status: "version_mismatch" };
+    this.authorize(metadata, args, true);
+    let selected: JsonObject;
+    try { selected = this.store.get(String(ref.kind), id, requestedVersion); }
+    catch (error) {
+      if (error instanceof Error && /digest mismatch|digest drifted/u.test(error.message)) return { status: "digest_mismatch" };
+      return { status: "unavailable" };
+    }
+    this.authorize(selected, args);
+    if (selected.content_unavailable === true) return { status: "unavailable" };
+    if (referenceDigest(selected) !== digest) return { status: "digest_mismatch" };
+    if (selected.source_id) {
+      const source = this.store.get("knowledge_source", String(selected.source_id));
+      if (source.status !== "active" || source.trust === "untrusted") return { status: "revoked" };
+      if (source.valid_until && Date.parse(String(source.valid_until)) <= Date.now()) return { status: "expired" };
+    }
+    if (member === "experience" && ref.kind === "experience_procedure" && selected.lifecycle === "routeable") {
+      const active = activeProcedure(this.store, id);
+      if (!active || active.version !== selected.version || active.definition_digest !== selected.definition_digest) return { status: "revoked" };
+    }
+    if (member === "codebase") {
+      const workspace = this.store.find("workspace", String(selected.workspace_id));
+      const activation = this.store.find("codebase_activation", `codebase_activation_${selected.workspace_id}`);
+      if (!workspace || workspace.latest_checkpoint_id !== selected.checkpoint_id || activation?.status !== "active") return { status: "revoked" };
+    }
+    return { status: "resolved", reference: ref, asset: selected, execution_authorized: false };
   }
   private explain(member: string, kind: string, current: JsonObject, args: JsonObject): JsonObject {
     const source = current.source_id ? this.store.get("knowledge_source", String(current.source_id)) : kind === "knowledge_source" ? current : null;
@@ -104,24 +184,43 @@ export class ComponentAssets {
     return { member, kind, asset: this.summary(current), reasons, eligible_by_record_state: reasons.length === 0, relevance_evaluated: false,
       receipts: receipts.slice(0, 100).map(r => ({ id: r.id, version: r.version, created_at: r.created_at, memory_refs: r.memory_refs, contributions: r.contributions, query_digest: r.query_digest })), receipts_truncated: receipts.length > 100, followed: "unknown", ...details };
   }
-  restore(member: string, args: JsonObject, commands: { memory: Command; knowledge: Command; experience: Command; codebase: Command }): JsonObject {
+  restore(member: string, args: JsonObject, commands: { memory: Command; knowledge: Command; experience: Command; codebase: Command; revisionEvidence?: Command }): JsonObject {
     return this.store.transaction(() => {
       const { kind, current } = this.locate(member, args);
       if (kind !== KINDS[member]![0]) throw new Error("Only primary component assets can be restored");
+      this.authorize(this.requireMetadata(kind, String(current.id), version(args.version, "version")), args, true);
       const previous = this.store.get(kind, String(current.id), version(args.version, "version")); this.authorize(previous, args);
       const reason = text(args.reason, "reason");
       if (previous.source_id) {
         const source = this.store.get("knowledge_source", String(previous.source_id));
         if (source.status !== "active" || source.trust === "untrusted") throw new Error("Restoration cannot bypass source revocation");
       }
-      const requestId = text(args.request_id, "request_id"), identity = { member, asset_id: current.id, version: previous.version, reason_digest: stableDigest(reason), scope_kind: args.scope_kind, scope_id: args.scope_id };
+      const edited = args.action === "register_edit";
+      if (args.action !== undefined && !edited) throw new Error("Unknown asset restoration action");
+      if (edited && member !== "knowledge" && member !== "memory") throw new Error("Use this component's existing definition editor to register a revision");
+      const content = edited ? args.content : previous.content;
+      if (edited) {
+        text(content, "content");
+        if (previous.content_unavailable === true) throw new Error("Recover the original asset body before registering an edited draft");
+      }
+      const requestId = text(args.request_id, "request_id"), identity = { member, asset_id: current.id, version: previous.version, reason_digest: stableDigest(reason), scope_kind: args.scope_kind, scope_id: args.scope_id,
+        ...(edited ? { registration_mode: "human_edit", content_digest: stableDigest(content) } : {}) };
       const id = `asset_restore_${stableDigest([member, requestId]).slice(-24)}`, existing = this.store.find("asset_restoration", id);
       if (existing) { if (existing.request_digest !== stableDigest(identity)) throw new Error("Restoration request conflict"); return { restoration: existing, idempotent: true }; }
       if (current.version !== version(args.expected_version, "expected_version")) throw new Error("Asset changed; reload before restoration");
       const newId = `restored_${stableDigest(identity).slice(-24)}`;
+      let revision: JsonObject | undefined;
+      if (edited) {
+        if (!commands.revisionEvidence) throw new Error("Human edit evidence registration is unavailable");
+        revision = commands.revisionEvidence({ evidence_id: `asset_edit_${stableDigest(identity).slice(-24)}`,
+          source_ref: { owner: member, kind, id: previous.id, version: previous.version, digest: referenceDigest(previous),
+            scope: { kind: args.scope_kind, id: args.scope_id } }, content_digest: stableDigest(content) });
+      }
+      const sourceId = revision?.source_id ?? previous.source_id;
+      const evidenceIds = revision?.evidence_ids ?? previous.evidence_ids ?? [];
       let result: JsonObject;
-      if (member === "knowledge") result = commands.knowledge({ claim_id: newId, kind: previous.kind, content: previous.content, scope: previous.scope, scope_envelope: current.scope_envelope, source_id: previous.source_id, evidence_ids: previous.evidence_ids ?? [], tags: previous.tags ?? [] });
-      else if (member === "memory") result = commands.memory({ candidate_id: newId, source_id: previous.source_id, kind: previous.kind, content: previous.content, scope_kind: args.scope_kind, scope_id: args.scope_id, scope_envelope: current.scope_envelope, sensitivity: current.sensitivity, confidence: "bounded", evidence_ids: previous.evidence_ids ?? [], topic: previous.topic || undefined, proposed_by: "version-restoration", auto_accept: false });
+      if (member === "knowledge") result = commands.knowledge({ claim_id: newId, kind: previous.kind, content, scope: previous.scope, scope_envelope: current.scope_envelope, source_id: sourceId, evidence_ids: evidenceIds, tags: previous.tags ?? [] });
+      else if (member === "memory") result = commands.memory({ candidate_id: newId, source_id: sourceId, kind: previous.kind, content, scope_kind: args.scope_kind, scope_id: args.scope_id, scope_envelope: current.scope_envelope, sensitivity: current.sensitivity, confidence: "bounded", evidence_ids: evidenceIds, topic: previous.topic || undefined, proposed_by: edited ? "human-edit-registration" : "version-restoration", auto_accept: false });
       else if (member === "experience") {
         if (!procedureDefinitionRef(previous.definition_ref)) throw new Error("Restoration requires a checked Procedure definition");
         const definition = new ProcedureDefinitionStore(this.store).read(previous.definition_ref);
@@ -134,7 +233,7 @@ export class ComponentAssets {
         result = commands.codebase({ workspace_id: current.workspace_id, checkpoint_id: previous.checkpoint_id, index_id: newId, analyzer: previous.analyzer === "builtin-regex-static-v1" ? "heuristic" : "typescript" });
       }
       let restored = object(result.claim ?? result.candidate ?? result.procedure ?? result.index, "restored asset");
-      if (member === "knowledge" && previous.document_id) {
+      if (member === "knowledge" && previous.document_id && !edited) {
         restored = this.store.save(kind, String(restored.id), { ...payload(restored), source_revision_id: previous.source_revision_id, document_id: previous.document_id, document_digest: previous.document_digest, fragment_id: previous.fragment_id, revalidation_required: true });
         result = { ...result, claim: restored };
       }

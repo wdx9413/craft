@@ -24,6 +24,10 @@ Trace / Outcome → Experience Observation → Scenario Signature → Pattern
 
 三者都使用 `craft_component_readiness_get` 返回无正文的状态、数量与下一安全动作。它既避免空库时的盲目工具调用，也明确声明 `model_effect_proven: false`，直到有真实 Host 对照数据为止。
 
+Memory 的日常积累分两条入口：Hook 只从当前用户消息中识别明确、稳定的偏好或项目陈述；任务结束时，Host Skill 再检查整个任务是否形成了可复用且有依据的事实、决定或做法，并用当前会话 ID 与项目 scope 调用 `craft_memory_capture_observed_fact`。后者依赖 Host 遵循 Skill，MCP 本身不会在每轮结束时自动读取或总结聊天。两条入口都只写会话层，后续提交、冲突处理和跨会话晋升仍受 Memory 治理控制。
+
+Notes 是独立的位置上下文能力，不是第四种通用知识账本。Host 在已完成任务真实使用目录或文件后，可向 Notes 记录有边界的使用证据；目录达到跨任务、跨会话门槛后只形成待确认候选，文件引用也必须绑定真实产物或已确认的 Codebase 引用。首次使用还需要带用户说明的活动设备。当前 Craft Context 工具面缺少 Notes 写入口、设备未登记或候选未确认时，都不能声称 Notes 已参与默认召回；也不能把这些内容改写到 Memory、Knowledge 或 Experience 里代替。
+
 “Skill 已读取”或 marketplace 中 `enabled = true` 都不是 MCP 已挂载的证明。只有当前会话对该组件完成 `initialize → tools/list → craft_component_diagnose`，才能分别证明包已加载、日常工具面匹配、以及这个 MCP 进程确实可达。Hook 是独立的可选自动化层：Hook 解析或信任失败不得被描述成“组件数据为空”。
 
 ## Codex 与 Claude Code 生命周期闭环
@@ -35,7 +39,7 @@ Trace / Outcome → Experience Observation → Scenario Signature → Pattern
 | 组件 | 事件 | 允许行为 | 明确禁止 |
 | --- | --- | --- | --- |
 | Knowledge | `UserPromptSubmit` | 当前 `cwd` 的 project scope 内解析 reviewed Claim，注入 bounded Context Receipt | 读取 transcript、candidate 入 Context、加载 Memory |
-| Memory | `UserPromptSubmit` | 同 scope 解析 Memory；仅 `记住：…` / `/remember: …` 写入明确同意的 statement | 普通对话落库、自然语言猜 topic、跨项目回退 |
+| Memory | `UserPromptSubmit` | 同 scope 解析 Memory；从用户明确表达的稳定偏好、项目约定和事实中做保守分类，写入 session 层并由治理策略决定是否提交；显式 `记住：…` / `/remember: …` 保留原文陈述路径 | 保存普通任务文本或聊天全文、猜测长期事实、绕过 scope 和冲突治理 |
 | Experience | `UserPromptSubmit` / `PostToolUse` / `Stop` | 开始时装载已路由 Procedure；结束时记录编辑/验证的 digest、退出状态与终态 Evidence；两条独立 Turn 才建 request | 保存命令/输出正文、模型自述当验收、直接提交 Workflow |
 
 Hook 的 `Stop` 不是后台 Agent，也不接管、续跑或唤醒 Codex。它只将本轮已有的“修改 + 可验证终态”交给 Observation Ledger；缺少验收命令、被取消或未知退出状态时不沉淀 Experience。

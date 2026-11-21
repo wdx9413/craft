@@ -2,18 +2,19 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
+import { RELEASE_PRODUCTS, releaseProductVersion } from "../../core/release-catalog.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const version = (JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string }).version;
-for (const { name } of RELEASE_PRODUCTS) {
+for (const product of RELEASE_PRODUCTS) {
+  const { name } = product;
   const manifest = JSON.parse(await readFile(join(root, "plugins", name, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string };
   assert.equal(manifest.name, name);
-  assert.equal(manifest.version, version, `${name} version mismatch`);
+  assert.equal(manifest.version, releaseProductVersion(product), `${name} version mismatch`);
   await access(join(root, "plugins", name, "dist", "plugin", "craft-mcp.cjs"));
 }
 for (const path of ["marketplace.json", ".agents/plugins/marketplace.json"]) {
   const marketplace = JSON.parse(await readFile(join(root, path), "utf8")) as { version?: string; plugins: unknown[] };
   assert.equal(marketplace.version, version, `${path} version mismatch`);
 }
-process.stdout.write(`Plugin and marketplace versions are aligned at ${version}.\n`);
+process.stdout.write(`Independent plugin versions and marketplace catalog validated at ${version}.\n`);

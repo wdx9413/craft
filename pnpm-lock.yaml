@@ -19,44 +19,44 @@ importers:
         specifier: 1.3.0
         version: 1.3.0(zod@4.6.7)
       '@craft/capability-codebase':
-        specifier: 0.20.5
-        version: 0.20.5(typescript@6.0.3)
-      '@craft/capability-context':
-        specifier: 0.20.8
-        version: 0.20.8
-      '@craft/capability-datasec':
-        specifier: 0.1.7
-        version: 0.1.7
-      '@craft/capability-experience':
-        specifier: 0.20.13
-        version: 0.20.13
-      '@craft/capability-knowledge':
-        specifier: 0.20.8
-        version: 0.20.8
-      '@craft/capability-memory':
-        specifier: 0.20.8
-        version: 0.20.8
-      '@craft/craft-notes':
         specifier: 0.20.7
-        version: 0.20.7
+        version: 0.20.7(typescript@6.0.3)
+      '@craft/capability-context':
+        specifier: 0.21.0
+        version: 0.21.0
+      '@craft/capability-datasec':
+        specifier: 0.2.0
+        version: 0.2.0
+      '@craft/capability-experience':
+        specifier: 0.21.0
+        version: 0.21.0
+      '@craft/capability-knowledge':
+        specifier: 0.20.9
+        version: 0.20.9
+      '@craft/capability-memory':
+        specifier: 0.20.9
+        version: 0.20.9
+      '@craft/craft-notes':
+        specifier: 0.20.8
+        version: 0.20.8
       '@modelcontextprotocol/sdk':
         specifier: 1.32.2
         version: 1.32.2(supports-color@7.1.0)(zod@4.6.7)
       craft-common-base:
-        specifier: 0.20.4
-        version: 0.20.4
+        specifier: 0.20.5
+        version: 0.20.5
       craft-common-log:
-        specifier: 0.20.12
-        version: 0.20.12
+        specifier: 0.20.13
+        version: 0.20.13
       craft-common-ontology:
         specifier: 0.20.7
         version: 0.20.7
       craft-common-store-local:
-        specifier: 0.20.4
-        version: 0.20.4
+        specifier: 0.21.0
+        version: 0.21.0
       craft-eval:
-        specifier: 0.7.3
-        version: 0.7.3
+        specifier: 0.7.4
+        version: 0.7.4
       quickjs-emscripten:
         specifier: 0.32.0
         version: 0.32.0
@@ -162,50 +162,34 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@craft/capability-codebase@0.20.5':
-    resolution: {integrity: sha512-IJKvYBZ/G1ZFwOBDXDU6BjdWIIpni5g/xoVDEXptkNqZttflfo5L6pCA/R+lx2+jrkMJ34aSZTXq/qJbCf3wBA==}
+  '@craft/capability-codebase@0.20.7':
+    resolution: {integrity: sha512-FdHxjurkjUxh+mGZNzyPZiGpRcBQc3tU9gN+xoUBIErinNLqhD/X3lek/Z4boisEKtfzWB5pGqcB/0LTEPsAnw==}
     engines: {node: '>=23'}
     peerDependencies:
       typescript: 6.0.3
 
-  '@craft/capability-context@0.20.8':
-    resolution: {integrity: sha512-wPa3H4/A8SQ0eCaRjtt2eG/f1nbvXUx4A7EGjTEfiQuFHB1L8ZH7Lb0WsakOnJ+S5ybA6+QWgrA4kYBlfAvNfw==}
+  '@craft/capability-context@0.21.0':
+    resolution: {integrity: sha512-4dQzejRI6MotI2cOTIa2K8f/UW0gs+VnF9xNkAOty3ZmScQw8+SEpmutxhRvwf12KKvU1haTwpzGfJLff02gTg==}
     engines: {node: '>=23'}
 
-  '@craft/capability-datasec@0.1.7':
-    resolution: {integrity: sha512-KexO59zjW/zm7mxuSovKsvY1tZwWAA1U6Z4oD9xobxAm1PGXJy1s+CVnWFa0Zk0eVw9OiOoRcdGrdPbebxKXhw==}
+  '@craft/capability-datasec@0.2.0':
+    resolution: {integrity: sha512-lppF4KwMvjsEz6ANFFuuhEbpMSCj8dRma2Uq2CkHq5TLMT7yli7TfgJoW5CWw6MHcMra9Q4QXR0BmzI/smYgog==}
     engines: {node: '>=23'}
 
-  '@craft/capability-experience@0.20.13':
-    resolution: {integrity: sha512-/UUlVM0RzlWhYNi5LXBgVHKw1A3+3V6IMuB6OxpkkcUqWEQsLGTdKHftMRLELifewD1QW5iRvzgulUH0UkRi+w==}
+  '@craft/capability-experience@0.21.0':
+    resolution: {integrity: sha512-osordEiNjUqu8hpoeIXulv6RgKVL+PGHJzCSBZYoknqL9Q3oaXMXclrCTtxfMtrZ8fQqFwxOzn0/0Cb8qcHM5Q==}
     engines: {node: '>=23'}
 
-  '@craft/capability-experience@0.20.5':
-    resolution: {integrity: sha512-bXixq+GoEvIwYzZgLiJ+kGAYlF8rdDuZ/s2IPRPsrcFGj/tHaImX7k3B8n3/ocNgOmisOapjhvZoyKCLn94dAQ==}
+  '@craft/capability-knowledge@0.20.9':
+    resolution: {integrity: sha512-bP/BdDgM0Dn99p6X/AYf71k8hjw4g0mX6zYnYrRABWQrmtmVe1jp2+bpRuRE8hqnNCU1hVMbIBQQe8Mta60k9w==}
     engines: {node: '>=23'}
 
-  '@craft/capability-knowledge@0.20.5':
-    resolution: {integrity: sha512-nVnCPQWe2NgfbLGc5DBCrY3sURqVa+0wz3hWufJF7pg1XR1qUDKclTA8qh2XXR5ehla+fLjKZdCGARVh0B0l4w==}
+  '@craft/capability-memory@0.20.9':
+    resolution: {integrity: sha512-8lgB+R7K7McmTR7F/lzpSTkTOhdXr/KbTjVc2Hg+MkNv6Zs32bCbP7NOMWHpdpYzrU6g0c8mVUXlm5uhGv3bsQ==}
     engines: {node: '>=23'}
 
-  '@craft/capability-knowledge@0.20.7':
-    resolution: {integrity: sha512-UwqePSA9ldFPH2+PxGuOjwO6lEqV+DwsvzRs26fC1aENUx1MrA0cLKM0LJKghKXP1KvOXehoamHBkLgVfyRrEw==}
-    engines: {node: '>=23'}
-
-  '@craft/capability-knowledge@0.20.8':
-    resolution: {integrity: sha512-U+rUMHmLSSb2Oh9NcbmBj4pyxH3crPP+G+rXw9jP2rAstQsGiEMPwLId/Nm5ZudiJsMi8EO998f4tcs3wol51w==}
-    engines: {node: '>=23'}
-
-  '@craft/capability-memory@0.20.5':
-    resolution: {integrity: sha512-IF2K2ez7/YHn/ufAdumLZkTbRoJtIFSYt3rXwWS/9oBEwxmQmYIwexmh8berX8N3TaEEgHX0GJ6f4l1mSGGnXA==}
-    engines: {node: '>=23'}
-
-  '@craft/capability-memory@0.20.8':
-    resolution: {integrity: sha512-RFyxEVLcTGZCjShU5zYp8KCMPHi6d7888RjtHAxRJQFcO0iA6HQQFzjBpI14iq0WN5EatnphZosq7Hjpexwetg==}
-    engines: {node: '>=23'}
-
-  '@craft/craft-notes@0.20.7':
-    resolution: {integrity: sha512-tP5wz9fLy+x6mWfl5NYSrVckfnrmDjlIhd63DsR1NrgEA+wzzF/HLHR5JkZMfLbjNh/0fFZdgwZqrBrphO3dZQ==}
+  '@craft/craft-notes@0.20.8':
+    resolution: {integrity: sha512-O/dbl5FM1/7mtz9RwBCesjK62/h3IevN6oOVnPHNKnyjBcoRgmY4HUqBLUTmEYQeVukL3VBeD4cnyBVDeSjzvw==}
     engines: {node: '>=23'}
 
   '@esbuild/aix-ppc64@0.28.2':
@@ -537,32 +521,24 @@ packages:
     resolution: {integrity: sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==}
     engines: {node: '>= 0.10'}
 
-  craft-common-base@0.20.4:
-    resolution: {integrity: sha512-3oGyyGnBJ9LbzAVgsEp838DPIzV4Xe/0WTbUQqcrFGRLo+R5E9OOKWZMTi0mO4bJrnYltM9we+jmNlpCF0nH9g==}
+  craft-common-base@0.20.5:
+    resolution: {integrity: sha512-iRoEOYtaa7KfFvR5FrcIYTKksqdtQjLcs3VeFHw6Suw/VEy7zWMOQ/GXo6BHIfdBNdrvHTnKZ4ne7wTBJ0F7Aw==}
     engines: {node: '>=23'}
 
-  craft-common-log@0.20.12:
-    resolution: {integrity: sha512-V7+Ngw3eqjab1REb5iz7lKQk/mj6DF9JVUWEjELnWYlvSI1SkKT2RMBw6sbw7D163h+CgbJgg5h8u/dG13+ytw==}
-    engines: {node: '>=23'}
-
-  craft-common-log@0.20.4:
-    resolution: {integrity: sha512-RMoOxNbQmXhK0M2+JJcRbtFgaJMX0CbWsc8LjvO57+6aCJwx+TTjVD2XQva8P4Bo9+jOJGWx5vtswNQL4d3Dvg==}
-    engines: {node: '>=23'}
-
-  craft-common-ontology@0.20.5:
-    resolution: {integrity: sha512-0Ra47KT4hl2k7rKrymDDHqFzlkm/BN6pFFYS7VY2D7vxksbto/eDL5CSt/J7GjUfdkFtkw31Hp/P4V3Rjnw+lQ==}
+  craft-common-log@0.20.13:
+    resolution: {integrity: sha512-bZb+OJ7DKLadLoa20L4QQ71aJsw3WiQMSaSK7pQDtyKo0TWGmOaAulHz4Di6q019HMzMNInt1SfNn5zpuJpXWQ==}
     engines: {node: '>=23'}
 
   craft-common-ontology@0.20.7:
     resolution: {integrity: sha512-hP/ZKl/59LdHdsY87doLL8s7LUSlvDjw/1Goz0cmILha07VoaCoDzbh4Fv8OJeb+IcIouGNEMd99stVJrzMmkg==}
     engines: {node: '>=23'}
 
-  craft-common-store-local@0.20.4:
-    resolution: {integrity: sha512-lGlLr8PIThQPVkRa5MQiNiIvNOdT6UxQVeGUB01jKQPTaWeNhhceMUDok6OK0mtn9cYIXcakpOSg0Ey2I3oeTA==}
+  craft-common-store-local@0.21.0:
+    resolution: {integrity: sha512-297Tr62Evyw0JnG31DS7uvFH9tiMXaiwWU2xngwcqOXxYpobhqfBbcrRwS5mPn/E+AjY8xVWnLEbz5IfYuS4AQ==}
     engines: {node: '>=23'}
 
-  craft-eval@0.7.3:
-    resolution: {integrity: sha512-ZiSSmPIWfy3x37asWwiSdcAhWpNCUfpiTH3E99vyArsdxSeas30ww8XwA1NNWI2tMYo9PgbK7WBwwgTcA5Lcag==}
+  craft-eval@0.7.4:
+    resolution: {integrity: sha512-UjG1ngMPjPR4rylNlYZ4su+60whyQ+Zeg3lSXefbLIFgD2jVEKVjEUoYEnI/g6muEzhZjlrvtEoxgt6gpwiv/A==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -1180,81 +1156,50 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@craft/capability-codebase@0.20.5(typescript@6.0.3)':
+  '@craft/capability-codebase@0.20.7(typescript@6.0.3)':
     dependencies:
-      craft-common-base: 0.20.4
-      craft-common-log: 0.20.4
-      craft-common-store-local: 0.20.4
+      craft-common-base: 0.20.5
+      craft-common-log: 0.20.13
+      craft-common-store-local: 0.21.0
       typescript: 6.0.3
 
-  '@craft/capability-context@0.20.8':
+  '@craft/capability-context@0.21.0':
     dependencies:
-      '@craft/capability-knowledge': 0.20.7
-      craft-common-base: 0.20.4
-      craft-common-log: 0.20.12
+      '@craft/capability-knowledge': 0.20.9
+      craft-common-base: 0.20.5
+      craft-common-log: 0.20.13
       craft-common-ontology: 0.20.7
-      craft-common-store-local: 0.20.4
+      craft-common-store-local: 0.21.0
 
-  '@craft/capability-datasec@0.1.7': {}
+  '@craft/capability-datasec@0.2.0': {}
 
-  '@craft/capability-experience@0.20.13':
+  '@craft/capability-experience@0.21.0':
     dependencies:
-      '@craft/capability-knowledge': 0.20.7
-      craft-common-base: 0.20.4
-      craft-common-log: 0.20.12
+      '@craft/capability-knowledge': 0.20.9
+      craft-common-base: 0.20.5
+      craft-common-log: 0.20.13
       craft-common-ontology: 0.20.7
-      craft-common-store-local: 0.20.4
+      craft-common-store-local: 0.21.0
 
-  '@craft/capability-experience@0.20.5':
+  '@craft/capability-knowledge@0.20.9':
     dependencies:
-      '@craft/capability-knowledge': 0.20.5
-      craft-common-base: 0.20.4
-      craft-common-log: 0.20.4
-      craft-common-ontology: 0.20.5
-      craft-common-store-local: 0.20.4
-
-  '@craft/capability-knowledge@0.20.5':
-    dependencies:
-      '@craft/capability-memory': 0.20.5
-      craft-common-base: 0.20.4
-      craft-common-log: 0.20.4
-      craft-common-ontology: 0.20.5
-      craft-common-store-local: 0.20.4
-
-  '@craft/capability-knowledge@0.20.7':
-    dependencies:
-      '@craft/capability-memory': 0.20.8
-      craft-common-base: 0.20.4
-      craft-common-log: 0.20.12
+      '@craft/capability-memory': 0.20.9
+      craft-common-base: 0.20.5
+      craft-common-log: 0.20.13
       craft-common-ontology: 0.20.7
-      craft-common-store-local: 0.20.4
+      craft-common-store-local: 0.21.0
 
-  '@craft/capability-knowledge@0.20.8':
+  '@craft/capability-memory@0.20.9':
     dependencies:
-      '@craft/capability-memory': 0.20.8
-      craft-common-base: 0.20.4
-      craft-common-log: 0.20.12
+      craft-common-base: 0.20.5
+      craft-common-log: 0.20.13
       craft-common-ontology: 0.20.7
-      craft-common-store-local: 0.20.4
+      craft-common-store-local: 0.21.0
 
-  '@craft/capability-memory@0.20.5':
+  '@craft/craft-notes@0.20.8':
     dependencies:
-      craft-common-base: 0.20.4
-      craft-common-log: 0.20.4
-      craft-common-ontology: 0.20.5
-      craft-common-store-local: 0.20.4
-
-  '@craft/capability-memory@0.20.8':
-    dependencies:
-      craft-common-base: 0.20.4
-      craft-common-log: 0.20.12
-      craft-common-ontology: 0.20.7
-      craft-common-store-local: 0.20.4
-
-  '@craft/craft-notes@0.20.7':
-    dependencies:
-      craft-common-base: 0.20.4
-      craft-common-store-local: 0.20.4
+      craft-common-base: 0.20.5
+      craft-common-store-local: 0.21.0
 
   '@esbuild/aix-ppc64@0.28.2':
     optional: true
@@ -1520,35 +1465,28 @@ snapshots:
       object-assign: 4.1.1
       vary: 1.1.2
 
-  craft-common-base@0.20.4:
+  craft-common-base@0.20.5:
     dependencies:
-      craft-common-store-local: 0.20.4
+      craft-common-store-local: 0.21.0
 
-  craft-common-log@0.20.12:
+  craft-common-log@0.20.13:
     dependencies:
-      craft-common-base: 0.20.4
-      craft-common-store-local: 0.20.4
-
-  craft-common-log@0.20.4:
-    dependencies:
-      craft-common-base: 0.20.4
-      craft-common-store-local: 0.20.4
-
-  craft-common-ontology@0.20.5: {}
+      craft-common-base: 0.20.5
+      craft-common-store-local: 0.21.0
 
   craft-common-ontology@0.20.7: {}
 
-  craft-common-store-local@0.20.4: {}
+  craft-common-store-local@0.21.0: {}
 
-  craft-eval@0.7.3:
+  craft-eval@0.7.4:
     dependencies:
-      '@craft/capability-datasec': 0.1.7
-      '@craft/capability-experience': 0.20.5
-      '@craft/capability-knowledge': 0.20.5
-      '@craft/capability-memory': 0.20.5
-      craft-common-base: 0.20.4
-      craft-common-ontology: 0.20.5
-      craft-common-store-local: 0.20.4
+      '@craft/capability-datasec': 0.2.0
+      '@craft/capability-experience': 0.21.0
+      '@craft/capability-knowledge': 0.20.9
+      '@craft/capability-memory': 0.20.9
+      craft-common-base: 0.20.5
+      craft-common-ontology: 0.20.7
+      craft-common-store-local: 0.21.0
 
   cross-spawn@7.0.6:
     dependencies:

@@ -1,7 +1,27 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "craft-experience",
-  "version": "0.12.44",
+  "version": "0.13.0",
   "description": "Standalone craft-experience Skill and MCP",
-  "license": "MIT"
+  "license": "MIT",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Craft Experience",
+        "shortDescription": "Turn sanitized execution observations into bounded experience drafts.",
+        "longDescription": "This component ingests only sanitized execution observations and creates a bounded experience draft. It does not publish changes by itself: use Craft Quality and the main Craft runtime for evaluation, signoff, canary, rollback, and routing.",
+        "developerName": "wdx9413",
+        "category": "Developer Tools",
+        "brandColor": "#000000",
+        "composerIcon": "./assets/craft-icon.svg",
+        "logo": "./assets/craft-icon.svg",
+        "capabilities": [
+          "Sanitized observation intake",
+          "Workflow draft proposals",
+          "Model evaluation contracts"
+        ]
+      },
+      "hooks": "./hooks/codex-hooks.json"
+    }
+  }
 }

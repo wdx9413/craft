@@ -11,6 +11,18 @@
 
 安装器先合并配置并保留其他服务，冲突要求 `--force`。卸载只删除仍匹配本安装器的 MCP entry；修改后的 Skill 不会删除。每个宿主的安装失败会恢复其配置和 Skill；`--agent all` 各目标独立，不是跨宿主事务。`--dry-run` 不启动探针。
 
+## 独立 MCP 数据空间
+
+从源码或本地构建验证独立运行时，为每个子能力指定一个空目录和匹配的 `CRAFT_STORAGE_OWNER`。例如：
+
+```sh
+CRAFT_DATA_DIR=/absolute/new-knowledge-space CRAFT_STORAGE_OWNER=knowledge craft-mcp --product knowledge
+```
+
+支持 Knowledge、Memory、Experience、Codebase、Notes、Eval 和 Context。Notes 和 Eval 的产品名分别为 `notes` 与 `eval`。该模式使用 `<data-root>/<owner>/publication.db` 提交本域版本，保留各能力现有的正文与索引布局。目录的所有者标记与数据库一起备份。目录有其他所有者、已有旧共享数据库、或所有者标记存在但发布库丢失时，启动失败。停机备份和恢复使用[数据目录维护备份](storage-backup.md)。
+
+独立空间只开放该能力当前能完成的 MCP 操作。当前 Context 独立空间可保存和读回自己的回执，跨独立空间的聚合召回、引用与晋级需要后续接线。独立空间使用显式 MCP 调用，当前不启动后台学习和维护进程。宿主 Hook 的独立目录接入待验收。现有安装继续使用原有共享布局，其历史由后续迁移工具按版本处理。
+
 ## 最短使用流程
 
 | 产品 | 第一次使用 | 后续操作 | 结果边界 |
@@ -62,3 +74,5 @@ conformance 在隔离数据目录中运行真实 stdio initialize/list/call，�
 效果评测继续使用已有 Knowledge evaluation、retrieval adapter evaluation、Experience gate 与工程评测执行器。固定 repository/checkpoint、Host/model、预算和验收命令再做 baseline/candidate paired trials。本地合同测试不证明模型任务成功率提高。
 
 默认聚合入口及五产品四种分发方式见 [Craft Context](craft-context.md)。
+
+独立存储、文件格式、跨域提交及迁移边界见[子能力独立存储](capability-owned-storage.md)。

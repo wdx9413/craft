@@ -13,6 +13,7 @@ import { productSurfaceOf } from "../core/interfaces/mcp/product-launch.ts";
 import { validateProcedureComposition } from '@craft/capability-experience/procedure-composition';
 import { ProcedureDefinitionStore, type ProcedureDefinition, type ProcedureDefinitionRef } from '@craft/capability-experience/procedure-definition';
 import { stableDigest as digest } from 'craft-common-base/digest';
+import { procedureTaskEffectFixture } from "./helpers/procedure-task-effect-fixture.ts";
 
 function spec(): JsonObject {
   return { steps: [{ id: "review", type: "instruction", instruction: "Review the supplied diff; findings are a valid report.", side_effect: "read_only", requires: ["diff"], provides: ["report"] }], composition: {
@@ -28,6 +29,16 @@ async function fixture() {
   const service = new CraftService(store), mcp = new McpServer(service, productSurfaceOf("experience"));
   store.create("evidence", "e", { confidence: "confirmed" });
   let n = 0;
+  const evaluations = new Map<string, JsonObject>();
+  function evaluation(procedure: JsonObject): JsonObject {
+    const key = `${procedure.id}:${procedure.candidate_version ?? procedure.version}`;
+    let result = evaluations.get(key);
+    if (!result) {
+      result = procedureTaskEffectFixture(service, procedure);
+      evaluations.set(key, result);
+    }
+    return result;
+  }
   function promote(procedure: JsonObject, stage: string): JsonObject {
     const evidence_ids: string[] = [];
     for (const entry of (procedure.entrypoints ?? []) as JsonObject[]) for (const route of entry.routes as JsonObject[]) {
@@ -35,7 +46,8 @@ async function fixture() {
       store.create("evidence", id, { confidence: "confirmed", metadata: { procedure_definition_digest: procedure.definition_digest, entry_id: entry.id, exit_id: route.exit_id, stage, status: "passed" } });
       evidence_ids.push(id);
     }
-    return service.experienceProcedures.gate({ procedure_id: procedure.id, stage, passed: true, evidence_ids: evidence_ids.length ? evidence_ids : ["e"] });
+    const qualification = ["held_out", "signoff", "canary"].includes(stage) ? evaluation(procedure) : {};
+    return service.experienceProcedures.gate({ procedure_id: procedure.id, stage, passed: true, evidence_ids: evidence_ids.length ? evidence_ids : ["e"], ...qualification });
   }
   function create(value = spec(), extra: JsonObject = {}): JsonObject {
     const id = `procedure-${++n}`;

@@ -1,6 +1,6 @@
 {
   "name": "craft-marketplace",
-  "version": "0.20.14",
+  "version": "0.21.2",
   "owner": {
     "name": "wdx9413"
   },
@@ -17,6 +17,41 @@
       "name": "craft-context",
       "source": "./plugins/craft-context",
       "description": "craft-context Skill and MCP"
+    },
+    {
+      "name": "craft-knowledge",
+      "source": "./plugins/craft-knowledge",
+      "description": "craft-knowledge Skill and MCP"
+    },
+    {
+      "name": "craft-memory",
+      "source": "./plugins/craft-memory",
+      "description": "craft-memory Skill and MCP"
+    },
+    {
+      "name": "craft-experience",
+      "source": "./plugins/craft-experience",
+      "description": "craft-experience Skill and MCP"
+    },
+    {
+      "name": "craft-codebase",
+      "source": "./plugins/craft-codebase",
+      "description": "craft-codebase Skill and MCP"
+    },
+    {
+      "name": "craft-notes",
+      "source": "./plugins/craft-notes",
+      "description": "craft-notes Skill and MCP"
+    },
+    {
+      "name": "craft-eval",
+      "source": "./plugins/craft-eval",
+      "description": "craft-eval Skill and MCP"
+    },
+    {
+      "name": "craft-runtime",
+      "source": "./plugins/craft-runtime",
+      "description": "craft-runtime Skill and MCP"
     },
     {
       "name": "craft-datasec",

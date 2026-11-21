@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
+import { releaseProductVersion, RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 
@@ -54,7 +54,7 @@ for (const product of componentProducts) {
   const componentRoot = join(root, "plugins", name);
   const componentManifest = JSON.parse(await readFile(join(componentRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string; hooks?: string; interface?: { composerIcon?: string; logo?: string } };
   assert.equal(componentManifest.name, name);
-  assert.equal(componentManifest.version, packageJson.version);
+  assert.equal(componentManifest.version, releaseProductVersion(product));
   assert.equal(componentManifest.skills, "./skills/");
   assert.equal(componentManifest.mcpServers, "./.mcp.json");
   assert.equal(componentManifest.interface?.composerIcon, "./assets/craft-icon.svg");
@@ -109,12 +109,13 @@ for (const product of componentProducts) {
 }
 
 // The public marketplace currently ships one complete context entry point.
-for (const { name, hookMember } of componentProducts) {
+for (const product of componentProducts) {
+  const { name, hookMember } = product;
   const manifest = JSON.parse(await readFile(join(root, "plugins", name, ".claude-plugin", "plugin.json"), "utf8")) as {
     name: string; version: string; hooks?: string; mcpServers: Record<string, { args: string[] }>;
   };
   assert.equal(manifest.name, name);
-  assert.equal(manifest.version, packageJson.version);
+  assert.equal(manifest.version, releaseProductVersion(product));
   assert.equal(manifest.hooks, hookMember ? "./hooks/hooks.json" : undefined);
   assert.deepEqual(manifest.mcpServers[name]?.args.slice(-2), ["--product", name.replace("craft-", "")]);
   if (name === "craft-context") {

@@ -7,7 +7,7 @@ export type CodebaseMigrationStatus = "current" | "legacy_ready" | "missing_root
   | "missing_workspace" | "invalid_checkpoint" | "source_out_of_scope" | "missing_snapshot";
 export interface CodebaseMigrationEntry {
   id: string; version: number; status: CodebaseMigrationStatus; workspace_id: string;
-  source_root: string; target_root: string | null; entry_count: number;
+  source_root: string; target_root: string | null; project_root?:string; entry_count: number;
 }
 
 function cursorVersion(cursor?: string): [string, number] {
@@ -21,13 +21,15 @@ function cursorVersion(cursor?: string): [string, number] {
   throw new Error("Codebase migration cursor is invalid");
 }
 
-function workspaceRoots(database: DatabaseSync, workspaceIds: string[]): Map<string, string[]> {
+type PayloadReader=(kind:string,id:string,version:number,payload:string)=>Record<string,unknown>;
+const inlinePayload:PayloadReader=(_kind,_id,_version,payload)=>JSON.parse(payload) as Record<string,unknown>;
+function workspaceRoots(database: DatabaseSync, workspaceIds: string[],readPayload:PayloadReader): Map<string, string[]> {
   const mapped = new Map<string, Set<string>>();
   if (!workspaceIds.length) return new Map();
   const placeholders = workspaceIds.map(() => "?").join(",");
-  for (const row of database.prepare(`SELECT id,payload_json FROM records WHERE kind='workspace' AND id IN (${placeholders})`).all(...workspaceIds) as Array<{ id: string; payload_json: string }>) {
+  for (const row of database.prepare(`SELECT id,version,payload_json FROM records WHERE kind='workspace' AND id IN (${placeholders})`).all(...workspaceIds) as Array<{ id: string; version:number; payload_json: string }>) {
     let payload: Record<string, unknown>;
-    try { const value: unknown = JSON.parse(row.payload_json);
+    try { const value: unknown = readPayload("workspace",row.id,row.version,row.payload_json);
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
       payload = value as Record<string, unknown>;
     } catch { continue; }
@@ -40,7 +42,7 @@ function workspaceRoots(database: DatabaseSync, workspaceIds: string[]): Map<str
 }
 
 /** Read-only, keyset-paged inventory. A checkpoint root is taken only from its matching Workspace state revision. */
-export function codebaseStoragePreflight(paths: CraftPaths, args: { max_records?: number; cursor?: string } = {}): {
+export function codebaseStoragePreflight(paths: CraftPaths, args: { max_records?: number; cursor?: string } = {},readPayload:PayloadReader=inlinePayload): {
   entries: CodebaseMigrationEntry[]; examined: number; has_more: boolean; next_cursor: string | null;
 } {
   const limit = args.max_records ?? 100;
@@ -55,15 +57,15 @@ export function codebaseStoragePreflight(paths: CraftPaths, args: { max_records?
       .all(after[0], after[0], after[1], limit + 1) as Array<{ id: string; version: number; payload_json: string }>;
     const page = rows.slice(0, limit);
     const workspaceIds = [...new Set(page.flatMap(row => {
-      try { const value: unknown = JSON.parse(row.payload_json); return value && typeof value === "object" && !Array.isArray(value)
+      try { const value: unknown = readPayload("workspace_checkpoint",row.id,row.version,row.payload_json); return value && typeof value === "object" && !Array.isArray(value)
         && typeof (value as Record<string, unknown>).workspace_id === "string" ? [String((value as Record<string, unknown>).workspace_id)] : []; }
       catch { return []; }
     }))];
-    const roots = workspaceRoots(database, workspaceIds);
+    const roots = workspaceRoots(database, workspaceIds,readPayload);
     database.exec("COMMIT");
     const entries = page.map(row => {
       let payload: Record<string, unknown>;
-      try { const value: unknown = JSON.parse(row.payload_json);
+      try { const value: unknown = readPayload("workspace_checkpoint",row.id,row.version,row.payload_json);
         payload = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
       catch { payload = {}; }
       const workspaceId = typeof payload.workspace_id === "string" ? payload.workspace_id : "";
@@ -98,7 +100,7 @@ export function codebaseStoragePreflight(paths: CraftPaths, args: { max_records?
         const stat = lstatSync(source);
         if (stat.isSymbolicLink() || !stat.isDirectory()) return { ...base, target_root: target, status: "missing_snapshot" as const };
       } catch { return { ...base, target_root: target, status: "missing_snapshot" as const }; }
-      return { ...base, target_root: target, status: position === 0 ? "current" as const : "legacy_ready" as const };
+      return { ...base, target_root: target, project_root:root, status: position === 0 ? "current" as const : "legacy_ready" as const };
     });
     const last = page.at(-1), hasMore = rows.length > limit;
     return { entries, examined: entries.length, has_more: hasMore,
@@ -111,8 +113,9 @@ export class CodebaseStoragePreflightReader {
   private readonly database: DatabaseSync;
   private readonly dataVersion: number;
   private readonly paths: CraftPaths;
-  constructor(paths: CraftPaths) {
-    this.paths = paths;
+  private readonly readPayload:PayloadReader;
+  constructor(paths: CraftPaths,readPayload:PayloadReader=inlinePayload) {
+    this.paths = paths;this.readPayload=readPayload;
     this.database = new DatabaseSync(paths.databaseFile, { readOnly: true });
     try { this.dataVersion = this.version(); }
     catch (error) { this.database.close(); throw error; }
@@ -122,7 +125,7 @@ export class CodebaseStoragePreflightReader {
   }
   readPage(args: { max_records?: number; cursor?: string } = {}): ReturnType<typeof codebaseStoragePreflight> {
     if (this.version() !== this.dataVersion) throw new Error("Codebase preflight database changed; restart inventory");
-    const page = codebaseStoragePreflight(this.paths, args);
+    const page = codebaseStoragePreflight(this.paths, args,this.readPayload);
     if (this.version() !== this.dataVersion) throw new Error("Codebase preflight database changed; restart inventory");
     return page;
   }

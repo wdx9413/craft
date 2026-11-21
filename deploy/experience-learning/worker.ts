@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runHeldOutAdapter } from "./held-out-adapter.ts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -48,6 +49,8 @@ async function collectCodexSessionsWithLock(client: ExperienceLearningClient, re
 }
 export interface DistillationDependencies {
   client: ExperienceLearningClient;
+  experience_client?: ExperienceLearningClient;
+  knowledge_client?: ExperienceLearningClient;
   providers?: readonly ModelProviderSpec[];
   transport?: ModelTransport;
   contentLanguage?: string;
@@ -63,7 +66,7 @@ export function learningTaskCandidateResult(ingestion: JsonObject, taskCandidate
     ? { task_candidates: taskCandidates } : {}), ...(taskCandidates.status === "failed" ? { failure_kind: taskCandidates.failure_kind } : {}) };
 }
 
-export async function runEvaluationOnce(client: ExperienceLearningClient): Promise<JsonObject> {
+export async function runEvaluationOnce(client: ExperienceLearningClient, env: NodeJS.ProcessEnv = process.env): Promise<JsonObject> {
   const queued = await client.call("craft_experience_learning_evaluation_dispatch_list", { limit: 100 });
   const pending = array(queued.dispatches, "evaluation dispatches") as JsonObject[];
   const outcomes: JsonObject[] = [], seen = new Set<string>();
@@ -73,8 +76,28 @@ export async function runEvaluationOnce(client: ExperienceLearningClient): Promi
     if (seen.has(dispatchId)) continue;
     seen.add(dispatchId);
     if (dispatch.stage === "held_out") {
-      outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: "awaiting_adapter",
-        reason: "trusted_task_effect_evaluation_required" });
+      try {
+        const report = await runHeldOutAdapter(dispatch, env);
+        if (!report) { outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: "awaiting_adapter",
+          reason: "trusted_task_effect_evaluation_required" }); continue; }
+        if (typeof report.contract_id !== "string" || typeof report.evaluation_id !== "string") throw new Error("HeldOutAdapterInvalidReport");
+        const recorded = await client.call("craft_evaluation_contract_task_effect_record", report);
+        if ((recorded.result as JsonObject | undefined)?.eligible === true) {
+          const material = await client.call("craft_evaluation_contract_get", { contract_id: report.contract_id });
+          const contract = object(material.contract, "task-effect contract");
+          const history = Array.isArray(contract.stage_history) ? contract.stage_history as JsonObject[] : [];
+          if (!history.some(stage => stage.stage === "business_eligible" && stage.verification === "trusted"
+            && Array.isArray(stage.evidence) && stage.evidence.includes(report.evaluation_id))) {
+            await client.call("craft_evaluation_contract_record", { contract_id: report.contract_id, stage: "business_eligible", evidence: [report.evaluation_id] });
+          }
+        }
+        const result = await client.call("craft_experience_learning_evaluation_result", { dispatch_id: dispatchId,
+          evaluation_contract_id: report.contract_id, evaluation_id: report.evaluation_id });
+        const resolved = object(result.dispatch, "evaluation result dispatch");
+        outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: resolved.status ?? "unknown" });
+        if (result.next_dispatch && typeof result.next_dispatch === "object") pending.push(object(result.next_dispatch, "next evaluation dispatch"));
+      } catch (error) { outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: "retryable",
+        reason: safeWorkerErrorClass(error, "HeldOutAdapterError") }); }
       continue;
     }
     const result = await client.call("craft_experience_learning_evaluation_run", { dispatch_id: dispatchId });
@@ -87,16 +110,86 @@ export async function runEvaluationOnce(client: ExperienceLearningClient): Promi
   return { processed: outcomes.length, outcomes };
 }
 
+export interface ProgramMemorySubmissionPort {
+  reconcile?(scope: JsonObject): JsonObject;
+  due(scope: JsonObject): JsonObject;
+  submit(id: string, scope: JsonObject): JsonObject;
+  dispatch(procedureId: string): JsonObject;
+}
+export async function runProgramMemorySubmissionOnce(_client: ExperienceLearningClient, env: NodeJS.ProcessEnv = process.env,
+  local?: ProgramMemorySubmissionPort): Promise<JsonObject> {
+  if (env.CRAFT_CONTINUOUS_LEARNING === "0")
+    return { processed: 0, waiting: 0, reason: "continuous_learning_disabled", outcomes: [] };
+  const designBindings = env.CRAFT_PROGRAM_MEMORY_DESIGNS ? object(JSON.parse(env.CRAFT_PROGRAM_MEMORY_DESIGNS), "CRAFT_PROGRAM_MEMORY_DESIGNS") : {};
+  let enrolledRuntime: Awaited<ReturnType<typeof import("../../core/interfaces/mcp/runtime.ts")["openCapabilityService"]>> | null = null;
+  let requested: unknown;
+  if (env.CRAFT_LEARNING_PROJECT_SCOPES === undefined) {
+    const present = (await import("../../core/infrastructure/owned-catalog.ts")).presentStorageOwners(craftPaths(dataRoot(env)).root);
+    if (!local && present.includes("context")) {
+      enrolledRuntime = await (await import("../../core/interfaces/mcp/runtime.ts")).openCapabilityService("context", env);
+      try { requested = (await import("../../core/evolution-project-binding.ts")).registeredLearningProjectScopes(enrolledRuntime.store); }
+      catch (error) { enrolledRuntime.close(); throw error; }
+    } else requested = [];
+    if (!(requested as unknown[]).length) { enrolledRuntime?.close(); return { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }; }
+  } else requested = JSON.parse(env.CRAFT_LEARNING_PROJECT_SCOPES);
+  const scopes = array(requested, "CRAFT_LEARNING_PROJECT_SCOPES").map(scope => {
+    const project = object(scope, "project scope");
+    if (project.kind !== "project" || typeof project.id !== "string" || !project.id.startsWith("project:")) throw new Error("Worker requires explicit project scopes");
+    return project;
+  });
+  const runtime = local ? null : enrolledRuntime ?? await (await import("../../core/interfaces/mcp/runtime.ts")).openCapabilityService("context", env);
+  const service = runtime?.service;
+  const owner = service?.ownerServices.get("experience");
+  const port = local ?? {
+    reconcile: (scope: JsonObject) => service!.evolutionProgramMemoryReconcile({ scope, design_bindings: designBindings[String(scope.id)] ?? {} }),
+    due: (scope: JsonObject) => service!.evolutionProgramMemorySubmissionDue({ scope, limit: 100 }),
+    submit: (id: string, scope: JsonObject) => service!.evolutionProgramMemorySubmit({ id, scope }),
+    dispatch: (procedureId: string) => {
+      return owner!.experienceLearningEvaluationDispatch({ procedure_id: procedureId });
+    },
+  };
+  try {
+    if (runtime && !owner) return { processed: 0, waiting: 0, reason: "experience_owner_unavailable", outcomes: [] };
+    const outcomes: JsonObject[] = [], reconciliation: JsonObject[] = [];
+    for (const scope of scopes) {
+      if (runtime) {
+        const alias = runtime.store.list("scope_alias", 1, item => item.status === "active" && item.alias_kind === "path"
+          && stableDigest(item.scope) === stableDigest(scope) && typeof item.alias === "string" && item.alias_digest === stableDigest(item.alias), false);
+        const disabled = runtime.store.list("context_learning_enrollment", 1, item => stableDigest(item.scope) === stableDigest(scope)
+          && (item.status === "disabled" || item.status === "revoked"), false);
+        if (!alias.length || disabled.length) { outcomes.push({ scope, status: "waiting", reason: disabled.length ? "learning_enrollment_disabled" : "project_scope_not_registered" }); continue; }
+      }
+      if (port.reconcile) reconciliation.push({ scope, ...port.reconcile(scope) });
+      const queue = port.due(scope);
+      for (const raw of array(queue.items, "Program Memory submission queue")) {
+        const item = object(raw, "Program Memory queue item");
+        const id = string(item.id, "candidate.id", 200);
+        if (item.status !== "ready") { outcomes.push({ id, status: "waiting", reason: item.reason ?? "waiting_evidence" }); continue; }
+        try {
+          const submitted = port.submit(id, scope);
+          if (submitted.status !== "submitted" || typeof submitted.procedure_id !== "string") throw new Error("SubmissionReceiptError");
+          const dispatch = port.dispatch(submitted.procedure_id);
+          outcomes.push({ id, status: "submitted", procedure_id: submitted.procedure_id, dispatch_id: object(dispatch.dispatch, "dispatch").id });
+        } catch (error) { outcomes.push({ id, status: "retryable", reason: safeWorkerErrorClass(error, "SubmissionError") }); }
+      }
+    }
+    return { processed: outcomes.filter(item => item.status !== "waiting").length, waiting: outcomes.filter(item => item.status === "waiting").length, outcomes, reconciliation };
+  } finally { runtime?.close(); }
+}
+
 export async function runOnce(deps: DistillationDependencies): Promise<JsonObject> {
   let scenarioClassification: JsonObject;
   try { scenarioClassification = await runExperienceScenarioClassificationOnce({ ...deps,
     state_file: deps.experience_classification_state_file }); }
   catch (error) { scenarioClassification = { status: "failed", failure_kind: safeWorkerErrorClass(error, "ClassificationError") }; }
+  let programMemory: JsonObject;
+  try { programMemory = await runProgramMemorySubmissionOnce(deps.client, deps.env); }
+  catch (error) { programMemory = { processed: 0, failure_kind: safeWorkerErrorClass(error, "SubmissionError") }; }
   const distillation = await runDistillationOnce(deps);
-  const evaluation = await runEvaluationOnce(deps.client);
+  const evaluation = await runEvaluationOnce(deps.client, deps.env);
   const includeClassification = Number(scenarioClassification.processed ?? 0) > 0 || scenarioClassification.status === "failed" || scenarioClassification.skipped === true;
-  return { ...distillation, ...(includeClassification ? { scenario_classification: scenarioClassification } : {}),
-    ...(scenarioClassification.status === "failed" ? { failure_kind: String(scenarioClassification.failure_kind) } : {}), evaluation };
+  return { ...distillation, program_memory_submission: programMemory, ...(includeClassification ? { scenario_classification: scenarioClassification } : {}),
+    ...(scenarioClassification.status === "failed" ? { failure_kind: String(scenarioClassification.failure_kind) } : programMemory.failure_kind ? { failure_kind: String(programMemory.failure_kind) } : {}), evaluation };
 }
 
 export function learningComponents(env: NodeJS.ProcessEnv = process.env): LearningComponent[] {
@@ -124,10 +217,10 @@ export async function runLearningTick(deps: DistillationDependencies, syncKnowle
   return runResilientLearningTick({
     pass_order: passOrder,
     ...(runSessionCollection ? { run_session_collection: runSessionCollection } : {}),
-    run_experience_pass: () => includesExperience ? runOnce(configuredDeps) : Promise.resolve({ processed: 0, outcomes: [], skipped: true }),
+    run_experience_pass: () => includesExperience ? runOnce({ ...configuredDeps, client: deps.experience_client ?? deps.client }) : Promise.resolve({ processed: 0, outcomes: [], skipped: true }),
     run_knowledge_pass: async () => {
-      const storage = syncKnowledge ? await runKnowledgeStorageReconcileOnce(deps.client, join(paths.knowledgeDir, "storage-migration-state.json")) : null;
-      const ingestion = syncKnowledge ? { ...await runKnowledgeSyncOnce(deps.client as KnowledgeLearningClient),
+      const storage = syncKnowledge ? await runKnowledgeStorageReconcileOnce((deps.knowledge_client ?? deps.client), join(paths.knowledgeDir, "storage-migration-state.json")) : null;
+      const ingestion = syncKnowledge ? { ...await runKnowledgeSyncOnce((deps.knowledge_client ?? deps.client) as KnowledgeLearningClient),
           ...(storage && (Number(storage.examined) > Number(storage.skipped) || storage.has_more === true) ? { storage_reconciliation: storage } : {}) }
         : { status: "not_due", processed: 0, content_stored: false, raw_content_stored: false };
       const knowledgeDir = paths.knowledgeDir;
@@ -156,7 +249,7 @@ export async function runLearningTick(deps: DistillationDependencies, syncKnowle
           ...(evaluationCases.status === "failed" ? { failure_kind: evaluationCases.failure_kind } : {}) };
       }
       let adjudication: JsonObject;
-      try { adjudication = await runSessionKnowledgeAdjudicationOnce({ ...configuredDeps,
+      try { adjudication = await runSessionKnowledgeAdjudicationOnce({ ...configuredDeps, client: deps.knowledge_client ?? deps.client,
         knowledge_adjudication_cursor_file: join(paths.knowledgeDir, "session-adjudication-cursor.json") }); }
       catch (error) { adjudication = { status: "failed", failure_kind: learningFailureKind(error), raw_content_stored: false }; }
       return { ...ingestion, ...(adjudication.status !== "idle" && adjudication.status !== "skipped" ? { session_adjudication: adjudication } : {}),
@@ -209,7 +302,8 @@ export function learningWorkFound(result: JsonObject): boolean {
   const evaluation = result.evaluation && typeof result.evaluation === "object" ? result.evaluation as JsonObject : null;
   const classification = result.scenario_classification && typeof result.scenario_classification === "object"
     ? result.scenario_classification as JsonObject : null;
-  return Number(result.processed ?? 0) > 0 || Number(evaluation?.processed ?? 0) > 0 || Number(classification?.processed ?? 0) > 0
+  const programMemory = result.program_memory_submission as JsonObject | undefined;
+  return Number(result.processed ?? 0) > 0 || Number(evaluation?.processed ?? 0) > 0 || Number(programMemory?.processed ?? 0) > 0 || Number(classification?.processed ?? 0) > 0
     || classification?.scan_has_more === true;
 }
 function parseModelJson(value: string): JsonObject {
@@ -483,7 +577,7 @@ async function main(): Promise<void> {
       return;
     }
   }
-  let cleanupClient: McpStdioClient | null = null;
+  let cleanupClient: { close(): void } | null = null;
   let stopping = false;
   let lastKnowledgeSync = 0;
   let lastVerifiedRecheck = 0;
@@ -500,16 +594,20 @@ async function main(): Promise<void> {
     timer = setTimeout(finish, nextPollMs);
   });
   try {
-    const client = new McpStdioClient(command, args);
-    cleanupClient = client;
-    await client.initialize();
+    const existingOwners = (await import("../../core/infrastructure/owned-catalog.ts")).presentStorageOwners(craftPaths(dataRoot()).root);
+    const owned = existingOwners.length && !process.env.CRAFT_EXPERIENCE_MCP_COMMAND && !process.env.CRAFT_EXPERIENCE_MCP_ARGS
+      ? await (await import("./owned-client.ts")).openOwnedLearningClients() : null;
+    const legacy = owned ? null : new McpStdioClient(command, args);
+    const client = owned?.context ?? legacy!;
+    cleanupClient = owned ?? legacy;
+    await legacy?.initialize();
     do {
       const syncKnowledge = knowledgeEnabled && Date.now() - lastKnowledgeSync >= knowledgePollMs;
       const recheckVerified = Date.now() - lastVerifiedRecheck >= 300_000;
       const modelHost = process.env.CRAFT_LEARNING_MODEL_HOST;
       const modelTransport = createLearningModelTransport(modelHost);
-      const result = await runLearningTick({ client, ...(modelTransport ? { transport: modelTransport } : {}) }, syncKnowledge, components,
-        modelHost === "claude-code" ? undefined : () => collectCodexSessionsWithLock(client, recheckVerified));
+      const result = await runLearningTick({ client, ...(owned ? { experience_client: owned.experience, knowledge_client: owned.knowledge } : {}), ...(modelTransport ? { transport: modelTransport } : {}) }, syncKnowledge, components,
+        modelHost === "claude-code" || (owned && !owned.hasContext) ? undefined : () => collectCodexSessionsWithLock(client, recheckVerified));
       const sessionCollection = result.session_collection as JsonObject | undefined;
       if (recheckVerified && sessionCollection && !sessionCollection.failure_kind && sessionCollection.status !== "skipped_locked"
         && (sessionCollection.evidence_reconciliation as JsonObject | undefined)?.status !== "partial") lastVerifiedRecheck = Date.now();
@@ -524,7 +622,7 @@ async function main(): Promise<void> {
       process.stdout.write(`${JSON.stringify(result)}\n`);
       if (status.exit_code !== null) process.exitCode = status.exit_code;
       if (once) break;
-      if (client.closed) { process.exitCode = 1; break; }
+      if (legacy?.closed) { process.exitCode = 1; break; }
       await waitForNextTick();
     } while (!stopping && !process.exitCode);
   } finally {

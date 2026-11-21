@@ -1,6 +1,6 @@
 {
   "name": "craft-experience",
-  "version": "0.12.44",
+  "version": "0.13.0",
   "description": "craft-experience governed context and repository tools",
   "author": {
     "name": "wdx9413"
@@ -29,9 +29,7 @@
       "Sanitized observation intake",
       "Workflow draft proposals",
       "Model evaluation contracts"
-    ],
-    "defaultPrompt": [
-      "Create a bounded Workflow draft from these sanitized execution observations; do not publish it before independent evaluation."
     ]
-  }
+  },
+  "hooks": "./hooks/codex-hooks.json"
 }

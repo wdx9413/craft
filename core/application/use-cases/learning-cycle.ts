@@ -1,8 +1,10 @@
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
 import { payload, stableDigest } from "../../digest.ts";
 import { completeExperienceScenarioClassificationRequest, createExperienceScenarioClassificationRequest, experienceScenarioCanClassify, experienceScenarioIsRetired, getExperienceScenarioClassificationRequest, listExperienceScenarios, proposeExperienceScenarioMigration, recordExperienceScenario, retireExperienceScenario, validateExperienceScenarioDefinition } from '@craft/capability-experience/scenario-catalog';
 import { projectExperienceDirectory, projectPathAliasDigest } from "../../project-experience-directory.ts";
+import { assertContextReadCurrent } from "../../context-access-guard.ts";
 import { codexTaskGoalDigest } from "../../codex-task-prose.ts";
 
 declare module "../craft-service.ts" {
@@ -203,6 +205,9 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     return { evidence, evidence_count: evidence.length, excluded_unusable_receipt_count: excludedUnusableReceiptCount, partial: observations.length > Number(limit) || evidenceRecords.length > Number(limit), content_stored: false };
   };
   serviceClass.prototype.learningCycleFinalize = function (args) {
+    const experienceOwner = this.ownerServices.get("experience");
+    if (this.storageOwner === "context" && !experienceOwner) throw new Error("Experience owner is unavailable");
+    if (this.storageOwner !== "experience" && experienceOwner) return experienceOwner.learningCycleFinalize(args);
     const requiredText = (key: string): string => {
       const value = args[key];
       if (typeof value !== "string" || !value.trim()) throw new Error(`${key} must not be empty`);
@@ -216,10 +221,12 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     const outcome = requiredText("verification_outcome");
     if (outcome !== "passed" && outcome !== "failed") throw new Error("verification_outcome must be passed or failed");
     const verificationRef = requiredText("verification_ref");
-    const resolution = this.store.find("context_resolution_receipt", receiptId);
-    const pack = resolution ? null : this.store.find("context_pack_receipt", receiptId);
-    const receipt = resolution ?? (pack ? this.store.find("context_resolution_receipt", String(pack.context_receipt_id)) : null);
+    const contextStore = this.contextResolution.ownerStores.get("context") ?? this.store;
+    const resolution = contextStore.find("context_resolution_receipt", receiptId);
+    const pack = resolution ? null : contextStore.find("context_pack_receipt", receiptId);
+    const receipt = resolution ?? (pack ? contextStore.find("context_resolution_receipt", String(pack.context_receipt_id)) : null);
     if (!receipt) throw new Error("context_receipt_id must reference a stored Context receipt");
+    assertContextReadCurrent(contextStore, receipt, this.contextResolution.ownerStores);
     if (args.verified !== true) return { status: "ignored", reason: "verification_not_attested", observation: null, request: null, idempotent: false };
     const scope = receipt.scope as JsonObject | undefined;
     if (!scope || typeof scope.kind !== "string" || typeof scope.id !== "string") throw new Error("Context receipt has no usable scope");
@@ -229,6 +236,12 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     const projectScope = scope.kind === "project" ? String(scope.id).startsWith("project:") ? String(scope.id) : `project:${scope.id}` : null;
     const observationScope = projectScope ?? `${scope.kind}:${scope.id}`;
     const projectRoot = typeof args.project_root === "string" ? args.project_root : undefined;
+    if (this.storageOwner === "experience" && projectRoot && projectScope) {
+      const resolved = this.scopeIdentity.resolveProject({ project_root: projectRoot });
+      if (((resolved.identity as JsonObject).canonical_scope as JsonObject).id !== projectScope) {
+        throw new Error("Experience project root does not match the Context receipt scope");
+      }
+    }
     const coarseScenario = args.coarse_scenario_key;
     if (coarseScenario !== undefined && (typeof coarseScenario !== "string" || !/^[a-z0-9][a-z0-9._/-]{0,95}$/u.test(coarseScenario))) throw new Error("coarse_scenario_key must be a bounded stable identifier");
     if (coarseScenario !== undefined && scenarioInput === undefined) throw new Error("coarse_scenario_key requires scenario_key");
@@ -294,8 +307,17 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     const observedPaths = Array.isArray(args.observed_paths) ? args.observed_paths : [];
     // Notes usage is counted only after an attested, successful terminal result.
     // Paths are task-bound references; the Notes registry never opens them.
-    if (outcome === "passed" && sessionId && projectScope && Array.isArray(args.observed_paths)) {
-      for (const path of new Set(args.observed_paths.filter((item): item is string => typeof item === "string" && item.trim().length > 0))) {
+    if (outcome === "passed" && sessionId && projectScope && projectRoot && Array.isArray(args.observed_paths)) {
+      const root = resolve(projectRoot);
+      const directories = new Set<string>();
+      for (const path of observedPaths) {
+        if (typeof path !== "string" || !path.trim() || isAbsolute(path) || path.includes("\\") || path.includes("\0")) continue;
+        const absoluteFile = resolve(root, path);
+        const relativeFile = relative(root, absoluteFile);
+        if (!relativeFile || relativeFile === ".." || relativeFile.startsWith(`..${sep}`) || isAbsolute(relativeFile)) continue;
+        directories.add(dirname(absoluteFile));
+      }
+      for (const path of [...directories].slice(0, 16)) {
         try { this.craftNotesObserveDirectory({ path, device_id: args.device_id ?? "local", project_id: projectScope,
           task_id: effectiveTaskId, session_id: sessionId, outcome: "completed", evidence_ref: evidence.id }); }
         catch { /* Notes capture is an optional learning side effect; task verification remains authoritative. */ }

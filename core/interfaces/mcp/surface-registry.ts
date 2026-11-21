@@ -83,7 +83,7 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "craft_memory_asset_inspect", "craft_memory_asset_restore",
     "craft_component_readiness_get", "craft_component_diagnose", "craft_knowledge_bootstrap_install", "craft_knowledge_source_list",
     "craft_memory_governance", "craft_memory_capture_user_statement", "craft_memory_capture_observed_fact", "craft_memory_candidate_propose", "craft_memory_candidate_review", "craft_memory_ledger_remember_approved",
-    "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_conflict_list", "craft_memory_conflict_resolve",
+    "craft_memory_recall", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_conflict_list", "craft_memory_conflict_resolve",
     "craft_context_resolution_resolve", "craft_context_resolution_feedback", "craft_memory_maintenance_run", "craft_memory_maintenance_schedule", "craft_knowledge_memory_bundle",
     "craft_scope_identity_resolve_project", "craft_decision_context_gate_open", "craft_memory_ledger_transition",
   ],
@@ -102,6 +102,13 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+const OWNED_ONLY_SURFACES: Readonly<Record<string, RegExp>> = {
+  "component-runtime-owned": /^craft_(?:task_|work_|host_|trace_|evidence_|artifact_|workspace_|runtime_|execution_|sandbox_|local_)/u,
+  "component-notes-owned": /^craft_notes_(?:create_device|observe_directory|observe_file|candidate_list|confirm|revoke|resolve)$/u,
+  "component-context-owned": /^craft_(?:context_(?:resolution_(?:resolve|get|feedback)|working_set_(?:resolve|get))|scope_identity_resolve_project|evolution_program_memory_(?:capture|list|get|submit|submission_due|promote|feedback))$/u,
+  "component-eval-owned": /^craft_evaluation_contract_(?:define|get|record|task_effect_record)$/u,
+};
+
 export const COMPONENT_SURFACE_NAMES: readonly string[] = Object.keys(COMPONENT_SURFACES);
 export const DOMAIN_SURFACE_NAMES: readonly string[] = SURFACE_RULES.map((rule) => rule.name);
 export const SURFACE_NAMES: readonly string[] = ["core", ...DOMAIN_SURFACE_NAMES, ...COMPONENT_SURFACE_NAMES, "component-context-agent", "syscall", "full"];
@@ -109,9 +116,9 @@ export const SURFACE_NAMES: readonly string[] = ["core", ...DOMAIN_SURFACE_NAMES
 export type MountedComponent = "knowledge" | "memory" | "experience";
 
 export function componentForSurface(surface: string): MountedComponent | undefined {
-  if (surface === "component-knowledge" || surface === "component-knowledge-daily") return "knowledge";
-  if (surface === "component-memory" || surface === "component-memory-daily") return "memory";
-  if (surface === "component-experience" || surface === "component-experience-daily") return "experience";
+  if (surface === "component-knowledge-worker" || surface === "component-knowledge" || surface === "component-knowledge-daily" || surface === "component-knowledge-owned") return "knowledge";
+  if (surface === "component-memory" || surface === "component-memory-daily" || surface === "component-memory-owned") return "memory";
+  if (surface === "component-experience-worker" || surface === "component-experience" || surface === "component-experience-daily" || surface === "component-experience-owned") return "experience";
   return undefined;
 }
 
@@ -120,11 +127,22 @@ export function domainSurfaceOf(toolName: string): string {
 }
 
 export function surfaceToolNames(surface: string, activeTools: readonly Tool[], coreToolNames: ReadonlySet<string>): string[] {
+  if (surface === "component-context-owned") return [...new Set([
+    ...surfaceToolNames("component-context-agent", activeTools, coreToolNames),
+    ...activeTools.filter(tool => OWNED_ONLY_SURFACES[surface]!.test(tool.name)).map(tool => tool.name),
+  ])];
   if (surface === "component-context-agent") {
     const names = new Set([
       "craft_info", "craft_component_readiness_get", "craft_component_diagnose",
       "craft_context_open", "craft_context_resolution_resolve", "craft_context_tools_discover", "craft_notes_context_resolve", "craft_context_doctor", "craft_context_usage_statusline", "craft_capability_iteration_plan", "craft_capability_iteration_gaps", "craft_lsp_readiness",
       "craft_knowledge_search", "craft_memory_capture_observed_fact", "craft_learning_cycle_finalize",
+      // The Context Agent must expose each owner's bounded capture path; the
+      // owned ledgers still enforce provenance, scope, review and promotion.
+      "craft_knowledge_session_evidence_record", "craft_knowledge_source_list", "craft_knowledge_bootstrap_install",
+      "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review",
+      "craft_experience_scenario_list", "craft_experience_runbook_capture",
+      "craft_notes_location_list_devices", "craft_notes_create_device", "craft_notes_observe_directory", "craft_notes_observe_file",
+      "craft_notes_candidate_list", "craft_notes_confirm", "craft_notes_resolve", "craft_notes_revoke",
     ]);
     const codebase = COMPONENT_SURFACES["component-codebase"]!;
     const direct = activeTools.filter(tool => names.has(tool.name) || codebase.test(tool.name)).map(tool => tool.name);
@@ -140,12 +158,28 @@ export function surfaceToolNames(surface: string, activeTools: readonly Tool[], 
     const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", "craft_notes_context_resolve", "craft_context_doctor", "craft_context_usage_statusline", "craft_capability_iteration_plan", "craft_capability_iteration_gaps", "craft_lsp_readiness", "craft_knowledge_session_evidence_record", "craft_knowledge_evaluation_case_list", "craft_knowledge_evaluation_run_get", ...Object.values(DAILY_COMPONENT_TOOLS).flat(), ...surfaceToolNames("component-codebase", activeTools, coreToolNames)]);
     return activeTools.filter(tool => names.has(tool.name)).map(tool => tool.name);
   }
+  if (surface === "component-experience-worker" || surface === "component-knowledge-worker") {
+    const base = surface.replace(/-worker$/u, "");
+    return [...new Set([...surfaceToolNames(base, activeTools, coreToolNames), ...surfaceToolNames(`${base}-daily`, activeTools, coreToolNames)])];
+  }
   if (surface === "full") return activeTools.map((tool) => tool.name);
   if (surface === "core") return activeTools.filter((tool) => coreToolNames.has(tool.name)).map((tool) => tool.name);
   if (surface === "syscall") return [...SYSCALL_VERBS, ...SYSCALL_PASSTHROUGH];
+  if (surface === "component-knowledge-owned" || surface === "component-memory-owned" || surface === "component-experience-owned") {
+    const shared = new Set(["craft_context_resolution_resolve", "craft_context_resolution_feedback", "craft_decision_context_gate_open",
+      "craft_knowledge_memory_bundle"]);
+    const daily = [...new Set(["craft_info", ...surfaceToolNames(surface.replace(/-owned$/u, "-daily"), activeTools, coreToolNames).filter(name => !shared.has(name))])];
+    if (surface === "component-experience-owned") {
+      const lifecycle = new Set(["craft_experience_asset_inspect", "craft_experience_asset_restore", "craft_procedure_create", "craft_procedure_configuration_save"]);
+      return [...daily, ...activeTools.filter(tool => lifecycle.has(tool.name)).map(tool => tool.name)];
+    }
+    if (surface !== "component-knowledge-owned") return daily;
+    const governance = new Set(["craft_knowledge_claim_review", "craft_knowledge_asset_inspect", "craft_knowledge_asset_restore", "craft_knowledge_semantic_review_packet"]);
+    return [...daily, ...activeTools.filter(tool => governance.has(tool.name)).map(tool => tool.name)];
+  }
   const daily = DAILY_COMPONENT_TOOLS[surface];
   if (daily) return daily.filter((name) => activeTools.some((tool) => tool.name === name));
-  const component = COMPONENT_SURFACES[surface];
+  const component = COMPONENT_SURFACES[surface] ?? OWNED_ONLY_SURFACES[surface];
   if (component) return activeTools.filter((tool) => tool.name === "craft_info" || component.test(tool.name)).map((tool) => tool.name);
   if (!SURFACE_RULES.some((rule) => rule.name === surface)) throw new Error(`Unknown Craft MCP surface: ${surface}`);
   return activeTools.filter((tool) => !coreToolNames.has(tool.name) && domainSurfaceOf(tool.name) === surface).map((tool) => tool.name);

@@ -1,8 +1,13 @@
 #!/usr/bin/env node
+import { lstatSync } from "node:fs";
 import type { CraftStore } from "../core/infrastructure/store.ts";
+import { presentStorageOwners } from "../core/infrastructure/owned-catalog.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { HookSignalSanitizer } from "../core/interfaces/codex-hook-signal-sanitizer.ts";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { nativeAsyncVerificationResults, withClaudeCommandResult, withCodexCommandResult } from "../core/interfaces/codex-hook-command-result.ts";
 import { beginHookRuntimeDiagnostic, hookStorageFailureDetails } from "../core/interfaces/codex-hook-runtime-diagnostics.ts";
 import { formatCodexHookOutput } from "../core/interfaces/codex-hook-output.ts";
 import { operationErrorCode } from 'craft-common-log/index';
@@ -26,15 +31,17 @@ async function main(): Promise<void> {
   for await (const chunk of process.stdin) raw += String(chunk);
   const inputReadMs = performance.now() - inputReadStarted;
   const inputParseStarted = performance.now();
-  const input = JSON.parse(raw);
+  let input = JSON.parse(raw);
   const hostIndex = process.argv.indexOf("--host");
   if (hostIndex >= 0) {
     const host = process.argv[hostIndex + 1];
     if (host !== "codex" && host !== "claude") throw new Error("--host must be codex or claude");
     input.session_host = host;
   } else input.session_host = "codex";
+  input = withCodexCommandResult(input, process.env.CODEX_HOME || join(homedir(), ".codex"));
+  input = withClaudeCommandResult(input, process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
   const inputParseMs = performance.now() - inputParseStarted;
-  const component = member(process.argv.slice(2));
+  const component = member(process.argv);
   const event = typeof input.hook_event_name === "string" ? input.hook_event_name : "";
   let diagnostic: ReturnType<typeof beginHookRuntimeDiagnostic> | undefined;
   try {
@@ -57,7 +64,7 @@ async function main(): Promise<void> {
   // Codex sends every matching Bash call here, including commands that cannot
   // produce a learning signal. Classify these before opening SQLite so the
   // common no-op path pays only process startup and a content-free receipt.
-  if (event === "PostToolUse" && !new HookSignalSanitizer().signal(input)) {
+  if (event === "PostToolUse" && !new HookSignalSanitizer().signal(input) && !new HookSignalSanitizer().gap(input)) {
     process.stdout.write("{}\n");
     diagnostic?.finish({ process_elapsed_ms: process.uptime() * 1_000, input_read_ms: inputReadMs,
       input_parse_ms: inputParseMs, store_open_ms: 0, handler_ms: 0, outcome: "skipped" });
@@ -72,7 +79,19 @@ async function main(): Promise<void> {
   // A short-lived Host Hook only needs the current schema and normal reads/writes.
   const storeOpenStarted = performance.now();
   let store: CraftStore;
-  try { store = await new Store().open({ skipLegacyPartitionMigration: true }); }
+  let ownedRuntime: Awaited<ReturnType<typeof import("../core/interfaces/mcp/runtime.ts").openCapabilityService>> | undefined;
+  try {
+    const paths = craftPaths();
+    if (process.env.CRAFT_STORAGE_OWNER || presentStorageOwners(paths.root).length
+      || !lstatSync(paths.databaseFile, { throwIfNoEntry: false })?.isFile() && !lstatSync(paths.legacyDatabaseFile, { throwIfNoEntry: false })?.isFile()) {
+      const runtime = await import("../core/interfaces/mcp/runtime.ts");
+      const journalRuntime = await runtime.openCapabilityService("runtime", { ...process.env, CRAFT_CONTEXT_MEMBERS: "" });
+      journalRuntime.close();
+      ownedRuntime = await runtime.openCapabilityService(component, component === "context"
+        ? { ...process.env, CRAFT_CONTEXT_MEMBERS: process.env.CRAFT_CONTEXT_MEMBERS ?? runtime.DEFAULT_CONTEXT_MEMBERS } : process.env);
+      store = ownedRuntime.store;
+    } else store = await new Store().open({ skipLegacyPartitionMigration: true });
+  }
   catch (error) {
     diagnostic?.finish({ process_elapsed_ms: process.uptime() * 1_000, input_read_ms: inputReadMs, input_parse_ms: inputParseMs,
       runtime_import_ms: runtimeImportMs, store_open_ms: performance.now() - storeOpenStarted, outcome: "failed", error_code: operationErrorCode(error),
@@ -91,11 +110,21 @@ async function main(): Promise<void> {
   let serviceOpenStarted = 0;
   try {
     serviceOpenStarted = performance.now();
-    const service = await CraftService.open(store);
+    const service = ownedRuntime?.service ?? await CraftService.open(store);
     serviceOpenMs = performance.now() - serviceOpenStarted;
     const handlerStarted = performance.now();
     let output;
-    try { output = await new CodexHookBridge(service, () => { if (process.argv[1]) launchMemoryArchiveWorker(process.argv[1], store.paths.root); }).handle(component, input); }
+    try {
+      const bridge = new CodexHookBridge(service, () => { if (process.argv[1]) launchMemoryArchiveWorker(process.argv[1], store.paths.root); });
+      if (event === "Stop" && (component === "context" || component === "experience")) {
+        const home = input.session_host === "claude" ? process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude") : process.env.CODEX_HOME || join(homedir(), ".codex");
+        const completions = nativeAsyncVerificationResults(input, home);
+        for (const completion of completions) await bridge.handle(component, completion);
+        for (const completion of new Map(completions.map(value => [value.turn_id, value])).values())
+          await bridge.handle(component, { ...completion, hook_event_name: "Stop" });
+      }
+      output = await bridge.handle(component, input);
+    }
     finally { handlerMs = performance.now() - handlerStarted; }
     const outputStarted = performance.now();
     process.stdout.write(`${JSON.stringify(formatCodexHookOutput(event, output))}\n`);
@@ -109,7 +138,7 @@ async function main(): Promise<void> {
     throw error;
   } finally {
     const closeStarted = performance.now();
-    store.close();
+    if (ownedRuntime) ownedRuntime.close(); else store.close();
     storeCloseMs = performance.now() - closeStarted;
     diagnostic?.finish({ process_elapsed_ms: process.uptime() * 1_000, input_read_ms: inputReadMs, input_parse_ms: inputParseMs,
       runtime_import_ms: runtimeImportMs, store_open_ms: storeOpenMs, service_open_ms: serviceOpenMs,

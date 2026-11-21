@@ -55,14 +55,14 @@ test("program memory submits an exact Experience candidate and blocks substitute
     }
     const design = service.evaluationContractDefine({ contract_id: "memory-design", capability_id: "verify-project-operating-procedure",
       capability_version: 1, input_contract: "project-scoped observation", output_contract: "accepted procedure",
-      scope, effect: "program_memory_design", budget: { task_effect_design: { candidate_family: "experience_procedure" } } }).contract as JsonObject;
+      scope, effect: "program_memory_design", budget: { program_memory_workflow: { steps: [{ id: "observe", type: "assertion", evaluator: "file_exists", path: "package.json", expected: true, side_effect: "read_only" }] }, task_effect_design: { candidate_family: "experience_procedure" } } }).contract as JsonObject;
     const observation = (sourceId: string, sessionId: string, project: string) => {
       const evidence = service.evidenceRecord({ source_type: "host_completion_signal", confidence: "bounded", claim: "Verified task",
         metadata: { provenance: "host_completion_signal", project_scope_id: project, verification_outcome: "passed",
           source_session_id: sessionId, task_id: sourceId, content_stored: false } });
       const result = service.workflowEvolutionObserve({ sanitized: true, content_stored: false, outcome: "passed",
         source_kind: "host:codex", source_id: sourceId, source_session_id: sessionId, source_digest: sourceId,
-        scope: project, scenario_key: "verified-release", evidence_ids: [evidence.id] }).observation as JsonObject;
+        scope: project, scenario_key: "verified-release", scenario_signature: { scenario_key: "verified-release", project: { id: project } }, evidence_ids: [evidence.id] }).observation as JsonObject;
       f.store.create("program_memory_verified_observation", String(result.id), { scope: { ...scope, id: project }, evidence_id: evidence.id,
         source_digest: sourceId, source_session_id: sessionId, task_id: sourceId });
       return result;
@@ -73,14 +73,29 @@ test("program memory submits an exact Experience candidate and blocks substitute
     const b = observation("task-b", "session-b", scope.id);
     const input = { statement: "Verify the release checklist", scenario_key: "verified-release", domain: "coding",
       scope, evaluation_contract_id: design.id };
+    const diagnostic = service.evolutionProgramMemoryCapture({ ...input, evaluation_contract_id: undefined, evidence_ids: [a.id] });
     const candidate = service.evolutionProgramMemoryCapture({ ...input, evidence_ids: [a.id, duplicate.id, foreign.id] });
+    assert.notEqual(candidate.id, diagnostic.id);
+    assert.equal((candidate.source_refs as JsonObject[]).some(ref => ref.id === diagnostic.id), true);
+    assert.equal(service.evolutionProgramMemoryGet({ id: diagnostic.id, scope }).candidate !== undefined, true);
     assert.equal(candidate.independent_evidence_count, 1);
+    const waiting = service.evolutionProgramMemorySubmissionDue({ scope }).items as JsonObject[];
+    assert.equal(waiting.find(item => item.id === diagnostic.id)?.reason, "waiting_evaluation_design");
+    assert.equal(waiting.find(item => item.id === candidate.id)?.reason, "waiting_independent_observations");
     assert.equal(service.evolutionProgramMemoryCapture({ ...input, evidence_ids: [a.id] }).version, candidate.version);
     const request = { id: candidate.id, scope };
     assert.throws(() => service.evolutionProgramMemorySubmit(request), /independent/);
     assert.equal(service.evolutionProgramMemoryCapture({ ...input, evidence_ids: [b.id] }).independent_evidence_count, 2);
+    const frozenSubmissionPlan = service.evolutionProgramMemoryPrepareSubmission(request);
     const submitted = service.evolutionProgramMemorySubmit(request);
     assert.equal(submitted.status, "submitted");
+    const ownerReceipt = { request_id: submitted.request_id, procedure_id: submitted.procedure_id, procedure_candidate_version: submitted.procedure_candidate_version };
+    assert.throws(() => service.evolutionProgramMemoryCommitSubmission(frozenSubmissionPlan, { ...ownerReceipt, procedure_candidate_version: 999 }), /receipt conflict/);
+    assert.throws(() => service.evolutionProgramMemoryCommitSubmission(frozenSubmissionPlan, { ...ownerReceipt, procedure_id: "foreign" }), /identity mismatch/);
+    assert.throws(() => service.evolutionProgramMemoryCommitSubmission({ ...frozenSubmissionPlan, candidate: { ...(frozenSubmissionPlan.candidate as JsonObject), digest: "changed" } }, ownerReceipt), /changed/);
+
+    const proposal = f.store.list("workflow_evolution_proposal", 100).find(item => item.request_id === submitted.request_id)!;
+    assert.equal((proposal.steps as JsonObject[])[0]!.type, "assertion");
     assert.equal(service.evolutionProgramMemorySubmit(request).procedure_id, submitted.procedure_id);
     assert.throws(() => service.evolutionProgramMemoryPromote({ ...request, evaluation_ref: "unverified" }), /qualified/);
 
@@ -95,6 +110,9 @@ test("program memory submits an exact Experience candidate and blocks substitute
       evaluation_id: "unverified" }), /frozen Program Memory design/);
     assert.equal(service.evolutionProgramMemoryFeedback({ ...request, outcome: "revoked" }).status, "revoked");
     assert.throws(() => service.experienceProcedureGate({ ...gate, stage: "shadow" }), /no longer authorizes/);
+    assert.throws(() => service.evolutionProgramMemoryCommitSubmission(frozenSubmissionPlan, ownerReceipt), /changed/);
+    assert.equal((service.evolutionProgramMemoryGet(request).candidate as JsonObject).status, "revoked", "a delayed submission commit must not resurrect a revoked candidate");
+
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

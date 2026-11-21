@@ -1,7 +1,9 @@
-import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { stableDigest } from "./digest.ts";
+
+const MAX_PENDING_AGE_MS = 24 * 60 * 60 * 1_000;
 
 const SCHEMA = "craft.experience-pending-task-goal.v1";
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
@@ -58,10 +60,23 @@ function readPendingFile(path: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/** Bound abandoned asynchronous task goals; paths remain confined to the existing pending directory. */
+export function pruneExperienceTaskGoals(experienceDir: string, now = Date.now()): number {
+  const queue = join(experienceDir, "scenario-classification"), pending = join(queue, "pending");
+  if (!directory(experienceDir, false) || !directory(queue, false) || !directory(pending, false)) return 0;
+  let removed = 0;
+  for (const name of readdirSync(pending).filter(name => /^[a-f0-9]{32}\.json$/u.test(name)).slice(0, 100)) {
+    const path = join(pending, name), stat = lstatSync(path);
+    if (!stat.isSymbolicLink() && stat.isFile() && now - stat.mtimeMs > MAX_PENDING_AGE_MS) { unlinkSync(path); removed++; }
+  }
+  return removed;
+}
+
 export function storeExperienceTaskGoal(args: ExperienceTaskGoalArgs): void {
   if (typeof args.task_goal !== "string" || !args.task_goal.trim() || args.task_goal.length > 320 || SECRET.test(args.task_goal)) {
     throw new Error("Experience task goal is not sanitized");
   }
+  pruneExperienceTaskGoals(args.experience_dir);
   const path = pendingPath(args, true);
   if (!path) throw new Error("Experience task-goal directory is unavailable");
   const identity = { schema: SCHEMA, scope: args.scope, task_goal: args.task_goal, sanitized: true, content_stored: false,
@@ -87,6 +102,7 @@ export function storeExperienceTaskGoal(args: ExperienceTaskGoalArgs): void {
 export function readExperienceTaskGoal(args: ExperienceTaskGoalArgs): string | null {
   const path = pendingPath(args, false);
   if (!path || !existsSync(path)) return null;
+  if (Date.now() - lstatSync(path).mtimeMs > MAX_PENDING_AGE_MS) { deleteExperienceTaskGoal(args); return null; }
   const value = readPendingFile(path);
   const identity = { schema: value.schema, scope: value.scope, task_goal: value.task_goal, sanitized: value.sanitized,
     content_stored: value.content_stored, task_identity_digest: value.task_identity_digest };

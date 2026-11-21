@@ -1,4 +1,5 @@
-import { craftPaths } from 'craft-common-store-local/paths';
+import { withStoragePreflightSnapshot } from "../core/storage-preflight-snapshot.ts";
+import { craftPaths, type CraftPaths } from 'craft-common-store-local/paths';
 import { CraftStore } from 'craft-common-store-local/store';
 import { legacySessionMemoryInventory, legacySessionMemoryPreflight } from "../core/legacy-session-memory-preflight.ts";
 import { quarantineLegacySessionMemory } from "../core/legacy-session-memory-quarantine.ts";
@@ -19,7 +20,7 @@ if (unknown.length || args.filter(arg => arg.startsWith("--data-root=")).length 
 }
 const paths = craftPaths(rootArgument ? rootArgument.slice("--data-root=".length) : undefined);
 const legacySessionRoot = legacySessionRootArgument?.slice("--legacy-session-memory-root=".length) ?? "/tmp/.craft_data/memory";
-function scan(): { entries: Array<{ kind: string; id: string; version: number }>; counts: Record<string, number>; identity_counts: Record<string, number>; unpartitioned_knowledge_versions: number; codebase_statuses: Record<string, number>;
+function scan(paths: CraftPaths): { entries: Array<{ kind: string; id: string; version: number }>; counts: Record<string, number>; identity_counts: Record<string, number>; unpartitioned_knowledge_versions: number; codebase_statuses: Record<string, number>;
   blocked_entries: Array<{ kind: string; id: string; version: number; status: string; project_scope_digest: string | null }>;
   legacy_entries: Awaited<ReturnType<typeof legacySessionMemoryPreflight>>["entries"]; legacy_root_status: "missing" | "ready" | "unsafe" } {
   const entries: Array<{ kind: string; id: string; version: number }> = [];
@@ -53,7 +54,7 @@ function scan(): { entries: Array<{ kind: string; id: string; version: number }>
   } while (codebaseCursor); } finally { codebaseReader.close(); }
   return { entries, counts, identity_counts: identityCounts, unpartitioned_knowledge_versions: unpartitionedKnowledgeVersions, codebase_statuses: codebaseStatuses, blocked_entries: blockedEntries, legacy_entries: legacyEntries, legacy_root_status: legacyRootStatus };
 }
-const { entries, counts: statusCounts, identity_counts: identityCounts, unpartitioned_knowledge_versions: unpartitionedKnowledgeVersions, codebase_statuses: codebaseStatuses, blocked_entries: blockedEntries, legacy_entries: legacyEntries, legacy_root_status: legacyRootStatus } = scan();
+const { entries, counts: statusCounts, identity_counts: identityCounts, unpartitioned_knowledge_versions: unpartitionedKnowledgeVersions, codebase_statuses: codebaseStatuses, blocked_entries: blockedEntries, legacy_entries: legacyEntries, legacy_root_status: legacyRootStatus } = apply ? scan(paths) : await withStoragePreflightSnapshot(paths, async snapshot => scan(snapshot));
 const legacyStatusCounts = legacyEntries.reduce<Record<string, number>>((counts, entry) => {
   counts[entry.status] = (counts[entry.status] ?? 0) + 1;
   return counts;
@@ -95,7 +96,7 @@ if (!apply) {
       ? quarantineLegacySessionMemory(paths, legacySessionRoot, legacyEntries, { retain_source: true })
       : { quarantined: 0, broken_links: 0, staging_recovered: 0,
         blocked: legacyEntries.length ? [{ source_digest: "root", reason: "legacy_root_unavailable" }] : [] };
-    const after = scan();
+    const after = scan(paths);
     const afterLegacyStatusCounts = after.legacy_entries.reduce<Record<string, number>>((counts, entry) => {
       counts[entry.status] = (counts[entry.status] ?? 0) + 1;
       return counts;

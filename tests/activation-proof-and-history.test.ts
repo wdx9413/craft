@@ -41,11 +41,21 @@ test("activation proof distinguishes observed execution, stale evidence and abse
     proof.record({ host: "codex", component: "experience", event: "Stop", session_id: "all", context_receipt_id: null, observation_written: true, hook_trusted: true, mcp_reachable: true });
     proof.record({ host: "codex", component: "knowledge", event: "SessionStart", hook_trusted: true, mcp_reachable: true });
     const current = proof.doctor({ session_id: "s" });
-    assert.equal((current.components as JsonObject[]).find((x) => x.component === "memory")!.status, "hook_not_trusted");
+    assert.equal((current.components as JsonObject[]).find((x) => x.component === "memory")!.status, "hook_trust_unknown");
     assert.equal((current.components as JsonObject[]).find((x) => x.component === "experience")!.status, "mcp_not_reachable");
     assert.equal(current.next_action, "run_one_real_host_turn_then_recheck_this_session");
     assert.equal(proof.doctor({ session_id: "all" }).next_action, "inspect_the_component_receipts_and_evidence");
     assert.equal(proof.doctor().session_id, null);
+    proof.record({ host: "codex", component: "memory", event: "Stop", session_id: "native-untrusted", hook_trust_status: "untrusted", hook_trust_evidence: "native_hooks_list", mcp_reachable: true });
+    assert.equal((proof.doctor({ session_id: "native-untrusted" }).components as JsonObject[]).find(item => item.component === "memory")!.status, "hook_not_trusted");
+
+    proof.record({ host: "codex", component: "memory", event: "Stop", session_id: "contradictory", hook_trust_status: "untrusted", hook_trust_evidence: "native_hooks_list", hook_trusted: true });
+    assert.equal((proof.doctor({ session_id: "contradictory" }).components as JsonObject[]).find(item => item.component === "memory")!.hook_trust_status, "unknown");
+    for (const trusted of [true, false]) {
+      f.store.create("activation_proof_receipt", `legacy-trust-${trusted}`, { host: "codex", component: "memory", session_id: `legacy-${trusted}`, plugin_release: (first.receipt as JsonObject).plugin_release, hook_trusted: trusted });
+      assert.equal((proof.doctor({ session_id: `legacy-${trusted}` }).components as JsonObject[]).find(item => item.component === "memory")!.hook_trust_status, trusted ? "trusted" : "unknown");
+    }
+
     assert.throws(() => proof.record({ host: "other", component: "memory", event: "x", session_id: "s" }), /host/);
     assert.throws(() => proof.record({ host: "codex", component: "other", event: "x", session_id: "s" }), /component/);
     assert.throws(() => proof.record({ host: "codex", component: "memory", event: "", session_id: "s" }), /event/);

@@ -23,6 +23,8 @@ catch (error) {
 }
 
 if (mode) serveMcpStdio({ mode, input: process.stdin, write: (line) => process.stdout.write(line), afterStart: async server => {
+  const owner = process.env.CRAFT_STORAGE_OWNER;
+  if (owner !== undefined) return;
   const stopLearning = await startContextLearningWorker({ mode, server_entrypoint: process.argv[1], env: process.env,
     on_failure: reason => process.stderr.write(`Craft ${mode} learning worker stopped (${reason}).\n`) });
   const stopTraceRetention = startConfiguredTraceRetentionWorker(server.service,

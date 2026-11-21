@@ -148,3 +148,29 @@ test("Context Hook and MCP share project binding for candidate capture, discover
     assert.equal(((retained.structuredContent as JsonObject).candidate as JsonObject).statement, "retained verified workflow");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("worker enrollment rejects malformed, stale and foreign provenance without issuing project authority", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-enrollment-validation-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const { registeredLearningProjectScopes } = await import("../core/evolution-project-binding.ts");
+    const { stableDigest } = await import("../core/digest.ts");
+    const scope = { kind: "project", id: "project:test" };
+    const source = store.create("context_evolution_project_binding", "native", { scope, host: "codex" });
+    const wrong = store.create("context_evolution_project_binding", "foreign", { scope: { kind: "project", id: "project:foreign" }, host: "claude" });
+    const unsupported = store.create("context_evolution_project_binding", "unsupported", { scope, host: "other" });
+    const ref = (record: JsonObject) => ({ kind: "context_evolution_project_binding", id: record.id, version: record.version, digest: stableDigest(record) });
+    const entries = [
+      { scope: { kind: "global", id: "global" }, source_ref: ref(source) },
+      { scope, provenance: "caller_asserted", source_ref: ref(source) },
+      { scope }, { scope, source_ref: { ...ref(source), kind: "other" } },
+      { scope, source_ref: { ...ref(source), id: 17 } }, { scope, source_ref: { ...ref(source), version: 0 } },
+      { scope, source_ref: { ...ref(source), version: 1.5 } },
+      { scope, source_ref: { ...ref(source), id: "missing" } },
+      { scope, source_ref: { ...ref(source), digest: "wrong" } },
+      { scope, source_ref: ref(wrong) }, { scope, source_ref: ref(unsupported) },
+    ];
+    for (const [index, entry] of entries.entries()) store.create("context_learning_enrollment", `bad-${index}`, { status: "active", provenance: "hook_project_binding", ...entry });
+    assert.deepEqual(registeredLearningProjectScopes(store), []);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

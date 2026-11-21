@@ -4,6 +4,9 @@ import { stableDigest } from "./digest.ts";
 import { CraftOperationError } from "./operation-error.ts";
 import { evolutionProjectScope, type EvolutionProjectScope } from "@craft/capability-context";
 
+const bindingSources = new WeakMap<CraftStore, Pick<CraftStore, "find">>();
+export function bindEvolutionProjectBindingSource(store: CraftStore, source: Pick<CraftStore, "find">): void { bindingSources.set(store, source); }
+
 const KIND = "context_evolution_project_binding";
 const TTL_MS = 60 * 60 * 1000;
 
@@ -19,8 +22,30 @@ type HookProjectBinding = {
 export function mintEvolutionProjectBinding(store: CraftStore, binding: HookProjectBinding): string {
   const id = projectBindingId(binding);
   const token = `${id}.${randomUUID().replaceAll("-", "")}`;
-  store.save(KIND, id, { ...binding, token_digest: stableDigest(token), expires_at_ms: Date.now() + TTL_MS });
+  const record = store.save(KIND, id, { ...binding, token_digest: stableDigest(token), expires_at_ms: Date.now() + TTL_MS });
+  const enrollmentId = `context_learning_enrollment_${stableDigest(binding.scope).slice(-24)}`;
+  if (!store.find("context_learning_enrollment", enrollmentId)) store.create("context_learning_enrollment", enrollmentId, {
+    scope: binding.scope, status: "active", provenance: "hook_project_binding", content_stored: false,
+    source_ref: { kind: KIND, id: record.id, version: record.version, digest: stableDigest(record) },
+  });
   return token;
+}
+
+/** Native Hook enrollment grants only its registered project; bearer tokens never reach the Worker. */
+export function registeredLearningProjectScopes(store: CraftStore): JsonObject[] {
+  const scopes = new Map<string, JsonObject>();
+  for (const enrollment of store.list("context_learning_enrollment", 1_000, item => item.status === "active", false)) {
+    const scope = evolutionProjectScope(enrollment.scope), reference = enrollment.source_ref as JsonObject | undefined;
+    if (!scope || enrollment.provenance !== "hook_project_binding" || reference?.kind !== KIND || typeof reference.id !== "string"
+      || !Number.isSafeInteger(reference.version) || Number(reference.version) < 1) continue;
+    const source = store.find(KIND, reference.id, Number(reference.version), false);
+    if (!source || stableDigest(source) !== reference.digest || stableDigest(source.scope) !== stableDigest(scope)
+      || (source.host !== "codex" && source.host !== "claude")) continue;
+    const registered = store.list("scope_alias", 1_000, alias => alias.status === "active" && alias.alias_kind === "path"
+      && stableDigest(alias.scope) === stableDigest(scope) && typeof alias.alias === "string" && alias.alias_digest === stableDigest(alias.alias), false);
+    if (registered.length) scopes.set(scope.id, scope as JsonObject);
+  }
+  return [...scopes.values()];
 }
 
 function projectBindingId({ host, session_id }: Pick<HookProjectBinding, "host" | "session_id">): string {
@@ -46,7 +71,7 @@ function denied(): CraftOperationError {
 
 function readBinding(store: CraftStore, token: unknown): HookProjectBinding {
   if (typeof token !== "string" || !/^[a-f0-9]{32}\.[a-f0-9]{32}$/u.test(token)) throw denied();
-  const binding = store.find(KIND, token.slice(0, 32));
+  const binding = (bindingSources.get(store) ?? store).find(KIND, token.slice(0, 32));
   if (!binding || binding.token_digest !== stableDigest(token) || !(Number(binding.expires_at_ms) > Date.now())) throw denied();
   const scope = evolutionProjectScope(binding.scope);
   if (!scope || typeof binding.project_root !== "string" || typeof binding.session_id !== "string"

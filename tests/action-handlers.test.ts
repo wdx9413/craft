@@ -13,7 +13,7 @@ test("all neutral action bindings use the supplied application and preserve call
     // context doctor) need a store-shaped object, not a callable.
     if (name === "store") return {
       list: () => [], count: () => 0, find: () => null,
-      paths: { root: process.cwd(), dataRoot: process.cwd(), configDir: process.cwd() },
+      paths: { root: process.cwd(), databaseDir: process.cwd(), dataRoot: process.cwd(), configDir: process.cwd() },
     };
     if (name === "memoryGovernance") return new Proxy({}, { get: (_kernel, method) => (...args: unknown[]) => { const call = { method: `memoryGovernance.${String(method)}`, args }; calls.push(call); return { method: call.method }; } });
     return (...args: unknown[]) => { const call = { method: String(name), args }; calls.push(call); return { method: call.method }; };

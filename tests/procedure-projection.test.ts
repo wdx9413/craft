@@ -11,6 +11,8 @@ import { stableDigest } from "../core/digest.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
+import { CraftService } from "../core/service.ts";
+import { procedureTaskEffectFixture } from "./helpers/procedure-task-effect-fixture.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-procedure-projection-"));
@@ -19,16 +21,17 @@ async function fixture() {
   mkdirSync(retireRoot); mkdirSync(testRoot);
   for (const [id, path] of [["project:project", root], ["project:retire-project", retireRoot], ["project:test", testRoot]]) store.create("scope_alias", `alias-${id}`, { status: "active", alias_kind: "path", alias: path,
     alias_digest: stableDigest(path), scope: { kind: "project", id } });
-  const procedures = new ProcedureStore(store);
+  const service = new CraftService(store), procedures = new ProcedureStore(store);
   store.create("evidence", "e", { confidence: "confirmed" });
   store.create("workflow_evolution_request", "request", { scenario_key: "inspect", scenario_signature: { domain: "test" }, observation_refs: [{ source: { scope: "project:test" }, evidence_ids: ["e"] }], output_contract_ref: "acceptance:test" });
   store.create("workflow_evolution_proposal", "proposal", { request_id: "request", request_version: 1, name: "Inspect", description: "Read only fixture", inputs: [], steps: [] });
   function draft(extra: JsonObject = {}): JsonObject { return procedures.draft({ proposal_id: "proposal", ...extra }).procedure as JsonObject; }
   function promote(procedure: JsonObject): JsonObject {
-    for (const stage of ["shadow", "held_out", "signoff", "canary"]) procedures.gate({ procedure_id: procedure.id, stage, passed: true, evidence_ids: ["e"] });
+    const qualification = procedureTaskEffectFixture(service, procedure, procedures);
+    for (const stage of ["shadow", "held_out", "signoff", "canary"]) procedures.gate({ procedure_id: procedure.id, stage, passed: true, evidence_ids: ["e"], ...qualification });
     return store.get("experience_procedure", String(procedure.id));
   }
-  return { root, store, procedures, draft, promote, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
+  return { root, store, service, procedures, draft, promote, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
 }
 
 test("Procedure drafts and qualification reject a retired Experience scenario", async () => {
@@ -186,7 +189,7 @@ test("Procedure public projection lists, validates drafts and preserves identity
     assert.equal((f.procedures.list({ scope: "project:test", limit: 1 }).procedures as JsonObject[]).length, 1);
     assert.deepEqual(f.procedures.list({ scope: "project:other" }).procedures, []);
     assert.throws(() => f.procedures.list({ scope: " " }), /must not be empty/);
-    assert.throws(() => f.procedures.plan({}), /scope/);
+    assert.throws(() => f.procedures.plan({}), /procedure_id/);
     assert.throws(() => f.procedures.gate({ procedure_id: p.id, stage: "unknown" }), /unsupported/);
     assert.throws(() => f.procedures.gate({ procedure_id: p.id, stage: "canary", evidence_ids: ["e"] }), /order/);
     f.store.create("evidence", "weak", { confidence: "unconfirmed" });
@@ -298,22 +301,29 @@ test("Gate retries preserve versions and cannot revive a failed qualification", 
     const first = f.procedures.gate(shadow);
     assert.equal(f.procedures.gate(shadow).idempotent, true);
     assert.equal((f.procedures.get({ procedure_id: p.id }).procedure as JsonObject).version, (first.procedure as JsonObject).version);
-    for (const stage of ["held_out", "signoff", "canary"]) f.procedures.gate({ ...shadow, stage, gate_id: stage });
+    const qualification = procedureTaskEffectFixture(f.service, p, f.procedures);
+    for (const stage of ["held_out", "signoff", "canary"]) f.procedures.gate({ ...shadow, ...qualification, stage, gate_id: stage });
+    assert.equal(f.procedures.gate({ ...shadow, ...qualification, stage: "canary", gate_id: "canary" }).idempotent, true);
     const failed = f.procedures.gate({ ...shadow, stage: "canary", passed: false, gate_id: "rollback" }).procedure as JsonObject;
     assert.deepEqual(failed.completed_gates, []);
-    assert.equal(f.procedures.gate({ ...shadow, stage: "canary", gate_id: "canary" }).idempotent, true);
+    assert.throws(() => f.procedures.gate({ ...shadow, ...qualification, stage: "canary", gate_id: "canary" }), /qualification cannot change/);
     assert.equal((f.procedures.get({ procedure_id: p.id }).procedure as JsonObject).lifecycle, "rolled_back");
-    assert.throws(() => f.procedures.gate({ ...shadow, stage: "canary", gate_id: "bypass" }), /order/);
+    const retryQualification = procedureTaskEffectFixture(f.service, p, f.procedures);
+    assert.throws(() => f.procedures.gate({ ...shadow, ...retryQualification, stage: "canary", gate_id: "bypass" }), /qualification cannot change/);
     // Old stores may still carry passed stages on a revoked record.
     f.store.save("experience_procedure", String(p.id), { ...failed, completed_gates: ["shadow", "held_out", "signoff", "canary"] });
-    assert.throws(() => f.procedures.gate({ ...shadow, stage: "canary", gate_id: "legacy-bypass" }), /order/);
-    for (const stage of ["shadow", "held_out", "signoff", "canary"]) f.procedures.gate({ ...shadow, stage, gate_id: `requalification-${stage}` });
+    assert.throws(() => f.procedures.gate({ ...shadow, ...retryQualification, stage: "canary", gate_id: "legacy-bypass" }), /qualification cannot change/);
+    let requalification = qualification;
+    for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
+      if (stage === "held_out") requalification = procedureTaskEffectFixture(f.service, p, f.procedures);
+      f.procedures.gate({ ...shadow, ...requalification, stage, gate_id: `requalification-${stage}` });
+    }
     assert.equal((f.procedures.get({ procedure_id: p.id }).procedure as JsonObject).routeable, true);
     const restarted = f.procedures.gate({ ...shadow, gate_id: "new-shadow" }).procedure as JsonObject;
     assert.deepEqual(restarted.completed_gates, ["shadow"]);
-    assert.throws(() => f.procedures.gate({ ...shadow, stage: "canary", gate_id: "skip-stages" }), /order/);
-    assert.throws(() => f.procedures.gate({ ...shadow, stage: "held_out", expected_version: 1 }), /version/);
-    assert.throws(() => f.procedures.gate({ ...shadow, stage: "held_out", expected_version: "bad" }), /version/);
+    assert.throws(() => f.procedures.gate({ ...shadow, ...requalification, stage: "canary", gate_id: "skip-stages" }), /qualification cannot change/);
+    assert.throws(() => f.procedures.gate({ ...shadow, ...requalification, stage: "held_out", expected_version: 1 }), /version/);
+    assert.throws(() => f.procedures.gate({ ...shadow, ...requalification, stage: "held_out", expected_version: "bad" }), /version/);
   } finally { f.close(); }
 });
 

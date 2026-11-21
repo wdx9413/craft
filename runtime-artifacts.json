@@ -2,8 +2,6 @@
   "npm_files": [
     "bin",
     "core",
-    "capability",
-    "common",
     "dist/core",
     "dist/capability",
     "dist/common",
@@ -22,7 +20,12 @@
     "docs",
     "deploy",
     "scripts/codebase",
-    "scripts/eval"
+    "scripts/eval",
+    "dist/scripts/owner-history-archive.js",
+    "dist/scripts/owner-history-compress.js",
+    "dist/scripts/owner-history-import.js",
+    "dist/scripts/owner-storage-cutover.js",
+    "dist/scripts/storage-capacity.js"
   ],
   "runtime_copies": [
     {

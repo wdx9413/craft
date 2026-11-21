@@ -1,6 +1,6 @@
 {
   "name": "craft-knowledge",
-  "version": "0.12.44",
+  "version": "0.13.0",
   "description": "craft-knowledge governed context and repository tools",
   "author": {
     "name": "wdx9413"
@@ -29,9 +29,7 @@
       "Knowledge sources",
       "Evidence Wiki",
       "Context resolution"
-    ],
-    "defaultPrompt": [
-      "Search my governed knowledge for this question and cite the selected revisions."
     ]
-  }
+  },
+  "hooks": "./hooks/codex-hooks.json"
 }

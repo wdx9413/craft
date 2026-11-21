@@ -1,3 +1,4 @@
+import { procedureTaskEffectFixture } from "./helpers/procedure-task-effect-fixture.ts";
 import { experienceGraphTemplate } from '@craft/capability-experience/procedure-templates';
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -64,10 +65,11 @@ test("Graph rework restores the previous accepted version of a refined artifact 
   };
   try {
     let p = f.service.procedureConfigurationSave({ procedure_id: "refinement", scope, title: "Review", procedure_kind: "graph", definition }).procedure as JsonObject;
+    const procedures = new ProcedureStore(f.store), qualification = procedureTaskEffectFixture(f.service, p, procedures);
     for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
       const id = `qualify:${stage}`;
       f.store.create("evidence", id, { confidence: "confirmed", metadata: { procedure_definition_digest: p.definition_digest, entry_id: "start", exit_id: "done", subscenario_id: "review", stage, status: "passed" } });
-      p = new ProcedureStore(f.store).gate({ procedure_id: p.id, stage, passed: true, evidence_ids: [id] }).procedure as JsonObject;
+      p = procedures.gate({ ...qualification, procedure_id: p.id, stage, passed: true, evidence_ids: [id] }).procedure as JsonObject;
     }
     f.service.procedureInvocationBind({ ...f.args(p), entry_id: "start", exit_id: "done", subscenario_id: "review", input_refs: { request: "artifact:request" } });
     let decision = 0;
@@ -107,13 +109,14 @@ test("configured Workflow and Graph export checked definitions as disabled Skill
       let p = f.service.procedureConfigurationSave({ procedure_id: `configured-${kind}`, scope, scenario_id: "review", title: "Configured Review", procedure_kind: kind, definition }).procedure as JsonObject;
       assert.equal(p.content_ref, undefined);
       assert.throws(() => procedures.skillExport({ procedure_id: p.id }), /Only routeable/);
+      const qualification = procedureTaskEffectFixture(f.service, p, procedures);
       for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
         const evidence_ids: string[] = [];
         for (const entry of p.entrypoints as JsonObject[]) for (const route of entry.routes as JsonObject[]) {
           const id = `${p.id}:${stage}:${entry.id}:${route.exit_id}:${route.subscenario_id}`;
           f.store.create("evidence", id, { confidence: "confirmed", metadata: { procedure_definition_digest: p.definition_digest, entry_id: entry.id, exit_id: route.exit_id, subscenario_id: route.subscenario_id, stage, status: "passed" } }); evidence_ids.push(id);
         }
-        p = procedures.gate({ procedure_id: p.id, stage, passed: true, evidence_ids }).procedure as JsonObject;
+        p = procedures.gate({ ...qualification, procedure_id: p.id, stage, passed: true, evidence_ids }).procedure as JsonObject;
       }
       const result = procedures.skillExport({ procedure_id: p.id });
       const exported = result.export as JsonObject;

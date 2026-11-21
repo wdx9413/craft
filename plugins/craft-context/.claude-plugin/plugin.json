@@ -1,6 +1,6 @@
 {
   "name": "craft-context",
-  "version": "0.20.14",
+  "version": "0.21.2",
   "description": "Complete Knowledge, Memory, Experience, and Codebase tools in one Craft entry point",
   "author": {
     "name": "wdx9413"
@@ -15,7 +15,8 @@
         "context"
       ],
       "env": {
-        "CRAFT_LEARNING_MODEL_HOST": "claude-code"
+        "CRAFT_LEARNING_MODEL_HOST": "claude-code",
+        "CRAFT_CONTEXT_MEMBERS": "knowledge,memory,experience,codebase,notes,eval,runtime"
       }
     }
   },

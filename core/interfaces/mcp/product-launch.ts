@@ -11,6 +11,9 @@ export const MCP_PRODUCT_SURFACES = {
   memory: "component-memory-daily",
   experience: "component-experience-daily",
   codebase: "component-codebase",
+  notes: "component-notes-owned",
+  eval: "component-eval-owned",
+  runtime: "component-runtime-owned",
 } as const;
 
 export type McpProduct = keyof typeof MCP_PRODUCT_SURFACES;

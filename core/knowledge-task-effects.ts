@@ -142,11 +142,13 @@ export class KnowledgeTaskEffects {
     const negativeIds = new Set(material.cases.filter(item => (item.expected_claim_ids as string[]).length === 0).map(item => item.id));
     if (results[1]!.some(result => negativeIds.has(result.case_id) && result.task_verdict !== "passed")) reasons.push("negative_task_regression");
     const dependencies = [...material.dependencies, ...records.map(record => ({ kind: "workbench_evaluation", id: record.id, version: record.version, digest: stableDigest(record) }))];
+    const dependencyRecord = (ref: JsonObject): JsonObject | null => ref.kind === "workbench_evaluation"
+      ? this.evaluations.get(String(ref.id)) : this.store.find(String(ref.kind), String(ref.id), undefined, false);
     const binding = { policy: KNOWLEDGE_TASK_EFFECT_POLICY, scope: material.claim.scope, claim_id: material.claim.id, retrieval_run_id: runId, retrieval_run_digest: stableDigest(material.run), baseline_id: baselineId, candidate_id: candidateId,
       dependencies, comparison_digest: stableDigest(comparison), observed_model: observedModel, execution_origin: "controlled_paired_host_tasks", status: reasons.length ? "insufficient" : "eligible", reasons };
     // Recheck after filesystem/model comparisons and immediately before writing authority.
     reject(same(this.material(runId), material), "Knowledge effect inputs changed during assessment");
-    for (const ref of dependencies) reject(stableDigest(this.store.find(String(ref.kind), String(ref.id), undefined, false)) === ref.digest, "Knowledge effect dependency changed during assessment");
+    for (const ref of dependencies) reject(stableDigest(dependencyRecord(ref)) === ref.digest, "Knowledge effect dependency changed during assessment");
     const id = knowledgeTaskEffectId(material.run);
     const existing = this.store.find("knowledge_task_effect", id);
     if (existing) { reject(same(existing.assessment_digest, stableDigest(binding)), "Knowledge effect run already has a different assessment; create a new retrieval run"); return { assessment: existing, idempotent: true, knowledge_promotion_authorized: false }; }
@@ -154,7 +156,7 @@ export class KnowledgeTaskEffects {
     const receipt = await this.store.transactionWithRetry(() => {
       reject(same(this.store.get("knowledge_evaluation_run", runId), material.run)
         && stableDigest(this.store.find("knowledge_claim", String(material.claim.id), undefined, false)) === material.claim_record_digest, "Knowledge effect inputs changed before persistence");
-      for (const ref of dependencies) reject(stableDigest(this.store.find(String(ref.kind), String(ref.id), undefined, false)) === ref.digest, "Knowledge effect dependency changed before persistence");
+      for (const ref of dependencies) reject(stableDigest(dependencyRecord(ref)) === ref.digest, "Knowledge effect dependency changed before persistence");
       const current = this.store.find("knowledge_task_effect", id);
       if (current) { reject(current.assessment_digest === stableDigest(binding), "Knowledge effect assessment changed concurrently"); concurrent = true; return current; }
       return this.store.create("knowledge_task_effect", id, { ...binding, assessment_digest: stableDigest(binding), metrics: comparison });

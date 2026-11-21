@@ -80,7 +80,7 @@ test("overview tolerates a scope without a colon", async () => {
   try {
     const result = f.service.workbenchExperienceOverview({ scope: "invalid" }) as JsonObject;
     assert.equal(result.scope, "invalid");
-    assert.deepEqual(result.counts, { drafts: 0, observations: 0, patterns: 0, procedures: 0 });
+    assert.deepEqual(result.counts, { drafts: 0, observations: 0, patterns: 0, procedures: 0, runbook_candidates: 0 });
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

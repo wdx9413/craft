@@ -10,7 +10,7 @@ import { payload, stableDigest } from "../core/digest.ts";
 import { KnowledgeTaskEffects } from "../core/knowledge-task-effects.ts";
 import { knowledgeTaskEffectEvidenceVerified, knowledgeClaimPromotionProofVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 import { knowledgeTaskContract } from "../core/knowledge-task-contract.ts";
-import { knowledgeTaskEffectAssessmentDigest } from "@craft/capability-knowledge/knowledge-task-effect-proof";
+import { bindKnowledgeTaskEffectEvaluationReader, knowledgeTaskEffectAssessmentDigest } from "@craft/capability-knowledge/knowledge-task-effect-proof";
 import { KnowledgeAutoReviewKernel } from "@craft/capability-knowledge/knowledge-auto-review";
 
 test("task contracts require bounded deterministic outcomes and safety assertions", () => {
@@ -36,6 +36,8 @@ test("Knowledge authority requires exact adjudicated tasks and a controlled posi
   // Policy fixture only: these records emulate trusted execution and do not claim live model effectiveness.
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-task-effect-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  const evaluationStore = await new CraftStore(craftPaths(join(root, "eval-owner"))).open({ fileRecords: true });
+  bindKnowledgeTaskEffectEvaluationReader(store, id => evaluationStore.find("workbench_evaluation", id, undefined, false));
   const source = store.create("knowledge_source", "source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", content_digest: stableDigest("source") });
   store.create("evidence", "claim-evidence", { confidence: "confirmed", metadata: { source_session_id: "claim-session", task_id: "claim-task", source_ref_digest: stableDigest("claim") } });
   const claim = store.create("knowledge_claim", "claim", { status: "candidate", scope: "global", source_id: source.id, content: "Exact task knowledge", identity_digest: stableDigest("claim"), content_digest: stableDigest("body"), evidence_ids: ["claim-evidence"] });
@@ -56,7 +58,7 @@ test("Knowledge authority requires exact adjudicated tasks and a controlled posi
     case_ids: cases.map(item => item.id), case_refs: cases.map(item => ({ case_id: item.id, case_version: item.version, identity_digest: item.identity_digest })) });
   const executable = await realpath(process.execPath);
   const engine = { executable, kind: "claude", sha256: "b".repeat(64), environment_digest: stableDigest("environment") };
-  const records = ["a", "b"].map(id => store.create("workbench_evaluation", id, { state: "completed", execution_engine: engine }));
+  const records = ["a", "b"].map(id => evaluationStore.create("workbench_evaluation", id, { state: "completed", execution_engine: engine }));
   let context: unknown;
   const suite = { subject_kind: "agent", partition: "held_out", sanitized: true, approved_by: "fixture", metrics: { primary: { kind: "binary_pass_rate", direction: "higher_is_better" }, guardrails: [{ metric: "duration_ms", required: true, comparator: "lte", threshold: 100 }] }, cases: cases.map(item => ({ id: item.id, prompt: item.query, ...contract })) };
   const subjects: JsonObject[] = [0, 1].map(() => ({ kind: "agent", id: "subject", version: "1", host: { kind: "claude", binary: executable, model: "selected-model" } }));
@@ -140,9 +142,10 @@ test("Knowledge authority requires exact adjudicated tasks and a controlled posi
     assert.equal((review.assessments as JsonObject[])[0]!.promoted, true);
     const promoted = store.get("knowledge_claim", String(claim.id));
     assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), true);
+    assert.equal(store.count("workbench_evaluation"), 0, "Knowledge retains Eval references without copying its payloads");
     const item = store.get("evidence", "task-evidence-0"); store.save("evidence", "task-evidence-0", { ...item, confidence: "unverified" });
     assert.equal(knowledgeTaskEffectEvidenceVerified(store, run), false);
     assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), false);
     await assert.rejects(effects.assess("retrieval", "a", "b"), /Claim or Source revision/);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { evaluationStore.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });

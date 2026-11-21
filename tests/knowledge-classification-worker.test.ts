@@ -118,7 +118,7 @@ test("candidate Claims receive source review but remain candidates until indepen
   assert.equal(outcome.promoted, false);
   assert.equal(outcome.claim_status, "candidate");
   assert.deepEqual(f.calls.find(call => call.name === "craft_knowledge_host_review")?.args, {
-    claim_id: claim.id, host_kind: "codex-cli", host_run_key: "learning:ticket-1", model_ref: "test-model:knowledge-evidence-review",
+    claim_id: claim.id, host_kind: "independent", host_run_key: "learning:ticket-1", model_ref: "test-model:knowledge-evidence-review",
     source_digest: "sha256:source", packet_digest: "sha256:review-packet", decision: "supported", reason_code: "evidence_supports_claim",
   });
   assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_save"), false);

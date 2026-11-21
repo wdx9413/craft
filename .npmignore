@@ -1,4 +1,3 @@
 **/__pycache__/
+**/node_modules/
 **/*.pyc
-capability/craft-codebase/analyzers/__pycache__/
-scripts/codebase/__pycache__/

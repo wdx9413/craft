@@ -17,7 +17,7 @@ test("npm publication actually includes the offline OCR models and compiled grap
     const { stdout } = await promisify(execFile)(npm, ["pack", "--dry-run", "--ignore-scripts", "--json", "--cache", cache], { cwd: root, timeout: 120_000, maxBuffer: 8 * 1024 * 1024, shell: process.platform === "win32" });
     const [result] = JSON.parse(stdout) as Array<{ files: Array<{ path: string }> }>;
     const files = new Set(result.files.map((file) => file.path));
-    for (const file of ["assets/ocr/eng.traineddata", "assets/ocr/chi_sim.traineddata", "dist/core/cli.js", "dist/bin/craft-mcp.js", "dist/capability/craft-memory/capability.js", "dist/adapters/deepseek-harness/package.json", "dist/adapters/deepseek-harness/dist/index.js", "runtime-artifacts.json"]) assert.ok(files.has(file), `npm package is missing ${file}`);
+    for (const file of ["assets/ocr/eng.traineddata", "assets/ocr/chi_sim.traineddata", "dist/core/cli.js", "dist/bin/craft-mcp.js", "dist/capability/craft-memory/capability.js", "dist/capability/craft-codebase/analyzers/analyze-python.py", "dist/common/craft-common-store-local/dist/store.js", "dist/adapters/deepseek-harness/package.json", "dist/adapters/deepseek-harness/dist/index.js", "runtime-artifacts.json"]) assert.ok(files.has(file), `npm package is missing ${file}`);
     assert.ok(![...files].some((file) => file.includes("node_modules/") || file.includes("src-tauri/target/") || file.startsWith(".serena/") || file.startsWith("workbench/") || file.startsWith("desktop/") || file.startsWith("dist/workbench/")));
   } finally { await rm(cache, { recursive: true, force: true }); }
 });

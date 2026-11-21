@@ -63,10 +63,12 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
       const procedure = this.store.get("experience_procedure", String(dispatch.procedure_id), Number(dispatch.procedure_version));
       const candidateRef = { kind: "experience_procedure", id: String(procedure.id),
         version: Number(procedure.candidate_version ?? procedure.version), digest: String(procedure.definition_digest ?? "") };
-      const verified = this.evaluationContracts.verifyTaskEffectEvaluation({ contract_id: contractId, evaluation_id: evaluationId, candidate_ref: candidateRef });
+      const evaluationOwner = this.ownerServices.get("eval") ?? (this.capabilityOwned ? null : this);
+      if (!evaluationOwner) throw new Error("Held-out evaluation owner is unavailable");
+      const verified = evaluationOwner.evaluationContracts.verifyTaskEffectEvaluation({ contract_id: contractId, evaluation_id: evaluationId, candidate_ref: candidateRef });
       if (verified.valid !== true) throw new Error("Held-out Procedure report is not valid, trusted, and bound to this candidate");
-      const report = this.store.get("task_effect_evaluation", evaluationId);
-      const contract = this.store.get("evaluation_contract", contractId);
+      const report = evaluationOwner.store.get("task_effect_evaluation", evaluationId);
+      const contract = evaluationOwner.store.get("evaluation_contract", contractId);
       const shadowGate = this.store.list("experience_procedure_gate", 10_000,
         item => item.procedure_id === procedure.id && item.stage === "shadow")
         .sort((left, right) => Number(right.procedure_version) - Number(left.procedure_version))[0];
@@ -110,7 +112,7 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
       const definition = new ProcedureDefinitionStore(this.store).read(reference as never);
       if (definition.kind !== "workflow") throw new Error("Experience evaluator supports Workflow Procedures only");
       const sourceProposal = this.store.find("workflow_evolution_proposal", definition.proposal_ref.id, definition.proposal_ref.version);
-      if (sourceProposal) {
+      if (sourceProposal && sourceProposal.composition === undefined) {
         const sourceWorkflow = this.store.get("workflow", String(sourceProposal.workflow_id));
         if ((sourceWorkflow.derived_from as JsonObject | undefined)?.workflow_evolution_proposal_id !== sourceProposal.id
           || stableDigest({ inputs: sourceWorkflow.inputs, steps: sourceWorkflow.steps }) !== stableDigest({ inputs: definition.definition.inputs, steps: definition.definition.steps })) {

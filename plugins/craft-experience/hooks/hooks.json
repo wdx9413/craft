@@ -26,11 +26,12 @@
         "statusMessage": "Recording verified Craft Experience signals"
       }]
     }],
+    "PostToolUseFailure": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member experience --host claude", "timeout": 3, "statusMessage": "Recording verified Craft Experience signals"}]}],
     "Stop": [{
       "hooks": [{
         "type": "command",
         "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member experience --host claude",
-        "timeout": 3,
+        "timeout": 10,
         "statusMessage": "Finalizing verified Craft Experience"
       }]
     }],

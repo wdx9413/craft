@@ -86,11 +86,14 @@ test("Host observation adapter binds exact emissions and preserves missing-measu
     t.mock.method(f.service.campaignRunners, "advance", () => ({ campaign: { status: "inconclusive" } }));
     t.mock.method(f.service, "evalCampaignReport", () => ({ status: "fixture_only" }));
     const observations = new Map<string, any>();
+    let executionFailure: unknown;
     const host = { preflight, async execute(dispatch: any) {
-      const id = String(dispatch.id); const observed = await prepareContextEvaluationRun(f.service, f.root, id, manifest.environment, manifest.budget);
+      const id = String(dispatch.id); let observed;
+      try { observed = await prepareContextEvaluationRun(f.service, f.root, id, manifest.environment, manifest.budget); }
+      catch (error) { executionFailure = error; throw error; }
       observations.set(id, observed); f.store.create("work_delivery", id, { launch_id: (observed.task_run as any).launch_id }); return id;
     }, async observeContext(id: string) { return observations.get(id); } };
-    const result = await runAblations(f.service, input, host); assert.equal(result.status, "graded"); assert.equal((result.context_emissions as unknown[]).length, 400);
+    const result = await runAblations(f.service, input, host); assert.equal(result.status, "graded", executionFailure instanceof Error ? executionFailure.stack : JSON.stringify(result)); assert.equal((result.context_emissions as unknown[]).length, 400);
     assert.equal(f.store.list("context_host_observation_pending", 1000, row => row.status === "pending").length, 0);
     const command = commandAblationHost({ argv: [process.execPath, "-e", 'console.log(JSON.stringify({observation:true}))'], observe_context: true });
     assert.equal((await command.observeContext!("run")).observation, true);

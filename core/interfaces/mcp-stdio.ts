@@ -1,17 +1,13 @@
 import { createInterface } from "node:readline";
-import { McpServer } from "../mcp.ts";
-import { CraftService } from "../application/craft-service.ts";
-import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
+import type { McpServer } from "../mcp.ts";
+import type { CraftService } from "../application/craft-service.ts";
+import type { JsonObject } from "../infrastructure/store.ts";
+import { openMcpRuntime } from "./mcp/runtime.ts";
 
 type Mode = string;
 type Server = Pick<McpServer, "handle"> & { service?: CraftService };
 type Start = (mode: Mode) => Promise<{ server: Server; close: () => void }>;
 type BackgroundStop = () => void | Promise<void>;
-
-async function start(mode: Mode): Promise<{ server: Server; close: () => void }> {
-  const store = await new CraftStore().open();
-  return { server: new McpServer(await CraftService.open(store), mode), close: () => store.close() };
-}
 
 function parseError(): JsonObject {
   return { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } };
@@ -32,7 +28,7 @@ export async function serveMcpStdio(options: {
   input.on("close", () => { closed = true; wake?.(); });
   let runtime: Awaited<ReturnType<Start>>;
   let stopBackground: BackgroundStop | undefined;
-  try { runtime = await (options.start ?? start)(options.mode); }
+  try { runtime = await (options.start ?? openMcpRuntime)(options.mode); }
   catch (error) { input.close(); options.input.pause(); throw error; }
   try { stopBackground = await options.afterStart?.(runtime.server); }
   catch (error) { runtime.close(); input.close(); options.input.pause(); throw error; }

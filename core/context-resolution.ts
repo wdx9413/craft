@@ -3,7 +3,7 @@ import { ContextBudget, DEFAULT_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_ITEMS } f
 import { EVAL_DOMAINS, type EvalDomain } from 'craft-common-base/capability-protocol';
 import { MemoryContribution } from '@craft/capability-memory/contribution';
 import { retrievalExcerpt } from 'craft-common-base/retrieval-excerpt';
-import { ContextReadGuard } from "./context-access-guard.ts";
+import { ContextReadGuard, type ContextOwnerStores } from "./context-access-guard.ts";
 /**
  * The context plane: retrieving accumulated material into a bounded, reproducible pack.
  *
@@ -119,7 +119,9 @@ export class ContextResolutionKernel {
   /** Registered contributions; an explicit Memory provider replaces the legacy default adapter. */
   readonly contributors: readonly ContextContributionProvider[];
   readonly scopes: ScopeIdentityKernel;
-  constructor(store: CraftStore, contributors: readonly ContextContributionProvider[] = []) {
+  readonly ownerStores: ContextOwnerStores;
+  constructor(store: CraftStore, contributors: readonly ContextContributionProvider[] = [], ownerStores: ContextOwnerStores = new Map()) {
+    this.ownerStores = ownerStores;
     this.store = store;
     this.contributors = contributors.some(provider => provider.member === "memory") ? contributors : [new MemoryContribution(store), ...contributors];
     this.scopes = new ScopeIdentityKernel(store);
@@ -138,7 +140,7 @@ export class ContextResolutionKernel {
     const provider = this.contributors.find((item) => item.member === "knowledge");
     if (!provider?.search) return { hits: [], skipped: true, reason: "knowledge_unavailable" };
     const access = scopeAccess(args);
-    const guard = new ContextReadGuard(this.store, undefined, scopes.attempted_scopes, sortedUniqueList(args.source_ids, "source_ids"));
+    const guard = new ContextReadGuard(this.store, undefined, scopes.attempted_scopes, sortedUniqueList(args.source_ids, "source_ids"), this.ownerStores);
     for (const alias of scopes.matched_aliases) guard.track("scope_alias", String(alias.id), Number(alias.version));
     const result = await provider.search({ query, scope_kind: scopes.canonical_scope.kind as ContextRequest["scope_kind"], scope_id: scopes.canonical_scope.id,
       scope_stack: scopes.attempted_scopes, max_items: limit, max_chars: 12_000, ...access, cognitive_purpose: access.purpose }, args.include_candidates === true);
@@ -231,7 +233,7 @@ export class ContextResolutionKernel {
     const sourceIds = sortedUniqueList(args.source_ids, "source_ids"); const requestedIds = sortedUniqueList(args.memory_ids, "memory_ids"); const allowRestricted = args.allow_restricted === true; const adapter = args.retrieval_adapter_id === undefined ? null : this.store.get("retrieval_adapter", text(args.retrieval_adapter_id, "retrieval_adapter_id"));
     const domain = args.domain === undefined ? undefined : text(args.domain, "domain");
     if (domain !== undefined && !(EVAL_DOMAINS as readonly string[]).includes(domain)) throw new Error("domain is unsupported");
-    const guard = new ContextReadGuard(this.store, undefined, scopeResolution.attempted_scopes, sourceIds);
+    const guard = new ContextReadGuard(this.store, undefined, scopeResolution.attempted_scopes, sourceIds, this.ownerStores);
     for (const alias of scopeResolution.matched_aliases) guard.track("scope_alias", String(alias.id), Number(alias.version));
     if (args.required_refs !== undefined && !Array.isArray(args.required_refs)) throw new Error("required_refs must be an array");
     const requiredRefs = ((args.required_refs ?? []) as unknown[]).map(requiredContextRef);
@@ -242,7 +244,7 @@ export class ContextResolutionKernel {
     const requestedStrategy = adapter?.status === "eligible" && !circuitOpen ? adapter.strategy : "keyword";
     for (const sourceId of sourceIds) {
       guard.track("knowledge_source", sourceId);
-      const source = this.store.find("knowledge_source", sourceId);
+      const source = (this.ownerStores.get("knowledge") ?? this.store).find("knowledge_source", sourceId);
       if (!source || source.status !== "active" || source.trust === "untrusted" || !sourceAllows(source, access)) throw new Error("Requested Knowledge Source is unavailable in this Context");
     }
     const historical = args.history_view === true || args.as_of !== undefined || args.known_at !== undefined;
@@ -276,7 +278,7 @@ export class ContextResolutionKernel {
         contributorFailures.push({ member: contributor.member, reason: "contribution_unavailable" });
         continue;
       }
-      for (const ref of contribution.read_refs ?? []) guard.track(ref.kind, ref.id, ref.version);
+      for (const ref of contribution.read_refs ?? []) guard.track(ref.kind, ref.id, ref.version, this.ownerStores.has(contributor.member) ? contributor.member : undefined);
       if (contributor.member === "knowledge" && contribution.diagnostics?.source_verification_incomplete === true)
         contributorFailures.push({ member: contributor.member, reason: "source_verification_incomplete" });
       for (const item of contribution.items) guard.contribution(contribution.member, item);
@@ -377,7 +379,7 @@ export class ContextResolutionKernel {
         omitted_count: part.omitted_count + extra.filter(candidate => candidate.group === group && (hitScores.has(candidate.id) || candidate.required)).length - selected.length };
     });
     const executionIdentity = { requested: retrieval.execution.requested, used: retrieval.execution.used, provider: retrieval.execution.provider, model: retrieval.execution.model, unavailable_reason: retrieval.execution.unavailable_reason };
-    const selectedGuard = new ContextReadGuard(this.store, guard.refs());
+    const selectedGuard = new ContextReadGuard(this.store, guard.refs(), undefined, [], this.ownerStores);
     for (const alias of scopeResolution.matched_aliases) selectedGuard.track("scope_alias", String(alias.id));
     for (const sourceId of sourceIds) selectedGuard.track("knowledge_source", sourceId);
     for (const item of items) selectedGuard.contribution("memory", item);

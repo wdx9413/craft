@@ -463,7 +463,9 @@ export abstract class ServiceFoundation {
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
     hostProfiles?: readonly HostProfile[], modelProviders?: readonly ModelProviderSpec[],
     modelTransport?: ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[],
-    localSandbox = new LocalProcessSandboxAdapter(), trustedEvaluators?: readonly TrustedEvaluatorIdentity[]) {
+    localSandbox = new LocalProcessSandboxAdapter(), trustedEvaluators?: readonly TrustedEvaluatorIdentity[],
+    contextSources?: { contributors: readonly import("../capability-protocol.ts").ContextContributionProvider[];
+      stores: import("../context-access-guard.ts").ContextOwnerStores; owner?: string }) {
     bindProjectKnowledgeContentDirectory(store);
     bindProjectExperienceContentDirectory(store);
     this.store = store; this.catalog = new Catalog(store, semanticProvider); this.isolatedAdapter = isolatedAdapter;
@@ -575,7 +577,7 @@ export abstract class ServiceFoundation {
     // Capabilities own governed candidates; the shared Context plane owns retrieval,
     // cross-member budgets and receipts for every product surface.
     this.scopeIdentity = new ScopeIdentityKernel(store);
-    this.contextResolution = new ContextResolutionKernel(store, capabilities.contributed);
+    this.contextResolution = new ContextResolutionKernel(store, contextSources?.contributors ?? capabilities.contributed, contextSources?.stores);
     this.contextWorkingSets = new ContextWorkingSetKernel(store, this.contextResolution);
     this.contextProjection = new ContextProjectionKernel(store);
     this.decisionContextGate = new DecisionPointContextGate(store, this.contextResolution);
@@ -638,7 +640,7 @@ export abstract class ServiceFoundation {
     this.autonomousRuntime = new AutonomousRuntimeKernel(store);
     this.capabilityLifecycle = new CapabilityLifecycleKernel(store);
     this.capabilityDefaults = loadSettingsSync(store.paths).capabilities;
-    if (this.capabilityDefaults.autoInstall) this.installCapabilityDefaults();
+    if (this.capabilityDefaults.autoInstall && (!contextSources || contextSources.owner === "runtime")) this.installCapabilityDefaults();
     this.memoryConsolidation = new MemoryConsolidationKernel(store);
     this.traceReviews = new TraceReviewKernel(store);
     this.memoryMaintenance = new MemoryMaintenanceKernel(store);

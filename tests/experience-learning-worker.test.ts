@@ -343,13 +343,13 @@ test("continuous learning tick contains transient Experience and Knowledge failu
   } };
   const deps = { client, providers: [provider], transport: fixture().transport, env: directWorkerEnv };
   const first = await runLearningTick(deps, true);
-  assert.deepEqual(first, { processed: 0, outcomes: [], scenario_classification: { status: "failed", failure_kind: "TypeError" },
+  assert.deepEqual(first, { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, scenario_classification: { status: "failed", failure_kind: "TypeError" },
     failure_kind: "TypeError", evaluation: { processed: 0, outcomes: [] }, knowledge: { status: "failed", failure_kind: "Error" } });
   assert.deepEqual(learningTickStatus(first, true), { diagnostics: "Craft Experience learning pass failed (TypeError).\nCraft Knowledge learning pass failed (Error).\n", exit_code: 1 });
   assert.equal(JSON.stringify(first).includes("credential"), false);
   assert.equal(JSON.stringify(first).includes("locator"), false);
   const second = await runLearningTick(deps, true);
-  assert.deepEqual(second, { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
+  assert.deepEqual(second, { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   assert.deepEqual(learningTickStatus(second, true), { diagnostics: "", exit_code: null });
   assert.equal(ticketAttempts, 4);
   assert.equal(sourceListAttempts, 2);
@@ -462,7 +462,7 @@ test("standalone learning modes call only their mounted Knowledge or Experience 
   } };
   const deps = { client, providers: [provider], transport: fixture().transport, env: directWorkerEnv };
   const experience = await runLearningTick(deps, true, ["experience"]);
-  assert.deepEqual(experience, { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, knowledge: null });
+  assert.deepEqual(experience, { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, knowledge: null });
   assert.deepEqual(calls, ["craft_evaluation_model_ticket_list", "craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list"]);
   calls.length = 0;
   const knowledge = await runLearningTick(deps, true, ["knowledge"]);
@@ -591,7 +591,7 @@ test("worker CLI negotiates real newline MCP stdio and completes one empty poll"
     child.once("close", code => resolve(code ?? -1));
   });
   assert.equal(exitCode, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   rmSync(dataDir, { recursive: true, force: true });
 });
@@ -612,7 +612,7 @@ test("worker selects the Codex Host transport for an empty poll without starting
     child.once("close", code => resolve(code ?? -1));
   });
   assert.equal(exitCode, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   rmSync(dataDir, { recursive: true, force: true });
 });
@@ -1165,7 +1165,7 @@ test("polling worker exits cleanly after a termination signal", async (t) => {
     child.once("close", code => resolve(code ?? -1));
   });
   assert.equal(exitCode, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   rmSync(dataDir, { recursive: true, force: true });
 });

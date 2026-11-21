@@ -1,3 +1,8 @@
+import { reconcileProgramMemory } from "./coordinators/program-memory-reconciliation.ts";
+import { bindEvolutionProjectBindingSource } from "../evolution-project-binding.ts";
+import { bindKnowledgeTaskEffectEvaluationReader } from "@craft/capability-knowledge/knowledge-task-effect-proof";
+import { ProgramMemorySubmissionCoordinator } from "./coordinators/program-memory-submission.ts";
+import { validateReadOnlyEvaluationSteps } from "@craft/capability-experience/scenario-evaluation";
 import { captureUserStatedRunbook, CreationAdapter, TravelAdapter } from '@craft/capability-context';
 import { reviewVerificationConfiguration, taskReviewVerification, verificationCriteria, assertReviewVerificationsStopped, prepareReviewVerification, reviewVerificationProjection, executeReviewVerification, stopReviewVerification, assertReviewVerificationCheck } from "../work-review-verification.ts";
 import { taskReviewRisk, riskReviewCriteria, RISK_REVIEW_CRITERION } from "../work-review-risk.ts";
@@ -78,6 +83,7 @@ import { egressRequestDigest } from "../egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 import { ProcedureConfiguration } from '@craft/capability-experience/procedure-configuration';
 import { ExperienceGraphAssets } from '@craft/capability-experience/graph-assets';
+import { loadedComponentArtifact } from "../release-build-inputs.ts";
 import { ComponentAssets } from "./coordinators/component-assets.ts";
 import { ContextUsageWorkbench } from "./coordinators/context-usage.ts";
 import { WorkflowDesignWorkbench } from "./coordinators/workflow-design.ts";
@@ -294,6 +300,9 @@ function validateModelInput(args: JsonObject, id: string): CraftModelConfig {
 
 export class CraftService extends ServiceFoundation {
   readonly contentLanguage: string;
+  readonly ownerServices: ReadonlyMap<string, CraftService>;
+  readonly capabilityOwned: boolean;
+  readonly storageOwner: string | undefined;
   readonly internalApprovalBroker: InternalActionApprovalBroker;
   readonly nativeTools: NativeToolKernel;
   readonly dshPluginHost: DshPluginHostRuntime;
@@ -320,9 +329,43 @@ export class CraftService extends ServiceFoundation {
     modelProviders?: readonly import("../model-gateway.ts").ModelProviderSpec[],
     modelTransport?: import("../model-gateway.ts").ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[],
     contentLanguage = "zh-CN", knowledgeAdjudicationTransportFactory: () => ModelTransport = () => new CodexCliModelTransport(),
-    localSandbox?: unknown, trustedEvaluators?: readonly import("../evaluation-contract.ts").TrustedEvaluatorIdentity[]) {
+    localSandbox?: unknown, trustedEvaluators?: readonly import("../evaluation-contract.ts").TrustedEvaluatorIdentity[],
+    contextSources?: { contributors: readonly import("../capability-protocol.ts").ContextContributionProvider[];
+      stores: import("../context-access-guard.ts").ContextOwnerStores; services?: ReadonlyMap<string, CraftService>; owner?: string }) {
     super(store, semanticProvider, isolatedAdapter as never, dockerSandbox as never, egressBroker as never, hostOwnerId,
-      hostProfiles, modelProviders, modelTransport, traceArchiveBackends, localSandbox as never, trustedEvaluators);
+      hostProfiles, modelProviders, modelTransport, traceArchiveBackends, localSandbox as never, trustedEvaluators, contextSources);
+    this.ownerServices = contextSources?.services ?? new Map();
+    this.capabilityOwned = contextSources !== undefined;
+    this.storageOwner = contextSources?.owner;
+    if (contextSources && this.storageOwner !== "context") bindEvolutionProjectBindingSource(store, contextSources.stores.get("context") ?? { find: () => null });
+    if (contextSources && this.storageOwner === "eval") {
+      const references = new Map<string, Pick<CraftStore, "get" | "list">>();
+      for (const [kind, owner] of [["experience_procedure", "experience"], ["task", "context"], ["host_session", "context"],
+        ["host_session_event", "context"], ["trace_event", "context"]]) {
+        const source = owner === "context" ? contextSources.stores.get("runtime") ?? contextSources.stores.get("context") : contextSources.stores.get(owner!);
+        if (source) references.set(kind!, source);
+      }
+      this.evaluationContracts.setReferenceSources(references);
+    }
+    if (this.capabilityOwned) bindKnowledgeTaskEffectEvaluationReader(store, id => this.ownerServices.get("eval")?.store.find("workbench_evaluation", id, undefined, false) ?? null);
+    if (contextSources) {
+      this.experienceProcedures.setProgramMemorySource({ get: (...args) => {
+        const owner = this.storageOwner === "context" ? this : this.ownerServices.get("context");
+        if (!owner) throw new Error("Program Memory Context owner is unavailable");
+        return owner.store.get(...args);
+      } });
+      const evaluationOwner = () => {
+        const owner = this.storageOwner === "eval" ? this : this.ownerServices.get("eval");
+        if (!owner) throw new Error("Evaluation owner is unavailable");
+        return owner;
+      };
+      this.experienceProcedures.setEvaluationContractSource({ get: (...args) => evaluationOwner().store.get(...args) });
+      this.experienceProcedures.setEvaluationVerifier({ verifyTaskEffectEvaluation: input => evaluationOwner().evaluationContracts.verifyTaskEffectEvaluation(input as never) });
+    }
+    if (contextSources) this.selfEvolution.configureProgramMemorySources({
+      observations: contextSources.stores.get("experience") ?? { find: () => null },
+      design: contextSources.stores.get("eval") ?? { find: () => null }, proof: store,
+    });
     this.internalApprovalBroker = new InternalActionApprovalBroker(store);
     this.nativeTools = new NativeToolKernel(store);
     this.dshPluginHost = new DshPluginHostRuntime(store, () => loadSettingsSync());
@@ -380,8 +423,28 @@ export class CraftService extends ServiceFoundation {
     if (args.action === "improvement_save" || args.action === "improvement_submit") return evaluation.submitGraphImprovement({ ...args, action: args.action === "improvement_save" ? "save" : "submit" }, new ExperienceGraphAssets(this.store));
     return new ExperienceGraphAssets(this.store).edit(args);
   }
-  componentAssetInspect(member: string, args: JsonObject): JsonObject { return new ComponentAssets(this.store).inspect(member, args); }
-  componentAssetRestore(member: string, args: JsonObject): JsonObject { return new ComponentAssets(this.store).restore(member, args, {
+  componentAssetInspect(member: string, args: JsonObject): JsonObject {
+    if (this.capabilityOwned && this.storageOwner !== member) {
+      const owner = this.ownerServices.get(member);
+      if (!owner) throw new Error(`${member} owner is unavailable`);
+      return owner.componentAssetInspect(member, args);
+    }
+    return new ComponentAssets(this.store).inspect(member, args);
+  }
+  componentAssetRestore(member: string, args: JsonObject): JsonObject {
+    if (this.capabilityOwned && this.storageOwner !== member) {
+      const owner = this.ownerServices.get(member);
+      if (!owner) throw new Error(`${member} owner is unavailable`);
+      return owner.componentAssetRestore(member, args);
+    }
+    return new ComponentAssets(this.store).restore(member, args, {
+    revisionEvidence: a => {
+      this.knowledgeMemoryInstallBuiltins();
+      const evidence = this.evidenceRecord({ evidence_id: a.evidence_id, source_type: "human_edit", confidence: "unverified",
+        claim: "A user proposed a new prose revision; its truth and applicability require review.",
+        metadata: { source_ref: a.source_ref, content_digest: a.content_digest, user_authored: true } });
+      return { source_id: "builtin.evidence-wiki", evidence_ids: [evidence.id] };
+    },
     memory: a => this.memoryCandidatePropose({ ...a, proposal_only: true }), knowledge: a => this.knowledgeClaimSave(a), experience: a => this.procedureConfigurationSave(a), codebase: a => this.codebaseIndexBuild(a),
   }); }
   workbenchContextUsage(args: JsonObject): JsonObject { return new ContextUsageWorkbench(this.store).get(args); }
@@ -521,11 +584,12 @@ export class CraftService extends ServiceFoundation {
     return { candidate: this.projectProgramMemory(candidate as JsonObject) };
   }
   private currentProgramMemoryProcedure(candidate: JsonObject): JsonObject | null {
-    if (typeof candidate.procedure_id !== "string" || typeof candidate.request_id !== "string"
-      || !this.store.find("experience_procedure", candidate.procedure_id)) return null;
-    const binding = this.store.find("program_memory_procedure_binding", candidate.request_id);
+    const experience = this.storageOwner === "experience" ? this : this.ownerServices.get("experience") ?? (this.capabilityOwned ? null : this);
+    if (!experience || typeof candidate.procedure_id !== "string" || typeof candidate.request_id !== "string"
+      || !experience.store.find("experience_procedure", candidate.procedure_id)) return null;
+    const binding = experience.store.find("program_memory_procedure_binding", candidate.request_id);
     if (binding?.candidate_id !== candidate.id || binding?.candidate_digest !== candidate.digest) return null;
-    const procedure = activeProcedure(this.store, candidate.procedure_id);
+    const procedure = activeProcedure(experience.store, candidate.procedure_id);
     return procedure?.request_id === candidate.request_id && procedure?.scope === (candidate.scope as JsonObject).id
       && procedure?.candidate_version === candidate.procedure_candidate_version ? procedure : null;
   }
@@ -536,38 +600,98 @@ export class CraftService extends ServiceFoundation {
       ...(candidate.status === "promoted" && !active ? { status: "review_required" } : {}),
       ...(active ? { active_procedure_version: active.version } : {}) };
   }
-  evolutionProgramMemorySubmit(args: JsonObject): JsonObject {
+  evolutionProgramMemoryPrepareSubmission(args: JsonObject): JsonObject {
+    const { candidate, design, observations } = this.selfEvolution.submitProgramMemory(text(args.id, "id"), args.scope as JsonObject) as {
+      candidate: JsonObject; design: JsonObject; observations: JsonObject[];
+    };
+    if (!["diagnostic", "submitted", "promoted"].includes(String(candidate.status))) throw new Error("Program Memory candidate is no longer eligible for submission");
+    const workflow = (design.budget as JsonObject)?.program_memory_workflow as JsonObject | undefined;
+    if (!workflow) throw new Error("Program Memory requires frozen executable workflow steps");
+    const steps = validateReadOnlyEvaluationSteps(normalizeSteps(array(workflow.steps, "workflow.steps")));
+    const observationRefs = observations.map(item => ({ id: item.id, version: item.version, evidence_ids: item.evidence_ids }));
+    const requestId = typeof candidate.request_id === "string" ? candidate.request_id
+      : `workflow_evolution_request_${stableDigest({ id: candidate.id, candidate_version: candidate.version, digest: candidate.digest, observations: observationRefs }).slice(-24)}`;
+    const procedureId = `experience_procedure_${stableDigest({ request_id: requestId }).slice(-24)}`;
+    return { candidate, design, observations, steps, request_id: requestId, procedure_id: procedureId,
+      binding: { candidate_id: candidate.id, candidate_digest: candidate.digest, design_id: design.id,
+        design_digest: design.contract_digest, procedure_id: procedureId, scope: candidate.scope } };
+  }
+  evolutionProgramMemoryExperienceSubmit(plan: JsonObject): JsonObject {
     return this.store.transaction(() => {
-      const id = text(args.id, "id");
-      const { candidate, design, observations } = this.selfEvolution.submitProgramMemory(id, args.scope as JsonObject) as {
-        candidate: JsonObject; design: JsonObject; observations: JsonObject[];
-      };
-      if (candidate.status === "submitted" || candidate.status === "promoted") return candidate;
-      if (candidate.status !== "diagnostic") throw new Error("Program Memory candidate is no longer eligible for submission");
-      const observationRefs = observations.map(item => ({ id: item.id, version: item.version, evidence_ids: item.evidence_ids }));
-      const requestId = `workflow_evolution_request_${stableDigest({ id, digest: candidate.digest, observations: observationRefs }).slice(-24)}`;
-      const procedureId = `experience_procedure_${stableDigest({ request_id: requestId }).slice(-24)}`;
-      const binding = { candidate_id: id, candidate_digest: candidate.digest, design_id: design.id,
-        design_digest: design.contract_digest, procedure_id: procedureId, scope: candidate.scope };
-      this.workflowEvolutionPropose({ request_id: requestId, scenario_key: observations[0]!.scenario_key,
+      const { candidate, design, binding } = plan as { candidate: JsonObject; design: JsonObject; binding: JsonObject };
+      const requestId = text(plan.request_id, "request_id"), procedureId = text(plan.procedure_id, "procedure_id");
+      const existing = this.store.find("program_memory_procedure_binding", requestId);
+      if (existing) {
+        if (stableDigest(recordPayload(existing)) !== stableDigest(binding)) throw new Error("Program Memory owner binding conflict");
+        const procedure = this.experienceProcedureGet({ procedure_id: procedureId }).procedure as JsonObject;
+        return { request_id: requestId, procedure_id: procedureId, procedure_candidate_version: procedure.candidate_version };
+      }
+      const observations = plan.observations as JsonObject[];
+      if (!observations.length || observations.some(item => item.scenario_key !== candidate.scenario_key)) throw new Error("Program Memory observation scenario mismatch");
+      const steps: JsonObject[] = validateReadOnlyEvaluationSteps(normalizeSteps(array(plan.steps, "plan.steps"))).map((step, index, all) => ({ ...step, requires: [],
+        provides: index === all.length - 1 ? ["verification_result"] : [] }));
+      this.workflowEvolutionPropose({ request_id: requestId, scenario_key: candidate.scenario_key,
         observation_ids: observations.map(item => item.id), hypothesis: "Validate this project operating procedure against the frozen evaluation design.",
         design_axes: ["orchestration"], procedure_kind: "workflow", output_contract_ref: design.output_contract });
       this.store.create("program_memory_procedure_binding", requestId, binding);
       const result = this.workflowEvolutionProposalSubmit({ request_id: requestId, procedure_id: procedureId,
         proposal_id: `workflow_evolution_proposal_${stableDigest(binding).slice(-24)}`, workflow_id: procedureId,
-        name: "Verify project operating procedure", description: candidate.statement,
-        steps: [{ id: "observe", type: "instruction", instruction: [candidate.statement, ...(candidate.steps as string[])].join("\n"),
-          side_effect: "read_only", requires: [], provides: ["verification_result"] }],
-        composition: {
-          entries: [{ id: "inspect", title: "Inspect project context", required_inputs: [], preconditions: [],
-            routes: [{ exit_id: "verified", step_ids: ["observe"] }] }],
-          exits: [{ id: "verified", title: "Verification result", required_outputs: ["verification_result"], acceptance_ref: design.output_contract }],
-        } });
+        name: "Verify project operating procedure", description: candidate.statement, inputs: [], steps,
+        composition: { entries: [{ id: "inspect", title: "Inspect project context", required_inputs: [], preconditions: [],
+          routes: [{ exit_id: "verified", step_ids: steps.map(step => step.id) }] }],
+          exits: [{ id: "verified", title: "Verification result", required_outputs: ["verification_result"], acceptance_ref: design.output_contract }] } });
       const procedure = result.procedure as JsonObject;
-      return this.store.save("program_memory_candidate", id, { ...recordPayload(candidate), status: "submitted",
-        request_id: requestId, procedure_id: procedureId, procedure_candidate_version: procedure.candidate_version,
-        independent_evidence_count: observations.length, submitted_at: new Date().toISOString() });
+      return { request_id: requestId, procedure_id: procedureId, procedure_candidate_version: procedure.candidate_version };
     });
+  }
+  evolutionProgramMemoryCommitSubmission(plan: JsonObject, ownerReceipt: JsonObject): JsonObject {
+    const source = plan.candidate as JsonObject;
+    const { candidate } = this.selfEvolution.getProgramMemory({ id: source.id, scope: source.scope }) as { candidate: JsonObject };
+    if (candidate.digest !== source.digest) throw new Error("Program Memory candidate changed before submission commit");
+    if (ownerReceipt.request_id !== plan.request_id || ownerReceipt.procedure_id !== plan.procedure_id
+      || !Number.isSafeInteger(ownerReceipt.procedure_candidate_version) || Number(ownerReceipt.procedure_candidate_version) < 1)
+      throw new Error("Program Memory owner receipt identity mismatch");
+    if (candidate.status === "submitted" || candidate.status === "promoted") {
+      if (candidate.request_id !== ownerReceipt.request_id || candidate.procedure_id !== ownerReceipt.procedure_id
+        || candidate.procedure_candidate_version !== ownerReceipt.procedure_candidate_version) throw new Error("Program Memory submission receipt conflict");
+      return candidate;
+    }
+    if (candidate.status !== "diagnostic" || candidate.version !== source.version)
+      throw new Error("Program Memory candidate changed before submission commit");
+    return this.store.save("program_memory_candidate", String(candidate.id), { ...recordPayload(candidate), status: "submitted", ...ownerReceipt,
+      independent_evidence_count: (plan.observations as JsonObject[]).length, submitted_at: new Date().toISOString() });
+  }
+  evolutionProgramMemoryReconcile(args: JsonObject): JsonObject { return reconcileProgramMemory(this, object(args.scope, "scope"), args.design_bindings === undefined ? {} : object(args.design_bindings, "design_bindings")); }
+  evolutionProgramMemorySubmissionDue(args: JsonObject = {}): JsonObject {
+    const limit = Math.max(1, Math.min(100, Number(args.limit) || 100));
+    const scoped = this.selfEvolution.listProgramMemory({ scope: args.scope }) as { items: JsonObject[] };
+    const experience = this.ownerServices.get("experience") ?? (this.capabilityOwned ? null : this);
+    const candidates = scoped.items.filter(item => item.status === "diagnostic" && typeof item.canonical_candidate_id !== "string" || (item.status === "submitted"
+      && !experience?.store.list("experience_evaluation_dispatch", 1, dispatch => dispatch.procedure_id === item.procedure_id, false).length)).slice(0, limit);
+    const items = candidates.map(candidate => {
+      let reason = "ready";
+      if (candidate.status === "submitted") reason = experience ? "ready" : "experience_owner_unavailable";
+      else if (typeof candidate.evaluation_design_id !== "string") reason = "waiting_evaluation_design";
+      else {
+        try { this.evolutionProgramMemoryPrepareSubmission({ id: candidate.id, scope: candidate.scope }); }
+        catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          reason = message.includes("independent") ? "waiting_independent_observations"
+            : message.includes("workflow") || message.includes("steps") ? "waiting_executable_design" : "invalid_evaluation_design_or_scope";
+        }
+      }
+      return { id: candidate.id, scope: candidate.scope, status: reason === "ready" ? "ready" : "waiting", reason };
+    });
+    return { items };
+  }
+  evolutionProgramMemorySubmit(args: JsonObject): JsonObject {
+    const { candidate } = this.selfEvolution.getProgramMemory(args) as { candidate: JsonObject };
+    if (candidate.status === "submitted" || candidate.status === "promoted") return candidate;
+    const plan = this.evolutionProgramMemoryPrepareSubmission(args);
+    const target = this.ownerServices.get("experience") ?? (this.capabilityOwned ? null : this);
+    if (!target) throw new Error("Program Memory Experience owner is unavailable");
+    const receipt = new ProgramMemorySubmissionCoordinator(this.store).submit(plan, value => target.evolutionProgramMemoryExperienceSubmit(value));
+    return this.evolutionProgramMemoryCommitSubmission(plan, receipt);
   }
   evolutionArtifactLineageRecord(args: JsonObject): JsonObject { return this.selfEvolution.recordArtifactLineage(args); }
   evolutionArtifactLineageRecall(args: JsonObject): JsonObject { return this.selfEvolution.recallArtifactLineage(args); }
@@ -589,20 +713,20 @@ export class CraftService extends ServiceFoundation {
     });
   }
   evolutionProgramMemoryFeedback(args: JsonObject): JsonObject {
-    return this.store.transaction(() => {
-      const candidate = this.selfEvolution.recordProgramMemoryFeedback(args);
-      if (!["revoked", "rejected"].includes(String(candidate.status)) || typeof candidate.procedure_id !== "string") return candidate;
-      const release = this.store.find("experience_release", candidate.procedure_id);
-      if (release?.status === "active" && (typeof release.valid_until !== "string" || Date.parse(release.valid_until) >= Date.now())) {
-        const evidenceId = `evidence_program_memory_revocation_${stableDigest({ candidate: candidate.id, version: candidate.version }).slice(-24)}`;
-        const revocation = this.evidenceRecord({ evidence_id: evidenceId, source_type: "program", confidence: "bounded",
-          claim: "Program Memory use was withdrawn for this project.", metadata: { project_scope_id: (candidate.scope as JsonObject).id,
-            candidate_id: candidate.id, content_stored: false } });
-        this.experienceProcedures.gate({ procedure_id: candidate.procedure_id, stage: "canary", passed: false,
-          release_channel: "current", expected_version: release.record_version, evidence_ids: [revocation.id] });
-      }
-      return candidate;
-    });
+    const candidate = this.selfEvolution.recordProgramMemoryFeedback(args);
+    if (!["revoked", "rejected"].includes(String(candidate.status)) || typeof candidate.procedure_id !== "string") return candidate;
+    const experience = this.storageOwner === "experience" ? this : this.ownerServices.get("experience") ?? (this.capabilityOwned ? null : this);
+    if (!experience) throw new Error("Program Memory revocation is saved; Experience owner reconciliation is unavailable");
+    const release = experience.store.find("experience_release", candidate.procedure_id);
+    if (release?.status === "active" && (typeof release.valid_until !== "string" || Date.parse(release.valid_until) >= Date.now())) {
+      const evidenceId = `evidence_program_memory_revocation_${stableDigest({ candidate: candidate.id, version: candidate.version }).slice(-24)}`;
+      const revocation = experience.evidenceRecord({ evidence_id: evidenceId, source_type: "program", confidence: "bounded",
+        claim: "Program Memory use was withdrawn for this project.", metadata: { project_scope_id: (candidate.scope as JsonObject).id,
+          candidate_id: candidate.id, content_stored: false } });
+      experience.experienceProcedures.gate({ procedure_id: candidate.procedure_id, stage: "canary", passed: false,
+        release_channel: "current", expected_version: release.record_version, evidence_ids: [revocation.id] });
+    }
+    return candidate;
   }
   evolutionRunbookCapture(args: JsonObject): JsonObject {
     return captureUserStatedRunbook(this.store, {
@@ -631,7 +755,12 @@ export class CraftService extends ServiceFoundation {
   evolutionCreationRecall(args: JsonObject): JsonObject { return this.creationAdapter.recall(args); }
   evolutionCreationApply(args: JsonObject): JsonObject { return this.creationAdapter.apply(args); }
   evolutionCreationForget(args: JsonObject): JsonObject { return this.creationAdapter.forget(args); }
-  craftNotesObserveDirectory(args: JsonObject): JsonObject { return this.craftNotes.observeDirectory(args); }
+  craftNotesObserveDirectory(args: JsonObject): JsonObject {
+    const owner = this.storageOwner === "notes" ? undefined : this.ownerServices.get("notes");
+    if (owner && owner !== this) return owner.craftNotesObserveDirectory(args);
+    if (this.capabilityOwned && this.storageOwner !== "notes") throw new Error("Notes owner is unavailable");
+    return this.craftNotes.observeDirectory(args);
+  }
   craftNotesObserveFile(args: JsonObject): JsonObject { return this.craftNotes.observeFileReference(args); }
   craftNotesCandidateList(args: JsonObject = {}): JsonObject { return this.craftNotes.candidateList(args) as unknown as JsonObject; }
   craftNotesConfirm(args: JsonObject): JsonObject { return this.craftNotes.confirm(args) as unknown as JsonObject; }
@@ -1268,12 +1397,14 @@ export class CraftService extends ServiceFoundation {
   webActionComplete(args: JsonObject): JsonObject { return this.webOperations.complete(args); }
   webOperationGet(args: JsonObject): JsonObject { return this.webOperations.get(args); }
 
-  static async open(store: CraftStore, hostOwnerId?: string): Promise<CraftService> {
+  static async open(store: CraftStore, hostOwnerId?: string,
+    contextSources?: { contributors: readonly import("../capability-protocol.ts").ContextContributionProvider[];
+      stores: import("../context-access-guard.ts").ContextOwnerStores; services?: ReadonlyMap<string, CraftService>; owner?: string }): Promise<CraftService> {
     const config = await loadConfig(store.paths);
     const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : undefined;
     const declared = hostProfilesFromConfig(config?.hostProfiles);
     const service = new CraftService(store, semanticProvider, undefined, undefined, undefined, hostOwnerId, declared,
-      undefined, undefined, undefined, config?.contentLanguage ?? "zh-CN");
+      undefined, undefined, undefined, config?.contentLanguage ?? "zh-CN", undefined, undefined, undefined, contextSources);
     return service;
   }
 
@@ -1318,6 +1449,7 @@ export class CraftService extends ServiceFoundation {
       // Components compare this content-free identity before assuming they
       // share one local ledger. It identifies only the configured data space.
       data_space_id: dataSpaceId(this.store.paths.root),
+      installed_artifact: loadedComponentArtifact(),
       counts };
   }
 
@@ -5919,7 +6051,11 @@ export class CraftService extends ServiceFoundation {
   }
   async knowledgeTaskEffectAssess(args: JsonObject): Promise<JsonObject> {
     const { WorkbenchEvaluations } = await import("../workbench-evaluations.ts");
-    return new WorkbenchEvaluations(this.store).assessKnowledgeEffect(text(args.retrieval_run_id, "retrieval_run_id"), text(args.baseline_id, "baseline_id"), text(args.candidate_id, "candidate_id"));
+    const { KnowledgeTaskEffects } = await import("../knowledge-task-effects.ts");
+    const evaluationOwner = this.ownerServices.get("eval");
+    if (this.capabilityOwned && !evaluationOwner) throw new Error("Knowledge task effects require the Eval owner");
+    const evaluations = new WorkbenchEvaluations(evaluationOwner?.store ?? this.store);
+    return new KnowledgeTaskEffects(this.store, evaluations).assess(text(args.retrieval_run_id, "retrieval_run_id"), text(args.baseline_id, "baseline_id"), text(args.candidate_id, "candidate_id"));
   }
   workLaunchPrepare(args: JsonObject): JsonObject { return this.workLaunchPrepareInternal(args); }
   private workLaunchPrepareInternal(args: JsonObject, knowledgeBinding?: JsonObject, reviewContract?: JsonObject): JsonObject {
@@ -6285,6 +6421,15 @@ export class CraftService extends ServiceFoundation {
   evaluationContractDefine(args: JsonObject): JsonObject { return this.evaluationContracts.define(args as unknown as EvaluationContractInput & { contract_id?: string }); }
   evaluationContractRecord(args: JsonObject): JsonObject { return this.evaluationContracts.record(args as unknown as { contract_id: string; stage: EvaluationStage; evidence?: string[]; metrics?: JsonObject }); }
   evaluationContractTaskEffectRecord(args: JsonObject): JsonObject {
+    const existing = typeof args.evaluation_id === "string" ? this.store.find("task_effect_evaluation", args.evaluation_id) : null;
+    if (existing) {
+      const fields = ["contract_id", "evaluation_id", "candidate_ref", "candidate_source_task_refs", "evaluator", "evaluator_signature", "pairs"];
+      if (fields.some(field => stableDigest(existing[field]) !== stableDigest(args[field]))) throw new Error("Task-effect evaluation idempotency conflict");
+      const verified = this.evaluationContracts.verifyTaskEffectEvaluation({ contract_id: String(args.contract_id), evaluation_id: String(args.evaluation_id),
+        candidate_ref: args.candidate_ref as never });
+      if (verified.valid !== true) throw new Error("Task-effect evaluation replay is no longer trusted");
+      return existing;
+    }
     return this.evaluationContracts.recordTaskEffectEvaluation(args);
   }
   evaluationContractGet(args: JsonObject): JsonObject { return this.evaluationContracts.get(text(args.contract_id, "contract_id")); }

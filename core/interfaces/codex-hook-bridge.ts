@@ -1,3 +1,5 @@
+import { hookVerificationGap } from "./codex-hook-signal-sanitizer.ts";
+import { NATIVE_ASYNC_COMPLETION } from "./codex-hook-command-result.ts";
 import { ComponentTraceKernel } from "../component-trace.ts";
 import { operationErrorCode } from 'craft-common-log/operation';
 import { randomUUID as hookRequestId } from "node:crypto";
@@ -232,7 +234,7 @@ function projectScenarioKey(input: HookInput, signal: Signal, service: CraftServ
 /** Append-only, content-free session facts shared by PostToolUse and Stop. */
 export class HookTurnJournal {
   readonly service: CraftService;
-  constructor(service: CraftService) { this.service = service; }
+  constructor(service: CraftService) { this.service = ownedMemberService(service, "runtime"); }
 
   record(input: HookInput, signal: Signal, projectScope?: HookProjectScope | null): JsonObject | null {
     const scope = projectScope === undefined ? codexProjectScope(input.cwd) : projectScope; const turn = this.turn(input);
@@ -243,7 +245,7 @@ export class HookTurnJournal {
       .get(typeof matched?.id === "string" ? matched.id : journalId) !== undefined;
     if (process.env.CRAFT_HOOK_MODE === "1" && !legacyRow) {
       const prior = this.find(input, false, scope);
-      if (prior?.closed_at) return prior;
+      if (prior?.closed_at && !((input as Record<PropertyKey, unknown>)[NATIVE_ASYNC_COMPLETION] === true && !prior.verification_outcome)) return prior;
       const signalId = signal.id;
       return this.service.store.traceTransaction(signalId, () => {
         const existing = this.service.store.traceShards.find("codex_hook_signal", signalId, undefined, signalId);
@@ -255,13 +257,13 @@ export class HookTurnJournal {
     const write = () => {
       const existing = this.find(input, undefined, scope);
       const currentId = existing ? String(existing.id) : journalId;
-      if (existing?.closed_at) return null;
+      if (existing?.closed_at && !((input as Record<PropertyKey, unknown>)[NATIVE_ASYNC_COMPLETION] === true && !existing.verification_outcome)) return null;
       const priorSignals = Array.isArray(existing?.signals) ? existing.signals as JsonObject[] : [];
       if (priorSignals.some((item) => item.id === signal.id)) return existing!;
       const signals = [...priorSignals, signal];
       const lastEdit = signals.findLastIndex((item) => item.kind === "edit");
       const checks = new Map<string, string>();
-      for (const item of signals.slice(lastEdit + 1)) if (item.kind === "verification") checks.set(String(item.verifier), String(item.outcome));
+      for (const item of signals.slice(lastEdit + 1)) if (item.kind === "verification" || item.kind === "verification_gap") checks.set(String(item.verifier), String(item.outcome));
       const outcomes = [...checks.values()];
       const verifications = signals.slice(lastEdit + 1).filter(item => item.kind === "verification");
       const scenarioKey = verifications.length > 0 && verifications.every(item => item.outcome !== "unknown" && typeof item.scenario_key === "string")
@@ -313,7 +315,7 @@ export class HookTurnJournal {
     const signals = [...merged.values()];
     const lastEdit = signals.findLastIndex(item => item.kind === "edit");
     const checks = new Map<string, string>();
-    for (const item of signals.slice(lastEdit + 1)) if (item.kind === "verification") checks.set(String(item.verifier), String(item.outcome));
+    for (const item of signals.slice(lastEdit + 1)) if (item.kind === "verification" || item.kind === "verification_gap") checks.set(String(item.verifier), String(item.outcome));
     const outcomes = [...checks.values()];
     const verifications = signals.slice(lastEdit + 1).filter(item => item.kind === "verification");
     const scenarioKey = verifications.length > 0 && verifications.every(item => item.outcome !== "unknown" && typeof item.scenario_key === "string")
@@ -364,7 +366,7 @@ export class HookLearningCoordinator {
 
   private finalizedTurn(input: HookInput, journal: JsonObject): JsonObject | null {
     const turnId = String(journal.turn_id), receiptId = String(journal.context_receipt_id), host = hookHost(input);
-    const evidenceIds = new Set(this.service.store.list("evidence", 10_000, evidence => {
+    const evidenceIds = new Set(ownedMemberService(this.service, "experience").store.list("evidence", 10_000, evidence => {
       const metadata = evidence.metadata as JsonObject | undefined;
       return metadata?.provenance === "host_completion_signal" && metadata.host === host
         && metadata.turn_id === turnId && metadata.context_receipt_id === receiptId;
@@ -372,7 +374,7 @@ export class HookLearningCoordinator {
     if (!evidenceIds.size) return null;
     const scope = journal.scope as JsonObject;
     const scopeKey = scope.kind === "project" ? `project:${String(scope.id).replace(/^project:/u, "")}` : `${scope.kind}:${scope.id}`;
-    return this.service.store.list("workflow_evolution_observation", 10_000, observation => {
+    return ownedMemberService(this.service, "experience").store.list("workflow_evolution_observation", 10_000, observation => {
       const source = observation.source as JsonObject | undefined;
       return source?.scope === scopeKey && Array.isArray(observation.evidence_ids)
         && (observation.evidence_ids as unknown[]).some(id => evidenceIds.has(String(id)));
@@ -395,7 +397,7 @@ export class HookLearningCoordinator {
     const prior = this.finalizedTurn(input, journal);
     if (prior) {
       if (prior.outcome !== journal.verification_outcome) throw new Error("Host turn already has a different terminal Experience outcome");
-      return { status: "observed", observation: prior, request: null, idempotent: true, next_action: "terminal_turn_already_recorded" };
+
     }
     const suppliedScenario = text(input.scenario_key);
     if (suppliedScenario && !/^[a-z0-9][a-z0-9._/-]{0,95}$/u.test(suppliedScenario)) throw new Error("scenario_key must be a bounded stable identifier");
@@ -405,7 +407,7 @@ export class HookLearningCoordinator {
       const lastEdit = signals.findLastIndex(item => item.kind === "edit");
       const alignedSignals = signals.map((signal, index) => index > lastEdit && signal.kind === "verification"
         ? { ...signal, scenario_key: suppliedScenario } : signal);
-      this.service.store.save("codex_hook_turn", String(journal.id), { ...payload(journal), trace_id: String(journal.trace_id ?? journal.id), scenario_key: suppliedScenario, signals: alignedSignals });
+      this.journal.service.store.save("codex_hook_turn", String(journal.id), { ...payload(journal), trace_id: String(journal.trace_id ?? journal.id), scenario_key: suppliedScenario, signals: alignedSignals });
     }
     const scenario = suppliedScenario ?? text(journal.scenario_key);
     const taskGoalArgs = scenario ? null : experienceTaskGoalArgs(this.service, input, resolvedProjectScope as HookProjectScope);
@@ -414,11 +416,14 @@ export class HookLearningCoordinator {
     const lastVerifier = [...signals].reverse().find(signal => signal.kind === "verification" && typeof signal.verifier === "string");
     const observedPaths = [...new Set(signals.filter(signal => signal.kind === "edit" && typeof signal.observed_path === "string")
       .map(signal => String(signal.observed_path)))].slice(0, 16);
-    const finalized = this.service.learningCycleFinalize({ host: hookHost(input), host_identity_verified: false, task_id: String(journal.id), turn_id: String(journal.turn_id), context_receipt_id: journal.context_receipt_id,
+    const finalized = prior ? { status: "observed", observation: prior,
+      evidence: ownedMemberService(this.service, "experience").store.find("evidence", String((prior.evidence_ids as string[] | undefined)?.[0])),
+      request: null, idempotent: true, next_action: "terminal_turn_already_recorded" }
+      : this.service.learningCycleFinalize({ host: hookHost(input), host_identity_verified: false, task_id: String(journal.id), turn_id: String(journal.turn_id), context_receipt_id: journal.context_receipt_id,
       ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
       verified: true, project_root: projectRoot, verification_outcome: journal.verification_outcome, verification_ref: stableDigest(journal.verification_receipts), ...(scenario ? { scenario_key: scenario } : {}),
       ...(taskGoal ? { scenario_context: { task_goal: taskGoal,
-        effect_summary: `项目代码已修改并完成终态验证，结果为 ${String(journal.verification_outcome)}。`, sanitized: true, content_stored: false } } : {}),
+        effect_summary: `项目资产已修改并完成终态验证，结果为 ${String(journal.verification_outcome)}。`, sanitized: true, content_stored: false } } : {}),
       observed_paths: observedPaths,
       ...(typeof journal.coarse_scenario_key === "string" ? { coarse_scenario_key: journal.coarse_scenario_key } : {}),
       ...(typeof lastVerifier?.verifier === "string" ? { scenario_verifier_digest: lastVerifier.verifier } : {}) });
@@ -437,8 +442,9 @@ export class HookLearningCoordinator {
             source_digest: source.digest, source_session_id: source.session_id, task_id: source.id,
             turn_id: journal.turn_id, context_receipt_id: journal.context_receipt_id, content_stored: false });
         }
+        if (typeof observation.scenario_key !== "string" || !observation.scenario_key) throw new Error("Verified observation has no scene identity");
         this.service.selfEvolution.captureProgramMemory({
-          scenario_key: scenario || "coding",
+          scenario_key: observation.scenario_key,
           domain: evolutionDomainFor(goalText),
           statement: `Verified workflow: ${goalText}`.slice(0, 280),
           steps: observedPaths,
@@ -447,8 +453,15 @@ export class HookLearningCoordinator {
         });
       } catch { this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "experience", event: "Stop", error_type: "program_memory_capture_failed" }); }
     }
-    return finalized;
+    return prior ? { ...finalized, idempotent: true, next_action: "terminal_turn_already_recorded" } : finalized;
   }
+}
+
+function ownedMemberService(service: CraftService, member: string): CraftService {
+  if (!service.capabilityOwned || service.storageOwner === member) return service;
+  const target = service.ownerServices.get(member);
+  if (!target) throw new Error(`${member} owner is unavailable`);
+  return target;
 }
 
 export class CodexHookBridge {
@@ -488,7 +501,7 @@ export class CodexHookBridge {
         if (event === "SessionEnd" && (member === "context" || member === "memory") && sessionId && this.launchArchiveWorker) {
           try {
             this.service.store.bindSessionStorageHost(sessionId, hookHost(input));
-            this.service.memoryGovernance.ledger.files.queueSessionArchive(sessionId, hookHost(input));
+            ownedMemberService(this.service, "memory").memoryGovernance.ledger.files.queueSessionArchive(sessionId, hookHost(input));
           } catch { /* The original failure remains the diagnostic result. */ }
           finally { try { this.launchArchiveWorker(); } catch { /* Preserve the original identity failure. */ } }
         }
@@ -569,14 +582,14 @@ export class CodexHookBridge {
     if (event === "PostToolUse") {
       const prior = this.service.store.find("context_hook_session", sessionKey);
       const pending = Array.isArray(prior?.pending_turn_ids) ? prior.pending_turn_ids as string[] : [];
-      const turnId = text(input.turn_id) ?? (prior?.ambiguous !== true && pending.length === 1 ? pending[0] : undefined);
+      const turnId = text(input.turn_id) ?? (hookHost(input) === "claude" ? text(input.prompt_id) : null) ?? (prior?.ambiguous !== true && pending.length === 1 ? pending[0] : undefined);
       return turnId ? { ...input, turn_id: turnId } : input;
     }
     return this.service.store.traceTransaction(sessionKey, () => {
       const prior = this.service.store.find("context_hook_session", sessionKey);
       let pending = Array.isArray(prior?.pending_turn_ids) ? prior.pending_turn_ids as string[] : [];
       let ambiguous = prior?.ambiguous === true;
-      let turnId = text(input.turn_id);
+      let turnId = text(input.turn_id) ?? (hookHost(input) === "claude" ? text(input.prompt_id) : null);
       if (event === "UserPromptSubmit" && (text(input.prompt) || text(input.user_prompt))) {
         const sequence = Number(prior?.sequence ?? 0) + 1;
         turnId ??= `hook_turn_${sessionKey.slice(-24)}_${sequence}`;
@@ -624,7 +637,7 @@ export class CodexHookBridge {
           if (decision.action !== "store_as_fact" && decision.action !== "store_as_preference") continue;
           const legacyKind = item.kind === "preference" ? "preference" : item.kind === "rule" ? "procedural" : "working";
           validateConcept(mapLegacyKind("memory", legacyKind), item.statement);
-          const captured = this.service.memoryCaptureObservedFact({ content: item.statement, kind: legacyKind,
+          const captured = ownedMemberService(this.service, "memory").memoryCaptureObservedFact({ content: item.statement, kind: legacyKind,
             session_id: sessionId, session_host: sessionHost, scope_kind: "session", scope_id: sessionId,
             project_scope_id: scope.id, project_root: input.cwd, sensitivity: "internal",
             ...(item.kind === "rule" ? { tags: ["auto_extracted_rule"] } : {}) });
@@ -644,10 +657,16 @@ export class CodexHookBridge {
           // A claim requires at least one Evidence record. The evidence only
           // attests "the user stated this rule", never that the rule is true.
           const evidenceId = `codex_hook_rule_${stableDigest({ statement: item.statement, session_id: sessionId ?? "" }).slice(-24)}`;
-          this.service.evidenceRecord({ evidence_id: evidenceId, source_type: "codex-hook",
+          const knowledgeOwner = ownedMemberService(this.service, "knowledge");
+          knowledgeOwner.knowledgeMemoryInstallBuiltins();
+          if (knowledgeOwner !== this.service && typeof input.cwd === "string") {
+            const registered = knowledgeOwner.scopeIdentityResolveProject({ project_root: input.cwd });
+            if (((registered.identity as JsonObject).canonical_scope as JsonObject).id !== scope.id) throw new Error("Knowledge project binding mismatch");
+          }
+          knowledgeOwner.evidenceRecord({ evidence_id: evidenceId, source_type: "codex-hook",
             claim: "user-stated-convention", confidence: "unverified",
             locator: sessionId ?? "codex-hook" });
-          this.service.knowledgeClaimSave({ kind: "rule", content: item.statement, scope: scope.id,
+          ownedMemberService(this.service, "knowledge").knowledgeClaimSave({ kind: "rule", content: item.statement, scope: scope.id,
             project_root: input.cwd, evidence_ids: [evidenceId],
             tags: ["auto_extracted_rule"], proposed_by: sessionId ?? "codex-hook" });
           count += 1;
@@ -742,7 +761,7 @@ export class CodexHookBridge {
       if (statement && sessionId) {
         try {
           this.service.store.bindSessionStorageHost(sessionId, hookHost(input));
-          const captured = this.service.memoryCaptureUserStatement({ content: statement, kind: "preference", session_id: sessionId, session_host: hookHost(input), session_host_verified: false,
+          const captured = ownedMemberService(this.service, "memory").memoryCaptureUserStatement({ content: statement, kind: "preference", session_id: sessionId, session_host: hookHost(input), session_host_verified: false,
             scope_kind: "session", scope_id: sessionId, project_scope_id: scope.id, project_root: input.cwd, sensitivity: "internal" });
           memoryWritten = captured.auto_committed === true;
           captureSummary = { candidate_id: (captured.candidate as JsonObject | null)?.id ?? null, next_action: captured.next_action,
@@ -778,7 +797,7 @@ export class CodexHookBridge {
     const receipt = resolved.receipt as JsonObject | null;
     if (receipt) this.journal.bindContextReceipt(input, receipt, scope);
     return this.service.store.transaction(() => {
-      assertContextReadCurrent(this.service.store, receipt);
+      assertContextReadCurrent(this.service.store, receipt, this.service.contextResolution.ownerStores);
       const projectBinding = member === "context" && this.issueEvolutionBinding && sessionId && turnId && input.cwd
         ? mintEvolutionProjectBinding(this.service.store, { host: hookHost(input), session_id: sessionId, turn_id: turnId, project_root: input.cwd, scope })
         : undefined;
@@ -822,7 +841,7 @@ export class CodexHookBridge {
   }
 
   private tool(input: HookInput, projectScope: HookProjectScope | null): JsonObject {
-    const rawSignal = this.signals.signal(input); if (!rawSignal) return {};
+    const rawSignal = this.signals.signal(input) ?? this.signals.gap(input); if (!rawSignal) return {};
     const captured = { ...rawSignal, id: `codex_hook_signal_${stableDigest({ host: hookHost(input), scope: projectScope, session_id: text(input.session_id), turn_id: text(input.turn_id), signal_id: rawSignal.id }).slice(-20)}` };
     const scenario = projectScope ? projectScenarioKey(input, captured, this.service, projectScope) : null;
     this.journal.record(input, scenario ? { ...captured, scenario_key: scenario.scenario_key,
@@ -848,7 +867,7 @@ export class CodexHookBridge {
     const finalized = member === "experience" ? this.service.store.transaction(() => {
       const result = this.learning.finalize(input, projectScope);
       const goalArgs = experienceTaskGoalArgs(this.service, input, projectScope);
-      if (goalArgs) deleteExperienceTaskGoal(goalArgs);
+      if (goalArgs && result?.observation) deleteExperienceTaskGoal(goalArgs);
       this.recordObservedContextUse(input, projectScope);
       this.journal.close(input, projectScope);
       return result;
@@ -887,8 +906,11 @@ export class CodexHookBridge {
     try {
       this.service.store.appendEvent("codex-hook", "codex_hook.unverified_edit", { member: "experience",
         session_id: input.session_id, turn_id: journal.turn_id,
-        reason: "edit_without_verification", content_stored: false });
+        reason: hookVerificationGap(journal).reason, content_stored: false });
     } catch { /* The hint must never block Stop. */ }
+    const reason = hookVerificationGap(journal).reason;
+    if (reason === "pending_background") return "Craft Hook：后台验证尚无终态，本轮暂未生成已验证的 Experience 观察；收到原生完成回执后会按原任务对账。";
+    if (reason === "unsupported_native_envelope") return "Craft Hook：工具已调用，但原生回执格式不受支持或缺少可关联终态；本轮未生成已验证的 Experience 观察。";
     return "Craft Hook 未识别到验证回执；本轮未生成已验证的 Experience 观察。这不影响之前保存的知识和记忆。若本轮已运行测试，请确认测试命令及退出码被 Hook 接收；否则运行相关测试后再结束。";
   }
 
@@ -901,7 +923,7 @@ export class CodexHookBridge {
         Array.isArray(candidate.evidence_ids) && (candidate.evidence_ids as unknown[]).includes(observationId)) : [];
       this.service.store.appendEvent("codex-hook", "codex_hook.learning_stage_diagnostic", {
         member: "experience", session_id: text(input.session_id) ?? "unknown", turn_id: text(input.turn_id), content_free: true,
-        ...codexHookLearningStageDiagnostic(journal, finalized, candidates),
+        ...codexHookLearningStageDiagnostic(journal, finalized, candidates), verification_gap: hookVerificationGap(journal),
       });
     } catch { /* Diagnostics must never block Stop. */ }
   }
@@ -936,15 +958,15 @@ export class CodexHookBridge {
         try {
           this.service.store.bindSessionStorageHost(text(input.session_id)!, hookHost(input));
           if (this.launchArchiveWorker) {
-            this.service.memoryGovernance.ledger.files.queueSessionArchive(text(input.session_id)!, hookHost(input));
-          } else this.service.memorySessionArchive({ session_id: text(input.session_id), session_host: hookHost(input) });
+            ownedMemberService(this.service, "memory").memoryGovernance.ledger.files.queueSessionArchive(text(input.session_id)!, hookHost(input));
+          } else ownedMemberService(this.service, "memory").memorySessionArchive({ session_id: text(input.session_id), session_host: hookHost(input) });
         }
         catch (error) { this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, event, error_type: error instanceof Error ? error.name : "unknown" }); }
       }
       if (event === "SessionEnd" && scheduleMaintenance && text(input.session_id)) {
         const leaseId = `hook-${member}-${stableDigest({ host: hookHost(input), member, session_id: text(input.session_id) }).slice(-32)}`;
-        if (this.launchArchiveWorker) queueHookMaintenance(this.service.store, leaseId);
-        else this.service.memoryMaintenanceSchedule({ stage: "light", lease_id: leaseId });
+        if (this.launchArchiveWorker) queueHookMaintenance(ownedMemberService(this.service, "memory").store, leaseId);
+        else ownedMemberService(this.service, "memory").memoryMaintenanceSchedule({ stage: "light", lease_id: leaseId });
       }
       this.service.store.appendEvent("codex-hook", "codex_hook.lifecycle", {
         member,

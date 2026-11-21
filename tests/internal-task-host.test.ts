@@ -356,6 +356,7 @@ test("a second connection can resolve an approval waiting in the first broker", 
     t.mock.timers.enable({ apis: ["setInterval"] });
     for (const decision of ["accept", "decline"] as const) {
       const waiting = f.service.internalApprovalBroker.authorize("write", {}, "local_write");
+      await new Promise<void>(resolve => setImmediate(resolve));
       const id = String(f.service.internalApprovalBroker.pending()[0]!.id);
       t.mock.timers.tick(250);
       const unavailable = t.mock.method(f.store, "find", () => { throw new Error("temporarily unavailable"); });
@@ -367,6 +368,7 @@ test("a second connection can resolve an approval waiting in the first broker", 
       await outcome;
     }
     const removed = f.service.internalApprovalBroker.authorize("write", {}, "local_write");
+    await new Promise<void>(resolve => setImmediate(resolve));
     const removedId = String(f.service.internalApprovalBroker.pending()[0]!.id);
     const rejected = assert.rejects(removed, /no longer available/u);
     const missing = t.mock.method(f.store, "find", () => null);
@@ -428,12 +430,14 @@ test("approval expiry rejects its waiter and mismatched consumption preserves ap
     assert.equal((await broker.authorize("read", {}, "read_only")).approval_ref, null);
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const waiting = broker.authorize("write", {}, "local_write");
+    await new Promise<void>(resolve => setImmediate(resolve));
     const rejection = assert.rejects(waiting, /timed out/u);
     const approval = broker.pending()[0]!;
     t.mock.timers.tick(300_000);
     await rejection;
     assert.equal(f.store.get("internal_action_approval", String(approval.id)).status, "expired");
     const failing = broker.authorize("write", {}, "local_write");
+    await new Promise<void>(resolve => setImmediate(resolve));
     const failedExpiry = assert.rejects(failing, /timed out/u);
     const failSave = t.mock.method(f.store, "save", () => { throw new Error("storage unavailable"); });
     t.mock.timers.tick(300_000);
@@ -830,6 +834,7 @@ test("approval queue capacity admits the last slot without creating orphan reque
     for (let i = 0; i < 63; i++) f.store.create("internal_action_approval", `queued-${i}`, { status: "pending", expires_at: new Date(Date.now() + 60_000).toISOString() });
     const controller = new AbortController();
     const waiting = f.service.internalApprovalBroker.authorize("workspace_write", { task_id: f.task.id }, "local_write", controller.signal);
+    await new Promise<void>(resolve => setImmediate(resolve));
     const rejection = assert.rejects(f.service.internalApprovalBroker.authorize("workspace_write", { task_id: f.task.id }, "local_write"), /queue is full/u);
     assert.equal(f.service.internalApprovalBroker.pending().length, 64);
     await rejection;
@@ -872,6 +877,7 @@ test("expired and closed approvals do not block a later broker", async () => {
     assert.throws(() => broker.decide("invalid", "accept"), /expired/u);
     assert.throws(() => broker.consume("invalid-approved", "workspace_write", {}, "local_write"), /expired/u);
     const waiting = broker.authorize("workspace_write", { task_id: f.task.id }, "local_write");
+    await new Promise<void>(resolve => setImmediate(resolve));
     const [approval] = broker.pending(); assert.ok(approval);
     broker.close();
     await assert.rejects(waiting, /cancelled/u);

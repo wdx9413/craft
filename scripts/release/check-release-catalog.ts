@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_PRODUCTS, INDEPENDENT_HOOK_PRODUCTS, RETIRED_MCP_PREFIXES, RETIRED_PUBLIC_PRODUCTS, allReleaseProducts, externalDistributionContract, externalMarketplaceProducts, releaseManifest } from "../../core/release-catalog.ts";
+import { RELEASE_PRODUCTS, INDEPENDENT_HOOK_PRODUCTS, RETIRED_MCP_PREFIXES, RETIRED_PUBLIC_PRODUCTS, allReleaseProducts, externalDistributionContract, externalMarketplaceProducts, releaseManifest, releaseProductVersion } from "../../core/release-catalog.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -16,12 +16,12 @@ for (const path of ["marketplace.json", ".agents/plugins/marketplace.json"]) {
 for (const product of RELEASE_PRODUCTS) {
   const rootPath = join(root, "plugins", product.name);
   const codex = JSON.parse(await readFile(join(rootPath, ".codex-plugin", "plugin.json"), "utf8")) as { name?: string; version?: string; hooks?: string };
-  assert.equal(codex.name, product.name); assert.equal(codex.version, CRAFT_RELEASE_VERSION);
+  assert.equal(codex.name, product.name); assert.equal(codex.version, releaseProductVersion(product));
   await access(join(rootPath, ".mcp.json")); await access(join(rootPath, "dist", "plugin", "craft-mcp.cjs"));
   if (product.hookMember) assert.equal(codex.hooks, "./hooks/codex-hooks.json", `${product.name} must retain its Codex Hook bridge`);
   if (product.name !== "craft") {
     const claude = JSON.parse(await readFile(join(rootPath, ".claude-plugin", "plugin.json"), "utf8")) as { name?: string; version?: string; hooks?: string };
-    assert.equal(claude.name, product.name); assert.equal(claude.version, CRAFT_RELEASE_VERSION);
+    assert.equal(claude.name, product.name); assert.equal(claude.version, releaseProductVersion(product));
     if (product.hookMember) assert.equal(claude.hooks, "./hooks/hooks.json");
     else assert.equal(claude.hooks, undefined, `${product.name} must not install an automatic Hook`);
   }

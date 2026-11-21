@@ -202,7 +202,7 @@ export class McpServer {
 
       // Standalone contracts are checked at the wire boundary, including calls
       // from clients that do not validate JSON Schema themselves.
-      if (this.mode.endsWith("-daily") || this.mode === "component-codebase" || this.mode === "component-context-agent") {
+      if (this.mode.endsWith("-daily") || this.mode.endsWith("-owned") || this.mode.endsWith("-worker") || this.mode === "component-codebase" || (this.mode === "component-context-agent" || this.mode === "component-context-owned")) {
         if (name === "craft_context_open") {
           for (const [field, maximum] of [["max_items", DEFAULT_CONTEXT_MAX_ITEMS], ["max_chars", DEFAULT_CONTEXT_MAX_CHARS]] as const) {
             const value = (supplied as JsonObject)[field];
@@ -279,8 +279,11 @@ export class McpServer {
   }
 
   private async reject(requestId: unknown, message: string, input: unknown): Promise<JsonObject> {
+    let safeInput: JsonValue;
+    try { safeInput = projectBindingFreeInput(input) as JsonValue; }
+    catch { safeInput = { rejected_input: "unreadable" }; }
     const captured = await this.componentTrace.capture({ requestId: String(requestId), component: "craft-mcp", operation: "protocol.reject",
-      input: { envelope: projectBindingFreeInput(input) }, handler: () => { throw Object.assign(new Error(message), { code: "ERR_INVALID_PARAMS" }); } });
+      input: { envelope: safeInput }, handler: () => { throw Object.assign(new Error(message), { code: "ERR_INVALID_PARAMS" }); } });
     return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message, data: { trace_correlation: captured.correlation,
       ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) } } };
   }
@@ -307,7 +310,7 @@ export class McpServer {
     const resource = typeof args.resource === "string" && args.resource.trim() ? args.resource.trim() : "capability";
     const operation = typeof args.operation === "string" && args.operation.trim() ? args.operation.trim() : undefined;
     if (name === "craft_describe") {
-      const registry = this.mode === "component-context-agent"
+      const registry = (this.mode === "component-context-agent" || this.mode === "component-context-owned")
         ? TOOL_REGISTRY.filter(entry => CONTEXT_ROUTED_TOOL_NAMES.has(entry.tool)) : TOOL_REGISTRY;
       if (args.resource === undefined) return catalogOf(registry);
       const described = resolveEntry(registry, resource, operation, "info");
@@ -326,7 +329,7 @@ export class McpServer {
     const { resource: _resource, operation: _operation, args: nested, ...rest } = args;
     const forwarded: JsonObject = { ...rest,
       ...(nested && typeof nested === "object" && !Array.isArray(nested) ? nested as JsonObject : {}) };
-    if (this.mode === "component-context-agent") {
+    if ((this.mode === "component-context-agent" || this.mode === "component-context-owned")) {
       if (!CONTEXT_ROUTED_TOOL_NAMES.has(entry.tool)) throw new Error(`Craft operation is not available on the Context Agent surface: ${entry.tool}`);
       if (!PROJECT_EVOLUTION_TOOL_NAMES.has(entry.tool)) {
         const target = ACTIVE_TOOLS.find(tool => tool.name === entry.tool);

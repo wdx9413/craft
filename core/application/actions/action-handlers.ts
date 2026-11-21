@@ -1,3 +1,4 @@
+import { routeOwnedService } from "../owner-service.ts";
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
 import type { ComponentName } from "../../component-readiness.ts";
@@ -18,6 +19,7 @@ import { PROJECT_BOUND_EXPERIENCE_TOOLS, PROJECT_EVOLUTION_TOOLS } from "../../m
 
 /** Caller identity is local; transport construction does not change internal dispatch. */
 export function createActionHandlers(service: CraftService, mountedComponent?: ComponentName): McpHandlerGroup {
+  service = routeOwnedService(service);
   const componentArgs = (args: JsonObject): JsonObject => {
     if (!mountedComponent) return args;
     if (args.members !== undefined && (!Array.isArray(args.members) || args.members.length !== 1 || args.members[0] !== mountedComponent)) throw new Error("Context members must match the mounted component");
@@ -63,6 +65,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_evolution_program_memory_capture: service.evolutionProgramMemoryCapture.bind(service),
       craft_evolution_program_memory_list: service.evolutionProgramMemoryList.bind(service),
       craft_evolution_program_memory_get: service.evolutionProgramMemoryGet.bind(service),
+      craft_evolution_program_memory_submission_due: service.evolutionProgramMemorySubmissionDue.bind(service),
       craft_evolution_program_memory_submit: service.evolutionProgramMemorySubmit.bind(service),
       craft_evolution_artifact_lineage_record: service.evolutionArtifactLineageRecord.bind(service),
       craft_evolution_artifact_lineage_recall: service.evolutionArtifactLineageRecall.bind(service),
@@ -683,6 +686,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_capability_intake_upgrade_plan: service.capabilityIntakeUpgradePlan.bind(service), craft_capability_intake_get: service.capabilityIntakeGet.bind(service), craft_capability_intake_list: service.capabilityIntakeList.bind(service),
       craft_memory_remember_episode: (a) => service.memoryConsolidationRemember(a),
       craft_memory_consolidate: service.memoryConsolidateGoverned.bind(service),
+      craft_memory_recall: service.memoryRecall.bind(service),
       craft_memory_resolve: (a) => service.memoryConsolidationResolve(a),
       craft_memory_search: (a) => service.memoryConsolidationSearch(a),
       craft_memory_maintenance_signal: (a) => service.memoryMaintenanceSignal(a),

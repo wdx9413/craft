@@ -1,5 +1,10 @@
+import { executeSteps, normalizeSteps } from "../core/workflow.ts";
+import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
+import { projectIdentityFromRoot } from "../core/scope-identity.ts";
+import { openCapabilityService } from "../core/interfaces/mcp/runtime.ts";
+import { runEvaluationOnce } from "../deploy/experience-learning/worker.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync, sign } from "node:crypto";
@@ -44,12 +49,20 @@ function createHostSession(store: CraftStore, taskId: string, id: string): JsonO
   return session;
 }
 
-async function fixture(options: { candidateSuccess?: number; includeRoutes?: boolean; programMemory?: boolean } = {}) {
+async function fixture(options: { candidateSuccess?: number; includeRoutes?: boolean; programMemory?: boolean; owned?: boolean; domain?: string; artifact?: string; goal?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), "craft-procedure-contract-promotion-"));
-  const store = await new CraftStore(craftPaths(root)).open();
   const previousTrust = process.env.CRAFT_TRUSTED_EVALUATORS;
   process.env.CRAFT_TRUSTED_EVALUATORS = JSON.stringify([evaluator]);
-  const service = new CraftService(store);
+  let ownedRuntime: Awaited<ReturnType<typeof openCapabilityService>> | undefined;
+  if (options.owned) {
+    const env = { ...process.env, CRAFT_DATA_DIR: root };
+    for (const owner of ["context", "runtime", "eval", "experience"]) { const runtime = await openCapabilityService(owner, env); runtime.close(); }
+    ownedRuntime = await openCapabilityService("experience", env);
+  }
+  const store = ownedRuntime?.store ?? await new CraftStore(craftPaths(root)).open();
+  const service = ownedRuntime?.service ?? new CraftService(store);
+  const evalStore = service.ownerServices.get("eval")?.store ?? store;
+  const taskStore = service.ownerServices.get("runtime")?.store ?? service.ownerServices.get("context")?.store ?? store;
   if (previousTrust === undefined) delete process.env.CRAFT_TRUSTED_EVALUATORS;
   else process.env.CRAFT_TRUSTED_EVALUATORS = previousTrust;
   store.create("scope_alias", "project-test", { status: "active", scope: { kind: "project", id: "project:test" }, alias_kind: "path", alias: root, alias_digest: stableDigest(root) });
@@ -58,13 +71,13 @@ async function fixture(options: { candidateSuccess?: number; includeRoutes?: boo
     observation_refs: [{ source: { scope: "project:test" }, evidence_ids: ["gate-evidence"] }], output_contract_ref: "acceptance:inspect" });
   store.create("workflow_evolution_proposal", "proposal", { request_id: "request", request_version: 1, name: "Inspect", description: "Read only inspection", inputs: [], steps: [] });
   store.create("experience_procedure", "procedure-baseline", { content_digest: stableDigest("baseline"), lifecycle: "candidate", routeable: false });
-  const kernel = new EvaluationContractKernel(store, [evaluator]);
+  const kernel = service.ownerServices.get("eval")?.evaluationContracts ?? new EvaluationContractKernel(store, [evaluator]);
   const baselineRef = kernel.artifactRef("experience_procedure", "procedure-baseline", 1);
-  const developmentTask = createTask(store, "dev-task"), heldOutTask = createTask(store, "held-out-task"), heldOutTask2 = createTask(store, "held-out-task-2");
-  const baselineSession = createHostSession(store, String(heldOutTask.id), "held-out-baseline");
-  const candidateSession = createHostSession(store, String(heldOutTask.id), "held-out-candidate");
-  const baselineSession2 = createHostSession(store, String(heldOutTask2.id), "held-out-baseline-2");
-  const candidateSession2 = createHostSession(store, String(heldOutTask2.id), "held-out-candidate-2");
+  const developmentTask = createTask(taskStore, "dev-task"), heldOutTask = createTask(taskStore, "held-out-task"), heldOutTask2 = createTask(taskStore, "held-out-task-2");
+  const baselineSession = createHostSession(taskStore, String(heldOutTask.id), "held-out-baseline");
+  const candidateSession = createHostSession(taskStore, String(heldOutTask.id), "held-out-candidate");
+  const baselineSession2 = createHostSession(taskStore, String(heldOutTask2.id), "held-out-baseline-2");
+  const candidateSession2 = createHostSession(taskStore, String(heldOutTask2.id), "held-out-candidate-2");
   const devRef = kernel.taskRef(String(developmentTask.id), Number(developmentTask.version));
   const heldOutRef = kernel.taskRef(String(heldOutTask.id), Number(heldOutTask.version));
   const heldOutRef2 = kernel.taskRef(String(heldOutTask2.id), Number(heldOutTask2.version));
@@ -81,27 +94,32 @@ async function fixture(options: { candidateSuccess?: number; includeRoutes?: boo
     pilot_report_digest: stableDigest("pilot"), minimum_meaningful_effect: 0.1, confidence_level: 0.95, planned_task_pairs: heldOutTaskRefs.length,
     repeats_per_task: 1, required_pair_count: requiredPairedSampleSize({ pilotVariance: 0, minimumMeaningfulEffect: 0.1, confidenceLevel: 0.95 }), pilot_signature: "pending" };
   const samplePlan = { ...samplePlanUnsigned, pilot_signature: sign(null, Buffer.from(taskEffectSamplePlanDigest(taskEffectBase, samplePlanUnsigned)), evaluatorKeys.privateKey).toString("base64") };
-  const scope = { kind: "project", id: "project:test" };
+  const scope = options.owned ? projectIdentityFromRoot(root).canonical_scope as JsonObject : { kind: "project", id: "project:test" };
+  const contextService = service.ownerServices.get("context") ?? service;
+  if (options.owned) {
+    store.create("scope_alias", "canonical-project", { status: "active", scope, alias_kind: "path", alias: root, alias_digest: stableDigest(root) });
+    projectExperienceDirectory(store, String(scope.id), root, true);
+  }
   let programMemory: JsonObject | null = null;
   let procedure: JsonObject;
   if (options.programMemory) {
     const design = kernel.define({ contract_id: "program-memory-design", capability_id: "verify-program-memory", capability_version: 1,
       input_contract: "Project observation", output_contract: "Procedure acceptance and recovery", scope,
-      effect: "program_memory_design", budget: { task_effect_design: { ...taskEffectBase, sample_plan: samplePlan } } }).contract as JsonObject;
+      effect: "program_memory_design", budget: { program_memory_workflow: { steps: [{ id: "observe", type: "assertion", evaluator: "file_exists", path: options.artifact ?? "package.json", expected: true, side_effect: "read_only" }] }, task_effect_design: { ...taskEffectBase, sample_plan: samplePlan } } }).contract as JsonObject;
     const observations = ["source-a", "source-b"].map(id => {
       const evidence = service.evidenceRecord({ source_type: "host_completion_signal", confidence: "bounded", claim: "Verified source task",
         metadata: { provenance: "host_completion_signal", project_scope_id: scope.id, verification_outcome: "passed",
           source_session_id: `session-${id}`, task_id: id, content_stored: false } });
       const observation = service.workflowEvolutionObserve({ sanitized: true, content_stored: false, outcome: "passed", source_kind: "host:codex",
-        source_id: id, source_session_id: `session-${id}`, source_digest: id, scope: scope.id, scenario_key: "inspect",
+        source_id: id, source_session_id: `session-${id}`, source_digest: id, scope: scope.id, scenario_key: "inspect", scenario_signature: { scenario_key: "inspect", project: { id: scope.id } },
         evidence_ids: [evidence.id] }).observation as JsonObject;
-      store.create("program_memory_verified_observation", String(observation.id), { scope, evidence_id: evidence.id, source_digest: id,
+      contextService.store.create("program_memory_verified_observation", String(observation.id), { scope, evidence_id: evidence.id, source_digest: id,
         source_session_id: `session-${id}`, task_id: id });
       return observation;
     });
-    const candidate = service.evolutionProgramMemoryCapture({ statement: "Inspect project using verified observations", scenario_key: "inspect",
+    const candidate = contextService.evolutionProgramMemoryCapture({ statement: options.goal ?? "Inspect project using verified observations", domain: options.domain ?? "coding", scenario_key: "inspect",
       scope, evaluation_contract_id: design.id, evidence_ids: observations.map(observation => observation.id) });
-    programMemory = service.evolutionProgramMemorySubmit({ id: candidate.id, scope });
+    programMemory = contextService.evolutionProgramMemorySubmit({ id: candidate.id, scope });
     procedure = service.experienceProcedureGet({ procedure_id: programMemory.procedure_id }).procedure as JsonObject;
   } else {
     procedure = service.experienceProcedureDraft({ proposal_id: "proposal", procedure_id: "procedure-under-evaluation" }).procedure as JsonObject;
@@ -114,8 +132,8 @@ async function fixture(options: { candidateSuccess?: number; includeRoutes?: boo
     scope, effect: "task_effect", task_effect: { ...taskEffectBase, candidate_ref: candidateRef, sample_plan: samplePlan } }).contract as JsonObject;
   for (const stage of ["mechanism_passed", "fixture_passed", "conformance_passed", "integration_passed", "host_verified"] as const) {
     const planId = `plan-${stage}`, assessmentId = `assessment-${stage}`;
-    store.create("verification_plan", planId, { change_ref: `procedure-contract:${stage}`, requires_real_host: stage === "host_verified", candidate_change: false });
-    store.create("verification_assessment", assessmentId, { verdict: "eligible", verification_id: planId });
+    evalStore.create("verification_plan", planId, { change_ref: `procedure-contract:${stage}`, requires_real_host: stage === "host_verified", candidate_change: false });
+    evalStore.create("verification_assessment", assessmentId, { verdict: "eligible", verification_id: planId });
     kernel.record({ contract_id: String(contract.id), stage, evidence: [assessmentId] });
   }
   const evaluationInput = { contract_id: String(contract.id), evaluation_id: "procedure-heldout-eval", candidate_ref: candidateRef,
@@ -126,16 +144,24 @@ async function fixture(options: { candidateSuccess?: number; includeRoutes?: boo
         candidate: { session_ref: candidateSessionRef2, metrics: { success_rate: options.candidateSuccess ?? 0.8, failure_rate: 0.2 }, latency_ms: 60, cost: 1.2, assertions: { scope_isolation: true } } },
     ] };
   const receiptDigest = digestJson({ contract_digest: contract.contract_digest, ...evaluationInput });
-  kernel.recordTaskEffectEvaluation({ ...evaluationInput, evaluator_signature: sign(null, Buffer.from(receiptDigest), evaluatorKeys.privateKey).toString("base64") });
+  const signedReport = { ...evaluationInput, evaluator_signature: sign(null, Buffer.from(receiptDigest), evaluatorKeys.privateKey).toString("base64") };
+  kernel.recordTaskEffectEvaluation(signedReport);
   kernel.record({ contract_id: String(contract.id), stage: "business_eligible", evidence: [String(evaluationInput.evaluation_id)] });
-  return { root, store, service, procedure, programMemory, scope, contract, evaluationId: evaluationInput.evaluation_id, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
+  return { root, store, service, contextService, procedure, programMemory, scope, contract, signedReport, evaluationService: service.ownerServices.get("eval") ?? service, evaluationId: evaluationInput.evaluation_id, close() { if (ownedRuntime) ownedRuntime.close(); else store.close(); rmSync(root, { recursive: true, force: true }); } };
 }
 
-test("Program Memory follows the exact signed Experience release and withdraws it on revocation", async () => {
-  const f = await fixture({ programMemory: true });
+for (const sample of [
+  { owned: false, domain: "coding", artifact: "package.json", goal: "Inspect the project manifest" },
+  { owned: true, domain: "coding", artifact: "package.json", goal: "Inspect the project manifest" },
+  { owned: true, domain: "office", artifact: "reviewed-agenda.md", goal: "Verify the reviewed meeting agenda before distribution" },
+  { owned: true, domain: "travel", artifact: "confirmed-itinerary.md", goal: "Verify the confirmed itinerary before departure" },
+  { owned: true, domain: "creation", artifact: "approved-storyboard.md", goal: "Verify the approved storyboard before producing creative assets" },
+  { owned: true, domain: "research", artifact: "source-register.md", goal: "Verify the research source register before writing conclusions" },
+]) test(`Program Memory follows the exact signed Experience release and withdraws it on revocation (${sample.owned ? "owned" : "legacy"}:${sample.domain})`, async () => {
+  const f = await fixture({ programMemory: true, ...sample });
   try {
     const memory = { id: f.programMemory!.id, scope: f.scope };
-    const read = () => f.service.evolutionProgramMemoryGet(memory).candidate as JsonObject;
+    const read = () => f.contextService.evolutionProgramMemoryGet(memory).candidate as JsonObject;
     assert.equal(read().routeable, false);
     let canary: JsonObject | undefined;
     for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
@@ -148,10 +174,15 @@ test("Program Memory follows the exact signed Experience release and withdraws i
     const plan = { procedure_id: f.procedure.id, procedure_version: canary!.version, entry_id: "inspect", exit_id: "verified",
       scope: f.scope.id, program_memory_scope_id: f.scope.id, allowed_effects: ["read_only"], input_refs: {} };
     assert.equal(f.service.experienceProcedurePlan(plan).expanded_step_count, 1);
-    assert.equal(f.service.evolutionProgramMemoryPromote({ ...memory, evaluation_ref: f.evaluationId }).status, "promoted");
-    assert.equal(f.service.evolutionProgramMemoryFeedback({ ...memory, outcome: "revoked" }).status, "revoked");
+    assert.equal(read().domain, sample.domain);
+    // Signed effect scores are synthetic fixture data; each domain executes its own frozen artifact assertion.
+    writeFileSync(join(f.root, sample.artifact), sample.goal);
+    const reusable = f.service.experienceProcedurePlan(plan).plan as JsonObject;
+    assert.equal(executeSteps(normalizeSteps(reusable.steps as JsonObject[]), f.root, new Set(["read_only"])).every(item => item.passed === true), true);
+    assert.equal(f.contextService.evolutionProgramMemoryPromote({ ...memory, evaluation_ref: f.evaluationId }).status, "promoted");
+    assert.equal(f.contextService.evolutionProgramMemoryFeedback({ ...memory, outcome: "revoked" }).status, "revoked");
     assert.equal(read().routeable, false);
-    assert.throws(() => f.service.experienceProcedurePlan(plan), /unavailable|revoked/);
+    assert.throws(() => f.service.experienceProcedurePlan(plan), /unavailable|revoked|no longer authorizes/);
     assert.throws(() => f.service.experienceProcedureGet({ procedure_id: f.procedure.id, release_channel: "current" }), /unavailable/);
   } finally { f.close(); }
 });
@@ -284,5 +315,37 @@ test("a valid but ineligible paired report rejects the candidate without publish
     assert.equal((result.dispatch as JsonObject).status, "failed");
     assert.equal((result.procedure as JsonObject).lifecycle, "rejected");
     assert.equal(f.store.find("experience_release", String(f.procedure.id)), null);
+  } finally { f.close(); }
+});
+
+
+test("configured held-out process reports pass the actual signature and exact-dispatch verifier before promotion", async () => {
+  const f = await fixture({ owned: true });
+  try {
+    const shadow = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }).dispatch as JsonObject;
+    const evidence = f.service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "Synthetic Shadow receipt",
+      metadata: { experience_evaluation_dispatch_id: shadow.id, procedure_id: f.procedure.id, procedure_version: shadow.procedure_version,
+        definition_digest: shadow.definition_digest, baseline_version: shadow.baseline_version, stage: "shadow", status: "passed",
+        evaluator_ref: "fixture", environment_digest: environment, evaluation_contract_digest: stableDigest("scenario-contract") } });
+    f.store.save("evidence", String(evidence.id), { ...evidence, record_origin: "experience_evaluator" });
+    const held = f.service.experienceLearningEvaluationResult({ dispatch_id: shadow.id, evidence_ids: [evidence.id] }).next_dispatch as JsonObject;
+    const client = { async call(name: string, args: JsonObject = {}): Promise<JsonObject> {
+      if (name.endsWith("dispatch_list")) return { dispatches: [held] };
+      if (name.endsWith("task_effect_record")) return f.evaluationService.evaluationContractTaskEffectRecord(args);
+      if (name === "craft_evaluation_contract_get") return f.evaluationService.evaluationContractGet(args);
+      if (name === "craft_evaluation_contract_record") return f.evaluationService.evaluationContractRecord(args);
+      if (name.endsWith("evaluation_result")) return f.service.experienceLearningEvaluationResult(args);
+      if (name.endsWith("evaluation_run")) return { dispatch: { status: "awaiting_adapter" } };
+      throw new Error(name);
+    } };
+    const adapter = (report: JsonObject) => ({ ...process.env, CRAFT_HELD_OUT_ADAPTER_COMMAND: JSON.stringify([
+      process.execPath, "-e", `process.stdout.write(${JSON.stringify(JSON.stringify(report))})`]) });
+    const rejected = await runEvaluationOnce(client, adapter({ ...f.signedReport, evaluator_signature: "forged" }));
+    assert.equal((rejected.outcomes as JsonObject[])[0]!.status, "retryable");
+    assert.equal(f.store.get("experience_evaluation_dispatch", String(held.id)).status, "awaiting_adapter");
+    const accepted = await runEvaluationOnce(client, adapter(f.signedReport));
+    assert.equal((accepted.outcomes as JsonObject[])[0]!.status, "passed");
+    assert.equal(f.store.get("experience_evaluation_dispatch", String(held.id)).evaluation_id, f.evaluationId);
+    assert.equal((f.service.experienceProcedureGet({ procedure_id: f.procedure.id }).procedure as JsonObject).routeable, false);
   } finally { f.close(); }
 });

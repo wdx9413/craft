@@ -37,7 +37,7 @@ export function installContextExtensionsMethods(serviceClass: typeof CraftServic
   serviceClass.prototype.contextExtensionsGetResume = function (args) { return kernel(this).getResume(args); };
   serviceClass.prototype.contextExtensionsResolveResume = function (args) { return kernel(this).resolveResume(args); };
   serviceClass.prototype.contextExtensionsStats = function (args) { return kernel(this).stats(args); };
-  serviceClass.prototype.contextReadinessDoctor = function (args) { return contextReadinessDoctor(this.store, args); };
+  serviceClass.prototype.contextReadinessDoctor = function (args) { return contextReadinessDoctor(this.store, args, this.capabilityOwned ? { stores: new Map([[this.storageOwner ?? "context", this.store], ...[...this.ownerServices].map(([name, service]) => [name, service.store] as const)]) } : {}); };
   serviceClass.prototype.contextExtensionsHealth = function (args) { return kernel(this).health(args); };
   serviceClass.prototype.contextExtensionsListCorrections = function (args) { return kernel(this).listCorrections(args); };
   serviceClass.prototype.contextExtensionsDecideCorrection = function (args) { return kernel(this).decideCorrection(args); };

@@ -8,6 +8,7 @@ import { McpServer } from "../core/mcp.ts";
 import { ProcedureStore } from '@craft/capability-experience/procedure-projection';
 import { ProcedureDefinitionStore } from '@craft/capability-experience/procedure-definition';
 import { validateGraphControl, selectGraph } from '@craft/capability-experience/procedure-graph';
+import { procedureTaskEffectFixture } from "./helpers/procedure-task-effect-fixture.ts";
 
 export function graph(): JsonObject { return experienceGraphTemplate("internet-product-engineering"); }
 
@@ -39,12 +40,14 @@ async function setup(value = graph()) {
   function configure(definition = value, extra: JsonObject = {}) { return f.service.procedureConfigurationSave({ procedure_id: "scenario", scope, title: "互联网产研", procedure_kind: "graph", definition, ...extra }).procedure as JsonObject; }
   function promote(p: JsonObject) {
     const definition = value.graph_control as JsonObject;
+    const procedures = new ProcedureStore(f.store);
+    const qualification = procedureTaskEffectFixture(f.service, p, procedures);
     for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
       const evidence_ids = (definition.subscenarios as JsonObject[]).map(route => {
         const id = `${p.id}:${p.definition_digest}:${stage}:${route.id}`;
         f.store.create("evidence", id, { confidence: "confirmed", metadata: { procedure_definition_digest: p.definition_digest, entry_id: route.entry_id, exit_id: route.exit_id, subscenario_id: route.id, stage, status: "passed" } }); return id;
       });
-      new ProcedureStore(f.store).gate({ procedure_id: p.id, stage, passed: true, evidence_ids });
+      procedures.gate({ procedure_id: p.id, stage, passed: true, evidence_ids, ...qualification });
     }
     return f.store.get("experience_procedure", String(p.id));
   }

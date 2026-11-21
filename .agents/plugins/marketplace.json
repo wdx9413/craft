@@ -1,6 +1,6 @@
 {
   "name": "craft-marketplace",
-  "version": "0.20.14",
+  "version": "0.21.2",
   "interface": {
     "displayName": "Craft"
   },
@@ -22,6 +22,90 @@
       "source": {
         "source": "local",
         "path": "./plugins/craft-context"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "craft-knowledge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-knowledge"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "craft-memory",
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-memory"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "craft-experience",
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-experience"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "craft-codebase",
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-codebase"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "craft-notes",
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-notes"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "craft-eval",
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-eval"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "craft-runtime",
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-runtime"
       },
       "policy": {
         "installation": "AVAILABLE",

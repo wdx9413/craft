@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "craft-eval": {
+      "command": "node",
+      "args": [
+        "dist/plugin/craft-mcp.cjs",
+        "--product",
+        "eval"
+      ],
+      "cwd": "."
+    }
+  }
+}

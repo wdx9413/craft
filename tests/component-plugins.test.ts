@@ -12,14 +12,14 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { dataSpaceId } from "../core/data-space.ts";
 import { MCP_PRODUCT_NAMES, productSurfaceOf, resolveMcpProductMode } from "../core/interfaces/mcp/product-launch.ts";
-import { RELEASE_PRODUCTS } from "../core/release-catalog.ts";
+import { RELEASE_PRODUCTS, releaseProductVersion } from "../core/release-catalog.ts";
 import { TOOLS } from "../core/mcp/tool-catalog.ts";
 
 const components = RELEASE_PRODUCTS.map((product) => product.name);
 const internalComponentSurfaces = ["component-context", "component-quality", "component-knowledge", "component-memory", "component-capability", "component-skill-quality", "component-experience", "component-codebase"] as const;
 
 test("MCP launch modes resolve the bounded Context Agent product and retained internal component modes", () => {
-  assert.deepEqual(MCP_PRODUCT_NAMES, ["full", "context", "knowledge", "memory", "experience", "codebase"]);
+  assert.deepEqual(MCP_PRODUCT_NAMES, ["full", "context", "knowledge", "memory", "experience", "codebase", "notes", "eval", "runtime"]);
   assert.equal(productSurfaceOf("full"), "syscall");
   assert.equal(productSurfaceOf("knowledge"), "component-knowledge-daily");
   assert.equal(productSurfaceOf("memory"), "component-memory-daily");
@@ -161,6 +161,11 @@ test("Context Agent fits the Host budget and routes scoped Knowledge, Memory, Ex
     assert(names.length <= 90, `Context Agent registers ${names.length} tools; Host limit is 90`);
     for (const name of ["craft_context_open", "craft_context_tools_discover", "craft_knowledge_search", "craft_run", "craft_describe", "craft_codebase_impact_query"])
       assert(names.includes(name), `Context Agent must expose ${name}`);
+    for (const name of ["craft_memory_capture_observed_fact", "craft_learning_cycle_finalize", "craft_knowledge_session_evidence_record",
+      "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review",
+      "craft_notes_location_list_devices", "craft_notes_create_device", "craft_notes_observe_directory", "craft_notes_observe_file",
+      "craft_notes_candidate_list", "craft_notes_confirm", "craft_notes_resolve", "craft_notes_revoke"])
+      assert(names.includes(name), `Context Agent must expose the governed ${name} accumulation path`);
     assert(!names.includes("craft_knowledge_claim_list"), "component operations should be discoverable, not all registered at startup");
     for (const component of ["knowledge", "memory", "experience"]) {
       const diagnosis = await server.handlers.craft_component_diagnose({ component, observed_tool_names: names });
@@ -174,6 +179,18 @@ test("Context Agent fits the Host budget and routes scoped Knowledge, Memory, Ex
       resource: "knowledge", operation: "search",
     } } });
     assert.equal(((description?.result as JsonObject).structuredContent as JsonObject).tool, "craft_knowledge_search");
+
+    const ownedServer = new McpServer(new CraftService(store), "component-context-owned");
+    const ownedCatalog = await ownedServer.handle({ id: 8, method: "tools/call", params: { name: "craft_describe", arguments: {} } });
+    assert(!JSON.stringify((ownedCatalog?.result as JsonObject).structuredContent).includes("runtime_readiness"));
+    const ownedDescription = await ownedServer.handle({ id: 9, method: "tools/call", params: { name: "craft_describe", arguments: {
+      resource: "knowledge", operation: "search",
+    } } });
+    assert.equal(((ownedDescription?.result as JsonObject).structuredContent as JsonObject).tool, "craft_knowledge_search");
+    const ownedRouted = await ownedServer.handle({ id: 10, method: "tools/call", params: { name: "craft_run", arguments: {
+      resource: "knowledge", operation: "search", args: { query: "sample" },
+    } } });
+    assert.equal((ownedRouted?.result as JsonObject).isError, false);
 
     const discovered = await server.handlers.craft_context_tools_discover({ intent: "knowledge" });
     const claimList = (discovered.tools as JsonObject[]).find(tool => tool.name === "craft_knowledge_claim_list");
@@ -208,19 +225,19 @@ test("component plugin manifests use public MCP products rather than internal su
     const mcp = JSON.parse(await readFile(`plugins/${name}/.mcp.json`, "utf8"));
     const server = mcp.mcpServers[name];
     assert.equal(manifest.name, name);
-    assert.equal(manifest.version, VERSION);
+    assert.equal(manifest.version, releaseProductVersion(releaseProduct));
     assert.equal(manifest.hooks, releaseProduct.hookMember ? "./hooks/codex-hooks.json" : undefined);
     const product = name === "craft" ? "full" : name.slice("craft-".length);
     assert.deepEqual(server.args, ["dist/plugin/craft-mcp.cjs", "--product", product]);
   }
 });
 
-test("standalone Knowledge, Memory and Experience plugins do not register duplicate lifecycle Hooks", async () => {
+test("standalone Knowledge, Memory and Experience plugins declare their own member lifecycle Hooks", async () => {
   for (const name of ["craft-knowledge", "craft-memory", "craft-experience"]) {
     const codex = JSON.parse(await readFile(`plugins/${name}/.codex-plugin/plugin.json`, "utf8")) as { hooks?: string; mcpServers?: unknown };
     const claude = JSON.parse(await readFile(`plugins/${name}/.claude-plugin/plugin.json`, "utf8")) as { hooks?: string; mcpServers?: unknown };
-    assert.equal(codex.hooks, undefined, `${name} must rely on the shared Context Hook`);
-    assert.equal(claude.hooks, undefined, `${name} must rely on the shared Context Hook`);
+    assert.equal(codex.hooks, "./hooks/codex-hooks.json");
+    assert.equal(claude.hooks, "./hooks/hooks.json");
     assert(codex.mcpServers, `${name} must retain its standalone Codex MCP`);
     assert(claude.mcpServers, `${name} must retain its standalone Claude MCP`);
   }
@@ -242,7 +259,7 @@ test("the complete context plugin declares one command-only lifecycle Hook for C
     assert.equal(codexConfig.hooks.UserPromptSubmit?.[0]?.hooks[0]?.additionalContextLimit, 400);
     assert.equal(claudeConfig.hooks.UserPromptSubmit?.[0]?.hooks[0]?.additionalContextLimit, undefined);
     for (const [config, root] of [[codexConfig, "PLUGIN_ROOT"], [claudeConfig, "CLAUDE_PLUGIN_ROOT"]] as const) {
-      assert.deepEqual(Object.keys(config.hooks), contract.events);
+      assert.deepEqual(Object.keys(config.hooks), root === "CLAUDE_PLUGIN_ROOT" ? [...contract.events.slice(0, 3), "PostToolUseFailure", ...contract.events.slice(3)] : contract.events);
       assert.doesNotMatch(JSON.stringify(config), /mcp_tool/u);
       for (const group of Object.values(config.hooks).flat()) {
         for (const handler of group.hooks) {
@@ -339,8 +356,8 @@ test("portable Agent Plugins manifests contain only standard Skill and MCP contr
     const root = join(import.meta.dirname, "..", "plugins", product.name);
     const manifest = JSON.parse(await readFile(join(root, "plugin.json"), "utf8"));
     assert.equal(manifest.$schema, "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
-    assert.equal(manifest.name, product.name); assert.equal(manifest.version, VERSION);
-    assert.deepEqual(Object.keys(manifest).sort(), ["$schema", "description", "license", "name", "version"]);
+    assert.equal(manifest.name, product.name); assert.equal(manifest.version, releaseProductVersion(product));
+    assert.deepEqual(Object.keys(manifest).sort(), ["$schema", "description", ...(product.hookMember ? ["extensions"] : []), "license", "name", "version"]);
     const mcp = JSON.parse(await readFile(join(root, "mcp.json"), "utf8"));
     assert.equal(mcp.$schema, "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
     assert.deepEqual(mcp.mcpServers[product.name], { type: "stdio", command: "node", args: ["${PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", product.name.replace("craft-", "")] });

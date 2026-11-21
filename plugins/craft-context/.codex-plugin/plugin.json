@@ -1,6 +1,6 @@
 {
   "name": "craft-context",
-  "version": "0.20.14",
+  "version": "0.21.2",
   "description": "Complete Knowledge, Memory, Experience, and Codebase tools in one Craft entry point",
   "author": {
     "name": "wdx9413"
@@ -33,9 +33,6 @@
       "Read-only Codebase tools",
       "Unified context resolution",
       "Repository indexing"
-    ],
-    "defaultPrompt": [
-      "Use the Craft Context plugin as the complete entry point for Knowledge, Memory, Experience, and Codebase tools. Discover the relevant operation, preserve each component's evidence and safety gates, and use bounded context receipts when resolving project context."
     ]
   },
   "hooks": "./hooks/codex-hooks.json"

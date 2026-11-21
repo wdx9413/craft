@@ -1,6 +1,6 @@
 {
   "name": "craft-codebase",
-  "version": "0.12.44",
+  "version": "0.13.0",
   "description": "craft-codebase governed context and repository tools",
   "author": {
     "name": "wdx9413"
@@ -29,9 +29,6 @@
       "Explicit codebase activation",
       "Snapshot-pinned structural index",
       "Static callers and candidate impact"
-    ],
-    "defaultPrompt": [
-      "Activate read-only codebase analysis for the declared workspace, build a checkpoint-pinned index, then inspect the requested symbol or candidate impact."
     ]
   }
 }

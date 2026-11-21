@@ -5,7 +5,6 @@ import { spawn, spawnSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import test, { mock } from "node:test";
 import { DEFAULT_RULES, enabledBuiltinRules, Sanitizer, type Json } from '@craft/capability-datasec/rules';
 import { TokenVault, isPrivateDirectory, isPrivateFile } from '@craft/capability-datasec/vault';
@@ -55,18 +54,18 @@ test("Datasec executable guard and output writer are deterministic", () => {
   assert.deepEqual(seen, ["warn\n", "ok\n"]);
   const built = JSON.parse(readFileSync(join(project, "plugins/craft-datasec/dist/build.json"), "utf8"));
   assert.equal(built.name, "craft-datasec");
-  assert.equal(built.version, "0.1.8");
+  assert.equal(built.version, "0.2.0");
   const bundle = readFileSync(join(project, "plugins/craft-datasec/dist/hook.mjs"), "utf8");
   assert.doesNotMatch(bundle, /from\s+["'](?:craft-common-store-local|@craft\/capability-datasec)(?:\/|["'])/u);
 });
 test("independent Datasec is discoverable in release catalogs without joining the Context runtime", () => {
   assert.equal(releaseProduct("craft-datasec")!.surface, "standalone-hooks");
   assert.equal(releaseProduct("unknown"), undefined);
-  assert.deepEqual(releaseProductNames(), ["craft", "craft-context", "craft-datasec"]);
-  assert.equal(allReleaseProducts().length, 3);
+  assert.deepEqual(releaseProductNames(), ["craft", "craft-context", "craft-knowledge", "craft-memory", "craft-experience", "craft-codebase", "craft-notes", "craft-eval", "craft-runtime", "craft-datasec"]);
+  assert.equal(allReleaseProducts().length, 10);
   assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context", "craft-datasec"]);
   const contract = externalDistributionContract();
-  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.1.8");
+  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.2.0");
   assert.equal(contract.products.find(product => product.name === "craft-context")!.hook_member, "context");
   assert(releaseManifest().plugins.some(product => product.name === "craft-datasec"));
 });
@@ -191,9 +190,12 @@ test("private session mappings are stable, isolated, reversible and never change
     assert.throws(() => vault.restore(`[CRAFT_DATASEC_phone_${"f".repeat(32)}]`));
     assert.throws(() => new TokenVault(f.root, ""));
     vault.flush(); vault.flush();
-    const db = new DatabaseSync(join(directory, "mappings.sqlite"));
-    db.prepare("UPDATE mappings SET value = ? WHERE token = ?").run("tampered", token); db.close();
-    assert.throws(() => vault.restore(token), /Invalid mapping/);
+    const mapping = createHash("sha256").update(token).digest("hex") + ".json";
+    const path = join(directory, mapping);
+    const envelope = JSON.parse(readFileSync(path, "utf8"));
+    envelope.tag = Buffer.alloc(16).toString("base64");
+    writeFileSync(path, JSON.stringify(envelope));
+    assert.throws(() => vault.restore(token));
     if (process.platform !== "win32") { chmodSync(join(directory, "key"), 0o644);
     assert.throws(() => new TokenVault(f.root, "first"), /Unsafe vault file/); }
     vault.close(); vault.close();
@@ -228,23 +230,21 @@ test("vault rejects public directories, symlinks, corrupt keys, wrong owners and
   } finally { mock.restoreAll(); syncBuiltinESMExports(); f.close(); }
 });
 
-test("mapping database initialization and transactions fail safely and retain retryable pending records", () => {
+test("file publication fails safely and retains retryable pending records", () => {
   const f = fixture();
   try {
-    const directory = join(f.root, createHash("sha256").update("sql").digest("hex"));
-    const vault = new TokenVault(f.root, "sql");
-    const db = new DatabaseSync(join(directory, "mappings.sqlite"));
-    db.exec("CREATE TRIGGER reject_mapping BEFORE INSERT ON mappings BEGIN SELECT RAISE(FAIL, 'fixture rejection'); END;");
-    const token = vault.token("phone", phone);
-    assert.throws(() => vault.flush(), /fixture rejection/);
-    assert.equal(db.prepare("SELECT count(*) AS total FROM mappings").get()!.total, 0);
-    db.exec("DROP TRIGGER reject_mapping"); vault.flush();
-    assert.equal(vault.restore(token), phone);
-    if (process.platform !== "win32") assert.equal(lstatSync(join(directory, "mappings.sqlite")).mode & 0o777, 0o600);
-    db.close(); vault.close();
-    writeFileSync(join(directory, "mappings.sqlite"), "not a sqlite database");
-    assert.throws(() => new TokenVault(f.root, "sql"));
-  } finally { f.close(); }
+    const vault = new TokenVault(f.root, "publication");
+    const token = vault.token("fixture", "synthetic-value");
+    const publication = mock.method(fs, "linkSync", () => { throw new Error("fixture rejection"); });
+    syncBuiltinESMExports();
+    assert.throws(() => vault.flush(), /fixture rejection/u);
+    assert.equal(vault.restore(token), "synthetic-value");
+    publication.mock.restore(); syncBuiltinESMExports();
+    vault.flush(); vault.close();
+    const reopened = new TokenVault(f.root, "publication");
+    assert.equal(reopened.restore(token), "synthetic-value");
+    reopened.close();
+  } finally { mock.restoreAll(); syncBuiltinESMExports(); f.close(); }
 });
 
 for (const host of ["claude", "codex"] as const) {
@@ -388,7 +388,7 @@ test("concurrent hook processes publish complete stable mappings without a share
     })));
     assert(outputs.every(out => out === outputs[0]));
     const safe = JSON.parse(outputs[0]).hookSpecificOutput.updatedToolOutput.stdout;
-    const reader = new TokenVault(f.root, "concurrent"); try { assert.equal(reader.restore(safe), phone); } finally { reader.close(); }
+    const reader = new TokenVault(f.root, "concurrent", "claude"); try { assert.equal(reader.restore(safe), phone); } finally { reader.close(); }
   } finally { f.close(); }
 });
 
@@ -400,7 +400,7 @@ test("independent plugin builds and executes both packaged hook manifests withou
       const manifest = JSON.parse(readFileSync(join(directory, `.${host}-plugin/plugin.json`), "utf8"));
       assert.equal(manifest.name, "craft-datasec"); assert.equal(manifest.mcpServers, undefined);
       const hooks = JSON.parse(readFileSync(join(directory, manifest.hooks), "utf8")).hooks;
-      assert.deepEqual(Object.keys(hooks).sort(), ["PostToolUse", "PreToolUse"]);
+      assert.deepEqual(Object.keys(hooks).sort(), ["PostToolUse", "PreToolUse", "SessionEnd"]);
       for (const [event, groups] of Object.entries(hooks)) {
         const handler = (groups as any)[0].hooks[0];
         assert(!handler.async); assert.equal(handler.timeout, 10);
@@ -413,5 +413,25 @@ test("independent plugin builds and executes both packaged hook manifests withou
       const bundle = readFileSync(join(directory, "dist/hook.mjs"), "utf8");
       assert(!bundle.includes("craft-context")); assert(!bundle.includes("CraftStore"));
     }
+  } finally { f.close(); }
+});
+
+
+test("Datasec native CLI SessionEnd keeps Host boundaries and ignores broken rule config", () => {
+  const f = fixture();
+  try {
+    const session = "cleanup-session";
+    for (const host of ["claude", "codex"] as const) {
+      const result = invoke([host, "PostToolUse"], JSON.stringify({hook_event_name:"PostToolUse",session_id:session,tool_response:phone}), f.root);
+      assert.equal(result.status, 0);
+      assert(existsSync(join(f.root,host,createHash("sha256").update(session).digest("hex"))));
+    }
+    const end = invoke(["codex", "SessionEnd"], JSON.stringify({hook_event_name:"SessionEnd",session_id:session}), f.root, join(f.temp,"missing-rules.json"));
+    assert.equal(end.status, 0);
+    assert.deepEqual(JSON.parse(end.stdout), {});
+    assert(!existsSync(join(f.root,"codex",createHash("sha256").update(session).digest("hex"))));
+    assert(existsSync(join(f.root,"claude",createHash("sha256").update(session).digest("hex"))));
+    const empty = runDataSecHookCli(["codex","SessionEnd"], JSON.stringify({hook_event_name:"SessionEnd"}), {CRAFT_DATASEC_DIR:f.root});
+    assert.deepEqual(JSON.parse(empty.stdout!), {systemMessage:FAILURE});
   } finally { f.close(); }
 });

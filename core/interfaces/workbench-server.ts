@@ -1,3 +1,4 @@
+import { routeOwnedService } from "../application/owner-service.ts";
 import { WorkbenchEvaluations } from "./workbench-evaluations.ts";
 import { workbenchContextAuditRoute } from "./workbench-context-audit-route.ts";
 import { WorkbenchQueueRunner } from "./workbench-queue-runner.ts";
@@ -147,7 +148,7 @@ export class WorkbenchWebApp {
   readonly toolInstalls: ToolInstallManager | null;
   readonly service: CraftService; readonly token: string; readonly origin: string; readonly workbenchDir: string | null; readonly agentSessions: CodexWorkbenchSessions | null; readonly claudeRuns: ClaudeWorkbenchRuns | null; readonly dshRuns: DshWorkbenchRuns | null; readonly claudeExecutable: (() => string) | undefined;
   constructor(service: CraftService, token: string, origin: string, options: { evaluations?: WorkbenchEvaluations; toolInstalls?: ToolInstallManager; workbenchDir?: string | null; agentSessions?: CodexWorkbenchSessions; claudeRuns?: ClaudeWorkbenchRuns; dshRuns?: DshWorkbenchRuns; claudeExecutable?: () => string } = {}) {
-    this.service = service; this.token = token; this.origin = origin;
+    this.service = routeOwnedService(service); this.token = token; this.origin = origin;
     this.evaluations = options.evaluations ?? null;
     this.toolInstalls = options.toolInstalls ?? null;
     // Presentation is owned by craft-workbench and must be mounted explicitly.
@@ -711,7 +712,11 @@ export class WorkbenchWebApp {
       if (request.method === "POST" && path === "/api/config/models") return json(201, this.service.modelAdd(bodyObject(request.body)));
       if (request.method === "PATCH" && path.startsWith("/api/config/models/")) return json(200, this.service.modelUpdate({ ...bodyObject(request.body), id: decodeURIComponent(path.slice("/api/config/models/".length)) }));
       if (request.method === "DELETE" && path.startsWith("/api/config/models/")) return json(200, this.service.modelDelete({ id: decodeURIComponent(path.slice("/api/config/models/".length)) }));
-      if (request.method === "GET" && path === "/api/projects") return json(200, { projects: this.service.store.list("project_brain", boundedLimit(url.searchParams.get("limit"), 50)) });
+      if (request.method === "GET" && path === "/api/projects") {
+        const knowledgeStore = this.service.ownerServices.get("knowledge")?.store ?? (this.service.capabilityOwned ? undefined : this.service.store);
+        if (!knowledgeStore) return json(503, { error: "knowledge owner is unavailable" });
+        return json(200, { projects: knowledgeStore.list("project_brain", boundedLimit(url.searchParams.get("limit"), 50)) });
+      }
       if (request.method === "POST" && path === "/api/projects") return json(201, this.service.projectBrainOpen(bodyObject(request.body)));
       if (request.method === "POST" && path.startsWith("/api/projects/") && path.endsWith("/goals")) return json(201, this.service.projectBrainGoalSave({ ...bodyObject(request.body), project_id: decodeURIComponent(path.slice(14, -6)) }));
       if (request.method === "POST" && path.startsWith("/api/projects/") && path.endsWith("/decisions")) return json(201, this.service.projectBrainDecisionSave({ ...bodyObject(request.body), project_id: decodeURIComponent(path.slice(14, -10)) }));
@@ -1135,7 +1140,7 @@ export class LocalWorkbenchServer {
   #queueRunner: WorkbenchQueueRunner | null = null;
   readonly workbenchDir: string | null;
   readonly service: CraftService; readonly token: string; readonly acceptanceTick: () => Promise<unknown>; readonly pilotTick: () => unknown; #server: Server | null = null; #agentSessions: CodexWorkbenchSessions | null = null; #claudeRuns: ClaudeWorkbenchRuns | null = null; #dshRuns: DshWorkbenchRuns | null = null; #acceptanceTimer: NodeJS.Timeout | null = null; #pilotTimer: NodeJS.Timeout | null = null; #acceptanceRunning = false; #pilotRunning = false;
-  constructor(service: CraftService, token = randomBytes(32).toString("base64url"), options: { acceptanceTick?: () => Promise<unknown>; pilotTick?: () => unknown; workbenchDir?: string | null } = {}) { this.service = service; this.token = token; this.workbenchDir = options.workbenchDir ?? null; this.acceptanceTick = options.acceptanceTick ?? (() => runBuiltinAcceptanceTicks(this.service)); this.pilotTick = options.pilotTick ?? (() => this.service.pilotReconcileAll({ limit: 100 })); }
+  constructor(service: CraftService, token = randomBytes(32).toString("base64url"), options: { acceptanceTick?: () => Promise<unknown>; pilotTick?: () => unknown; workbenchDir?: string | null } = {}) { this.service = routeOwnedService(service); this.token = token; this.workbenchDir = options.workbenchDir ?? null; this.acceptanceTick = options.acceptanceTick ?? (() => runBuiltinAcceptanceTicks(this.service)); this.pilotTick = options.pilotTick ?? (() => this.service.pilotReconcileAll({ limit: 100 })); }
   async start(port = 4173): Promise<{ url: string; token: string }> {
     if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("port must be an integer between 0 and 65535");
     if (this.#server) throw new Error("Workbench server is already running");
@@ -1152,8 +1157,9 @@ export class LocalWorkbenchServer {
       if (effect === "external_write" || effect === "destructive") return "ask";
       return permission === "full" || (permission === "auto" && effect !== "destructive") ? "allow" : "ask";
     });
-    const evaluations = new WorkbenchEvaluations(this.service.store);
-    this.#evaluations = evaluations;
+    const evaluationStore = this.service.capabilityOwned ? this.service.ownerServices.get("eval")?.store : this.service.store;
+    const evaluations = evaluationStore ? new WorkbenchEvaluations(evaluationStore) : undefined;
+    this.#evaluations = evaluations ?? null;
     const toolInstalls = new ToolInstallManager();
     this.#toolInstalls = toolInstalls;
     const server = createServer((request, response) => { const chunks: Buffer[] = []; let size = 0;

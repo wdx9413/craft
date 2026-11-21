@@ -26,6 +26,9 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
       maximum_items: DEFAULT_CONTEXT_MAX_ITEMS, maximum_chars: DEFAULT_CONTEXT_MAX_CHARS,
     });
   }
+  const codebaseService = service.ownerServices.get("codebase") ?? (service.capabilityOwned ? undefined : service);
+  const knowledgeService = service.ownerServices.get("knowledge") ?? (service.capabilityOwned ? undefined : service);
+  const notesService = service.ownerServices.get("notes") ?? (service.capabilityOwned ? undefined : service);
   const taskKind = args.task_kind ?? (/review|bug|debug|code|开发|代码|修复|排查|重构|测试/iu.test(args.query) ? "code" : "general");
   if (!["code", "review", "debug", "development", "knowledge", "general"].includes(String(taskKind))) throw new CraftOperationError("INVALID_INPUT", "input_validation", "Unsupported Context task_kind", { field: "task_kind" });
   if (args.required_refs !== undefined && !Array.isArray(args.required_refs)) throw new CraftOperationError("INVALID_INPUT", "input_validation", "required_refs must be an array", { field: "required_refs" });
@@ -40,16 +43,17 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   const scope = identity.canonical_scope as JsonObject;
   let knowledgeSourceDiscovery: JsonObject;
   try {
+    if (!knowledgeService) throw new Error("knowledge owner is unavailable");
     knowledgeSourceDiscovery = observeOperation(service.store, "knowledge", "project_source_discovery", { scope, project_root_digest: stableDigest(root) },
-      () => service.knowledgeSources.discoverProjectSources({ project_root: root, scope_kind: scope.kind, scope_id: scope.id }));
+      () => knowledgeService.knowledgeSources.discoverProjectSources({ project_root: root, scope_kind: scope.kind, scope_id: scope.id }));
   } catch (error) {
     knowledgeSourceDiscovery = { status: "unavailable", reason: "project_source_discovery_failed", failure_code: operationErrorCode(error), sources_registered: 0, sources_ingested: 0, candidates_created: 0 };
   }
   let codebase: JsonObject;
-  try { codebase = loadCodebase ? observeOperation(service.store, "codebase", "repository_ensure", { project_root: root, index_depth: args.index_depth }, () => ensureRepository(service, { project_root: root, index_depth: args.index_depth, query: args.query })) : { status: "skipped", reason: "not_requested" }; }
+  try { if (loadCodebase && !codebaseService) throw new Error("codebase owner is unavailable"); codebase = loadCodebase ? observeOperation(service.store, "codebase", "repository_ensure", { project_root: root, index_depth: args.index_depth }, () => codebaseService!.codebaseRepositoryEnsure({ project_root: root, index_depth: args.index_depth, query: args.query })) : { status: "skipped", reason: "not_requested" }; }
   catch (error) { codebase = { status: "unavailable", reason: "repository_index_failed", ...codebaseFailureDiagnostic(error) }; }
   if (codeRequired.length && codebase.status !== "ready") throw new CraftOperationError("REQUIRED_MATERIAL_UNAVAILABLE", "codebase_projection", "Required Codebase material is unavailable", { member: "codebase", reason: codebase.reason });
-  const controls = Object.fromEntries(["source_ids", "memory_ids", "retrieval_adapter_id", "allow_restricted", "principal_id", "principal_ids", "tenant_id", "cognitive_purpose", "user_scope_id", "team_scope_id", "organization_scope_id", "session_scope_id", "include_global", "include_working_notes", "now", "task_id", "session_id", "turn_id", "history_refs", "state_refs", "program_memory_scope_id"].filter(key => args[key] !== undefined).map(key => [key, args[key]]));
+  const controls = Object.fromEntries(["source_ids", "memory_ids", "retrieval_adapter_id", "allow_restricted", "principal_id", "principal_ids", "tenant_id", "cognitive_purpose", "user_scope_id", "team_scope_id", "organization_scope_id", "session_scope_id", "session_host", "session_host_verified", "include_global", "include_working_notes", "now", "task_id", "session_id", "turn_id", "history_refs", "state_refs", "program_memory_scope_id"].filter(key => args[key] !== undefined).map(key => [key, args[key]]));
   const defaultMembers = String(taskKind) === "knowledge" ? ["knowledge"] : ["knowledge", "memory", "experience", "history", "state"];
   const requiredMemberNames = required.map(ref => String(ref.member)).filter(member => ["knowledge", "memory", "experience", "history", "state"].includes(member));
   if (Array.isArray(args.memory_ids) && args.memory_ids.length > 0) requiredMemberNames.push("memory");
@@ -60,7 +64,7 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   // Required references remain eligible even when they exceed this optional
   // window; the budget gate below still validates them.
   const projectionLimit = Math.max(maxItems + 1, codeRequired.length);
-  const projection = codebase.status === "ready" ? service.codebase.contextProjection({ workspace_id: codebase.workspace_id, index_id: codebase.index_id, query: args.query, limit: projectionLimit, required_refs: codeRequired, scope }) : null;
+  const projection = codebase.status === "ready" ? codebaseService!.codebase.contextProjection({ workspace_id: codebase.workspace_id, index_id: codebase.index_id, query: args.query, limit: projectionLimit, required_refs: codeRequired, scope }) : null;
   const queryOmitted = Number(projection?.query_omitted_count ?? 0);
   const candidates = (projection?.candidates ?? []) as JsonObject[];
   // Notes are a bounded, scope-matched Context addition. Device + current-root
@@ -68,10 +72,11 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   // supplied by the Host. The registry returns only confirmed legacy/current Notes.
   const requestedNotePaths = Array.isArray(args.note_paths) ? args.note_paths.filter((item): item is string => typeof item === "string") : [];
   const notesById = new Map<string, JsonObject>();
-  const notePaths = [...new Set([...requestedNotePaths, root, ...(typeof args.project_root === "string" ? [args.project_root] : [])])].slice(0, 16);
+  const notePaths = [...new Set((requestedNotePaths.length ? requestedNotePaths : [root, ...(typeof args.project_root === "string" ? [args.project_root] : [])]))].slice(0, 16);
   for (const notePath of notePaths) {
     try {
-      const notesResult = service.craftNotesResolve({ device_id: args.device_id ?? "local", project_id: scope.id, path: notePath, limit: 3 }) as JsonObject;
+      if (!notesService) continue;
+      const notesResult = notesService.craftNotesResolve({ device_id: args.device_id ?? "local", project_id: scope.id, path: notePath, limit: 3 }) as JsonObject;
       if (Array.isArray(notesResult.items)) for (const note of notesResult.items as JsonObject[]) notesById.set(String(note.id), note);
     } catch { /* A non-canonical or remote caller path cannot broaden this project-scoped lookup. */ }
   }
@@ -87,7 +92,7 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
     for (const note of selectedNotes) {
       const deviceId = String(note.device_id ?? "local");
       const subjectPath = note.subject_type === "device" ? null : String(note.subject_key).slice(deviceId.length + 1);
-      const current = service.craftNotesResolve({ device_id: deviceId, project_id: scope.id,
+      const current = notesService!.craftNotesResolve({ device_id: deviceId, project_id: scope.id,
         ...(subjectPath === null ? {} : { path: subjectPath }), limit: 10 }) as JsonObject;
       const stillCurrent = Array.isArray(current.items) && (current.items as JsonObject[]).some(item =>
         item.id === note.id && item.version === note.version && item.status === note.status);
@@ -110,6 +115,7 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
     if (failures.some(item => item.member === "knowledge" && item.reason === "source_verification_incomplete")) reasons.push("knowledge_source_verification_incomplete");
     if (!failures.length || failures.some(item => item.member !== "knowledge" || item.reason !== "source_verification_incomplete")) reasons.push("context_contribution_unavailable");
   }
+  if (!notesService) reasons.push("notes_owner_unavailable");
   if (knowledgeSourceDiscovery.status === "unavailable") reasons.push("knowledge_source_discovery_unavailable");
   else if (knowledgeSourceDiscovery.status !== "ready")
     reasons.push("knowledge_source_discovery_incomplete");
@@ -137,15 +143,15 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   };
   const priorPackReceipt = service.store.find("context_pack_receipt", id);
   if (priorPackReceipt) {
-    assertContextReadCurrent(service.store, receipt);
-    if (projection) service.codebase.assertContextProjectionCurrent(projection, references);
+    assertContextReadCurrent(service.store, receipt, service.contextResolution.ownerStores);
+    if (projection) codebaseService!.codebase.assertContextProjectionCurrent(projection, references);
     assertNotesCurrent();
     if (priorPackReceipt.identity_digest !== identityDigest) throw new Error("Context Pack Receipt idempotency conflict");
     return response(priorPackReceipt);
   }
   return service.store.transaction(() => {
-    assertContextReadCurrent(service.store, receipt);
-    if (projection) service.codebase.assertContextProjectionCurrent(projection, references);
+    assertContextReadCurrent(service.store, receipt, service.contextResolution.ownerStores);
+    if (projection) codebaseService!.codebase.assertContextProjectionCurrent(projection, references);
     assertNotesCurrent();
     const current = service.store.find("context_pack_receipt", id);
     if (current) {

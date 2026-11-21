@@ -1,3 +1,4 @@
+import { procedureTaskEffectFixture } from "./helpers/procedure-task-effect-fixture.ts";
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import fs, { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
@@ -23,6 +24,7 @@ test("two-field YAML follows candidate, promotion, failed evaluation and histori
     assert.equal(existsSync(join(dirname(path), "README.md")), false);
     let p = f.service.experienceGraphEdit({ action: "submit", scope, graph_id: id, expected_draft_digest: saved.draft_digest }).procedure as JsonObject;
     assert.deepEqual(read(), { current_version: null, test_version: 1 });
+    const procedures = new ProcedureStore(f.store), qualification = procedureTaskEffectFixture(f.service, p, procedures);
     let canaryIds: string[] = [];
     for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
       const ids: string[] = [];
@@ -30,12 +32,12 @@ test("two-field YAML follows candidate, promotion, failed evaluation and histori
         const evidence_id = `${stage}:${entry.id}:${route.subscenario_id}`; ids.push(evidence_id);
         f.store.create("evidence", evidence_id, { confidence: "confirmed", metadata: { procedure_definition_digest: p.definition_digest, entry_id: entry.id, exit_id: route.exit_id, subscenario_id: route.subscenario_id, stage, status: "passed" } });
       }
-      p = (new ProcedureStore(f.store).gate({ procedure_id: id, stage, passed: true, evidence_ids: ids }).procedure as JsonObject);
+      p = (procedures.gate({ ...qualification, procedure_id: id, stage, passed: true, evidence_ids: ids }).procedure as JsonObject);
       canaryIds = ids;
       assert.deepEqual(read(), stage === "canary" ? { current_version: 1, test_version: null } : { current_version: null, test_version: 1 });
     }
     assert.equal(p.version, 5); assert.equal(p.content_version, 1);
-    new ProcedureStore(f.store).gate({ procedure_id: id, stage: "canary", passed: true, evidence_ids: canaryIds });
+    procedures.gate({ ...qualification, procedure_id: id, stage: "canary", passed: true, evidence_ids: canaryIds });
     const changed = experienceGraphTemplate("internet-product-engineering"); (changed.nodes as JsonObject[])[0]!.instruction = "Confirm target";
     const next = f.service.procedureConfigurationSave({ procedure_id: id, scope, title: "互联网产研", procedure_kind: "graph", definition: changed, expected_version: p.version }).procedure as JsonObject;
     assert.equal(next.content_version, 2); assert.deepEqual(read(), { current_version: 1, test_version: 2 });

@@ -1,0 +1,14 @@
+{
+  "name": "craft-eval",
+  "version": "0.1.0",
+  "interface": {
+    "composerIcon": "./assets/craft-icon.svg",
+    "logo": "./assets/craft-icon.svg"
+  },
+  "description": "craft-eval governed context and repository tools",
+  "author": {
+    "name": "wdx9413"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

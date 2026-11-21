@@ -1,6 +1,6 @@
 {
   "name": "craft-knowledge",
-  "version": "0.12.44",
+  "version": "0.13.0",
   "description": "craft-knowledge governed context and repository tools",
   "author": {
     "name": "wdx9413"
@@ -15,5 +15,6 @@
         "knowledge"
       ]
     }
-  }
+  },
+  "hooks": "./hooks/hooks.json"
 }

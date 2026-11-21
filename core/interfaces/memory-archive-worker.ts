@@ -3,6 +3,7 @@ import { MemoryFileStore } from '@craft/capability-memory/memory-files';
 import { craftPaths, dataRoot } from "../infrastructure/paths.ts";
 import { CraftStore } from "../infrastructure/store.ts";
 import { acquireLearningWorkerLocks } from "../infrastructure/learning-worker-lock.ts";
+import { presentStorageOwners } from "../infrastructure/owned-catalog.ts";
 import { stableDigest } from "../digest.ts";
 
 /** Persist only a lease identifier, never a session transcript. */
@@ -42,10 +43,12 @@ export async function runMemoryArchiveWorker(): Promise<void> {
     }
   }
   try {
-    const store = await new CraftStore(paths).open({ skipLegacyPartitionMigration: true });
+    const runtime = process.env.CRAFT_STORAGE_OWNER || presentStorageOwners(paths.root).length
+      ? await (await import("./mcp/runtime.ts")).openCapabilityService("memory") : undefined;
+    const store = runtime?.store ?? await new CraftStore(paths).open({ skipLegacyPartitionMigration: true });
     try {
       const files = new MemoryFileStore(store);
-      let service: Awaited<ReturnType<typeof import("../service.ts").CraftService.open>> | undefined;
+      let service: Awaited<ReturnType<typeof import("../service.ts").CraftService.open>> | undefined = runtime?.service;
       for (;;) {
         const result = files.runQueuedArchiveSteps(1);
         const now = Date.now();
@@ -83,6 +86,6 @@ export async function runMemoryArchiveWorker(): Promise<void> {
         if ((result.outcomes as Array<{ status: string; backoff_recorded?: boolean }>).some(item => item.status === "failed" && item.backoff_recorded === false)) await delay(1_000);
         await yieldImmediate();
       }
-    } finally { store.close(); }
+    } finally { if (runtime) runtime.close(); else store.close(); }
   } finally { await release(); }
 }

@@ -19,7 +19,8 @@ function text(value: unknown, name: string): string {
  */
 export class ActivationProofKernel {
   readonly store: CraftStore;
-  constructor(store: CraftStore) { this.store = store; }
+  readonly proofSources: readonly Pick<CraftStore, "list">[];
+  constructor(store: CraftStore, proofSources: readonly Pick<CraftStore, "list">[] = [store]) { this.store = store; this.proofSources = proofSources; }
 
   record(args: JsonObject): JsonObject {
     const host = text(args.host, "host"); if (!HOSTS.has(host)) throw new Error("host must be codex or claude");
@@ -29,9 +30,12 @@ export class ActivationProofKernel {
     const turnId = args.turn_id === undefined || args.turn_id === null ? null : text(args.turn_id, "turn_id");
     const contextReceiptId = args.context_receipt_id === undefined || args.context_receipt_id === null ? null : text(args.context_receipt_id, "context_receipt_id");
     if (contextReceiptId !== null) this.store.get("context_resolution_receipt", contextReceiptId);
+    const declaredTrust = args.hook_trust_evidence === "native_hooks_list" && ["trusted", "untrusted", "unknown"].includes(String(args.hook_trust_status))
+      ? String(args.hook_trust_status) : null;
+    const trust = declaredTrust === "untrusted" && args.hook_trusted === true ? "unknown" : declaredTrust ?? (args.hook_trusted === true ? "trusted" : "unknown");
     const identity = { host, component, event, session_id: sessionId, turn_id: turnId, context_receipt_id: contextReceiptId,
       memory_written: args.memory_written === true, observation_written: args.observation_written === true,
-      plugin_release: text(args.plugin_release ?? CRAFT_RELEASE_VERSION, "plugin_release"), hook_trusted: args.hook_trusted === true,
+      plugin_release: text(args.plugin_release ?? CRAFT_RELEASE_VERSION, "plugin_release"), hook_trusted: trust === "trusted", hook_trust_status: trust,
       mcp_reachable: args.mcp_reachable === true, content_free: true };
     const receiptId = String(args.receipt_id ?? `activation_proof_${randomUUID().replaceAll("-", "")}`);
     const existing = this.store.find("activation_proof_receipt", receiptId); const identityDigest = stableDigest(identity);
@@ -44,19 +48,21 @@ export class ActivationProofKernel {
 
   doctor(args: JsonObject = {}): JsonObject {
     const sessionId = args.session_id === undefined ? null : text(args.session_id, "session_id");
-    const receipts = this.store.list("activation_proof_receipt", 10_000, (item) => sessionId === null || item.session_id === sessionId);
+    const receipts = [...new Set(this.proofSources)].flatMap(source => source.list("activation_proof_receipt", 10_000, (item) => sessionId === null || item.session_id === sessionId));
     const components = [...COMPONENTS].sort().map((component) => {
       const records = receipts.filter((item) => item.component === component);
       const current = records.filter((item) => item.plugin_release === CRAFT_RELEASE_VERSION);
-      const hookTrusted = current.some((item) => item.hook_trusted === true);
+      const trustStates = current.map(item => typeof item.hook_trust_status === "string" ? item.hook_trust_status : item.hook_trusted === true ? "trusted" : "unknown");
+      const hookTrust = trustStates.includes("untrusted") ? "untrusted" : trustStates.includes("trusted") ? "trusted" : "unknown";
+      const hookTrusted = hookTrust === "trusted";
       const mcpReachable = current.some((item) => item.mcp_reachable === true);
       const context = current.find((item) => typeof item.context_receipt_id === "string") ?? null;
       const memoryWritten = component === "memory" && current.some((item) => item.memory_written === true);
       const observationWritten = component === "experience" && current.some((item) => item.observation_written === true);
       const status = current.length === 0 ? (records.length ? "stale_plugin_or_receipt" : "not_observed")
-        : !hookTrusted ? "hook_not_trusted" : !mcpReachable ? "mcp_not_reachable" : "executed";
+        : hookTrust === "untrusted" ? "hook_not_trusted" : hookTrust === "unknown" ? "hook_trust_unknown" : !mcpReachable ? "mcp_not_reachable" : "executed";
       return { component, status, current_release: CRAFT_RELEASE_VERSION, executions: current.length,
-        hook_trusted: hookTrusted, mcp_reachable: mcpReachable, context_receipt_id: context?.context_receipt_id ?? null,
+        hook_trusted: hookTrusted, hook_trust_status: hookTrust, mcp_reachable: mcpReachable, context_receipt_id: context?.context_receipt_id ?? null,
         ...(component === "memory" ? { explicit_memory_written: memoryWritten } : {}),
         ...(component === "experience" ? { verified_observation_written: observationWritten } : {}),
         last_observed_at: current.length ? current[current.length - 1]!.observed_at : null };

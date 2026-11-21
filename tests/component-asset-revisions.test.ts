@@ -10,6 +10,7 @@ import { McpServer } from "../core/mcp.ts";
 import { WorkbenchWebApp } from "../core/workbench-server.ts";
 import { payload, stableDigest } from "../core/digest.ts";
 import { spec } from "./helpers/procedure-invocation-fixture.ts";
+import { ComponentAssets } from "../core/application/coordinators/component-assets.ts";
 const scope = { scope_kind: "project", scope_id: "assets" };
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-asset-")), store = await new CraftStore(craftPaths(join(root, "data"))).open(), service = new CraftService(store);
@@ -174,5 +175,56 @@ test("explanations remain bounded, hide privileged selections, preserve restored
     assert((f.inspect("knowledge", "k", { action: "diff", version: 2, target_version: 3 }).changes as JsonObject[]).some(change => change.field === "extra_field" && change.before === null));
     f.inspect("knowledge", "k", { action: "diff", version: 3, target_version: 2 });
     for (const [before, limit] of [[0, 1], [1, 0], [1, 102]]) assert.throws(() => f.store.history("knowledge_claim", "k", before!, limit!), /bounds/);
+  } finally { await f.close(); }
+});
+
+test("manual prose registration preserves prior bytes and creates unreviewed linked candidates", async () => {
+  const f = await fixture();
+  try {
+    const claim = f.service.knowledgeClaimSave({ claim_id: "editable", source_id: "source", kind: "rule", content: "Run fixture checks before review.", scope: "project:assets", evidence_ids: ["e"] }).claim as JsonObject;
+    const original = f.store.get("knowledge_claim", "editable");
+    const revision = f.restore("knowledge", claim, { action: "register_edit", content: "Run focused fixture checks before review.", request_id: "edited-claim" });
+    const next = (revision.result as JsonObject).claim as JsonObject;
+    assert.equal(f.store.get("knowledge_claim", String(next.id)).content, "Run focused fixture checks before review.");
+    assert.equal(next.status, "candidate"); assert.notEqual(next.id, original.id);
+    assert.equal(f.store.get("knowledge_claim", "editable").content, original.content);
+    assert.equal(f.restore("knowledge", claim, { action: "register_edit", content: "Run focused fixture checks before review.", request_id: "edited-claim" }).idempotent, true);
+    assert.throws(() => f.restore("knowledge", claim, { action: "register_edit", content: "Different revised text.", request_id: "edited-claim" }), /conflict/u);
+    const editEvidence = f.store.get("evidence", String((next.evidence_ids as string[])[0]));
+    assert.equal(editEvidence.confidence, "unverified"); assert.equal((editEvidence.metadata as JsonObject).user_authored, true);
+    assert.equal(((editEvidence.metadata as JsonObject).source_ref as JsonObject).version, original.version);
+    const memory = f.service.memoryLedgerRemember({ memory_id: "edited-memory", source_id: "source", kind: "preference", ...scope,
+      content: "I prefer short fixture output.", sensitivity: "internal", confidence: "bounded", evidence_ids: ["e"] }).memory as JsonObject;
+    const proposal = f.restore("memory", memory, { action: "register_edit", content: "I prefer detailed fixture output.", request_id: "edited-memory" });
+    const candidate = (proposal.result as JsonObject).candidate as JsonObject;
+    assert.equal(candidate.content, "I prefer detailed fixture output.");
+    assert.equal(f.store.get("memory_ledger", "edited-memory").content, "I prefer short fixture output.");
+    assert.equal((proposal.restoration as JsonObject).execution_authorized, false);
+  } finally { await f.close(); }
+});
+
+test("asset revision guards reject unavailable metadata, unsupported edits and missing revision evidence", async t => {
+  const f = await fixture();
+  try {
+    const claim = f.service.knowledgeClaimSave({ claim_id: "guarded", source_id: "source", kind: "fact", content: "Original body", scope: "project:assets", evidence_ids: ["e"] }).claim as JsonObject;
+    const missing = t.mock.method(f.store, "findMetadata", () => null);
+    assert.throws(() => f.inspect("knowledge", "guarded"), /version is unavailable/u);
+    missing.mock.restore();
+    assert.throws(() => f.restore("knowledge", claim, { action: "unknown" }), /Unknown asset restoration action/u);
+
+    const procedure = f.service.procedureConfigurationSave({ procedure_id: "edit-guard", scope: "project:assets", title: "Edit guard", procedure_kind: "workflow", scenario_id: "engineering", definition: spec() }).procedure as JsonObject;
+    assert.throws(() => f.restore("experience", procedure, { action: "register_edit", content: "edited" }), /existing definition editor/u);
+
+    const unavailable = f.store.create("knowledge_claim", "unavailable-body", { scope: "project:assets", content_unavailable: true, kind: "fact" });
+    assert.throws(() => f.restore("knowledge", unavailable, { action: "register_edit", content: "edited", request_id: "unavailable" }), /Recover the original asset body/u);
+
+    const assets = new ComponentAssets(f.store);
+    assert.throws(() => assets.restore("knowledge", { ...scope, asset_id: "guarded", version: 1, expected_version: 1,
+      request_id: "no-evidence-command", reason: "Review edit", action: "register_edit", content: "Edited body" }, {
+      knowledge: args => f.service.knowledgeClaimSave(args) as unknown as JsonObject,
+      memory: args => f.service.memoryCaptureUserStatement(args) as unknown as JsonObject,
+      experience: args => f.service.procedureConfigurationSave(args) as unknown as JsonObject,
+      codebase: () => ({}),
+    }), /Human edit evidence registration is unavailable/u);
   } finally { await f.close(); }
 });

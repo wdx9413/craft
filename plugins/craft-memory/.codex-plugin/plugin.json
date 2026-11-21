@@ -1,6 +1,6 @@
 {
   "name": "craft-memory",
-  "version": "0.12.44",
+  "version": "0.13.0",
   "description": "craft-memory governed context and repository tools",
   "author": {
     "name": "wdx9413"
@@ -29,9 +29,7 @@
       "Memory ledger",
       "Context resolution",
       "Memory governance"
-    ],
-    "defaultPrompt": [
-      "Resolve only the memories relevant to this task and explain why each was selected."
     ]
-  }
+  },
+  "hooks": "./hooks/codex-hooks.json"
 }

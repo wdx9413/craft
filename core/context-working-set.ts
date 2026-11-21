@@ -87,7 +87,7 @@ export class ContextWorkingSetKernel {
       budget.chars = hostChars + references.reduce((sum, item) => sum + JSON.stringify(item).length, 0);
       base = await resolve();
     }
-    assertContextReadCurrent(this.store, base.receipt as JsonObject | null);
+    assertContextReadCurrent(this.store, base.receipt as JsonObject | null, this.resolver.ownerStores);
     const receipt = base.receipt as JsonObject | null;
     budget.reserve(Number(receipt?.total_items ?? 0), Number(receipt?.total_used_chars ?? 0), true, "Recalled Context exceeds Context budget");
     if (!codeFirst && args.empty_budget !== true) selectCode(maxItems - budget.items);
@@ -108,14 +108,14 @@ export class ContextWorkingSetKernel {
       host_used_chars: hostChars, host_items: hostRefs.length, host_refs: hostRefs, asset_refs: assetRefs, selected_refs: selectedRefs,
       selection_reasons: selectionReasons, omitted_refs: [], omitted_count: omittedCount, idempotent });
     // Existing immutable Working Sets need validation, not a writer transaction.
-    assertContextReadCurrent(this.store, base.receipt as JsonObject | null);
+    assertContextReadCurrent(this.store, base.receipt as JsonObject | null, this.resolver.ownerStores);
     const prior = this.store.find("context_working_set_receipt", workingSetId);
     if (prior) {
       if (prior.identity_digest !== identityDigest) throw new Error("Context Working Set idempotency conflict");
       return projectionResult(prior, true);
     }
     return this.store.transaction(() => {
-      assertContextReadCurrent(this.store, base.receipt as JsonObject | null);
+      assertContextReadCurrent(this.store, base.receipt as JsonObject | null, this.resolver.ownerStores);
       const existing = this.store.find("context_working_set_receipt", workingSetId);
       if (existing) {
         if (existing.identity_digest !== identityDigest) throw new Error("Context Working Set idempotency conflict");

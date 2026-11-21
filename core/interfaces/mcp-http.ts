@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { McpServer } from "../mcp.ts";
-import { CraftService } from "../application/craft-service.ts";
-import { CraftStore } from "../infrastructure/store.ts";
+import type { McpServer } from "../mcp.ts";
+import { openMcpRuntime } from "./mcp/runtime.ts";
 import { RemoteMcpAccessError, type RemoteMcpAccessPolicy, type RemoteMcpAccessReceipt } from "../remote-mcp-access.ts";
 
 type Handler = Pick<McpServer, "handle">;
@@ -57,7 +56,7 @@ export function createMcpHttpHandler(handler: Handler, options: McpHttpOptions =
 }
 
 export async function serveMcpHttp(options: McpHttpOptions & { mode?: string; host?: string; port?: number; start?: () => Promise<{ server: Handler; close: () => void }> }): Promise<{ server: Server; close: () => void }> {
-  const runtime = await (options.start ?? (async () => { const store = await new CraftStore().open(); return { server: new McpServer(await CraftService.open(store), options.mode ?? "syscall"), close: () => store.close() }; }))();
+  const runtime = await (options.start?.() ?? openMcpRuntime(options.mode ?? "syscall"));
   const http = createServer(createMcpHttpHandler(runtime.server, options));
   await new Promise<void>((resolve, reject) => { http.once("error", reject); http.listen(options.port ?? 8787, options.host ?? "127.0.0.1", () => { http.removeListener("error", reject); resolve(); }); });
   return { server: http, close: () => { http.close(); runtime.close(); } };

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-import { backupStorage, restoreStorage } from "./storage-backup.ts";
+import { openCapabilityService } from "./interfaces/mcp/runtime.ts";
+import { presentStorageOwners, STORAGE_OWNERS } from "./infrastructure/owned-catalog.ts";
+import { backupOwnerStorage, backupStorage, restoreStorage } from "./storage-backup.ts";
 import { ComponentTraceKernel } from "./component-trace.ts";
 import { TraceKernel } from "./trace-kernel.ts";
 import { createInterface } from "node:readline/promises";
@@ -42,6 +44,7 @@ Usage:
   craft storage-backup --output <new-directory>   Back up the data directory for maintenance
   craft storage-restore --backup <directory> --output <new-directory>
                                 Verify and restore into a new directory
+  craft --product <owner> ...   Select the matching capability owner (or CRAFT_STORAGE_OWNER)
   craft version                 Print the Craft product version
   craft run --goal <text>       Run a governed standalone Agent task
   craft run --project <id> ...  Attach the run to a durable Project Brain
@@ -243,14 +246,16 @@ function publicConfig(config: Awaited<ReturnType<typeof loadConfig>>): unknown {
   };
 }
 
-async function doctor(paths: ReturnType<typeof craftPaths>): Promise<JsonObject> {
+type CliRuntime = Awaited<ReturnType<typeof openCapabilityService>>;
+
+async function doctor(paths: ReturnType<typeof craftPaths>, owned?: CliRuntime): Promise<JsonObject> {
   const config = await loadConfig(paths);
-  const store = await new CraftStore(paths).open();
+  const store = owned?.store ?? await new CraftStore(paths).open();
   let activation: JsonObject, readiness: JsonObject;
   try {
-    activation = new CraftService(store).activationProofDoctor({});
+    activation = (owned?.service ?? new CraftService(store)).activationProofDoctor({});
     readiness = contextReadinessDoctor(store);
-  } finally { store.close(); }
+  } finally { if (!owned) store.close(); }
   const result: JsonObject = {
     version: VERSION,
     node: process.versions.node,
@@ -262,7 +267,7 @@ async function doctor(paths: ReturnType<typeof craftPaths>): Promise<JsonObject>
   const runtime = config.runtime;
   const provider = runtime.provider ? providerFromConfig(runtime.provider) : null;
   return { ...result, runtime: runtime.kind, provider: provider ? { ...credentialStatus(provider), model: runtime.provider?.model } : null,
-    storage: { database: paths.databaseFile, exists: await fileExists(paths.databaseFile) },
+    storage: { database: store.paths.databaseFile, exists: await fileExists(store.paths.databaseFile) },
     activation, readiness,
     status: runtime.kind === "direct-api" && provider && credentialStatus(provider).configured ? "ready" : "needs_configuration",
     next: runtime.kind === "direct-api" ? "craft run --goal \"...\"" : "craft init --mode agent --runtime direct-api ..." };
@@ -332,7 +337,7 @@ export async function resolveStandaloneContext(service: CraftService, input: { g
   return { knowledge_refs: knowledgeRefs, capability_refs: capabilityRefs, memory_refs: memoryRefs.map((ref) => `memory://${String(ref.memory_id)}@${String(ref.memory_version)}`), excluded_refs: excluded, selection_rationale: rationale };
 }
 
-async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths>): Promise<JsonObject> {
+async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths>, owned?: CliRuntime): Promise<JsonObject> {
   const config = await loadConfig(paths);
   if (!config) throw new Error("Craft is not initialized; run `craft init --mode agent --runtime direct-api ...` first.");
   if (config.runtime.kind !== "direct-api" || !config.runtime.provider) throw new Error("`craft run` currently requires a direct-api runtime; configure it with `craft init`.");
@@ -348,8 +353,9 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
   if (!credential.configured) {
     throw new Error(`Model ${credential.provider} has no credential: set ${credential.api_key_env}, or configure the key in the Workbench (Settings → 模型).`);
   }
-  const store = await new CraftStore(paths).open();
-  const service = new CraftService(store, undefined, undefined, undefined, undefined, undefined, [], [provider], createFetchTransport());
+  const store = owned?.store ?? await new CraftStore(paths).open();
+  const service = new CraftService(store, undefined, undefined, undefined, undefined, undefined, [], [provider], createFetchTransport(), undefined, config.contentLanguage, undefined, undefined, undefined,
+    owned ? { contributors: [], stores: new Map(), services: owned.service.ownerServices, owner: "runtime" } : undefined);
   try {
     const existingDispatch = resumeId ? store.get("internal_dispatch", resumeId) : null;
     const existingTask = existingDispatch ? store.get("task", String(existingDispatch.task_id)) : null;
@@ -386,27 +392,48 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
     const gate = service.acceptanceGatePrepare({ gate_id: `standalone-gate-${dispatch.id}`, task_id: task.id, work_id: (verified.work as JsonObject).id, acceptance_ref: `acceptance:${task.id}`, required_artifact_ids: [artifact.id], required_evidence_ids: [evidence.id] });
     const completedSession = service.workSessionComplete({ session_id: session.id, status: hostStatus === "completed" ? "needs_review" : "failed", summary: hostStatus === "completed" ? "Host finished; independent acceptance is pending." : String(receipt.failure ?? "Host failed") });
     return { version: VERSION, project_id: effectiveProjectId, session: completedSession.session, task, ...executed, acceptance: gate, outcome: null } as JsonObject;
-  } finally { store.close(); }
+  } finally { if (!owned) store.close(); }
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
+  const productIndex = args.indexOf("--product");
+  const requested = option(args, "--product") ?? process.env.CRAFT_STORAGE_OWNER;
+  if (productIndex >= 0 && !option(args, "--product")) throw new Error("--product requires a capability owner");
+  if (productIndex >= 0) args = args.filter((_, index) => index !== productIndex && index !== productIndex + 1);
+
   if (["storage-backup", "storage-restore"].includes(args[0] ?? "") && !args.includes("--help") && !args.includes("-h")) {
     const output = option(args, "--output");
     if (!output) throw new Error("--output must name a new directory outside the source");
     const archive = option(args, "--backup");
     if (args[0] === "storage-restore" && !archive) throw new Error("--backup is required for storage-restore");
-    const manifest = args[0] === "storage-backup" ? await backupStorage(craftPaths().root, output) : await restoreStorage(archive!, output);
-    stdout.write(`${JSON.stringify({ output, files: manifest.entries.length, schema: manifest.schema, original_root: manifest.source_root, activation: args[0] === "storage-restore" ? "staged_restore; place at original_root offline before starting Craft" : "backup_only" })}\n`);
+    const backupOwner = requested === undefined ? undefined : STORAGE_OWNERS.find(owner => owner === requested);
+    if (requested && !backupOwner) throw new Error("Unknown storage owner for backup");
+    if (args[0] === "storage-restore" && productIndex >= 0) throw new Error("Storage restore uses the owner bound in its manifest; omit --product");
+    const manifest = args[0] === "storage-backup" ? backupOwner ? await backupOwnerStorage(craftPaths().root, backupOwner, output) : await backupStorage(craftPaths().root, output) : await restoreStorage(archive!, output);
+    stdout.write(`${JSON.stringify({ output, files: manifest.entries.length, schema: manifest.schema, original_root: manifest.source_root, owner: manifest.owner ?? null, external_references: manifest.external_references ?? [], revalidation_required: manifest.relocation?.revalidation_required ?? [], activation: args[0] === "storage-restore" ? manifest.owner ? manifest.external_references?.length ? "restored_owner_requires_external_owners_and_revalidation" : "restored_owner_ready; revalidate dependent formal proofs" : "staged_restore; place at original_root offline before starting Craft" : "backup_only" })}\n`);
     return;
   }
   if (args.includes("--help") || args.includes("-h") || ["version", "paths"].includes(args[0] ?? "")) return dispatchMain(args);
+  const paths = craftPaths();
+  const inferred = args[0] === "notes" ? "notes" : "runtime";
+  const owned = requested !== undefined || presentStorageOwners(paths.root).length > 0;
+  if (owned) {
+    if (![undefined, "doctor", "run", "config", "mode", "semantic", "source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor", "command", "adapter", "openapi", "migrate", "notes", "init"].includes(args[0])) throw new Error(`Unknown command: ${args[0]}`);
+    if (requested && requested !== inferred) throw new Error(`CLI ${args[0] ?? "home"} belongs to ${inferred}; --product ${requested} cannot own this command`);
+    if (args[0] === "migrate") throw new Error("Owned storage history requires the verified capability migration entry points shipped in the Craft package: dist/scripts/owner-history-archive.js, dist/scripts/owner-history-compress.js, dist/scripts/owner-history-import.js, dist/scripts/owner-storage-cutover.js and dist/scripts/storage-capacity.js");
+    const runtime = await openCapabilityService(inferred);
+    try {
+      await new ComponentTraceKernel(new TraceKernel(runtime.store), "cli").run({ requestId: "command", component: "craft-cli", operation: "command", input: { args }, handler: () => dispatchMain(args, runtime) });
+    } finally { runtime.close(); }
+    return;
+  }
   const store = await new CraftStore(craftPaths()).open();
   try {
     await new ComponentTraceKernel(new TraceKernel(store), "cli").run({ requestId: "command", component: "craft-cli", operation: "command", input: { args }, handler: () => dispatchMain(args) });
   } finally { store.close(); }
 }
 
-async function dispatchMain(args: string[]): Promise<void> {
+async function dispatchMain(args: string[], owned?: CliRuntime): Promise<void> {
   const paths = craftPaths();
   // Keys pasted in the Workbench live in an owner-only secrets.json; make them
   // visible to the model gateway once, without ever overriding a real env var.
@@ -424,11 +451,11 @@ async function dispatchMain(args: string[]): Promise<void> {
     return;
   }
   if (args[0] === "doctor") {
-    stdout.write(`${JSON.stringify(await doctor(paths), null, 2)}\n`);
+    stdout.write(`${JSON.stringify(await doctor(paths, owned), null, 2)}\n`);
     return;
   }
   if (args[0] === "run") {
-    stdout.write(`${JSON.stringify(await runStandalone(args.slice(1), paths), null, 2)}\n`);
+    stdout.write(`${JSON.stringify(await runStandalone(args.slice(1), paths, owned), null, 2)}\n`);
     return;
   }
   if (args[0] === "config" && args[1] === "show") {
@@ -455,16 +482,16 @@ async function dispatchMain(args: string[]): Promise<void> {
       return;
     }
     if (args[1] === "status") {
-      const store = await new CraftStore(paths).open();
-      try { stdout.write(`${JSON.stringify((await CraftService.open(store)).semanticSearchStatus(), null, 2)}\n`); }
-      finally { store.close(); }
+      const store = owned?.store ?? await new CraftStore(paths).open();
+      try { stdout.write(`${JSON.stringify((owned?.service ?? await CraftService.open(store)).semanticSearchStatus(), null, 2)}\n`); }
+      finally { if (!owned) store.close(); }
       return;
     }
     throw new Error("semantic requires configure, disable, or status.");
   }
   if (["source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor", "command", "adapter", "openapi", "migrate", "notes"].includes(args[0] ?? "")) {
-    const store = await new CraftStore(paths).open();
-    const service = await CraftService.open(store);
+    const store = owned?.store ?? await new CraftStore(paths).open();
+    const service = owned?.service ?? await CraftService.open(store);
     try {
       let result: unknown;
       if (args[0] === "migrate" && args[1] === "history") {
@@ -636,7 +663,7 @@ async function dispatchMain(args: string[]): Promise<void> {
       }
       else throw new Error(`Unknown command: ${args.join(" ")}`);
       stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    } finally { store.close(); }
+    } finally { if (!owned) store.close(); }
     return;
   }
   if (args[0] === "init") {
