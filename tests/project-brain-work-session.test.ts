@@ -149,6 +149,27 @@ test("project brain covers default identities, revisions and projection limits",
   } finally { f.store.close(); }
 });
 
+test("Runtime Work Sessions keep a stable read-only reference to the Knowledge-owned Project Brain", async () => {
+  const knowledge = await fixture(), runtime = await fixture();
+  try {
+    const opened = knowledge.brain.open({ project_id: "owned-project" }).brain as Record<string, unknown>;
+    runtime.store.create("task", "owned-task", { project_id: "owned-project", title: "Task", goal: "Goal", status: "active" });
+    const sessions = new WorkSessionKernel(runtime.store, knowledge.brain);
+    const prepared = sessions.prepare({ project_id: "owned-project", task_id: "owned-task", session_id: "owned-session" });
+    const session = prepared.session as Record<string, unknown>;
+    assert.equal(session.brain_id, opened.id);
+    assert.equal(session.brain_version, opened.version);
+    assert.equal(runtime.store.list("project_brain").length, 0, "Runtime stores only the stable reference on Work Session");
+
+    runtime.store.create("work_launch", "owned-launch", { task_id: "owned-task", status: "prepared" });
+    sessions.bindLaunch({ session_id: "owned-session", launch_id: "owned-launch" });
+    knowledge.store.save("project_brain", String(opened.id), { ...opened, version: Number(opened.version) + 1 });
+    const refreshed = sessions.refresh({ session_id: "owned-session" });
+    assert.equal(refreshed.ready, false);
+    assert((refreshed.issues as Record<string, unknown>[]).some(issue => issue.component === "project_brain" && issue.issue === "changed"));
+  } finally { knowledge.store.close(); runtime.store.close(); }
+});
+
 test("service and MCP expose the new surfaces", async () => {
   // The service now exposes the default bounded model tool surface and the dispatch/session binding.
   const f = await fixture(); const service = new CraftService(f.store); const opened = service.projectBrainOpen({ project_id: "p3" }); f.store.create("task", "task3", { project_id: "p3", title: "Task", goal: "Goal", status: "active" }); service.projectBrainGoalSave({ project_id: "p3", title: "Ship" }); service.projectBrainDecisionSave({ project_id: "p3", title: "Choose", rationale: "reason", chosen_ref: "wf" }); service.projectBrainMaterialBind({ project_id: "p3", name: "brief", uri: "file:///brief", content_digest: "sha256:b" }); const prepared = service.workSessionPrepare({ project_id: "p3", task_id: "task3", session_id: "s3" }); service.workSessionGet({ session_id: "s3" }); service.workSessionRefresh({ session_id: "s3" }); f.store.create("work_launch", "launch3", { task_id: "task3", status: "prepared" }); service.workSessionBindLaunch({ session_id: "s3", launch_id: "launch3" }); service.workSessionComplete({ session_id: "s3", summary: "done" }); service.projectBrainOutcomeRecord({ project_id: "p3", session_id: "s3", verdict: "passed", summary: "done" }); service.projectBrainExperienceRecord({ project_id: "p3", name: "pattern", pattern: "pattern" }); service.workbenchExperienceQuery({ project_id: "p3" }); service.workbenchExperienceGet({ session_id: "s3" }); service.workbenchExperienceReview({ project_id: "p3" }); const checkpoint = service.longTaskSuspend({ session_id: "s3", wait_condition: "approval" }); service.longTaskGet({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id }); service.longTaskList({ session_id: "s3" }); service.longTaskWake({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id, signal: "approved" }); service.longTaskResume({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id }); service.longTaskTick({ now: "2020-01-01T00:00:00.000Z" });

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { openCapabilityService } from "./interfaces/mcp/runtime.ts";
+import { DEFAULT_RUNTIME_MEMBERS, openCapabilityService } from "./interfaces/mcp/runtime.ts";
 import { presentStorageOwners, STORAGE_OWNERS } from "./infrastructure/owned-catalog.ts";
 import { backupOwnerStorage, backupStorage, restoreStorage } from "./storage-backup.ts";
 import { ComponentTraceKernel } from "./component-trace.ts";
@@ -7,7 +7,7 @@ import { TraceKernel } from "./trace-kernel.ts";
 import { createInterface } from "node:readline/promises";
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
@@ -28,6 +28,8 @@ import { credentialStatus, createFetchTransport, providerFromConfig } from "./mo
 import { hydrateSecretsIntoEnv } from "./secrets-store.ts";
 import { digestJson } from "./digest.ts";
 import { contextReadinessDoctor } from "./context-readiness-doctor.ts";
+import { ActivationProofKernel } from "./activation-proof.ts";
+import { routeOwnedService } from "./application/owner-service.ts";
 
 
 
@@ -248,13 +250,26 @@ function publicConfig(config: Awaited<ReturnType<typeof loadConfig>>): unknown {
 
 type CliRuntime = Awaited<ReturnType<typeof openCapabilityService>>;
 
+function ownedStores(owned: CliRuntime): Map<string, CraftStore> {
+  const stores = new Map<string, CraftStore>();
+  if (owned.service.storageOwner) stores.set(owned.service.storageOwner, owned.store);
+  for (const [owner, service] of owned.service.ownerServices) stores.set(owner, service.store);
+  return stores;
+}
+
 async function doctor(paths: ReturnType<typeof craftPaths>, owned?: CliRuntime): Promise<JsonObject> {
   const config = await loadConfig(paths);
   const store = owned?.store ?? await new CraftStore(paths).open();
   let activation: JsonObject, readiness: JsonObject;
   try {
-    activation = (owned?.service ?? new CraftService(store)).activationProofDoctor({});
-    readiness = contextReadinessDoctor(store);
+    if (owned) {
+      const stores = ownedStores(owned);
+      activation = new ActivationProofKernel(stores.get("context") ?? store, [...new Set(stores.values())]).doctor({});
+      readiness = contextReadinessDoctor(store, {}, { stores });
+    } else {
+      activation = new CraftService(store).activationProofDoctor({});
+      readiness = contextReadinessDoctor(store);
+    }
   } finally { if (!owned) store.close(); }
   const result: JsonObject = {
     version: VERSION,
@@ -354,8 +369,8 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
     throw new Error(`Model ${credential.provider} has no credential: set ${credential.api_key_env}, or configure the key in the Workbench (Settings → 模型).`);
   }
   const store = owned?.store ?? await new CraftStore(paths).open();
-  const service = new CraftService(store, undefined, undefined, undefined, undefined, undefined, [], [provider], createFetchTransport(), undefined, config.contentLanguage, undefined, undefined, undefined,
-    owned ? { contributors: [], stores: new Map(), services: owned.service.ownerServices, owner: "runtime" } : undefined);
+  const service = routeOwnedService(new CraftService(store, undefined, undefined, undefined, undefined, undefined, [], [provider], createFetchTransport(), undefined, config.contentLanguage, undefined, undefined, undefined,
+    owned ? { contributors: [], stores: ownedStores(owned), services: owned.service.ownerServices, owner: owned.service.storageOwner ?? "runtime" } : undefined));
   try {
     const existingDispatch = resumeId ? store.get("internal_dispatch", resumeId) : null;
     const existingTask = existingDispatch ? store.get("task", String(existingDispatch.task_id)) : null;
@@ -416,12 +431,15 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (args.includes("--help") || args.includes("-h") || ["version", "paths"].includes(args[0] ?? "")) return dispatchMain(args);
   const paths = craftPaths();
   const inferred = args[0] === "notes" ? "notes" : "runtime";
-  const owned = requested !== undefined || presentStorageOwners(paths.root).length > 0;
+  const hasSharedDatabase = [paths.databaseFile, paths.legacyDatabaseFile].some(path => lstatSync(path, { throwIfNoEntry: false })?.isFile());
+  const owned = requested !== undefined || presentStorageOwners(paths.root).length > 0 || !hasSharedDatabase;
   if (owned) {
     if (![undefined, "doctor", "run", "config", "mode", "semantic", "source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor", "command", "adapter", "openapi", "migrate", "notes", "init"].includes(args[0])) throw new Error(`Unknown command: ${args[0]}`);
     if (requested && requested !== inferred) throw new Error(`CLI ${args[0] ?? "home"} belongs to ${inferred}; --product ${requested} cannot own this command`);
     if (args[0] === "migrate") throw new Error("Owned storage history requires the verified capability migration entry points shipped in the Craft package: dist/scripts/owner-history-archive.js, dist/scripts/owner-history-compress.js, dist/scripts/owner-history-import.js, dist/scripts/owner-storage-cutover.js and dist/scripts/storage-capacity.js");
-    const runtime = await openCapabilityService(inferred);
+    const runtime = await openCapabilityService(inferred, args[0] === "run" && inferred === "runtime"
+      ? { ...process.env, CRAFT_CONTEXT_MEMBERS: process.env.CRAFT_CONTEXT_MEMBERS ?? DEFAULT_RUNTIME_MEMBERS }
+      : process.env);
     try {
       await new ComponentTraceKernel(new TraceKernel(runtime.store), "cli").run({ requestId: "command", component: "craft-cli", operation: "command", input: { args }, handler: () => dispatchMain(args, runtime) });
     } finally { runtime.close(); }

@@ -1,6 +1,6 @@
 {
   "name": "craft-eval",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "interface": {
     "composerIcon": "./assets/craft-icon.svg",
     "logo": "./assets/craft-icon.svg"

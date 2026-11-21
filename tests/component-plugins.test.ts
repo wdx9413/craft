@@ -38,6 +38,10 @@ test("MCP launch modes resolve the bounded Context Agent product and retained in
   assert.throws(() => resolveMcpProductMode([], { CRAFT_MCP_PRODUCT: "memory", CRAFT_MCP_SURFACE: "component-knowledge" }), /conflict/);
 });
 
+test("the notes-owned surface exposes the device discovery step required by the Notes workflow", () => {
+  assert(surfaceToolNames("component-notes-owned").includes("craft_notes_location_list_devices"));
+});
+
 test("the internal Context worker retains the complete component surfaces", () => {
   const context = new Set(surfaceToolNames("component-context-complete"));
   for (const component of ["component-codebase", "component-knowledge", "component-memory", "component-experience"]) {
@@ -268,6 +272,14 @@ test("the complete context plugin declares one command-only lifecycle Hook for C
         }
       }
     }
+  }
+});
+
+test("Datasec keeps session mappings available for resumed sessions", async () => {
+  for (const path of ["plugins/craft-datasec/hooks/codex-hooks.json", "plugins/craft-datasec/hooks/hooks.json"]) {
+    const config = JSON.parse(await readFile(path, "utf8")) as { hooks: Record<string, unknown> };
+    assert.equal(config.hooks.SessionEnd, undefined);
+    assert(config.hooks.PostToolUse, `${path} must keep its synchronous redaction hook`);
   }
 });
 

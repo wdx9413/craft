@@ -34,13 +34,15 @@ test("Trace retention worker checks on a low-frequency timer and stops cleanly",
 test("configured retention isolates slow work in one child and stops its own active child", async () => {
   let tick: (() => void) | undefined, launches = 0, foregroundRuns = 0, failures = 0;
   const children: ChildProcess[] = [], killed: unknown[] = [];
-  const stop = startConfiguredTraceRetentionWorker(fixture(() => { foregroundRuns++; }), {}, () => { failures++; }, {
+  const service = { ...fixture(() => { foregroundRuns++; }), storageOwner: "runtime" } as CraftService;
+  const stop = startConfiguredTraceRetentionWorker(service, {}, () => { failures++; }, {
     server_entrypoint: "/tmp/craft-mcp.ts",
     set_interval: callback => { tick = callback; return {} as NodeJS.Timeout; }, clear_interval: () => undefined,
     spawn_process: ((_executable: string, args: string[], options: { env: NodeJS.ProcessEnv; stdio: string }) => {
       launches++;
       assert.deepEqual(args, ["--experimental-strip-types", "/tmp/craft-mcp.ts", TRACE_RETENTION_WORKER_FLAG]);
       assert.equal(options.env.CRAFT_DATA_DIR, "/tmp/craft-retention-test");
+      assert.equal(options.env.CRAFT_STORAGE_OWNER, "runtime");
       assert.equal(options.env.CRAFT_CONTINUOUS_LEARNING, "0");
       assert.equal(options.stdio, "ignore");
       const child = new EventEmitter() as ChildProcess;

@@ -4,7 +4,7 @@ import { existsSync, lstatSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { openCapabilityService } from "../core/interfaces/mcp/runtime.ts";
+import { DEFAULT_RUNTIME_MEMBERS, openCapabilityService } from "../core/interfaces/mcp/runtime.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 
@@ -13,6 +13,19 @@ function cli(root: string, args: string[], owner?: string) {
     encoding: "utf8", timeout: 30_000, env: { ...process.env, CRAFT_DATA_DIR: root, CRAFT_STORAGE_OWNER: owner, CRAFT_CONTINUOUS_LEARNING: "0" },
   });
 }
+
+test("CLI init on a new data root creates the Runtime catalog without a shared database", () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-cli-init-owned-runtime-"));
+  try {
+    const initialized = cli(root, ["init", "--mode", "agent", "--runtime", "direct-api", "--provider-protocol", "openai-compatible",
+      "--provider-name", "fixture", "--base-url", "https://fixture.invalid/v1", "--model", "fixture"]);
+    assert.equal(initialized.status, 0, initialized.stderr);
+    assert(existsSync(join(root, "runtime", "publication.db")));
+    assert.equal(lstatSync(join(root, "db", "craft.db"), { throwIfNoEntry: false })?.isFile() ?? false, false);
+    assert.equal(lstatSync(join(root, "craft.db"), { throwIfNoEntry: false })?.isFile() ?? false, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("CLI Notes uses its own authority with an explicit product and infers the same owner after restart", () => {
   const root = mkdtempSync(join(tmpdir(), "craft-cli-owned-notes-"));
   try {
@@ -78,6 +91,14 @@ test("owned standalone CLI runs its provider fixture in the Runtime catalog", as
       timeout: 30_000, env: { ...process.env, CRAFT_DATA_DIR: root, CRAFT_STORAGE_OWNER: "runtime", CRAFT_FIXTURE_CREDENTIAL: "local-fixture-value", CRAFT_CONTINUOUS_LEARNING: "0" },
     });
     assert.equal(JSON.parse(result.stdout).receipt.status, "completed");
+    const observed = await openCapabilityService("runtime", { CRAFT_DATA_DIR: root, CRAFT_CONTEXT_MEMBERS: DEFAULT_RUNTIME_MEMBERS });
+    try {
+      const session = observed.store.list("work_session", 10)[0];
+      const knowledge = observed.service.ownerServices.get("knowledge");
+      assert(session);
+      assert(knowledge?.store.find("project_brain", String(session.brain_id)), "the referenced Project Brain remains in Knowledge storage");
+      assert.equal(observed.store.find("project_brain", String(session.brain_id)), null, "Runtime does not duplicate Project Brain state");
+    } finally { observed.close(); }
     assert(existsSync(join(root, "runtime", "publication.db")));
     assert(!lstatSync(join(root, "db", "craft.db"), { throwIfNoEntry: false })?.isFile());
     assert.equal(cli(root, ["doctor"], "runtime").status, 0);

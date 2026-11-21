@@ -2,7 +2,7 @@
 export const PROJECT_EVOLUTION_TOOLS = [
   "craft_evolution_program_memory_capture", "craft_evolution_program_memory_list", "craft_evolution_program_memory_get",
   "craft_evolution_domain_capture", "craft_evolution_failure_capture",
-  "craft_evolution_program_memory_submit", "craft_evolution_program_memory_promote", "craft_evolution_program_memory_feedback",
+  "craft_evolution_program_memory_submit", "craft_evolution_program_memory_submission_due", "craft_evolution_program_memory_promote", "craft_evolution_program_memory_feedback",
   "craft_evolution_artifact_lineage_record", "craft_evolution_artifact_lineage_recall",
   "craft_evolution_artifact_lineage_apply", "craft_evolution_artifact_lineage_forget",
   "craft_evolution_prospective_create", "craft_evolution_prospective_fire",

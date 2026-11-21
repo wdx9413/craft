@@ -23,10 +23,15 @@ export async function openCapabilityService(owner: string, environment = process
 async function openServiceRuntime(mode: string, environment = process.env): Promise<{ service: CraftService; store: CraftStore; mode: string; close: () => void }> {
   const paths = craftPaths(dataRoot(environment));
   assertStorageAvailable(paths.root);
-  const product = mode === "syscall" || mode === "full" ? "runtime" : Object.entries(MCP_PRODUCT_SURFACES).find(([name, surface]) => name !== "full" && surface === mode)?.[0];
-  if (!environment.CRAFT_STORAGE_OWNER && product
-    && !lstatSync(paths.databaseFile, { throwIfNoEntry: false })?.isFile()
-    && !lstatSync(paths.legacyDatabaseFile, { throwIfNoEntry: false })?.isFile()) environment = { ...environment, CRAFT_STORAGE_OWNER: product };
+  const contextComposition = ["component-context-agent", "component-context-daily", "component-context-complete", "component-context-owned"].includes(mode);
+  const product = mode === "syscall" || mode === "full" ? "runtime" : contextComposition ? "context"
+    : Object.entries(MCP_PRODUCT_SURFACES).find(([name, surface]) => name !== "full" && surface === mode)?.[0];
+  const productOwner = STORAGE_OWNERS.find(owner => owner === product);
+  const hasSharedDatabase = lstatSync(paths.databaseFile, { throwIfNoEntry: false })?.isFile()
+    || lstatSync(paths.legacyDatabaseFile, { throwIfNoEntry: false })?.isFile();
+  const existingOwners = presentStorageOwners(paths.root);
+  if (!environment.CRAFT_STORAGE_OWNER && productOwner
+    && (existingOwners.includes(productOwner) || !hasSharedDatabase)) environment = { ...environment, CRAFT_STORAGE_OWNER: productOwner };
   if (environment.CRAFT_STORAGE_OWNER && existsSync(join(paths.root, ".craft-storage-layout.json"))) ensureOwnedLayoutFence(paths.root);
   const launch = mcpStorageLaunch(paths, mode, environment.CRAFT_STORAGE_OWNER);
   if (launch.initializeOwner) initializeOwnedCatalog(launch.paths.root, launch.initializeOwner);
@@ -91,7 +96,8 @@ async function openServiceRuntime(mode: string, environment = process.env): Prom
 }
 
 export async function openMcpRuntime(mode: string, environment = process.env): Promise<{ server: McpServer; close: () => void }> {
-  const configured = mode === productSurfaceOf("context")
+  const contextComposition = [productSurfaceOf("context"), "component-context-daily", "component-context-complete", "component-context-owned"].includes(mode);
+  const configured = contextComposition
     ? { ...environment, CRAFT_CONTEXT_MEMBERS: environment.CRAFT_CONTEXT_MEMBERS ?? DEFAULT_CONTEXT_MEMBERS }
     : mode === "syscall" || mode === "full" ? { ...environment, CRAFT_CONTEXT_MEMBERS: environment.CRAFT_CONTEXT_MEMBERS ?? DEFAULT_RUNTIME_MEMBERS } : environment;
   const runtime = await openServiceRuntime(mode, configured);

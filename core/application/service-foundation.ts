@@ -465,7 +465,8 @@ export abstract class ServiceFoundation {
     modelTransport?: ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[],
     localSandbox = new LocalProcessSandboxAdapter(), trustedEvaluators?: readonly TrustedEvaluatorIdentity[],
     contextSources?: { contributors: readonly import("../capability-protocol.ts").ContextContributionProvider[];
-      stores: import("../context-access-guard.ts").ContextOwnerStores; owner?: string }) {
+      stores: import("../context-access-guard.ts").ContextOwnerStores; owner?: string;
+      projectBrainReader?: Pick<ProjectBrainKernel, "get"> }) {
     bindProjectKnowledgeContentDirectory(store);
     bindProjectExperienceContentDirectory(store);
     this.store = store; this.catalog = new Catalog(store, semanticProvider); this.isolatedAdapter = isolatedAdapter;
@@ -671,7 +672,7 @@ export abstract class ServiceFoundation {
     this.a2aV1 = new A2AV1AdapterKernel(store);
     this.orgSync = new OrgSyncKernel(store);
     this.projectBrain = capabilities.registry.require<ProjectBrainKernel>(KNOWLEDGE_KERNELS.projectBrain);
-    this.workSessions = new WorkSessionKernel(store, this.projectBrain);
+    this.workSessions = new WorkSessionKernel(store, contextSources?.projectBrainReader ?? this.projectBrain);
     this.workbenchExperience = new WorkbenchExperienceKernel(store);
     this.longTaskWorker = new LongTaskWorkerKernel(store);
     this.contextPlane = new ContextPlaneKernel(store);

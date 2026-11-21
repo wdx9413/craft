@@ -43,15 +43,24 @@ async function main(): Promise<void> {
   const inputParseMs = performance.now() - inputParseStarted;
   const component = member(process.argv);
   const event = typeof input.hook_event_name === "string" ? input.hook_event_name : "";
+  const paths = craftPaths();
+  const freshRoot = presentStorageOwners(paths.root).length === 0
+    && !lstatSync(paths.databaseFile, { throwIfNoEntry: false })?.isFile()
+    && !lstatSync(paths.legacyDatabaseFile, { throwIfNoEntry: false })?.isFile();
+  if (freshRoot) {
+    const runtime = await import("../core/interfaces/mcp/runtime.ts");
+    const initialized = await runtime.openCapabilityService("runtime", { ...process.env, CRAFT_CONTEXT_MEMBERS: "" });
+    initialized.close();
+  }
   let diagnostic: ReturnType<typeof beginHookRuntimeDiagnostic> | undefined;
   try {
     if (["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd", "PreCompact"].includes(event))
-      diagnostic = beginHookRuntimeDiagnostic({ data_root: craftPaths().root, request_id: requestId, member: component,
+      diagnostic = beginHookRuntimeDiagnostic({ data_root: paths.root, request_id: requestId, member: component,
         event: event as "SessionStart" | "UserPromptSubmit" | "PostToolUse" | "Stop" | "SessionEnd" | "PreCompact",
         ...(input.session_host === "codex" || input.session_host === "claude" ? { host: input.session_host } : {}),
         ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}) });
   } catch { /* Diagnostics must never delay or prevent the Host Hook. */ }
-  if (event === "SessionStart" && process.argv[1]) launchMemoryArchiveWorker(process.argv[1], craftPaths().root);
+  if (event === "SessionStart" && process.argv[1]) launchMemoryArchiveWorker(process.argv[1], paths.root);
   // Context has no SessionStart work: its bridge deliberately returns an empty
   // result for this event. Keep the content-free runtime receipt, but avoid
   // opening SQLite and constructing the full service for a pure no-op.

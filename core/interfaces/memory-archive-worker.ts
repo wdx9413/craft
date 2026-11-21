@@ -1,3 +1,5 @@
+import { lstatSync } from "node:fs";
+import { dirname } from "node:path";
 import { setImmediate as yieldImmediate, setTimeout as delay } from "node:timers/promises";
 import { MemoryFileStore } from '@craft/capability-memory/memory-files';
 import { craftPaths, dataRoot } from "../infrastructure/paths.ts";
@@ -25,6 +27,17 @@ export { launchMemoryArchiveWorker, MEMORY_ARCHIVE_WORKER_FLAG } from "./memory-
 /** Process one bounded page at a time outside the Hook process. */
 export async function runMemoryArchiveWorker(): Promise<void> {
   const paths = craftPaths(dataRoot());
+  const databaseExists = lstatSync(paths.databaseFile, { throwIfNoEntry: false })?.isFile() ?? false;
+  const legacyDatabaseExists = lstatSync(paths.legacyDatabaseFile, { throwIfNoEntry: false })?.isFile() ?? false;
+  const hasSharedDatabase = databaseExists || legacyDatabaseExists;
+  const storePaths = !databaseExists && legacyDatabaseExists
+    ? { ...paths, databaseDir: dirname(paths.legacyDatabaseFile), databaseFile: paths.legacyDatabaseFile }
+    : paths;
+  const ownedDataSpace = Boolean(process.env.CRAFT_STORAGE_OWNER) || presentStorageOwners(paths.root).length > 0 || !hasSharedDatabase;
+  if (ownedDataSpace && !presentStorageOwners(paths.root).includes("memory")) {
+    const initialized = await (await import("./mcp/runtime.ts")).openCapabilityService("memory");
+    initialized.close();
+  }
   let release = await acquireLearningWorkerLocks(paths.runtimeDir, ["memory-session-archive"]);
   if (!release) {
     // A single durable waiter covers the race where the active worker has
@@ -44,8 +57,9 @@ export async function runMemoryArchiveWorker(): Promise<void> {
   }
   try {
     const runtime = process.env.CRAFT_STORAGE_OWNER || presentStorageOwners(paths.root).length
+      || (!databaseExists && !legacyDatabaseExists)
       ? await (await import("./mcp/runtime.ts")).openCapabilityService("memory") : undefined;
-    const store = runtime?.store ?? await new CraftStore(paths).open({ skipLegacyPartitionMigration: true });
+    const store = runtime?.store ?? await new CraftStore(storePaths).open({ skipLegacyPartitionMigration: true });
     try {
       const files = new MemoryFileStore(store);
       let service: Awaited<ReturnType<typeof import("../service.ts").CraftService.open>> | undefined = runtime?.service;

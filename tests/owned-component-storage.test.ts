@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { backupStorage, restoreStorage } from "../core/storage-backup.ts";
 import { initializeOwnedCatalog } from "../core/infrastructure/owned-catalog.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
-import { sessionStorageScopeId, craftPaths } from "../core/infrastructure/paths.ts";
+import { sessionStorageScopeId, craftPaths, ensureLayout } from "../core/infrastructure/paths.ts";
 import { serveMcpHttp } from "../core/interfaces/mcp-http.ts";
 import { openMcpRuntime } from "../core/interfaces/mcp/runtime.ts";
 import { mcpStorageLaunch } from "../core/interfaces/mcp/owned-storage.ts";
@@ -38,6 +38,23 @@ function ownedMcp<T>(owner: Owner, root: string, calls: readonly Call[]): T[] {
 }
 
 type KnowledgeReply = { id?: string; claim?: { version: number; status: string; content: string; content_ref: { path: string } } };
+
+test("the complete Context surface infers its owner on a fresh root and preserves the composite surface", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-context-complete-owned-"));
+  let runtime: Awaited<ReturnType<typeof openMcpRuntime>> | undefined;
+  try {
+    runtime = await openMcpRuntime("component-context-complete", { CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "0" });
+    assert.equal(runtime.server.service.storageOwner, "context");
+    assert.equal(runtime.server.mode, "component-context-complete");
+    assert.equal(runtime.server.service.ownerServices.has("experience"), true);
+    assert.equal(runtime.server.service.ownerServices.has("runtime"), true);
+    const listed = ((await runtime.server.handle({ id: 1, method: "tools/list" }))?.result as { tools: Array<{ name: string }> }).tools;
+    assert(listed.some(tool => tool.name === "craft_knowledge_search"));
+    assert(existsSync(join(root, "context", "publication.db")));
+    assert(existsSync(join(root, "experience", "publication.db")));
+    assert.equal(databaseExists(craftPaths(root).databaseFile), false);
+  } finally { runtime?.close(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test("the Knowledge MCP publishes, reads, retires and restores Claim revisions without craft.db", async () => {
   const directory = mkdtempSync(join(tmpdir(), "craft-owner-knowledge-"));
@@ -92,7 +109,7 @@ test("the Knowledge MCP publishes, reads, retires and restores Claim revisions w
   }
 });
 
-test("an owned catalog keeps existing shared data spaces and mismatched products out", () => {
+test("an owned catalog keeps existing shared data spaces and mismatched products out", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-owner-guard-"));
   const mode = "component-knowledge-daily", paths = craftPaths(root);
   try {
@@ -110,6 +127,12 @@ test("an owned catalog keeps existing shared data spaces and mismatched products
 
     assert.equal(mcpStorageLaunch(paths, mode, "knowledge").paths.databaseDir, paths.knowledgeDir);
     assert.throws(() => mcpStorageLaunch(paths, "component-knowledge-owned", undefined), /requires an owned data space/u);
+    const initializedRoot = join(root, "initialized"), initializedPaths = craftPaths(initializedRoot);
+    await ensureLayout(initializedPaths);
+    writeFileSync(initializedPaths.configFile, "{}\n");
+    assert.equal(mcpStorageLaunch(initializedPaths, mode, "knowledge").initializeOwner, "knowledge");
+    writeFileSync(join(initializedPaths.cacheDir, "old-cache"), "existing data");
+    assert.throws(() => mcpStorageLaunch(initializedPaths, mode, "knowledge"), /new, empty data space/u);
     const reserved = join(root, "reserved");
     initializeOwnedCatalog(reserved, "knowledge");
     assert.doesNotThrow(() => initializeOwnedCatalog(reserved, "knowledge"));

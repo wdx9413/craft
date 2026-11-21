@@ -63,7 +63,7 @@ export function startConfiguredTraceRetentionWorker(
     run_maintenance: () => new Promise<void>((resolve, reject) => {
       const launched = (options.spawn_process ?? spawn)(process.execPath,
         [...(entrypoint.endsWith(".ts") ? ["--experimental-strip-types"] : []), entrypoint, TRACE_RETENTION_WORKER_FLAG],
-        { stdio: "ignore", env: { ...env, CRAFT_DATA_DIR: service.store.paths.root, CRAFT_CONTINUOUS_LEARNING: "0", CRAFT_TRACE_RETENTION_WORKER: "0" } });
+        { stdio: "ignore", env: { ...env, ...(service.storageOwner ? { CRAFT_STORAGE_OWNER: service.storageOwner } : {}), CRAFT_DATA_DIR: service.store.paths.root, CRAFT_CONTINUOUS_LEARNING: "0", CRAFT_TRACE_RETENTION_WORKER: "0" } });
       child = launched;
       const finish = (error?: Error) => { clearTimeout(timer); if (child === launched) child = undefined; if (error && !stopped) reject(error); else resolve(); };
       const timer = setTimeout(() => { launched.kill("SIGKILL"); finish(new Error("Trace retention worker timed out")); }, timeout);
@@ -85,8 +85,9 @@ export async function runTraceRetentionMaintenance(env: NodeJS.ProcessEnv = proc
   const release = await (dependencies.acquire_lock ?? acquireLearningWorkerLocks)(paths.runtimeDir, ["trace-retention"]);
   if (!release) return;
   try {
-    const store = await (dependencies.open_store ?? (async paths => new CraftStore(paths).open()))(paths);
+    const ownedRuntime = env.CRAFT_STORAGE_OWNER ? await (await import("./mcp/runtime.ts")).openCapabilityService(env.CRAFT_STORAGE_OWNER, env) : undefined;
+    const store = ownedRuntime?.store ?? await (dependencies.open_store ?? (async paths => new CraftStore(paths).open()))(paths);
     try { if (dependencies.maintain) dependencies.maintain(store); else new TraceKernel(store).maintain({ limit: 1 }); }
-    finally { store.close(); }
+    finally { if (ownedRuntime) ownedRuntime.close(); else store.close(); }
   } finally { await release(); }
 }

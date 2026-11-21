@@ -965,8 +965,11 @@ export class CodexHookBridge {
       }
       if (event === "SessionEnd" && scheduleMaintenance && text(input.session_id)) {
         const leaseId = `hook-${member}-${stableDigest({ host: hookHost(input), member, session_id: text(input.session_id) }).slice(-32)}`;
-        if (this.launchArchiveWorker) queueHookMaintenance(ownedMemberService(this.service, "memory").store, leaseId);
-        else ownedMemberService(this.service, "memory").memoryMaintenanceSchedule({ stage: "light", lease_id: leaseId });
+        const memory = this.service.capabilityOwned ? this.service.ownerServices.get("memory") : this.service;
+        if (memory) {
+          if (this.launchArchiveWorker) queueHookMaintenance(memory.store, leaseId);
+          else memory.memoryMaintenanceSchedule({ stage: "light", lease_id: leaseId });
+        }
       }
       this.service.store.appendEvent("codex-hook", "codex_hook.lifecycle", {
         member,

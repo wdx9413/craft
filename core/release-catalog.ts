@@ -19,19 +19,19 @@ export type ReleaseProduct = {
 
 export const RELEASE_PRODUCTS: readonly ReleaseProduct[] = [
   { name: "craft", surface: "full", category: "Productivity", external_marketplace: false },
-  { name: "craft-context", version: "0.21.2", surface: "component-context-agent", hookMember: "context", category: "Developer Tools", external_marketplace: true },
-  { name: "craft-knowledge", version: "0.13.0", surface: "component-knowledge-daily", hookMember: "knowledge", category: "Developer Tools", external_marketplace: false },
-  { name: "craft-memory", version: "0.13.0", surface: "component-memory-daily", hookMember: "memory", category: "Developer Tools", external_marketplace: false },
-  { name: "craft-experience", version: "0.13.0", surface: "component-experience-daily", hookMember: "experience", category: "Developer Tools", external_marketplace: false },
-  { name: "craft-codebase", version: "0.13.0", surface: "component-codebase", category: "Developer Tools", external_marketplace: false },
-  { name: "craft-notes", version: "0.1.0", surface: "component-notes-owned", category: "Productivity", external_marketplace: false },
-  { name: "craft-eval", version: "0.1.0", surface: "component-eval-owned", category: "Developer Tools", external_marketplace: false },
-  { name: "craft-runtime", version: "0.1.0", surface: "component-runtime-owned", category: "Developer Tools", external_marketplace: false },
+  { name: "craft-context", version: "0.21.3", surface: "component-context-agent", hookMember: "context", category: "Developer Tools", external_marketplace: true },
+  { name: "craft-knowledge", version: "0.13.1", surface: "component-knowledge-daily", hookMember: "knowledge", category: "Developer Tools", external_marketplace: false },
+  { name: "craft-memory", version: "0.13.1", surface: "component-memory-daily", hookMember: "memory", category: "Developer Tools", external_marketplace: false },
+  { name: "craft-experience", version: "0.13.1", surface: "component-experience-daily", hookMember: "experience", category: "Developer Tools", external_marketplace: false },
+  { name: "craft-codebase", version: "0.13.1", surface: "component-codebase", category: "Developer Tools", external_marketplace: false },
+  { name: "craft-notes", version: "0.1.1", surface: "component-notes-owned", category: "Productivity", external_marketplace: false },
+  { name: "craft-eval", version: "0.1.1", surface: "component-eval-owned", category: "Developer Tools", external_marketplace: false },
+  { name: "craft-runtime", version: "0.1.1", surface: "component-runtime-owned", category: "Developer Tools", external_marketplace: false },
 ];
 
 /** Independent hook-only products never enter the MCP/Context packer or runtime. */
 export const INDEPENDENT_HOOK_PRODUCTS: readonly ReleaseProduct[] = [
-  { name: "craft-datasec", surface: "standalone-hooks", version: "0.2.0", category: "Developer Tools", external_marketplace: true },
+  { name: "craft-datasec", surface: "standalone-hooks", version: "0.2.1", category: "Developer Tools", external_marketplace: true },
 ];
 export function allReleaseProducts(): readonly ReleaseProduct[] { return [...RELEASE_PRODUCTS, ...INDEPENDENT_HOOK_PRODUCTS]; }
 

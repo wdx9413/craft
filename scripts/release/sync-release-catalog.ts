@@ -1,18 +1,18 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_PRODUCTS, allReleaseProducts, externalDistributionContract, releaseManifest, releaseProductVersion } from "../../core/release-catalog.ts";
+import { allReleaseProducts, externalDistributionContract, releaseManifest, releaseProductVersion } from "../../core/release-catalog.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 const requested = process.argv.slice(2).map(arg => {
   const match = /^--product=(.+)$/u.exec(arg);
-  if (!match || !RELEASE_PRODUCTS.some(product => product.name === match[1])) throw new Error("Unknown release product");
+  if (!match || !allReleaseProducts().some(product => product.name === match[1])) throw new Error("Unknown release product");
   return match[1]!;
 });
 if (new Set(requested).size !== requested.length) throw new Error("Duplicate release product");
-const selected = RELEASE_PRODUCTS.filter(product => requested.length === 0 || requested.includes(product.name));
+const selected = allReleaseProducts().filter(product => requested.length === 0 || requested.includes(product.name));
 
 async function writeJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });

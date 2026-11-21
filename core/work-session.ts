@@ -14,17 +14,18 @@ function refs(value: unknown, name: string): JsonObject[] {
 
 /** Binds Project Brain, knowledge, capability, workflow, model, Host and acceptance into one resumable session. */
 export class WorkSessionKernel {
-  readonly store: CraftStore; readonly brain: ProjectBrainKernel;
-  constructor(store: CraftStore, brain = new ProjectBrainKernel(store)) { this.store = store; this.brain = brain; }
+  readonly store: CraftStore; readonly brain: Pick<ProjectBrainKernel, "get">;
+  constructor(store: CraftStore, brain: Pick<ProjectBrainKernel, "get"> = new ProjectBrainKernel(store)) { this.store = store; this.brain = brain; }
 
   prepare(args: JsonObject): JsonObject {
-    const projectId = text(args.project_id, "project_id"); this.brain.get({ project_id: projectId }); const task = this.store.get("task", text(args.task_id, "task_id"));
+    const projectId = text(args.project_id, "project_id");
+    const brain = this.brain.get({ project_id: projectId }).brain as JsonObject;
+    const task = this.store.get("task", text(args.task_id, "task_id"));
     if (task.project_id !== null && task.project_id !== projectId) throw new Error("Task does not belong to the Project Brain");
     const sessionId = String(args.session_id ?? `work_session_${randomUUID().replaceAll("-", "")}`); const knowledge = refs(args.knowledge_refs, "knowledge_refs"); const capabilities = refs(args.capability_refs, "capability_refs"); const workflows = refs(args.workflow_refs, "workflow_refs"); const excluded = strings(args.excluded_refs, "excluded_refs");
     const selection = { knowledge, capabilities, workflows, excluded, rationale: args.selection_rationale === undefined ? [] : strings(args.selection_rationale, "selection_rationale") };
     const identity = { project_id: projectId, task_id: task.id, goal_digest: digestJson(text(args.goal ?? task.goal, "goal")), selection_digest: digestJson(selection), model: args.model === undefined ? null : text(args.model, "model"), host: args.host === undefined ? null : text(args.host, "host"), acceptance_ref: args.acceptance_ref === undefined ? null : text(args.acceptance_ref, "acceptance_ref") };
     const existing = this.store.find("work_session", sessionId); if (existing) { if (existing.identity_digest !== digestJson(identity)) throw new Error("Work Session idempotency conflict"); return { session: existing, idempotent: true }; }
-    const brain = this.store.list("project_brain", 10_000, (item) => item.project_id === projectId)[0]!;
     const session = this.store.create("work_session", sessionId, { ...identity, brain_id: brain.id, brain_version: brain.version, task_version: task.version, status: "prepared", selection, context_digest: digestJson({ ...identity, selection }), launch_id: null, outcome_id: null, next_action: "bind_work_launch", identity_digest: digestJson(identity) });
     return { session, idempotent: false };
   }
@@ -32,7 +33,14 @@ export class WorkSessionKernel {
   get(args: JsonObject): JsonObject { const session = this.store.get("work_session", text(args.session_id, "session_id")); return { session, context: { project_id: session.project_id, task_id: session.task_id, knowledge_refs: (session.selection as JsonObject).knowledge, capability_refs: (session.selection as JsonObject).capabilities, workflow_refs: (session.selection as JsonObject).workflows, excluded_refs: (session.selection as JsonObject).excluded, read_only: true, content_free: true } }; }
 
   refresh(args: JsonObject): JsonObject {
-    const session = this.store.get("work_session", text(args.session_id, "session_id")); const task = this.store.find("task", String(session.task_id)); const brain = this.store.find("project_brain", String(session.brain_id)); const issues: JsonObject[] = [];
+    const session = this.store.get("work_session", text(args.session_id, "session_id")); const task = this.store.find("task", String(session.task_id)); let brain: JsonObject | null = null; const issues: JsonObject[] = [];
+    try {
+      const current = this.brain.get({ project_id: String(session.project_id) }).brain as JsonObject;
+      brain = current;
+      if (current.id !== session.brain_id) issues.push({ component: "project_brain", issue: "replaced", current_id: current.id });
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith("Unknown Project Brain:")) throw error;
+    }
     if (!task) issues.push({ component: "task", issue: "missing" }); else if (Number(task.version) !== Number(session.task_version)) issues.push({ component: "task", issue: "version_changed", current_version: task.version });
     if (!brain) issues.push({ component: "project_brain", issue: "missing" }); else if (Number(brain.version) !== Number(session.brain_version ?? 1) && session.status !== "prepared") issues.push({ component: "project_brain", issue: "changed", current_version: brain.version });
     const status = issues.length ? "needs_replan" : session.status; const next = issues.length ? "review_context_drift" : session.launch_id ? "observe_execution" : "bind_work_launch";

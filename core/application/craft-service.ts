@@ -332,8 +332,13 @@ export class CraftService extends ServiceFoundation {
     localSandbox?: unknown, trustedEvaluators?: readonly import("../evaluation-contract.ts").TrustedEvaluatorIdentity[],
     contextSources?: { contributors: readonly import("../capability-protocol.ts").ContextContributionProvider[];
       stores: import("../context-access-guard.ts").ContextOwnerStores; services?: ReadonlyMap<string, CraftService>; owner?: string }) {
+    const knowledgeService = contextSources?.services?.get("knowledge");
+    const projectBrainReader = contextSources && contextSources.owner !== "knowledge"
+      ? knowledgeService?.projectBrain ?? { get: (_args: JsonObject): JsonObject => { throw new Error("knowledge owner is unavailable"); } }
+      : undefined;
     super(store, semanticProvider, isolatedAdapter as never, dockerSandbox as never, egressBroker as never, hostOwnerId,
-      hostProfiles, modelProviders, modelTransport, traceArchiveBackends, localSandbox as never, trustedEvaluators, contextSources);
+      hostProfiles, modelProviders, modelTransport, traceArchiveBackends, localSandbox as never, trustedEvaluators,
+      contextSources ? { ...contextSources, projectBrainReader } : undefined);
     this.ownerServices = contextSources?.services ?? new Map();
     this.capabilityOwned = contextSources !== undefined;
     this.storageOwner = contextSources?.owner;

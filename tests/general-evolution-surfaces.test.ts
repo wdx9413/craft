@@ -6,7 +6,7 @@ import { discoverContextTools } from "../core/mcp/context-tools.ts";
 const GENERAL_EVOLUTION_TOOLS = [
   "craft_evolution_value_decide", "craft_evolution_domain_adapters", "craft_evolution_domain_capture",
   "craft_evolution_program_memory_capture", "craft_evolution_program_memory_list", "craft_evolution_program_memory_submit",
-  "craft_evolution_program_memory_promote", "craft_evolution_program_memory_feedback", "craft_evolution_failure_capture",
+  "craft_evolution_program_memory_submission_due", "craft_evolution_program_memory_promote", "craft_evolution_program_memory_feedback", "craft_evolution_failure_capture",
   "craft_evolution_runbook_capture", "craft_evolution_runbook_revoke",
   "craft_evolution_research_capture", "craft_evolution_research_recall", "craft_evolution_research_impact",
   "craft_evolution_research_forget", "craft_evolution_replication_propose",
@@ -29,7 +29,7 @@ test("Context discovery exposes project-bound evolution operations with a bindin
     name: string; inputSchema: { required: string[] }; syscall_route: { tool: string };
   }[] };
   const byName = new Map(tools.map(tool => [tool.name, tool]));
-  for (const name of ["craft_evolution_program_memory_submit", "craft_evolution_artifact_lineage_forget",
+  for (const name of ["craft_evolution_program_memory_submit", "craft_evolution_program_memory_submission_due", "craft_evolution_artifact_lineage_forget",
     "craft_evolution_prospective_fire", "craft_evolution_travel_apply", "craft_evolution_research_impact"]) {
     assert.ok(byName.get(name)?.inputSchema.required.includes("project_binding"), name);
     assert.equal(byName.get(name)?.syscall_route.tool, "craft_run");

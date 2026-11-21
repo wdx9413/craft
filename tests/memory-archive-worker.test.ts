@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
@@ -26,6 +26,39 @@ test("maintenance request enqueue handles races and rejects identity conflicts",
   assert.throws(() => queueHookMaintenance(wrong, lease), /identity conflict/u);
   const unavailable = { find: () => null, create: () => { throw new Error("unavailable"); } } as unknown as CraftStore;
   assert.throws(() => queueHookMaintenance(unavailable, lease), /unavailable/u);
+});
+
+test("empty data roots initialize the owned memory catalog instead of a shared database", { timeout: 15_000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-empty-memory-worker-root-"));
+  const previousRoot = process.env.CRAFT_DATA_DIR;
+  try {
+    process.env.CRAFT_DATA_DIR = root;
+    await runMemoryArchiveWorker();
+    assert.equal(existsSync(join(root, "memory", "publication.db")), true);
+    assert.equal(lstatSync(craftPaths(root).databaseFile, { throwIfNoEntry: false })?.isFile() ?? false, false);
+    assert.equal(lstatSync(craftPaths(root).legacyDatabaseFile, { throwIfNoEntry: false })?.isFile() ?? false, false);
+  } finally {
+    if (previousRoot === undefined) delete process.env.CRAFT_DATA_DIR;
+    else process.env.CRAFT_DATA_DIR = previousRoot;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("memory archive worker uses an existing legacy-only database without creating a second catalog", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-legacy-memory-worker-root-"));
+  const paths = craftPaths(root), previousRoot = process.env.CRAFT_DATA_DIR;
+  try {
+    const legacy = await new CraftStore({ ...paths, databaseDir: dirname(paths.legacyDatabaseFile), databaseFile: paths.legacyDatabaseFile }).open();
+    legacy.close();
+    process.env.CRAFT_DATA_DIR = root;
+    await runMemoryArchiveWorker();
+    assert.equal(lstatSync(paths.legacyDatabaseFile, { throwIfNoEntry: false })?.isFile() ?? false, true);
+    assert.equal(lstatSync(paths.databaseFile, { throwIfNoEntry: false })?.isFile() ?? false, false);
+  } finally {
+    if (previousRoot === undefined) delete process.env.CRAFT_DATA_DIR;
+    else process.env.CRAFT_DATA_DIR = previousRoot;
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("worker launch uses the proper runtime flags and tolerates spawn errors", t => {
@@ -343,8 +376,10 @@ test("waiter release failure also releases the acquired main lock", { timeout: 1
   const root = mkdtempSync(join(tmpdir(), "craft-hook-waiter-release-")), previousRoot = process.env.CRAFT_DATA_DIR;
   const paths = craftPaths(root);
   let owner: (() => Promise<void>) | null = null;
+  let memory: Awaited<ReturnType<typeof openCapabilityService>> | undefined;
   try {
     process.env.CRAFT_DATA_DIR = root;
+    memory = await openCapabilityService("memory", { CRAFT_DATA_DIR: root });
     owner = await acquireLearningWorkerLocks(paths.runtimeDir, ["memory-session-archive"]);
     assert(owner);
     const worker = runMemoryArchiveWorker();
@@ -360,6 +395,7 @@ test("waiter release failure also releases the acquired main lock", { timeout: 1
     await next();
   } finally {
     if (owner) await owner();
+    memory?.close();
     if (previousRoot === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = previousRoot;
     rmSync(root, { recursive: true, force: true });
   }

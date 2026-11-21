@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
-import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
+import { RELEASE_PRODUCTS, releaseProductVersion } from "../../core/release-catalog.ts";
 import { skillVersionNotAhead } from "./skill-release-compatibility.ts";
 
 /**
@@ -27,16 +27,24 @@ if (typeof packageVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(packageVersion
   throw new Error("package.json must provide a semantic version as the release source of truth");
 }
 
-for (const path of [...RELEASE_PRODUCTS.map((product) => `plugins/${product.name}/.codex-plugin/plugin.json`), ".claude-plugin/plugin.json",
-  "adapters/workbuddy-expert/.codebuddy-plugin/plugin.json", "adapters/workbuddy-connector/connector-meta.json",
+for (const product of RELEASE_PRODUCTS) {
+  const path = `plugins/${product.name}/.codex-plugin/plugin.json`;
+  const manifestVersion = (await json(path)).version;
+  const expectedVersion = releaseProductVersion(product);
+  if (manifestVersion !== expectedVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from release product ${expectedVersion}`);
+}
+
+for (const path of [".claude-plugin/plugin.json", "adapters/workbuddy-expert/.codebuddy-plugin/plugin.json", "adapters/workbuddy-connector/connector-meta.json",
   "adapters/deepseek-harness/package.json"]) {
   const manifestVersion = (await json(path)).version;
   if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
 }
 
-for (const path of RELEASE_PRODUCTS.filter((product) => product.hookMember).map((product) => `plugins/${product.name}/.claude-plugin/plugin.json`)) {
+for (const product of RELEASE_PRODUCTS.filter((product) => product.hookMember)) {
+  const path = `plugins/${product.name}/.claude-plugin/plugin.json`;
   const manifestVersion = (await json(path)).version;
-  if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
+  const expectedVersion = releaseProductVersion(product);
+  if (manifestVersion !== expectedVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from release product ${expectedVersion}`);
 }
 
 const versionSource = await readFile(resolve(root, "core/version.ts"), "utf8");

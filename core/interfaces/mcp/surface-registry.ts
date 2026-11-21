@@ -104,7 +104,7 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
 
 const OWNED_ONLY_SURFACES: Readonly<Record<string, RegExp>> = {
   "component-runtime-owned": /^craft_(?:task_|work_|host_|trace_|evidence_|artifact_|workspace_|runtime_|execution_|sandbox_|local_)/u,
-  "component-notes-owned": /^craft_notes_(?:create_device|observe_directory|observe_file|candidate_list|confirm|revoke|resolve)$/u,
+  "component-notes-owned": /^craft_notes_(?:location_list_devices|create_device|observe_directory|observe_file|candidate_list|confirm|revoke|resolve)$/u,
   "component-context-owned": /^craft_(?:context_(?:resolution_(?:resolve|get|feedback)|working_set_(?:resolve|get))|scope_identity_resolve_project|evolution_program_memory_(?:capture|list|get|submit|submission_due|promote|feedback))$/u,
   "component-eval-owned": /^craft_evaluation_contract_(?:define|get|record|task_effect_record)$/u,
 };
