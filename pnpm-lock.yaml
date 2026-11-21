@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  craft-common-store-local: 0.21.1
   '@types/node': 25.9.5
   typescript: 6.0.3
 
@@ -34,11 +35,11 @@ importers:
         specifier: 0.20.9
         version: 0.20.9
       '@craft/capability-memory':
+        specifier: 0.20.10
+        version: 0.20.10
+      '@craft/craft-notes':
         specifier: 0.20.9
         version: 0.20.9
-      '@craft/craft-notes':
-        specifier: 0.20.8
-        version: 0.20.8
       '@modelcontextprotocol/sdk':
         specifier: 1.32.2
         version: 1.32.2(supports-color@7.1.0)(zod@4.6.7)
@@ -52,8 +53,8 @@ importers:
         specifier: 0.20.7
         version: 0.20.7
       craft-common-store-local:
-        specifier: 0.21.0
-        version: 0.21.0
+        specifier: 0.21.1
+        version: 0.21.1
       craft-eval:
         specifier: 0.7.4
         version: 0.7.4
@@ -181,15 +182,15 @@ packages:
     engines: {node: '>=23'}
 
   '@craft/capability-knowledge@0.20.9':
-    resolution: {integrity: sha512-bP/BdDgM0Dn99p6X/AYf71k8hjw4g0mX6zYnYrRABWQrmtmVe1jp2+bpRuRE8hqnNCU1hVMbIBQQe8Mta60k9w==}
+    resolution: {integrity: sha512-HXQk0Sj8yhxg8oUwJSSVBynMFK80vbldpyBN5ouAMUbDGHViahHoIbjxSiXk00kQIV9yoYatHAN2h0+dpdFnpA==}
     engines: {node: '>=23'}
 
-  '@craft/capability-memory@0.20.9':
-    resolution: {integrity: sha512-8lgB+R7K7McmTR7F/lzpSTkTOhdXr/KbTjVc2Hg+MkNv6Zs32bCbP7NOMWHpdpYzrU6g0c8mVUXlm5uhGv3bsQ==}
+  '@craft/capability-memory@0.20.10':
+    resolution: {integrity: sha512-M0lsrchjg1hkZ02zbkGCHDF6OVkRKCaLAp4ZXzvwjIxhQZMmpeu6b7DYIL/jR+sC+kiqfsENx9DYYaqaL/7m4A==}
     engines: {node: '>=23'}
 
-  '@craft/craft-notes@0.20.8':
-    resolution: {integrity: sha512-O/dbl5FM1/7mtz9RwBCesjK62/h3IevN6oOVnPHNKnyjBcoRgmY4HUqBLUTmEYQeVukL3VBeD4cnyBVDeSjzvw==}
+  '@craft/craft-notes@0.20.9':
+    resolution: {integrity: sha512-v+NGTRMEacCW86AkrGFPvpEsnnxcgwjrawdT3F9BZlh28qD7+Y/kDtRK05u3+wsOGb5vLqgl0+iuLZHVthnp7w==}
     engines: {node: '>=23'}
 
   '@esbuild/aix-ppc64@0.28.2':
@@ -533,8 +534,8 @@ packages:
     resolution: {integrity: sha512-hP/ZKl/59LdHdsY87doLL8s7LUSlvDjw/1Goz0cmILha07VoaCoDzbh4Fv8OJeb+IcIouGNEMd99stVJrzMmkg==}
     engines: {node: '>=23'}
 
-  craft-common-store-local@0.21.0:
-    resolution: {integrity: sha512-297Tr62Evyw0JnG31DS7uvFH9tiMXaiwWU2xngwcqOXxYpobhqfBbcrRwS5mPn/E+AjY8xVWnLEbz5IfYuS4AQ==}
+  craft-common-store-local@0.21.1:
+    resolution: {integrity: sha512-Tvz3QRZnF4CTBVrSpf1I4RXKvdf8qmgoISOdvqA/ynSD1LQKBOltRYUb6gwOeTgzl+UEmsTxFs4I7SgqzsjJUQ==}
     engines: {node: '>=23'}
 
   craft-eval@0.7.4:
@@ -1160,7 +1161,7 @@ snapshots:
     dependencies:
       craft-common-base: 0.20.5
       craft-common-log: 0.20.13
-      craft-common-store-local: 0.21.0
+      craft-common-store-local: 0.21.1
       typescript: 6.0.3
 
   '@craft/capability-context@0.21.0':
@@ -1169,7 +1170,7 @@ snapshots:
       craft-common-base: 0.20.5
       craft-common-log: 0.20.13
       craft-common-ontology: 0.20.7
-      craft-common-store-local: 0.21.0
+      craft-common-store-local: 0.21.1
 
   '@craft/capability-datasec@0.2.0': {}
 
@@ -1179,27 +1180,27 @@ snapshots:
       craft-common-base: 0.20.5
       craft-common-log: 0.20.13
       craft-common-ontology: 0.20.7
-      craft-common-store-local: 0.21.0
+      craft-common-store-local: 0.21.1
 
   '@craft/capability-knowledge@0.20.9':
     dependencies:
-      '@craft/capability-memory': 0.20.9
+      '@craft/capability-memory': 0.20.10
       craft-common-base: 0.20.5
       craft-common-log: 0.20.13
       craft-common-ontology: 0.20.7
-      craft-common-store-local: 0.21.0
+      craft-common-store-local: 0.21.1
 
-  '@craft/capability-memory@0.20.9':
+  '@craft/capability-memory@0.20.10':
     dependencies:
       craft-common-base: 0.20.5
       craft-common-log: 0.20.13
       craft-common-ontology: 0.20.7
-      craft-common-store-local: 0.21.0
+      craft-common-store-local: 0.21.1
 
-  '@craft/craft-notes@0.20.8':
+  '@craft/craft-notes@0.20.9':
     dependencies:
       craft-common-base: 0.20.5
-      craft-common-store-local: 0.21.0
+      craft-common-store-local: 0.21.1
 
   '@esbuild/aix-ppc64@0.28.2':
     optional: true
@@ -1467,26 +1468,26 @@ snapshots:
 
   craft-common-base@0.20.5:
     dependencies:
-      craft-common-store-local: 0.21.0
+      craft-common-store-local: 0.21.1
 
   craft-common-log@0.20.13:
     dependencies:
       craft-common-base: 0.20.5
-      craft-common-store-local: 0.21.0
+      craft-common-store-local: 0.21.1
 
   craft-common-ontology@0.20.7: {}
 
-  craft-common-store-local@0.21.0: {}
+  craft-common-store-local@0.21.1: {}
 
   craft-eval@0.7.4:
     dependencies:
       '@craft/capability-datasec': 0.2.0
       '@craft/capability-experience': 0.21.0
       '@craft/capability-knowledge': 0.20.9
-      '@craft/capability-memory': 0.20.9
+      '@craft/capability-memory': 0.20.10
       craft-common-base: 0.20.5
       craft-common-ontology: 0.20.7
-      craft-common-store-local: 0.21.0
+      craft-common-store-local: 0.21.1
 
   cross-spawn@7.0.6:
     dependencies:

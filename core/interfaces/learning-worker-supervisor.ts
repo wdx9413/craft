@@ -35,9 +35,10 @@ export function resolveLearningWorkerLaunch(serverEntrypoint: string, exists: (p
 
 export async function startContextLearningWorker(options: LearningWorkerSupervisorOptions): Promise<(() => Promise<void>) | undefined> {
   const components: Record<string, { product: string; surface?: string; learning: string }> = {
-    "component-context-agent": { product: "context", surface: "component-context-complete", learning: "experience,knowledge" },
-    "component-context-daily": { product: "context", surface: "component-context-complete", learning: "experience,knowledge" },
-    "component-context-complete": { product: "context", surface: "component-context-complete", learning: "experience,knowledge" },
+    "component-context-agent": { product: "context", surface: "component-context-complete", learning: "experience,knowledge,memory,notes" },
+    "component-context-owned": { product: "context", surface: "component-context-complete", learning: "experience,knowledge,memory,notes" },
+    "component-context-daily": { product: "context", surface: "component-context-complete", learning: "experience,knowledge,memory,notes" },
+    "component-context-complete": { product: "context", surface: "component-context-complete", learning: "experience,knowledge,memory,notes" },
     "component-knowledge-daily": { product: "knowledge", learning: "knowledge" },
     "component-experience-daily": { product: "experience", learning: "experience" },
   };

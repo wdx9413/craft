@@ -66,6 +66,11 @@ test("CLI Runtime commands use runtime authority and reject cross-domain migrati
     assert.notEqual(migrated.status, 0);
     assert.match(migrated.stderr, /verified capability migration/u);
     assert.notEqual(cli(root, ["unknown-command"]).status, 0);
+    const invalidWorkerRoot = mkdtempSync(join(tmpdir(), "craft-cli-invalid-worker-"));
+    try {
+      assert.notEqual(cli(invalidWorkerRoot, ["learning-worker", "typo"]).status, 0);
+      assert(!existsSync(join(invalidWorkerRoot, "runtime", "publication.db")), "invalid learning-worker commands must not initialize Runtime storage");
+    } finally { rmSync(invalidWorkerRoot, { recursive: true, force: true }); }
     assert.equal(cli(root, ["--product", "runtime", "version"]).status, 0);
     assert.equal(cli(root, ["--product", "runtime", "worker", "status"]).status, 0);
     assert.equal(cli(root, ["settings", "show"], "runtime").status, 0);
@@ -125,7 +130,7 @@ test("CLI storage restore reports owner archives that require external-owner rev
     let definition: Record<string, unknown>;
     try {
       const { ProcedureDefinitionStore } = await import("@craft/capability-experience/procedure-definition");
-      definition = new ProcedureDefinitionStore(experience.store).write({ schema_version: "craft.procedure.v1", procedure_id: "external", procedure_version: 1, kind: "graph", scope: "global", trigger: "Fixture", preconditions: [], allowed_effects: ["read_only"], acceptance_ref: "fixture", failure_disposition: "stop", scenario_signature: {}, evidence_ids: [], proposal_ref: { id: "fixture", version: 1 }, definition: {} }, "External graph");
+      definition = new ProcedureDefinitionStore(experience.store).write({ schema_version: "craft.procedure.v1", procedure_id: "external", procedure_version: 1, kind: "graph", scope: "global", trigger: "Fixture", preconditions: [], allowed_effects: ["read_only"], acceptance_ref: "fixture", failure_disposition: "stop", scenario_signature: {}, evidence_ids: [], proposal_ref: { id: "fixture", version: 1 }, definition: {} }, "External graph") as unknown as Record<string, unknown>;
     } finally { experience.close(); }
     const knowledge = await openCapabilityService("knowledge", { CRAFT_DATA_DIR: source });
     try { knowledge.store.create("fixture", "external", { content_ref: memoryRecord.content_ref, definition_ref: definition }); }

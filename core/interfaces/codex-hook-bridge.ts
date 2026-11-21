@@ -1,4 +1,4 @@
-import { hookVerificationGap } from "./codex-hook-signal-sanitizer.ts";
+import { hookVerificationGap } from "../hook-verification-gap.ts";
 import { NATIVE_ASYNC_COMPLETION } from "./codex-hook-command-result.ts";
 import { ComponentTraceKernel } from "../component-trace.ts";
 import { operationErrorCode } from 'craft-common-log/operation';

@@ -130,6 +130,8 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_experience_graph_edit: { scope: "string", configuration: "object", scope_envelope: "object", principal_ids: "array", before_version: "integer" },
   craft_notes_observe_directory: { pin: "boolean" },
   craft_notes_observe_file: { pin: "boolean" },
+  craft_notes_qualification_run: { limit: "integer" },
+  craft_memory_promotion_run: { limit: "integer" },
   craft_evaluation_contract_define: { input_contract: "string", output_contract: "string", capability_version: "integer", scope: "object", host_compatibility: "array", budget: "object", task_effect: "object" },
   craft_evaluation_contract_record: { evidence: "array", metrics: "object" },
   craft_evaluation_contract_task_effect_record: { candidate_ref: "object", candidate_source_task_refs: "array", evaluator: "object", pairs: "array" },

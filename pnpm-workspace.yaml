@@ -6,6 +6,7 @@ autoInstallPeers: false
 # sibling checkouts into the application install.
 linkWorkspacePackages: false
 overrides:
+  craft-common-store-local: 0.21.1
   # Keep all sibling packages on the Node declarations already pinned by Craft.
   '@types/node': 25.9.5
   # The checked-out capability sources accept TypeScript 6; reuse Craft's lock.
@@ -16,15 +17,15 @@ allowBuilds:
 
 # Runtime dependencies are resolved by exact versions from the npm registry.
 minimumReleaseAgeExclude:
-  - 'craft-common-store-local@0.21.0'
+  - 'craft-common-store-local@0.21.1'
   - 'craft-common-base@0.20.5'
   - 'craft-common-log@0.20.13'
-  - '@craft/capability-memory@0.20.9'
+  - '@craft/capability-memory@0.20.10'
   - '@craft/capability-knowledge@0.20.9'
   - '@craft/capability-experience@0.21.0'
   - '@craft/capability-context@0.21.0'
   - '@craft/capability-codebase@0.20.7'
-  - '@craft/craft-notes@0.20.8'
+  - '@craft/craft-notes@0.20.9'
   - '@craft/capability-datasec@0.2.0'
   - 'craft-eval@0.7.4'
   - 'craft@0.21.1'

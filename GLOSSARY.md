@@ -50,6 +50,10 @@ _Avoid_: Full-text recall, global prompt, maximal context
 The evidence-gated chain from scoped, sanitized observations to independently evaluated task effects under a pre-bound Evaluation Contract, staged activation, automatic rollback and user revocation.
 _Avoid_: Self-modifying Agent, automatic publication
 
+**Learning Work Item**:
+A durable reference to one capability-owned candidate and its pending assessment progress; it preserves that capability's evidence, evaluation and activation rules.
+_Avoid_: Shared promotion verdict, executable candidate
+
 **Evolution Value Gate**:
 A versioned decision step that routes a task observation to a durable asset candidate, review, or discard with an auditable reason; it does not verify truth or grant authority.
 _Avoid_: Truth validator, scenario allowlist

@@ -81,6 +81,7 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
   ],
   "component-memory-daily": [
     "craft_memory_asset_inspect", "craft_memory_asset_restore",
+    "craft_memory_policy_save",
     "craft_component_readiness_get", "craft_component_diagnose", "craft_knowledge_bootstrap_install", "craft_knowledge_source_list",
     "craft_memory_governance", "craft_memory_capture_user_statement", "craft_memory_capture_observed_fact", "craft_memory_candidate_propose", "craft_memory_candidate_review", "craft_memory_ledger_remember_approved",
     "craft_memory_recall", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_conflict_list", "craft_memory_conflict_resolve",
@@ -104,7 +105,7 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
 
 const OWNED_ONLY_SURFACES: Readonly<Record<string, RegExp>> = {
   "component-runtime-owned": /^craft_(?:task_|work_|host_|trace_|evidence_|artifact_|workspace_|runtime_|execution_|sandbox_|local_)/u,
-  "component-notes-owned": /^craft_notes_(?:location_list_devices|create_device|observe_directory|observe_file|candidate_list|confirm|revoke|resolve)$/u,
+  "component-notes-owned": /^craft_notes_(?:location_list_devices|create_device|observe_directory|observe_file|candidate_list|qualification_run|confirm|revoke|resolve)$/u,
   "component-context-owned": /^craft_(?:context_(?:resolution_(?:resolve|get|feedback)|working_set_(?:resolve|get))|scope_identity_resolve_project|evolution_program_memory_(?:capture|list|get|submit|submission_due|promote|feedback))$/u,
   "component-eval-owned": /^craft_evaluation_contract_(?:define|get|record|task_effect_record)$/u,
 };
@@ -142,7 +143,7 @@ export function surfaceToolNames(surface: string, activeTools: readonly Tool[], 
       "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review",
       "craft_experience_scenario_list", "craft_experience_runbook_capture",
       "craft_notes_location_list_devices", "craft_notes_create_device", "craft_notes_observe_directory", "craft_notes_observe_file",
-      "craft_notes_candidate_list", "craft_notes_confirm", "craft_notes_resolve", "craft_notes_revoke",
+      "craft_notes_candidate_list", "craft_notes_qualification_run", "craft_notes_confirm", "craft_notes_resolve", "craft_notes_revoke",
     ]);
     const codebase = COMPONENT_SURFACES["component-codebase"]!;
     const direct = activeTools.filter(tool => names.has(tool.name) || codebase.test(tool.name)).map(tool => tool.name);
@@ -150,7 +151,7 @@ export function surfaceToolNames(surface: string, activeTools: readonly Tool[], 
     return [...new Set([...direct, ...SYSCALL_VERBS, ...passthrough])];
   }
   if (surface === "component-context-complete") {
-    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", "craft_notes_context_resolve", "craft_context_doctor", "craft_context_usage_statusline", "craft_capability_iteration_plan", "craft_capability_iteration_gaps", "craft_lsp_readiness", "craft_learning_cycle_task_evidence_list", ...Object.values(DAILY_COMPONENT_TOOLS).flat()]);
+    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", "craft_notes_context_resolve", "craft_notes_qualification_run", "craft_context_doctor", "craft_context_usage_statusline", "craft_capability_iteration_plan", "craft_capability_iteration_gaps", "craft_lsp_readiness", "craft_learning_cycle_task_evidence_list", ...Object.values(DAILY_COMPONENT_TOOLS).flat()]);
     const components = ["component-knowledge", "component-memory", "component-experience", "component-codebase"] as const;
     return activeTools.filter(tool => names.has(tool.name) || components.some(component => COMPONENT_SURFACES[component].test(tool.name))).map(tool => tool.name);
   }
@@ -173,7 +174,8 @@ export function surfaceToolNames(surface: string, activeTools: readonly Tool[], 
       const lifecycle = new Set(["craft_experience_asset_inspect", "craft_experience_asset_restore", "craft_procedure_create", "craft_procedure_configuration_save"]);
       return [...daily, ...activeTools.filter(tool => lifecycle.has(tool.name)).map(tool => tool.name)];
     }
-    if (surface !== "component-knowledge-owned") return daily;
+    if (surface === "component-memory-owned") return [...daily, ...activeTools.filter(tool =>
+      tool.name === "craft_memory_promotion_run" || tool.name === "craft_memory_session_finalize").map(tool => tool.name)];
     const governance = new Set(["craft_knowledge_claim_review", "craft_knowledge_asset_inspect", "craft_knowledge_asset_restore", "craft_knowledge_semantic_review_packet"]);
     return [...daily, ...activeTools.filter(tool => governance.has(tool.name)).map(tool => tool.name)];
   }

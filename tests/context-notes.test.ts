@@ -41,6 +41,29 @@ test("directory recall shares the registry without recording, promoting or openi
   } finally { await f.close(); }
 });
 
+test("Context Worker operations call the Notes and Memory owners without exposing candidate content", async () => {
+  const f = await fixture();
+  try {
+    const server = new McpServer(f.service, "component-context-complete");
+    const notesResponse = await server.handle({ jsonrpc: "2.0", id: 7, method: "tools/call", params: {
+      name: "craft_notes_qualification_run", arguments: { limit: 10 },
+    } }) as JsonObject;
+    const notesResult = notesResponse.result as JsonObject;
+    assert.equal(notesResult.isError, false, JSON.stringify(notesResponse));
+    const notes = notesResult.structuredContent as JsonObject;
+    assert.equal(notes.processed, 0);
+    assert.equal(notes.qualified, 0);
+    const memoryResponse = await server.handle({ jsonrpc: "2.0", id: 8, method: "tools/call", params: {
+      name: "craft_memory_promotion_run", arguments: { limit: 10 },
+    } }) as JsonObject;
+    const memoryResult = memoryResponse.result as JsonObject;
+    assert.equal(memoryResult.isError, false, JSON.stringify(memoryResponse));
+    const memory = memoryResult.structuredContent as JsonObject;
+    assert.equal(memory.processed, 0);
+    assert.equal(memory.promoted, 0);
+  } finally { await f.close(); }
+});
+
 test("directory material is bounded without truncating conditions or treating cloud hints as access", async () => {
   const f = await fixture();
   try {

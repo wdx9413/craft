@@ -44,10 +44,15 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   let knowledgeSourceDiscovery: JsonObject;
   try {
     if (!knowledgeService) throw new Error("knowledge owner is unavailable");
-    knowledgeSourceDiscovery = observeOperation(service.store, "knowledge", "project_source_discovery", { scope, project_root_digest: stableDigest(root) },
-      () => knowledgeService.knowledgeSources.discoverProjectSources({ project_root: root, scope_kind: scope.kind, scope_id: scope.id }));
+    // Knowledge resolves project content against its own scoped identity catalog.
+    // The Context identity is not shared across owner databases.
+    const knowledgeIdentity = knowledgeService.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject;
+    const knowledgeScope = knowledgeIdentity.canonical_scope as JsonObject;
+    knowledgeSourceDiscovery = observeOperation(service.store, "knowledge", "project_source_discovery", { scope: knowledgeScope, project_root_digest: stableDigest(root) },
+      () => knowledgeService.knowledgeSources.discoverProjectSources({ project_root: root, scope_kind: knowledgeScope.kind, scope_id: knowledgeScope.id }));
   } catch (error) {
-    knowledgeSourceDiscovery = { status: "unavailable", reason: "project_source_discovery_failed", failure_code: operationErrorCode(error), sources_registered: 0, sources_ingested: 0, candidates_created: 0 };
+    knowledgeSourceDiscovery = { status: "unavailable", reason: "project_source_discovery_failed",
+      failure_code: error instanceof CraftOperationError ? error.code : operationErrorCode(error), sources_registered: 0, sources_ingested: 0, candidates_created: 0 };
   }
   let codebase: JsonObject;
   try { if (loadCodebase && !codebaseService) throw new Error("codebase owner is unavailable"); codebase = loadCodebase ? observeOperation(service.store, "codebase", "repository_ensure", { project_root: root, index_depth: args.index_depth }, () => codebaseService!.codebaseRepositoryEnsure({ project_root: root, index_depth: args.index_depth, query: args.query })) : { status: "skipped", reason: "not_requested" }; }

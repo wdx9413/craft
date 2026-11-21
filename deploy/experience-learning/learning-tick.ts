@@ -26,20 +26,20 @@ function classificationSkipReason(classification: JsonObject): string {
 }
 
 /** A poll isolates Experience and Knowledge failures so the next scheduled pass can recover. */
-export async function runLearningTick(deps: LearningTickDependencies, syncKnowledge = false): Promise<JsonObject> {
+export async function runLearningTick(deps: LearningTickDependencies, syncKnowledge = false, shouldRunExperience = true): Promise<JsonObject> {
   let sessionCollection: JsonObject | null = null;
   if (deps.run_session_collection) {
     try { sessionCollection = await deps.run_session_collection(); }
     catch (error) { sessionCollection = { status: "failed", failure_kind: failureKind(error) }; }
   }
-  let experience: JsonObject = { processed: 0, outcomes: [] }, knowledge: JsonObject | null = null;
+  let experience: JsonObject = { processed: 0, outcomes: [], ...(!shouldRunExperience ? { skipped: true } : {}) }, knowledge: JsonObject | null = null;
   const runExperience = async () => { try { experience = await deps.run_experience_pass(); }
     catch (error) { experience = { processed: 0, outcomes: [], failure_kind: failureKind(error) }; } };
   const runKnowledge = async () => { if (!syncKnowledge) return;
     try { knowledge = await deps.run_knowledge_pass(); }
     catch (error) { knowledge = { status: "failed", failure_kind: failureKind(error) }; } };
-  if (deps.pass_order === "knowledge_first") { await runKnowledge(); await runExperience(); }
-  else { await runExperience(); await runKnowledge(); }
+  if (deps.pass_order === "knowledge_first") { await runKnowledge(); if (shouldRunExperience) await runExperience(); }
+  else { if (shouldRunExperience) await runExperience(); await runKnowledge(); }
   return { ...experience, ...(sessionCollection ? { session_collection: sessionCollection } : {}), knowledge };
 }
 
@@ -104,6 +104,16 @@ export function learningTickStatus(result: JsonObject, once: boolean): { diagnos
     const code = typeof outcome.failure_code === "string" && /^(?:ERR_[A-Z_]+|[A-Z][A-Z_]{0,63})$/u.test(outcome.failure_code) ? ` [${outcome.failure_code}]` : "";
     return [`Craft Knowledge source ${source} sync failed (${kind})${code}.\n`];
   }) : [];
+  const auxiliaryIssues = ([
+    ["memory_promotion", "Memory promotion"], ["notes_qualification", "Notes qualification"],
+  ] as const).flatMap(([key, label]) => {
+    const value = result[key];
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const state = value as JsonObject;
+    if (state.status !== "blocked" && state.status !== "failed") return [];
+    const reason = typeof state.reason === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(state.reason) ? ` (${state.reason})` : "";
+    return [state.status === "failed" ? `Craft ${label} failed${reason}.\n` : `Craft ${label} is blocked${reason}.\n`];
+  });
   const diagnostics = [
     ...(sessionCollectionFailure ? [`Craft Codex session collection failed (${sessionCollectionFailure}).\n`] : []),
     ...(sessionEvidenceIncomplete ? ["Craft Codex session evidence lookup is incomplete; reconciliation and cursor advancement were skipped.\n"] : []),
@@ -116,8 +126,9 @@ export function learningTickStatus(result: JsonObject, once: boolean): { diagnos
     ...(classificationSkip ? [`Craft Knowledge scenario classification skipped (${classificationSkip}); configure one ready model profile to resume.\n`] : []),
     ...(!classificationFailure && failedClassifications ? [`Craft Knowledge scenario classification failed for ${failedClassifications} Claim(s)${stageSummary ? ` at ${stageSummary}` : ""}.\n`] : []),
     ...sourceIssues,
+    ...auxiliaryIssues,
   ].join("");
-  return { diagnostics, exit_code: once && (sessionCollectionFailure !== null || sessionEvidenceIncomplete || experienceFailure !== null || experienceReconciliation || knowledgeFailure !== null || pendingKnowledge.length > 0 || classificationFailure !== null || classificationSkipped || failedClassifications > 0 || sourceIssues.length > 0) ? 1 : null };
+  return { diagnostics, exit_code: once && (sessionCollectionFailure !== null || sessionEvidenceIncomplete || experienceFailure !== null || experienceReconciliation || knowledgeFailure !== null || pendingKnowledge.length > 0 || classificationFailure !== null || classificationSkipped || failedClassifications > 0 || sourceIssues.length > 0 || auxiliaryIssues.length > 0) ? 1 : null };
 }
 
 export function learningFailureKind(error: unknown): string { return failureKind(error); }

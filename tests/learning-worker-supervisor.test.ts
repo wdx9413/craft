@@ -71,10 +71,15 @@ test("worker supervisor starts one worker per free component and skips overlappi
     const stopContextAfterRelease = await startWorker(f, { mode: "component-context-agent", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
     assert.deepEqual(JSON.parse(launches[2]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--surface", "component-context-complete"]);
     assert.equal(launches[2]!.env.CRAFT_STORAGE_OWNER, "context");
-    assert.equal(launches[2]!.env.CRAFT_LEARNING_COMPONENTS, "experience,knowledge");
-    assert.equal(launches[2]!.env.CRAFT_LEARNING_COMPONENT_LOCKS_HELD, "experience,knowledge");
+    assert.equal(launches[2]!.env.CRAFT_LEARNING_COMPONENTS, "experience,knowledge,memory,notes");
+    assert.equal(launches[2]!.env.CRAFT_LEARNING_COMPONENT_LOCKS_HELD, "experience,knowledge,memory,notes");
     await stopContextAfterRelease?.();
     await stopContext?.();
+    const stopOwnedContext = await startWorker(f, { mode: "component-context-owned", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
+    assert.deepEqual(JSON.parse(launches[3]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--surface", "component-context-complete"]);
+    assert.equal(launches[3]!.env.CRAFT_STORAGE_OWNER, "context");
+    assert.equal(launches[3]!.env.CRAFT_LEARNING_COMPONENTS, "experience,knowledge,memory,notes");
+    await stopOwnedContext?.();
     assert.equal(await startWorker(f, { mode: "component-memory-daily", server_entrypoint: f.server, env: {} }), undefined);
     assert.equal(await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: { CRAFT_CONTINUOUS_LEARNING: "0" } }), undefined);
     assert.equal(await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, exists: () => false, on_failure: value => failures.push(value) }), undefined);

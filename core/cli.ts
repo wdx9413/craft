@@ -30,6 +30,9 @@ import { digestJson } from "./digest.ts";
 import { contextReadinessDoctor } from "./context-readiness-doctor.ts";
 import { ActivationProofKernel } from "./activation-proof.ts";
 import { routeOwnedService } from "./application/owner-service.ts";
+import { installLearningWorkerLaunchAgent, learningWorkerLaunchAgentStatus, startLearningWorkerLaunchAgent,
+  stopLearningWorkerLaunchAgent, uninstallLearningWorkerLaunchAgent, upgradeLearningWorkerLaunchAgent,
+  type LaunchAgentDependencies } from "./learning-worker-launch-agent.ts";
 
 
 
@@ -72,8 +75,11 @@ Usage:
   craft kit list                List installed Capability Kits
   craft kit install-builtins    Install reviewed built-in Capability Kits
   craft kit describe <id>       Describe the shared Skill/MCP/CLI/plugin surface
-  craft notes locations record <path> <description> [--host local|cloud] [--promote]  记住目录与含义
-  craft notes locations promote <id>      将观察到的位置提升为正式可召回条目
+  craft notes locations record <path> <description> [--host local|cloud] [--promote]  记录候选；晋升须异步资格审查并确认
+  craft notes locations candidates [--limit N] 查看待审查或待确认的 Note 候选
+  craft notes locations qualify [--limit N]   运行一轮 Notes 资格审查
+  craft notes locations confirm <id> --expected-version N  确认已通过资格审查的 Note
+  craft notes locations promote <id>      晋升已资格审查并确认的目录 Note
   craft notes locations resolve --by-desc <text>   用描述找目录（仅正式条目可召回）
   craft notes locations resolve --by-path <path>   查某目录已存的含义
   craft notes locations list [--status observed|promoted] [--host local|cloud]  列出目录备注
@@ -104,6 +110,8 @@ Usage:
   craft worker tick             Run one safe local maintenance cycle
   craft worker run [options]    Run the persistent local maintenance worker
   craft worker status           Read the last local worker heartbeat
+  craft learning-worker launch-agent <install|status|start|stop|resume|upgrade|uninstall> (resume aliases start)
+                                Manage the explicitly installed macOS learning Worker
   craft command plan --argv '["node","-v"]'
                                 Plan a cross-platform command without executing
   craft command run --argv '["node","-v"]'
@@ -410,7 +418,7 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
   } finally { if (!owned) store.close(); }
 }
 
-export async function main(args = process.argv.slice(2)): Promise<void> {
+export async function main(args = process.argv.slice(2), launchAgentDependencies: LaunchAgentDependencies = {}): Promise<void> {
   const productIndex = args.indexOf("--product");
   const requested = option(args, "--product") ?? process.env.CRAFT_STORAGE_OWNER;
   if (productIndex >= 0 && !option(args, "--product")) throw new Error("--product requires a capability owner");
@@ -427,6 +435,13 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     const manifest = args[0] === "storage-backup" ? backupOwner ? await backupOwnerStorage(craftPaths().root, backupOwner, output) : await backupStorage(craftPaths().root, output) : await restoreStorage(archive!, output);
     stdout.write(`${JSON.stringify({ output, files: manifest.entries.length, schema: manifest.schema, original_root: manifest.source_root, owner: manifest.owner ?? null, external_references: manifest.external_references ?? [], revalidation_required: manifest.relocation?.revalidation_required ?? [], activation: args[0] === "storage-restore" ? manifest.owner ? manifest.external_references?.length ? "restored_owner_requires_external_owners_and_revalidation" : "restored_owner_ready; revalidate dependent formal proofs" : "staged_restore; place at original_root offline before starting Craft" : "backup_only" })}\n`);
     return;
+  }
+  if (args[0] === "learning-worker" && args[1] === "launch-agent" && !args.includes("--help") && !args.includes("-h")) {
+    await dispatchMain(args, undefined, launchAgentDependencies);
+    return;
+  }
+  if (args[0] === "learning-worker" && !args.includes("--help") && !args.includes("-h")) {
+    throw new Error("learning-worker requires the launch-agent subcommand");
   }
   if (args.includes("--help") || args.includes("-h") || ["version", "paths"].includes(args[0] ?? "")) return dispatchMain(args);
   const paths = craftPaths();
@@ -451,7 +466,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   } finally { store.close(); }
 }
 
-async function dispatchMain(args: string[], owned?: CliRuntime): Promise<void> {
+async function dispatchMain(args: string[], owned?: CliRuntime, launchAgentDependencies: LaunchAgentDependencies = {}): Promise<void> {
   const paths = craftPaths();
   // Keys pasted in the Workbench live in an owner-only secrets.json; make them
   // visible to the model gateway once, without ever overriding a real env var.
@@ -466,6 +481,21 @@ async function dispatchMain(args: string[], owned?: CliRuntime): Promise<void> {
   }
   if (args[0] === "version") {
     stdout.write(`${VERSION}\n`);
+    return;
+  }
+  if (args[0] === "learning-worker" && args[1] === "launch-agent") {
+    let result: unknown;
+    switch (args[2]) {
+      case "install": result = installLearningWorkerLaunchAgent(launchAgentDependencies); break;
+      case "status": result = learningWorkerLaunchAgentStatus(launchAgentDependencies); break;
+      case "start":
+      case "resume": result = startLearningWorkerLaunchAgent(launchAgentDependencies); break;
+      case "stop": result = stopLearningWorkerLaunchAgent(launchAgentDependencies); break;
+      case "upgrade": result = upgradeLearningWorkerLaunchAgent(launchAgentDependencies); break;
+      case "uninstall": result = uninstallLearningWorkerLaunchAgent(launchAgentDependencies); break;
+      default: throw new Error("learning-worker launch-agent requires install, status, start, stop, resume, upgrade, or uninstall");
+    }
+    stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
   if (args[0] === "doctor") {
@@ -668,6 +698,16 @@ async function dispatchMain(args: string[], owned?: CliRuntime): Promise<void> {
         if (subcommand === "record") {
           if (!locationArgs[2] || !locationArgs[3]) throw new Error("notes locations record requires <path> and <description>");
           result = service.craftNotesLocationRecord({ path: locationArgs[2], description: locationArgs[3], host_kind: host, promote });
+        } else if (subcommand === "candidates") {
+          result = service.craftNotesCandidateList({ limit: option(args, "--limit") });
+        } else if (subcommand === "qualify") {
+          result = service.craftNotesQualificationRun({ limit: option(args, "--limit") });
+        } else if (subcommand === "confirm") {
+          if (!locationArgs[2]) throw new Error("notes locations confirm requires <id>");
+          const expectedVersion = option(args, "--expected-version");
+          if (!expectedVersion || !Number.isSafeInteger(Number(expectedVersion)) || Number(expectedVersion) < 1)
+            throw new Error("notes locations confirm requires --expected-version <positive integer>");
+          result = service.craftNotesConfirm({ id: locationArgs[2], expected_version: Number(expectedVersion) });
         } else if (subcommand === "promote") {
           if (!locationArgs[2]) throw new Error("notes locations promote requires <id>");
           result = service.craftNotesLocationPromote({ id: locationArgs[2] });
@@ -677,7 +717,7 @@ async function dispatchMain(args: string[], owned?: CliRuntime): Promise<void> {
           result = service.craftNotesLocationResolve({ description: byDesc, path: byPath, limit: option(args, "--limit") });
         } else if (subcommand === "list") {
           result = service.craftNotesLocationList({ status: option(args, "--status"), host_kind: host, limit: option(args, "--limit") });
-        } else throw new Error("notes locations requires record, promote, resolve, or list.");
+        } else throw new Error("notes locations requires record, candidates, qualify, confirm, promote, resolve, or list.");
       }
       else throw new Error(`Unknown command: ${args.join(" ")}`);
       stdout.write(`${JSON.stringify(result, null, 2)}\n`);

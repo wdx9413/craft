@@ -12,6 +12,7 @@ import type { JsonObject } from "../core/infrastructure/store.ts";
 import { McpStdioClient, boundedPollInterval, learningComponents, learningMcpRequestTimeoutMs, learningPollInterval, learningTaskCandidateResult, learningWorkFound, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
+import { openCapabilityService } from "../core/interfaces/mcp/runtime.ts";
 
 test("reports Knowledge recovery waits without including untrusted detail", () => {
   for (const [key, label] of [["task_candidates", "candidate"], ["evaluation_cases", "evaluation"]] as const) {
@@ -478,9 +479,98 @@ test("standalone learning modes call only their mounted Knowledge or Experience 
   assert.deepEqual(learningComponents({}), ["experience", "knowledge"]);
   assert.deepEqual(learningComponents({ CRAFT_LEARNING_COMPONENTS: "knowledge" }), ["knowledge"]);
   assert.deepEqual(learningComponents({ CRAFT_LEARNING_COMPONENTS: "experience,knowledge" }), ["experience", "knowledge"]);
-  for (const invalid of ["", "memory", "experience,experience", "experience, memory"]) {
+  assert.deepEqual(learningComponents({ CRAFT_LEARNING_COMPONENTS: "memory,notes" }), ["memory", "notes"]);
+  for (const invalid of ["", "not-a-component", "experience,experience", "memory, memory"]) {
     assert.throws(() => learningComponents({ CRAFT_LEARNING_COMPONENTS: invalid }), /CRAFT_LEARNING_COMPONENTS/u);
   }
+});
+
+test("Memory and Notes owners process their own queues as independent worker passes", async () => {
+  const calls: Array<{ owner: string; name: string; args?: JsonObject }> = [];
+  const client: ExperienceLearningClient = { async call(name, args) { calls.push({ owner: "context", name, args }); return {}; } };
+  const memoryClient: ExperienceLearningClient = { async call(name, args) { calls.push({ owner: "memory", name, args }); return { processed: 1, promoted: 0, pending: 1, items: [{ status: "waiting" }] }; } };
+  const notesClient: ExperienceLearningClient = { async call(name, args) { calls.push({ owner: "notes", name, args }); return { processed: 1, qualified: 1, waiting: 0, rejected: 0, items: [{ status: "qualified" }] }; } };
+  let collectedSessions = false;
+  const result = await runLearningTick({ client, memory_client: memoryClient, notes_client: notesClient, env: directWorkerEnv }, false, ["memory", "notes"], async () => {
+    collectedSessions = true; return { status: "completed" };
+  });
+  assert.deepEqual(calls, [
+    { owner: "memory", name: "craft_memory_promotion_run", args: { limit: 100 } },
+    { owner: "notes", name: "craft_notes_qualification_run", args: { limit: 100 } },
+  ]);
+  assert.equal(collectedSessions, false);
+  assert.deepEqual(result.memory_promotion, { processed: 1, promoted: 0, pending: 1, items: [{ status: "waiting" }] });
+  assert.deepEqual(result.notes_qualification, { processed: 1, qualified: 1, waiting: 0, rejected: 0, items: [{ status: "qualified" }] });
+  assert.deepEqual(learningTickStatus(result, true), { diagnostics: "", exit_code: null });
+});
+
+test("Memory and Notes worker failures are bounded and visible in one-shot diagnostics", async () => {
+  const result = await runLearningTick({ client: { async call() { throw new TypeError("private candidate content"); } }, env: directWorkerEnv }, false, ["memory", "notes"]);
+  assert.equal(JSON.stringify(result).includes("private candidate content"), false);
+  assert.deepEqual(learningTickStatus(result, true), {
+    diagnostics: "Craft Memory promotion is blocked (TypeError).\nCraft Notes qualification is blocked (TypeError).\n", exit_code: 1,
+  });
+});
+
+test("Memory-only and Notes-only worker processes run their own due pass", async () => {
+  const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
+  const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
+  for (const component of ["memory", "notes"] as const) {
+    const dataDir = mkdtempSync(join(tmpdir(), `craft-${component}-worker-cli-`));
+    const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
+      ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"),
+      CRAFT_LEARNING_COMPONENTS: component, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
+      CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
+    }, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "";
+    child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+    try {
+      const exitCode = await new Promise<number>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", code => resolve(code ?? -1));
+      });
+      assert.equal(exitCode, 0, stderr);
+      const result = JSON.parse(stdout.trim()) as JsonObject;
+      assert(result.memory_promotion || result.notes_qualification);
+      if (component === "memory") {
+        assert(result.memory_promotion);
+        assert.equal(result.notes_qualification, undefined);
+      } else {
+        assert(result.notes_qualification);
+        assert.equal(result.memory_promotion, undefined);
+      }
+    } finally { rmSync(dataDir, { recursive: true, force: true }); }
+  }
+});
+
+test("an owned Experience worker without a Context owner skips Context session collection", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "craft-owned-experience-worker-"));
+  const experience = await openCapabilityService("experience", { CRAFT_DATA_DIR: dataDir });
+  experience.close();
+  const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
+  const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_LEARNING_COMPONENTS: "experience", CRAFT_CONTINUOUS_LEARNING: "0",
+  }, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  try {
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", code => resolve(code ?? -1));
+    });
+    assert.equal(exitCode, 0, stderr);
+    const result = JSON.parse(stdout.trim()) as JsonObject;
+    assert.equal(result.session_collection, undefined);
+    assert.equal(result.failure_kind, undefined);
+  } finally { rmSync(dataDir, { recursive: true, force: true }); }
+});
+
+test("auxiliary-worker diagnostics never echo unrecognized reasons", () => {
+  assert.deepEqual(learningTickStatus({ memory_promotion: { status: "failed" }, notes_qualification: { status: "blocked", reason: "private/path" } }, false), {
+    diagnostics: "Craft Memory promotion failed.\nCraft Notes qualification is blocked.\n", exit_code: null,
+  });
 });
 
 test("Knowledge worker surfaces a storage page only when migration made progress", async () => {
@@ -659,7 +749,7 @@ test("one-shot worker skips MCP and model work when another process owns its com
       child.once("error", reject);
       child.once("close", code => resolve(code ?? -1));
     });
-    assert.equal(exitCode, 0, stderr);
+    assert.equal(exitCode, 75, stderr);
     assert.deepEqual(JSON.parse(stdout.trim()), { status: "skipped_locked", components: ["knowledge"] });
     assert.equal(stderr, "");
   } finally { rmSync(dataDir, { recursive: true, force: true }); }

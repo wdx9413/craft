@@ -42,6 +42,45 @@ test("storage maintenance accepts bounded blocked-reason summaries and rejects i
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("storage maintenance bounds legacy owner-record responses and holds the cursor on blocked pages", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-storage-owner-compat-")), path = join(root, "state.json");
+  try {
+    const calls: JsonObject[] = [];
+    await runKnowledgeStorageReconcileOnce({ async call(_name, args = {}) { calls.push(args); return page; } }, path);
+    const result = await runKnowledgeStorageReconcileOnce({ async call(_name, args = {}) {
+      calls.push(args);
+      return { status: "blocked", phase: "owner_records", examined: 1, migrated: 0, skipped: 0,
+        blocked: [{ kind: "knowledge_source", id: "private-id", reason: "owner_record_verification_failed" }],
+        has_more: true, next_cursor: "bmV4dA", dry_run: false };
+    } }, path);
+    assert.equal(result.status, "blocked");
+    assert.equal(result.phase, "owner_records");
+    assert.equal(result.blocked_count, 1);
+    assert.equal(JSON.stringify(result).includes("private-id"), false);
+    assert.equal(calls[1]?.cursor, page.next_cursor);
+    assert.equal(JSON.parse(await readFile(path, "utf8")).cursor, page.next_cursor);
+    const compact = await runKnowledgeStorageReconcileOnce({ async call(_name, args = {}) {
+      calls.push(args);
+      return { status: "blocked", phase: "owner_records", examined: 1, migrated: 0, skipped: 0, blocked: [],
+        summary_only: true, blocked_count: 1, blocked_reasons: { owner_record_verification_failed: 1 },
+        has_more: false, next_cursor: null, dry_run: false };
+    } }, path);
+    assert.equal(compact.blocked_count, 1);
+    assert.equal(JSON.stringify(compact).includes("owner_record_verification_failed"), false);
+    assert.equal(JSON.parse(await readFile(path, "utf8")).cursor, page.next_cursor);
+    const missingReason = await runKnowledgeStorageReconcileOnce({ async call() {
+      return { status: "blocked", phase: "owner_records", examined: 1, migrated: 0, skipped: 0,
+        blocked: [{ kind: "knowledge_source", id: "opaque-id" }], has_more: false, next_cursor: null, dry_run: false };
+    } }, path);
+    assert.equal(missingReason.blocked_count, 1);
+    assert.equal(JSON.stringify(missingReason).includes("opaque-id"), false);
+    await assert.rejects(runKnowledgeStorageReconcileOnce({ async call() {
+      return { status: "blocked", phase: "owner_records", examined: 1, migrated: 0, skipped: 0,
+        blocked: [null], has_more: false, next_cursor: null, dry_run: false };
+    } }, path), /invalid page/u);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("storage maintenance retries a writer-locked page without advancing its persisted cursor", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-storage-lock-retry-")), path = join(root, "state.json");
   try {

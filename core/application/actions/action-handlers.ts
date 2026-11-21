@@ -57,6 +57,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_notes_observe_directory: service.craftNotesObserveDirectory.bind(service),
       craft_notes_observe_file: service.craftNotesObserveFile.bind(service),
       craft_notes_candidate_list: service.craftNotesCandidateList.bind(service),
+      craft_notes_qualification_run: service.craftNotesQualificationRun.bind(service),
       craft_notes_confirm: service.craftNotesConfirm.bind(service),
       craft_notes_revoke: service.craftNotesRevoke.bind(service),
       craft_notes_resolve: service.craftNotesResolve.bind(service),
@@ -536,7 +537,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_knowledge_expiry_sweep: service.knowledgeExpirySweep.bind(service), craft_knowledge_conflict_resolve: service.knowledgeConflictResolve.bind(service),
       craft_knowledge_source_list: service.knowledgeSourceList.bind(service), craft_knowledge_source_transition: service.knowledgeSourceTransition.bind(service),
       craft_memory_ledger_remember: service.memoryLedgerRemember.bind(service), craft_memory_ledger_get: service.memoryLedgerGet.bind(service), craft_memory_ledger_list: service.memoryLedgerList.bind(service), craft_memory_ledger_transition: service.memoryLedgerTransition.bind(service), craft_memory_ledger_compat_bind: service.memoryLedgerCompatBind.bind(service),
-      craft_memory_candidate_propose: service.memoryCandidatePropose.bind(service), craft_memory_candidate_review: service.memoryCandidateReview.bind(service), craft_memory_ledger_remember_approved: service.memoryLedgerRememberApproved.bind(service), craft_memory_capture_user_statement: service.memoryCaptureUserStatement.bind(service), craft_memory_capture_observed_fact: service.memoryCaptureObservedFact.bind(service),
+      craft_memory_candidate_propose: service.memoryCandidatePropose.bind(service), craft_memory_candidate_review: service.memoryCandidateReview.bind(service), craft_memory_ledger_remember_approved: service.memoryLedgerRememberApproved.bind(service), craft_memory_capture_user_statement: service.memoryCaptureUserStatement.bind(service), craft_memory_capture_observed_fact: service.memoryCaptureObservedFact.bind(service), craft_memory_promotion_run: service.memoryPromotionRun.bind(service),
       craft_memory_policy_save: service.memoryPolicySave.bind(service), craft_memory_policy_get: service.memoryPolicyGet.bind(service),
       craft_memory_governance: (a) => {
         if (a.action === "topics") return service.memoryGovernance.topicSuggestions(a);

@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { nativeAsyncVerificationResults, withClaudeCommandResult, withCodexCommandResult } from "../core/interfaces/codex-hook-command-result.ts";
-import { hookVerificationGap, HookSignalSanitizer } from "../core/interfaces/codex-hook-signal-sanitizer.ts";
+import { HookSignalSanitizer } from "../core/interfaces/codex-hook-signal-sanitizer.ts";
+import { hookVerificationGap } from "../core/hook-verification-gap.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 
@@ -131,7 +132,7 @@ test("Hook CLI keeps the legacy store and non-learning member Stop path", async 
   const root = mkdtempSync(join(tmpdir(), "craft-hook-legacy-entry-"));
   try {
     const data = join(root, "data"), store = await new CraftStore(craftPaths(data)).open(); store.close();
-    const env = { ...process.env, CRAFT_DATA_DIR: data, CRAFT_CONTINUOUS_LEARNING: "0" };
+    const env: NodeJS.ProcessEnv = { ...process.env, CRAFT_DATA_DIR: data, CRAFT_CONTINUOUS_LEARNING: "0" };
     delete env.CRAFT_STORAGE_OWNER;
     const output = execFileSync(process.execPath, ["--experimental-strip-types",
       fileURLToPath(new URL("../bin/craft-codex-hook.ts", import.meta.url)), "--member", "knowledge"], {

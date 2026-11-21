@@ -8,12 +8,12 @@ import { COMPONENT_SURFACE_NAMES, McpServer, domainSurfaceOf, surfaceToolNames }
 import { componentForSurface, surfaceToolNames as resolveSurfaceToolNames } from "../core/interfaces/mcp/surface-registry.ts";
 import { assertExecutionHostMode, defaultExecutionHostMode, executionHostDescriptor } from "../core/host-protocol.ts";
 import { CraftService, VERSION } from "../core/service.ts";
+import { TOOLS } from "../core/mcp/tool-catalog.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { dataSpaceId } from "../core/data-space.ts";
 import { MCP_PRODUCT_NAMES, productSurfaceOf, resolveMcpProductMode } from "../core/interfaces/mcp/product-launch.ts";
 import { RELEASE_PRODUCTS, releaseProductVersion } from "../core/release-catalog.ts";
-import { TOOLS } from "../core/mcp/tool-catalog.ts";
 
 const components = RELEASE_PRODUCTS.map((product) => product.name);
 const internalComponentSurfaces = ["component-context", "component-quality", "component-knowledge", "component-memory", "component-capability", "component-skill-quality", "component-experience", "component-codebase"] as const;
@@ -40,6 +40,15 @@ test("MCP launch modes resolve the bounded Context Agent product and retained in
 
 test("the notes-owned surface exposes the device discovery step required by the Notes workflow", () => {
   assert(surfaceToolNames("component-notes-owned").includes("craft_notes_location_list_devices"));
+  assert(surfaceToolNames("component-notes-owned").includes("craft_notes_qualification_run"));
+});
+
+test("the Memory-owned surface exposes asynchronous promotion only to its owner", () => {
+  const ownedTools = surfaceToolNames("component-memory-owned", TOOLS);
+  assert(ownedTools.includes("craft_memory_promotion_run"));
+  assert(ownedTools.includes("craft_memory_session_finalize"));
+  assert(!surfaceToolNames("component-memory-daily").includes("craft_memory_promotion_run"));
+  assert(surfaceToolNames("component-memory-daily").includes("craft_memory_policy_save"));
 });
 
 test("the internal Context worker retains the complete component surfaces", () => {
@@ -48,7 +57,7 @@ test("the internal Context worker retains the complete component surfaces", () =
     const missing = surfaceToolNames(component).filter(name => !context.has(name));
     assert.deepEqual(missing, [], `craft-context must include every ${component} tool`);
   }
-  for (const name of ["craft_context_open", "craft_knowledge_source_register", "craft_knowledge_session_evidence_record", "craft_memory_ledger_transition", "craft_procedure_host_control", "craft_codebase_impact_query"])
+  for (const name of ["craft_context_open", "craft_knowledge_source_register", "craft_knowledge_session_evidence_record", "craft_memory_ledger_transition", "craft_memory_promotion_run", "craft_notes_qualification_run", "craft_procedure_host_control", "craft_codebase_impact_query"])
     assert(context.has(name), `craft-context must expose ${name}`);
   assert(context.has("craft_knowledge_semantic_review_packet"), "craft-context must expose the exact Knowledge review packet");
   assert(context.has("craft_learning_cycle_task_evidence_list"), "the Context learning worker must reconcile archived session evidence");

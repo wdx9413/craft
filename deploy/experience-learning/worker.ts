@@ -26,7 +26,7 @@ import { acquireLearningWorkerLocks } from "../../core/interfaces/learning-worke
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 
 export interface ExperienceLearningClient { call(name: string, args?: JsonObject): Promise<JsonObject> }
-export type LearningComponent = "experience" | "knowledge";
+export type LearningComponent = "experience" | "knowledge" | "memory" | "notes";
 
 async function collectCodexSessionsWithLock(client: ExperienceLearningClient, recheckVerified: boolean): Promise<JsonObject> {
   const release = await acquireLearningWorkerLocks(craftPaths(dataRoot()).runtimeDir, ["codex-session-collection"], { runtime_version: CRAFT_RELEASE_VERSION });
@@ -51,6 +51,8 @@ export interface DistillationDependencies {
   client: ExperienceLearningClient;
   experience_client?: ExperienceLearningClient;
   knowledge_client?: ExperienceLearningClient;
+  memory_client?: ExperienceLearningClient;
+  notes_client?: ExperienceLearningClient;
   providers?: readonly ModelProviderSpec[];
   transport?: ModelTransport;
   contentLanguage?: string;
@@ -196,15 +198,16 @@ export function learningComponents(env: NodeJS.ProcessEnv = process.env): Learni
   const raw = env.CRAFT_LEARNING_COMPONENTS;
   if (raw === undefined) return ["experience", "knowledge"];
   const values = raw.split(",").map(value => value.trim());
-  if (!values.length || values.some(value => value !== "experience" && value !== "knowledge") || new Set(values).size !== values.length) {
-    throw new Error("CRAFT_LEARNING_COMPONENTS must be a unique comma-separated list of experience and/or knowledge");
+  if (!values.length || values.some(value => !["experience", "knowledge", "memory", "notes"].includes(value)) || new Set(values).size !== values.length) {
+    throw new Error("CRAFT_LEARNING_COMPONENTS must be a unique comma-separated list of experience, knowledge, memory, and/or notes");
   }
   return values as LearningComponent[];
 }
 
 export async function runLearningTick(deps: DistillationDependencies, syncKnowledge = false,
   components: readonly LearningComponent[] = ["experience", "knowledge"],
-  runSessionCollection?: () => Promise<JsonObject>): Promise<JsonObject> {
+  runSessionCollection?: () => Promise<JsonObject>, dueComponents: readonly LearningComponent[] = components,
+  runExperiencePass = true): Promise<JsonObject> {
   const env = deps.env ?? process.env;
   const paths = craftPaths(dataRoot(env));
   const config = await loadConfig(paths);
@@ -214,9 +217,9 @@ export async function runLearningTick(deps: DistillationDependencies, syncKnowle
   const passOrder = includesExperience && includesKnowledge
     ? await nextLearningPassOrder(deps.learning_pass_cursor_file ?? join(paths.runtimeDir, "learning-pass-order.json"))
     : includesKnowledge ? "knowledge_first" : "experience_first";
-  return runResilientLearningTick({
+  const result = await runResilientLearningTick({
     pass_order: passOrder,
-    ...(runSessionCollection ? { run_session_collection: runSessionCollection } : {}),
+    ...(runSessionCollection && (includesExperience || includesKnowledge) ? { run_session_collection: runSessionCollection } : {}),
     run_experience_pass: () => includesExperience ? runOnce({ ...configuredDeps, client: deps.experience_client ?? deps.client }) : Promise.resolve({ processed: 0, outcomes: [], skipped: true }),
     run_knowledge_pass: async () => {
       const storage = syncKnowledge ? await runKnowledgeStorageReconcileOnce((deps.knowledge_client ?? deps.client), join(paths.knowledgeDir, "storage-migration-state.json")) : null;
@@ -255,7 +258,16 @@ export async function runLearningTick(deps: DistillationDependencies, syncKnowle
       return { ...ingestion, ...(adjudication.status !== "idle" && adjudication.status !== "skipped" ? { session_adjudication: adjudication } : {}),
         ...(adjudication.status === "failed" ? { failure_kind: adjudication.failure_kind } : {}) };
     },
-  }, includesKnowledge);
+  }, includesKnowledge, includesExperience && runExperiencePass);
+  if (components.includes("memory") && dueComponents.includes("memory")) {
+    try { result.memory_promotion = await (deps.memory_client ?? deps.client).call("craft_memory_promotion_run", { limit: 100 }); }
+    catch (error) { result.memory_promotion = { status: "blocked", reason: learningFailureKind(error), processed: 0 }; }
+  }
+  if (components.includes("notes") && dueComponents.includes("notes")) {
+    try { result.notes_qualification = await (deps.notes_client ?? deps.client).call("craft_notes_qualification_run", { limit: 100 }); }
+    catch (error) { result.notes_qualification = { status: "blocked", reason: learningFailureKind(error), processed: 0 }; }
+  }
+  return result;
 }
 
 export function mcpCommandOptions(env: NodeJS.ProcessEnv = process.env): { command: string; args: string[] } {
@@ -561,7 +573,13 @@ async function main(): Promise<void> {
   const experienceEnabled = components.includes("experience"), knowledgeEnabled = components.includes("knowledge");
   const experiencePollMs = boundedPollInterval(process.env.CRAFT_EXPERIENCE_POLL_MS, 30_000, 1_000, 300_000);
   const knowledgePollMs = boundedPollInterval(process.env.CRAFT_KNOWLEDGE_POLL_MS, 300_000, 60_000, 3_600_000);
-  const pollMs = experienceEnabled ? experiencePollMs : knowledgePollMs;
+  const memoryPollMs = boundedPollInterval(process.env.CRAFT_MEMORY_POLL_MS, 300_000, 30_000, 3_600_000);
+  const notesPollMs = boundedPollInterval(process.env.CRAFT_NOTES_POLL_MS, 300_000, 30_000, 3_600_000);
+  const enabledPollIntervals = [
+    ...(experienceEnabled ? [experiencePollMs] : []), ...(knowledgeEnabled ? [knowledgePollMs] : []),
+    ...(components.includes("memory") ? [memoryPollMs] : []), ...(components.includes("notes") ? [notesPollMs] : []),
+  ];
+  const pollMs = Math.min(...enabledPollIntervals);
   const inheritedLocks = new Set((process.env.CRAFT_LEARNING_COMPONENT_LOCKS_HELD ?? "").split(",").map(value => value.trim()).filter(Boolean));
   const lockComponents = components.filter(component => !inheritedLocks.has(component));
   let releaseWorkerLocks: (() => Promise<void>) | null = null;
@@ -574,6 +592,7 @@ async function main(): Promise<void> {
     }
     if (!releaseWorkerLocks) {
       process.stdout.write(`${JSON.stringify({ status: "skipped_locked", components: lockComponents })}\n`);
+      process.exitCode = 75;
       return;
     }
   }
@@ -581,6 +600,9 @@ async function main(): Promise<void> {
   let stopping = false;
   let lastKnowledgeSync = 0;
   let lastVerifiedRecheck = 0;
+  let lastMemoryPass = 0;
+  let lastNotesPass = 0;
+  let lastExperiencePass = 0;
   let idleExperiencePasses = 0;
   let nextPollMs = pollMs;
   let wakePoll: (() => void) | null = null;
@@ -604,17 +626,32 @@ async function main(): Promise<void> {
     do {
       const syncKnowledge = knowledgeEnabled && Date.now() - lastKnowledgeSync >= knowledgePollMs;
       const recheckVerified = Date.now() - lastVerifiedRecheck >= 300_000;
+      const now = Date.now();
+      const memoryDue = components.includes("memory") && now - lastMemoryPass >= memoryPollMs;
+      const notesDue = components.includes("notes") && now - lastNotesPass >= notesPollMs;
+      const experienceDue = experienceEnabled && now - lastExperiencePass >= experiencePollMs;
+      const dueComponents = components.filter(component => (component === "memory" && memoryDue) || (component === "notes" && notesDue));
       const modelHost = process.env.CRAFT_LEARNING_MODEL_HOST;
       const modelTransport = createLearningModelTransport(modelHost);
-      const result = await runLearningTick({ client, ...(owned ? { experience_client: owned.experience, knowledge_client: owned.knowledge } : {}), ...(modelTransport ? { transport: modelTransport } : {}) }, syncKnowledge, components,
-        modelHost === "claude-code" || (owned && !owned.hasContext) ? undefined : () => collectCodexSessionsWithLock(client, recheckVerified));
+      const collectsSessions = (experienceEnabled || knowledgeEnabled) && modelHost !== "claude-code" && !(owned && !owned.hasContext);
+      const result = await runLearningTick({ client, ...(owned ? { experience_client: owned.experience, knowledge_client: owned.knowledge, memory_client: owned.memory, notes_client: owned.notes } : {}), ...(modelTransport ? { transport: modelTransport } : {}) }, syncKnowledge, components,
+        collectsSessions ? () => collectCodexSessionsWithLock(client, recheckVerified) : undefined, dueComponents, experienceDue);
+      if (experienceDue && !result.failure_kind) lastExperiencePass = now;
+      if (memoryDue) lastMemoryPass = now;
+      if (notesDue) lastNotesPass = now;
       const sessionCollection = result.session_collection as JsonObject | undefined;
       if (recheckVerified && sessionCollection && !sessionCollection.failure_kind && sessionCollection.status !== "skipped_locked"
         && (sessionCollection.evidence_reconciliation as JsonObject | undefined)?.status !== "partial") lastVerifiedRecheck = Date.now();
       const idlePass = Number(experienceEnabled) * Number(!learningWorkFound(result));
       idleExperiencePasses = idlePass * (idleExperiencePasses + 1);
       const experienceNextPollMs = learningPollInterval(experiencePollMs, idleExperiencePasses);
-      nextPollMs = experienceNextPollMs * Number(experienceEnabled) + knowledgePollMs * Number(!experienceEnabled);
+      const activePollIntervals = [
+        ...(experienceEnabled ? [experienceNextPollMs] : []),
+        ...(knowledgeEnabled ? [knowledgePollMs] : []),
+        ...(components.includes("memory") ? [memoryPollMs] : []),
+        ...(components.includes("notes") ? [notesPollMs] : []),
+      ];
+      nextPollMs = Math.min(...activePollIntervals);
       const knowledge = result.knowledge as JsonObject | null;
       if (syncKnowledge && !knowledge?.failure_kind) lastKnowledgeSync = Date.now();
       const status = learningTickStatus(result, once);

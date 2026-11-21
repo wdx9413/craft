@@ -125,6 +125,16 @@
       ]
     },
     {
+      "name": "hook-verification-gap",
+      "include": [
+        "core/hook-verification-gap.ts"
+      ],
+      "tests": [
+        "tests/hook-verification-gap.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "context-notes",
       "include": [
         "core/context-notes.ts"
@@ -253,6 +263,17 @@
       ],
       "tests": [
         "tests/learning-worker-diagnostic.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "learning-worker-launch-agent",
+      "include": [
+        "core/learning-worker-launch-agent.ts"
+      ],
+      "tests": [
+        "tests/learning-worker-launch-agent.test.ts",
+        "tests/learning-worker-launch-agent-cli.test.ts"
       ],
       "branches": true
     },

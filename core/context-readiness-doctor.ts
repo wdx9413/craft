@@ -1,5 +1,5 @@
 import { catalogOwner } from "./infrastructure/owned-catalog.ts";
-import { hookVerificationGap, type HookHostReadiness } from "./interfaces/codex-hook-signal-sanitizer.ts";
+import { hookVerificationGap, type HookHostReadiness } from "./hook-verification-gap.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ActivationProofKernel } from "./activation-proof.ts";

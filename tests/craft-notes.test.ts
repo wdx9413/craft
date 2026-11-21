@@ -4,7 +4,7 @@ import type { JsonObject } from "../core/infrastructure/store.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CraftNotesRegistry } from "@craft/craft-notes";
+import { CraftNotesLocationRegistry, CraftNotesRegistry } from "@craft/craft-notes";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { migrateCraftNotesLocationNotes } from "../core/craft-notes-migration.ts";
@@ -52,6 +52,7 @@ test("the same path stays device-local and a repo identity never broadens typed 
   const { store, root, notes } = await fixture();
   try {
     const directory = notes.observeDirectory({ path: "/work/craft", device_id: "local", pin: true, project_id: "repo-a" }).note as { id: string };
+    notes.qualifyCandidates({ limit: 100 });
     notes.confirm({ id: directory.id, expected_version: Number(store.find("craft_note", directory.id)?.version) });
     assert.throws(() => notes.observeDirectory({ path: "/work/craft", device_id: "missing", pin: true }), /active device/u);
     const directoryNotes = (query: Record<string, unknown>) => notes.resolve(query).items.filter(item => item.subject_type === "directory");
@@ -77,7 +78,8 @@ test("Notes registry validates versions and limits, filters lists, and keeps dis
     assert.throws(() => notes.resolve({ limit: 1001 }), /limit/u);
     notes.createDevice({ id: "laptop", note: "停用设备", status: "disabled" });
     assert.equal(notes.resolve({ device_id: "laptop" }).items.length, 0);
-    notes.createDevice({ id: "laptop", note: "重新启用设备", status: "active" });
+    new CraftNotesLocationRegistry(store).setDeviceStatus("laptop", "active");
+    notes.createDevice({ id: "laptop", note: "重新启用设备" });
     assert.equal(notes.resolve({ device_id: "laptop" }).items[0]?.text, "重新启用设备");
     const pinned = notes.observeDirectory({ path: "/work/revoked", pin: true });
     const candidate = pinned.note as { id: string; version: number };
@@ -94,18 +96,21 @@ test("directory evidence is deduplicated by task/session, threshold only creates
     assert.throws(() => notes.observeDirectory({ path: "relative", pin: true }), /absolute/u);
     let first = notes.observeDirectory({ path: "/work/app", task_id: "t1", session_id: "s1", outcome: "completed", note: "backend root" });
     assert.equal(first.eligible, false);
-    notes.observeDirectory({ path: "/work/app", task_id: "t1", session_id: "s1", outcome: "completed" });
+    notes.observeDirectory({ path: "/work/app", task_id: "t1", session_id: "s1", outcome: "completed", note: "backend root" });
     notes.observeDirectory({ path: "/work/app", task_id: "t2", session_id: "s1", outcome: "completed" });
     first = notes.observeDirectory({ path: "/work/app", task_id: "t3", session_id: "s2", outcome: "completed" });
-    assert.equal(first.eligible, true);
+    assert.equal(first.eligible, false);
+    assert.equal(first.reason, "awaiting_async_qualification");
     assert.equal(notes.candidateList().items.length, 1);
     assert.equal(notes.resolve({ device_id: "local", path: "/work/app" }).items.some(item => item.subject_type === "directory"), false);
     const candidate = (first.note as { id: string; version: number });
-    const confirmed = notes.confirm({ id: candidate.id, expected_version: candidate.version, note: "核心后端架构" });
+    assert.equal(notes.qualifyCandidates({ limit: 100 }).qualified, 1);
+    const confirmed = notes.confirm({ id: candidate.id, expected_version: Number(store.find("craft_note", candidate.id)?.version), note: "核心后端架构" });
     assert.equal(confirmed.status, "confirmed");
     assert.equal(notes.resolve({ device_id: "local", path: "/work/app" }).items.find(item => item.subject_type === "directory")?.text, "核心后端架构");
     const pinned = notes.observeDirectory({ path: "/work/pinned", pin: true, note: "pinned directory" });
-    assert.equal(pinned.eligible, true);
+    assert.equal(pinned.eligible, false);
+    assert.equal(pinned.reason, "awaiting_async_qualification");
     assert.equal(notes.candidateList({ limit: 1 }).items.length, 1);
     assert.throws(() => notes.confirm({ id: "missing", expected_version: 1 }), /Unknown craft_note/u);
     const revoked = notes.revoke({ id: candidate.id, expected_version: confirmed.version, revoked_by: "user", reason: "obsolete" });
@@ -123,6 +128,7 @@ test("file notes only accept explicit evidence and caller metadata, then require
     const result = notes.observeFileReference({ path: "/work/config.toml", pin: true, note: "production config, read only", metadata: { size: 10, modified_at: "2026-11-01T00:00:00Z" } });
     const id = (result.note as { id: string }).id;
     assert.equal((result.note as { freshness: string }).freshness, "current");
+    notes.qualifyCandidates({ limit: 100 });
     const confirmed = notes.confirm({ id, expected_version: Number(store.find("craft_note", id)?.version) });
     assert.equal(confirmed.status, "confirmed");
     const stale = notes.observeFileReference({ path: "/work/config.toml", pin: true, metadata: { size: 11, modified_at: "2026-11-02T00:00:00Z" } });
@@ -160,8 +166,8 @@ test("only attested successful task completion contributes deduplicated usage to
         session_id: sessionId, turn_id: turnId, include_codebase: false }) as Record<string, unknown>;
       const receipt = context.receipt as { id: string };
       service.learningCycleFinalize({ host: "codex", task_id: taskId, session_id: sessionId, turn_id: turnId,
-        context_receipt_id: receipt.id, verification_outcome: outcome, verification_ref: `test:${turnId}`, verified,
-        observed_paths: [repo] });
+        project_root: repo, context_receipt_id: receipt.id, verification_outcome: outcome, verification_ref: `test:${turnId}`, verified,
+        observed_paths: ["verify.ts"] });
     };
     await completed("task-fail", "session-1", "turn-fail", "failed", true);
     await completed("task-not-verified", "session-1", "turn-unverified", "passed", false);
@@ -174,7 +180,8 @@ test("only attested successful task completion contributes deduplicated usage to
     assert.equal(store.list("craft_note_usage", 20).length, 3);
     const candidate = (service.craftNotesCandidateList({}).items as JsonObject[])[0]! as JsonObject & { id: string; version: number; project_id: string; subject_key: string };
     assert.equal(candidate.subject_key, `local:${repo}`);
-    service.craftNotesConfirm({ id: candidate.id, expected_version: candidate.version, note: "核心项目目录" });
+    service.craftNotesQualificationRun({ limit: 100 });
+    service.craftNotesConfirm({ id: candidate.id, expected_version: Number(store.find("craft_note", candidate.id)?.version), note: "核心项目目录" });
     assert.equal((service.craftNotesResolve({ device_id: "local", project_id: candidate.project_id, path: repo }).items as JsonObject[]).length, 2);
     const injected = await service.contextOpen({ project_root: repo, query: "项目目录用途", include_codebase: false,
       task_id: "task-context", session_id: "session-3", turn_id: "turn-context" }) as unknown as Record<string, unknown>;
@@ -190,6 +197,7 @@ test("only attested successful task completion contributes deduplicated usage to
     const filePath = join(repo, "prod.yaml");
     const fileCandidate = service.craftNotesObserveFile({ path: filePath, device_id: "local", project_id: injectedScope,
       pin: true, note: "生产只读配置" }).note as { id: string; version: number };
+    service.craftNotesQualificationRun({ limit: 100 });
     service.craftNotesConfirm({ id: fileCandidate.id, expected_version: Number(store.find("craft_note", fileCandidate.id)?.version) });
     const defaultNotes = await service.contextOpen({ project_root: repo, query: "读取配置说明", include_codebase: false,
       task_id: "task-file-default", session_id: "session-3", turn_id: "turn-file-default" }) as Record<string, unknown>;
@@ -219,6 +227,7 @@ test("scoped Craft Notes do not leak across devices or paths in Context resoluti
     notes.createDevice({ id: "laptop", note: "笔记本设备" });
     notes.createDevice({ id: "local", note: "测试用本地设备" });
     const directory = notes.observeDirectory({ path: repo, device_id: "local", pin: true }).note as { id: string; version: number };
+    notes.qualifyCandidates({ limit: 100 });
     notes.confirm({ id: directory.id, expected_version: Number(store.find("craft_note", directory.id)?.version) });
     service.craftNotesLocationDisableDevice({ id: "laptop" });
     const open = async (deviceId: string, notePaths?: string[]) => service.contextOpen({ project_root: repo,

@@ -79,6 +79,15 @@ test("disabled capture writes nothing, while governed capture reports its actual
   } finally { await f.close(); }
 });
 
+test("asynchronous Memory promotion is exposed through the service-owned gate", async () => {
+  const f = await fixture();
+  try {
+    const result = f.service.memoryPromotionRun({ limit: 10 });
+    assert.equal(result.processed, 0);
+    assert.equal(result.promoted, 0);
+  } finally { await f.close(); }
+});
+
 test("expiry changes only elapsed reviewed claims and retains content references", async () => {
   const f = await fixture();
   try {

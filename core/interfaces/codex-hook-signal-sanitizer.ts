@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
+import type { HookSignalGapReason } from "../hook-verification-gap.ts";
 
 export type HookSignal = {
   readonly id: string;
@@ -12,7 +13,7 @@ export type HookSignal = {
   readonly scenario_key?: string;
   readonly coarse_scenario_key?: string;
   readonly observed_path?: string;
-  readonly gap_reason?: "pending_background" | "unsupported_native_envelope";
+  readonly gap_reason?: HookSignalGapReason;
 };
 
 type HookInput = Record<string, unknown>;
@@ -26,7 +27,6 @@ const EDIT = /(?:^|[;&|\s])(?:apply_patch|git\s+apply|sed\s+-i|perl\s+-pi)\b/iu;
 export function isHookVerificationCommand(command: string): boolean {
   return (VERIFY.test(command.trim()) || NODE_TEST.test(command.trim())) && !/[;&|`$\n]/u.test(command);
 }
-
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -105,26 +105,4 @@ export class HookSignalSanitizer {
     const stable = { tool, kind, outcome, command_digest: command ? digest(command) : null, path, tool_use_id: text(input.tool_use_id) ?? text(input.toolUseId) ?? randomUUID() };
     return { id: `codex_hook_signal_${digest(stable).slice(-20)}`, tool, kind, outcome, digest: digest(stable), verifier: command ? digest(command) : null, ...(path ? { observed_path: path } : {}) };
   }
-}
-
-
-export type HookHostReadiness = {
-  authentication?: "available" | "unavailable" | "unknown";
-  hook_trust?: "trusted" | "untrusted" | "unknown";
-};
-/** Missing Hook events never establish absent authentication or untrusted configuration. */
-export function hookVerificationGap(journal: HookInput | null, readiness: HookHostReadiness = {}): HookInput {
-  const authentication = readiness.authentication ?? "unknown", trust = readiness.hook_trust ?? "unknown";
-  const signals = Array.isArray(journal?.signals) ? journal.signals as HookInput[] : [];
-  const lastEdit = signals.findLastIndex(item => item.kind === "edit");
-  const pending = new Map<unknown, unknown>();
-  for (const signal of signals.slice(lastEdit + 1)) {
-    if (signal.kind === "verification_gap") pending.set(signal.verifier, signal.gap_reason);
-    else if (signal.kind === "verification") pending.delete(signal.verifier);
-  }
-  const reason = authentication === "unavailable" ? "host_auth_unavailable" : trust === "untrusted" ? "hook_untrusted"
-    : journal?.verification_outcome === "passed" || journal?.verification_outcome === "failed" ? null
-    : [...pending.values()].includes("pending_background") ? "pending_background"
-    : pending.size ? "unsupported_native_envelope" : "verification_unobserved";
-  return { reason, host_authentication: authentication, hook_trust: trust };
 }

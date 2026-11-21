@@ -162,12 +162,20 @@ test("stale legacy promotion and revocation do not split the Notes and compatibi
     assert.throws(() => service.craftNotesLocationPromote({ id: place.id, expected_version: Number(note.version) + 1 }), /stale Note/u);
     assert.equal(store.find("craft_notes_location", String(place.id))?.status, "observed");
     assert.equal(store.find("craft_note", String(place.id))?.status, "candidate");
-    service.craftNotesLocationPromote({ id: place.id, expected_version: Number(note.version) });
-    const confirmed = store.find("craft_note", String(place.id))!;
-    assert.throws(() => service.craftNotesLocationRevoke({ id: place.id, expected_version: Number(confirmed.version) + 1,
-      revoked_by: "user", reason: "stale" }), /stale Note/u);
-    assert.equal(store.find("craft_notes_location", String(place.id))?.status, "promoted");
-    assert.equal(store.find("craft_note", String(place.id))?.status, "confirmed");
+    assert.throws(() => service.craftNotesLocationPromote({ id: place.id, expected_version: Number(note.version) }), /asynchronous qualification/u);
+    assert.throws(() => service.craftNotesLocationPromote({ id: place.id }), /asynchronous qualification/u);
+    const find = store.find.bind(store);
+    store.find = ((...args: Parameters<typeof store.find>) => {
+      const current = find(...args);
+      return args[0] === "craft_note" && args[1] === String(place.id) && current ? { ...current, version: undefined } : current;
+    }) as typeof store.find;
+    try { assert.throws(() => service.craftNotesLocationPromote({ id: place.id }), /asynchronous qualification/u); }
+    finally { store.find = find; }
+    assert.equal(store.find("craft_notes_location", String(place.id))?.status, "observed", "a pending Notes candidate cannot partially promote its location");
+    assert.throws(() => service.craftNotesLocationPromote({ id: "missing-note" }), /without its owned Note candidate/u);
+    service.craftNotesQualificationRun({ limit: 10 });
+    assert.equal(store.find("craft_note", String(place.id))?.status, "candidate", "async qualification never confirms a Note automatically");
+    assert.equal(store.find("craft_notes_location", String(place.id))?.status, "observed");
   } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

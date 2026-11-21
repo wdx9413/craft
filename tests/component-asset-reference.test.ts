@@ -17,7 +17,7 @@ test("exact asset reads distinguish storage failure, expiry and withdrawn source
   const resolve = (reference: unknown) => assets.inspect("memory", { ...args, action: "resolve", reference });
   try {
     store.create("knowledge_source", "source", source); store.create("memory_ledger", "memory", memory);
-    const reference = assets.inspect("memory", { ...args, action: "reference", version: 1 }).reference;
+    const reference = assets.inspect("memory", { ...args, action: "reference", version: 1 }).reference as JsonObject;
     assert.equal(resolve(reference).status, "resolved");
     assert.equal(resolve({ ...reference, scope: { kind: "global", id: "other" } }).status, "denied");
     assert.equal(resolve({ ...reference, id: "missing" }).status, "missing");

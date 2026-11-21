@@ -24,6 +24,7 @@ const TASK_TOOLS: Record<ContextToolIntent, string[]> = {
 };
 
 export const CONTEXT_ROUTED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "craft_notes_qualification_run",
   ...Object.values(TASK_TOOLS).flat(),
   "craft_activation_proof_doctor", "craft_context_doctor", "craft_context_usage_statusline", "craft_capability_iteration_plan", "craft_capability_iteration_gaps", "craft_lsp_readiness",
   ...ACTIVE_TOOLS.filter(tool => tool.name.startsWith("craft_codebase_")).map(tool => tool.name),

@@ -22,27 +22,36 @@ export async function runKnowledgeStorageReconcileOnce(client: KnowledgeLearning
     cursor = state.cursor as string | null;
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   const result = await client.call("craft_knowledge_storage_reconcile", { max_records: 500, summary_only: true, ...(cursor ? { cursor } : {}) });
-  const summaryOnly = result.summary_only === true;
+  const legacyOwnerRecords = result.phase === "owner_records" && result.summary_only !== true;
+  const rawBlocked = Array.isArray(result.blocked) ? result.blocked as JsonObject[] : [];
+  const legacyReasons = legacyOwnerRecords ? rawBlocked.reduce<Record<string, number>>((counts, item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Knowledge storage migration returned an invalid page");
+    const reason = String(item.reason ?? "owner_record_verification_failed");
+    counts[reason] = (counts[reason] ?? 0) + 1;
+    return counts;
+  }, {}) : {};
+  const summaryOnly = result.summary_only === true || legacyOwnerRecords;
   const hasBlockedReasons = result.blocked_reasons !== null && typeof result.blocked_reasons === "object" && !Array.isArray(result.blocked_reasons);
-  const blockedCount = Number(summaryOnly ? result.blocked_count : Array.isArray(result.blocked) ? result.blocked.length : -1);
-  const blockedReasons = summaryOnly && hasBlockedReasons
-    ? Object.values(result.blocked_reasons as JsonObject).map(Number) : [];
-  if (!["partial", "completed"].includes(String(result.status)) || !Array.isArray(result.blocked) || typeof result.has_more !== "boolean"
+  const summaryBlockedCount = legacyOwnerRecords ? result.blocked_count ?? rawBlocked.length : result.blocked_count;
+  const blockedCount = Number(summaryOnly ? summaryBlockedCount : rawBlocked.length);
+  const blockedReasons = summaryOnly ? Object.values((hasBlockedReasons ? result.blocked_reasons : legacyReasons) as JsonObject).map(Number) : [];
+  const blockedRecords = legacyOwnerRecords ? [] : rawBlocked;
+  if (!["partial", "completed", "blocked"].includes(String(result.status)) || !Array.isArray(result.blocked) || typeof result.has_more !== "boolean"
     || !Number.isSafeInteger(result.examined) || Number(result.examined) < 0 || Number(result.examined) > 500
     || !Number.isSafeInteger(result.migrated) || Number(result.migrated) < 0 || Number(result.migrated) > Number(result.examined)
     || !Number.isSafeInteger(result.skipped) || Number(result.skipped) < 0 || Number(result.skipped) > Number(result.examined)
-    || result.phase !== undefined && !["records", "content"].includes(String(result.phase))
+    || result.phase !== undefined && !["records", "content", "owner_records"].includes(String(result.phase))
     || result.retired_content !== undefined && (!Number.isSafeInteger(result.retired_content) || Number(result.retired_content) < 0 || Number(result.retired_content) > Number(result.examined))
     || !Number.isSafeInteger(blockedCount) || blockedCount < 0 || blockedCount > Number(result.examined)
-    || summaryOnly && (!hasBlockedReasons || result.blocked.length !== 0 || !blockedReasons.every(count => Number.isSafeInteger(count) && count >= 0)
+    || summaryOnly && (!hasBlockedReasons && !legacyOwnerRecords || blockedRecords.length !== 0 || !blockedReasons.every(count => Number.isSafeInteger(count) && count >= 0)
       || blockedReasons.reduce((sum, count) => sum + count, 0) !== blockedCount)
-    || !summaryOnly && result.blocked.length !== blockedCount || result.dry_run === true
+    || result.dry_run === true
     || !result.has_more && result.next_cursor !== null
     || result.has_more && (typeof result.next_cursor !== "string" || !CURSOR.test(result.next_cursor) || result.next_cursor === cursor)) throw new Error("Knowledge storage migration returned an invalid page");
   const failureKinds = summaryOnly && result.blocked_failure_kinds && typeof result.blocked_failure_kinds === "object"
     && !Array.isArray(result.blocked_failure_kinds) ? result.blocked_failure_kinds as JsonObject : {};
   const retryableBlocked = Number(failureKinds.write_lock ?? 0) > 0;
-  const next = retryableBlocked ? cursor : result.has_more ? result.next_cursor as string : null;
+  const next = result.status === "blocked" || retryableBlocked ? cursor : result.has_more ? result.next_cursor as string : null;
   if (next !== cursor) {
     try { const parent = lstatSync(dirname(stateFile)); if (parent.isSymbolicLink() || !parent.isDirectory()) throw new Error("Knowledge storage state directory must be regular"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }

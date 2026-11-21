@@ -39,6 +39,7 @@
 | [0033](0033-experience-runbooks-are-governed-procedures.md) | 经验手册属于 Experience Procedure；Context 编排捕获和召回，Notes 只存位置短备注 |
 | [0034](0034-codex-context-plugin-self-evolution-plan.md) | Codex 的 craft-context 是入口；Value Gate 场景无关，自进化状态机归 craft-context，内核保持薄 |
 | [0035](0035-craft-context-learning-scope-and-data-boundary.md) | Craft Context 学习遵循最小持久化与作用域晋级 |
+| [0036](0036-learning-worker-outlives-host.md) | 学习 Worker 生命周期独立于 Host；各子能力保留自己的晋级门槛 |
 
 ## 与技术文档的关系
 
@@ -60,3 +61,4 @@
 | 0033 | [Experience / Eval](../technical/modules/experience-eval.md)、[Context 成员](../technical/modules/context-members.md) |
 | 0034 | [通用自进化缺口分析](../research/2026-11-18-general-self-evolution-gap-analysis.md)、[自进化 Mod](../technical/modules/self-evolution-mod.md) |
 | 0035 | [Codex 自进化理想态规划](../product/craft-context-codex-self-evolution-ideal-state.zh-CN.md)、[Craft Context 接入](../technical/modules/craft-context.md) |
+| 0036 | [持久化自进化 Worker 设计稿](../superpowers/specs/2026-11-21-durable-learning-worker-design.md)、[Worker 部署说明](../../deploy/experience-learning/README.md) |

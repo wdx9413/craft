@@ -7,8 +7,7 @@ import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { MCP_PREFERRED_PROTOCOL_VERSION } from "../../core/distribution-and-first-run.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
-import { CraftStore } from "../../core/infrastructure/store.ts";
-import { craftPaths } from "../../core/infrastructure/paths.ts";
+import { openCapabilityService } from "../../core/interfaces/mcp/runtime.ts";
 
 const root = resolve(import.meta.dirname, "..", "..");
 import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
@@ -33,15 +32,18 @@ async function smoke(name: string): Promise<void> {
   const data = await mkdtemp(join(tmpdir(), `${name}-smoke-`));
   let contextCodebaseSummary: Record<string, unknown> | undefined;
   const persistedCodebaseSummary = async (workspaceId: string, indexId: string): Promise<Record<string, unknown> | undefined> => {
-    const indexStore = await new CraftStore(craftPaths(data)).open({ skipLegacyPartitionMigration: true });
+    const codebase = await openCapabilityService("codebase", { ...process.env, CRAFT_DATA_DIR: data });
     try {
-      const state = indexStore.list("codebase_repository_state", 100, item =>
+      const state = codebase.store.list("codebase_repository_state", 100, item =>
         item.workspace_id === workspaceId && item.index_id === indexId)[0];
       return state?.summary as Record<string, unknown> | undefined;
-    } finally { indexStore.close(); }
+    } finally { codebase.close(); }
   };
   const repo = join(data, "repo");
   if (name === "craft-codebase" || name === "craft-context") {
+    // Pre-create the owner catalog before the MCP child starts so both processes see the same storage layout.
+    const owner = await openCapabilityService(name === "craft-context" ? "context" : "codebase", { ...process.env, CRAFT_DATA_DIR: data });
+    owner.close();
     await mkdir(repo);
     execFileSync("git", ["-C", repo, "init", "-q"]);
     await writeFile(join(repo, "main.py"), "def value():\n    return 1\n\ndef caller():\n    return value()\n\ndef flow_target(flag, items):\n    if flag:\n        for item in items:\n            if item:\n                return value()\n    return 0\n");
@@ -76,6 +78,11 @@ async function smoke(name: string): Promise<void> {
       }
     });
     child.once("error", (error) => { for (const waiter of pending.values()) waiter.reject(error); pending.clear(); });
+    child.once("close", (code, signal) => {
+      const error = new Error(`${name}:MCP child exited (${code ?? signal ?? "unknown"}); stderr=${childStderr}`);
+      for (const waiter of pending.values()) waiter.reject(error);
+      pending.clear();
+    });
     let nextId = 0;
     const request = (method: string, params?: Record<string, unknown>, timeoutMs = 5_000): Promise<Record<string, any>> => {
       const id = ++nextId;
@@ -197,16 +204,15 @@ async function smoke(name: string): Promise<void> {
       const expectedWorkerCalls = new Set(["craft_knowledge_storage_reconcile"]);
       let observed = new Set<string>();
       let observedAll = new Set<string>();
-      for (let attempt = 0; attempt < 100 && observed.size < expectedWorkerCalls.size; attempt++) {
-        const store = await new CraftStore(craftPaths(data)).open();
-        try {
-          const events = store.list("trace_event", 10_000);
+      const context = await openCapabilityService("context", { ...process.env, CRAFT_DATA_DIR: data });
+      try {
+        for (let attempt = 0; attempt < 100 && observed.size < expectedWorkerCalls.size; attempt++) {
+          const events = context.store.list("trace_event", 10_000);
           observedAll = new Set(events.map(event => String(event.operation_id)));
           observed = new Set([...observedAll].filter(operation => expectedWorkerCalls.has(operation)));
+          if (observed.size < expectedWorkerCalls.size) await new Promise(resolveDelay => setTimeout(resolveDelay, 50));
         }
-        finally { store.close(); }
-        if (observed.size < expectedWorkerCalls.size) await new Promise(resolveDelay => setTimeout(resolveDelay, 50));
-      }
+      } finally { context.close(); }
       assert.deepEqual(observed, expectedWorkerCalls, `packaged Context MCP must start its background learning pass; operations=${JSON.stringify([...observedAll].slice(0, 20))}; stderr=${childStderr}`);
     }
     if (name === "craft-codebase" || name === "craft-context") {

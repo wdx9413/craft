@@ -42,6 +42,10 @@ export class CognitiveWriteCoordinator {
     return new MemoryCapture(this.memory, () => this.sources.installBuiltins(), this.evidenceRecord).captureObservedFact(args);
   }
 
+  processObservedPromotions(args: JsonObject = {}): JsonObject {
+    return new MemoryCapture(this.memory, () => this.sources.installBuiltins(), this.evidenceRecord).processObservedPromotions(args);
+  }
+
   sweepExpiredClaims(args: JsonObject = {}): JsonObject {
     const synchronized = new KnowledgeClaimGovernance(this.store).synchronize(args);
     const expired = (synchronized.affected as JsonObject[]).filter(claim => claim.status === "expired");

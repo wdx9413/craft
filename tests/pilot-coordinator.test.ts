@@ -514,8 +514,13 @@ test("a path escaping a registered project cannot fall back to another project's
     const billing = join(f.root, "billing");
     await mkdir(registered); await mkdir(billing);
     f.service.workspaceResolveOrCreate({ root_path: registered });
+    f.service.craftNotesCreateDevice({ id: "local", note: "Local Notes device." });
     const record = f.service.craftNotesLocationRecord({ path: billing, description: "用户服务" });
-    f.service.craftNotesLocationPromote({ id: record.id });
+    f.service.craftNotesQualificationRun({ limit: 10 });
+    const candidate = f.store.find("craft_note", String(record.id));
+    assert(candidate);
+    f.service.craftNotesConfirm({ id: String(record.id), expected_version: Number(candidate.version) });
+    f.service.craftNotesLocationPromote({ id: record.id, expected_version: Number(f.store.find("craft_note", String(record.id))?.version) });
     const input = `修改 ${registered}/../other 的用户服务`;
     const session = asSession(f.service.pilotSessionOpen({ input }) as JsonObject);
     const result = f.service.pilotTurnAuto({ session_id: session.id, input }) as JsonObject;

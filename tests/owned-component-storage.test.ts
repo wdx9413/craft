@@ -215,12 +215,20 @@ test("Notes, Eval and Context can write their own records with only their indepe
     ]);
     const note = observed?.note;
     assert(note);
-    const [confirmed, resolved, revoked, duringRevocation] = ownedMcp<{ status?: string; items?: Array<{ id: string }> }>("notes", notesRoot, [
-      ["craft_notes_confirm", { id: note.id, expected_version: note.version }],
+    const [qualified, candidates] = ownedMcp<{ status?: string; processed?: number; items?: Array<{ id: string; version?: number }> }>("notes", notesRoot, [
+      ["craft_notes_qualification_run", { limit: 100 }],
+      ["craft_notes_candidate_list", { limit: 100 }],
+    ]);
+    const currentCandidate = candidates?.items?.find(item => item.id === note.id);
+    const [confirmed] = ownedMcp<{ status?: string; version?: number; items?: Array<{ id: string }> }>("notes", notesRoot, [
+      ["craft_notes_confirm", { id: note.id, expected_version: currentCandidate?.version }],
+    ]);
+    const [resolved, revoked, duringRevocation] = ownedMcp<{ status?: string; items?: Array<{ id: string }> }>("notes", notesRoot, [
       ["craft_notes_resolve", { device_id: "local", path: project }],
-      ["craft_notes_revoke", { id: note.id, expected_version: note.version + 1, revoked_by: "fixture", reason: "Retired." }],
+      ["craft_notes_revoke", { id: note.id, expected_version: Number(confirmed?.version), revoked_by: "fixture", reason: "Retired." }],
       ["craft_notes_resolve", { device_id: "local", path: project }],
     ]);
+    assert.equal(qualified?.processed, 1);
     assert.equal(confirmed?.status, "confirmed");
     assert(resolved?.items?.some(item => item.id === note.id));
     assert.equal(revoked?.status, "revoked");

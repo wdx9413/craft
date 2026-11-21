@@ -510,10 +510,13 @@ export class CraftService extends ServiceFoundation {
   memoryCaptureProjectCorrection(args: JsonObject): JsonObject { return this.cognitiveWrites.captureProjectCorrection(args); }
   /** Internal Host Hook path for bounded, automatically classified stable facts. */
   memoryCaptureObservedFact(args: JsonObject): JsonObject { return this.cognitiveWrites.captureObservedFact(args); }
+  memoryPromotionRun(args: JsonObject = {}): JsonObject { return this.cognitiveWrites.processObservedPromotions(args); }
 
   /** Record or reinforce a directory↔description link; see `craft-notes-location.ts`. */
   craftNotesLocationRecord(args: JsonObject): JsonObject {
-    const place = this.craftNotesLocation.record(args);
+    const locationArgs = { ...args };
+    delete locationArgs.promote;
+    const place = this.craftNotesLocation.record(locationArgs);
     try {
       this.craftNotes.observeDirectory({ id: place.id, path: String(args.path), device_id: args.device_id ?? "local",
         note: String(args.description), pin: true, ...(args.project_id === undefined ? {} : { project_id: args.project_id }) });
@@ -521,25 +524,16 @@ export class CraftService extends ServiceFoundation {
       if (!(error instanceof Error) || !/active device with a confirmed Device Note/u.test(error.message)) throw error;
       migrateCraftNotesLocationNotes(this.store);
     }
-    if (args.promote === true) {
-      try {
-        const note = this.store.find("craft_note", String(place.id));
-        if (note) this.craftNotes.confirm({ id: String(place.id), expected_version: Number(note.version ?? 1) });
-      }
-      catch (error) { if (!(error instanceof Error) || !/Unknown craft_note/u.test(error.message)) throw error; }
-    }
-    return place;
+    return args.promote === true ? { ...place, promotion_status: "awaiting_async_qualification" } : place;
   }
   craftNotesLocationPromote(args: JsonObject): JsonObject {
     const id = text(args.id, "id");
     const note = this.store.find("craft_note", id);
-    const expectedVersion = args.expected_version ?? (note ? Number(note.version ?? 1) : undefined);
-    if (note) assertCraftNoteVersion(expectedVersion, note);
+    if (!note) throw new Error("Notes location cannot promote without its owned Note candidate");
+    const expectedVersion = args.expected_version ?? Number(note.version ?? 1);
+    assertCraftNoteVersion(expectedVersion, note);
+    if (note.status !== "confirmed") throw new Error("Notes location requires asynchronous qualification and explicit confirmation before promotion");
     const place = this.craftNotesLocation.promote(args);
-    try {
-      if (note) this.craftNotes.confirm({ id, expected_version: expectedVersion });
-    }
-    catch (error) { if (!(error instanceof Error) || !/Unknown craft_note/u.test(error.message)) throw error; }
     return place;
   }
   /** Automatic reinforcement from real use; never rewrites a description. */
@@ -761,16 +755,49 @@ export class CraftService extends ServiceFoundation {
   evolutionCreationApply(args: JsonObject): JsonObject { return this.creationAdapter.apply(args); }
   evolutionCreationForget(args: JsonObject): JsonObject { return this.creationAdapter.forget(args); }
   craftNotesObserveDirectory(args: JsonObject): JsonObject {
-    const owner = this.storageOwner === "notes" ? undefined : this.ownerServices.get("notes");
-    if (owner && owner !== this) return owner.craftNotesObserveDirectory(args);
-    if (this.capabilityOwned && this.storageOwner !== "notes") throw new Error("Notes owner is unavailable");
+    const owner = this.notesOwner();
+    if (owner) return owner.craftNotesObserveDirectory(args);
     return this.craftNotes.observeDirectory(args);
   }
-  craftNotesObserveFile(args: JsonObject): JsonObject { return this.craftNotes.observeFileReference(args); }
-  craftNotesCandidateList(args: JsonObject = {}): JsonObject { return this.craftNotes.candidateList(args) as unknown as JsonObject; }
-  craftNotesConfirm(args: JsonObject): JsonObject { return this.craftNotes.confirm(args) as unknown as JsonObject; }
-  craftNotesRevoke(args: JsonObject): JsonObject { return this.craftNotes.revoke(args) as unknown as JsonObject; }
-  craftNotesResolve(args: JsonObject): JsonObject { return this.craftNotes.resolve(args) as unknown as JsonObject; }
+  craftNotesObserveFile(args: JsonObject): JsonObject {
+    const owner = this.notesOwner();
+    if (owner) return owner.craftNotesObserveFile(args);
+    return this.craftNotes.observeFileReference(args);
+  }
+  craftNotesCandidateList(args: JsonObject = {}): JsonObject {
+    const owner = this.notesOwner();
+    if (owner) return owner.craftNotesCandidateList(args);
+    return this.craftNotes.candidateList(args) as unknown as JsonObject;
+  }
+  craftNotesQualificationRun(args: JsonObject = {}): JsonObject {
+    const owner = this.notesOwner();
+    if (owner) return owner.craftNotesQualificationRun(args);
+    return this.craftNotes.qualifyCandidates(args) as unknown as JsonObject;
+  }
+  craftNotesConfirm(args: JsonObject): JsonObject {
+    const owner = this.notesOwner();
+    if (owner) return owner.craftNotesConfirm(args);
+    return this.craftNotes.confirm(args) as unknown as JsonObject;
+  }
+  craftNotesRevoke(args: JsonObject): JsonObject {
+    const owner = this.notesOwner();
+    if (owner) return owner.craftNotesRevoke(args);
+    return this.craftNotes.revoke(args) as unknown as JsonObject;
+  }
+  craftNotesResolve(args: JsonObject): JsonObject {
+    const owner = this.notesOwner();
+    if (owner) return owner.craftNotesResolve(args);
+    return this.craftNotes.resolve(args) as unknown as JsonObject;
+  }
+
+  private notesOwner(): CraftService | null {
+    const owner = this.storageOwner === "notes" ? this : this.ownerServices.get("notes");
+    if (owner && owner !== this) return owner;
+    if (this.capabilityOwned) {
+      if (this.storageOwner !== "notes") throw new Error("Notes owner is unavailable");
+    }
+    return null;
+  }
 
   /** Mod kernel: cognitive overlays with a governed draft → approve → active lifecycle. */
   modCreate(args: JsonObject): JsonObject { return this.mods.create(args) as unknown as JsonObject; }

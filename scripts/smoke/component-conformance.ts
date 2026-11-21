@@ -112,8 +112,21 @@ for (const product of selectedProduct ? [selectedProduct] : products) {
       await asset(product, saved.claim, scope);
     } else if (product === "memory") {
       await call("craft_knowledge_bootstrap_install");
-      for (const session of ["fixture-one", "fixture-two"]) await call("craft_memory_capture_user_statement", {
-        content: "Run verification", session_id: session, session_host: "codex", project_scope_id: scope.scope_id, project_root: fixtureProject });
+      await call("craft_memory_policy_save", { mode: "propose", updated_by: "conformance-fixture" });
+      const captures: JsonObject[] = [];
+      for (const session of ["fixture-one", "fixture-two"]) {
+        const captured = await call("craft_memory_capture_observed_fact", {
+          content: "Remember to run verification before delivery.", session_id: session, session_host: "codex", project_scope_id: scope.scope_id, project_root: fixtureProject });
+        const candidate = captured.candidate;
+        assert(candidate?.id, "session Memory capture must produce a durable review candidate");
+        if (candidate.status === "candidate") await call("craft_memory_candidate_review", { candidate_id: candidate.id,
+          decision: "approve", reviewer: "conformance-fixture", reason: "bounded evidence is sufficient for this isolated fixture" });
+        await call("craft_memory_session_finalize", { session_id: session, session_host: "codex", summary: "Fixture verification session ended.", candidate_ids: [candidate.id] });
+        captures.push(candidate);
+      }
+      await call("craft_memory_policy_save", { mode: "governed", min_confidence: "bounded", updated_by: "conformance-fixture" });
+      const promotion = await call("craft_memory_promotion_run", { project_scope_id: scope.scope_id, project_root: fixtureProject, limit: 100 });
+      assert.equal(promotion.processed, captures.length, `the async Memory worker must process both finalized session candidates: ${JSON.stringify(promotion)}`);
       const ledger = await call("craft_memory_ledger_list", scope); assert.equal(ledger.memories.length, 1);
       await asset(product, ledger.memories[0], scope);
       assert.equal((await call("craft_memory_recall", { ...scope, query: "verification" })).items.length, 1);
@@ -141,10 +154,15 @@ for (const product of selectedProduct ? [selectedProduct] : products) {
       const directory = join(root, "notes-project"); await mkdir(directory);
       await call("craft_notes_create_device", { id: "fixture", note: "Fixture device" });
       const observed = await call("craft_notes_observe_directory", { device_id: "fixture", path: directory, note: "Keep verified fixture notes", pin: true });
-      await call("craft_notes_confirm", { id: observed.note.id, expected_version: observed.note.version });
+      const qualification = await call("craft_notes_qualification_run", { limit: 100 });
+      assert.equal(qualification.qualified, 1, "pinned Note must pass asynchronous qualification");
+      const candidates = await call("craft_notes_candidate_list", { limit: 100 });
+      const candidate = candidates.items.find((item: any) => item.id === observed.note.id);
+      assert(candidate);
+      const confirmed = await call("craft_notes_confirm", { id: candidate.id, expected_version: candidate.version });
       const resolvedNotes = (await call("craft_notes_resolve", { device_id: "fixture", path: directory })).items;
       assert.equal(resolvedNotes.filter((item: any) => item.subject_type === "directory").length, 1);
-      await call("craft_notes_revoke", { id: observed.note.id, expected_version: observed.note.version + 1, revoked_by: "fixture", reason: "Fixture retired" });
+      await call("craft_notes_revoke", { id: observed.note.id, expected_version: confirmed.version, revoked_by: "fixture", reason: "Fixture retired" });
       assert.equal((await call("craft_notes_resolve", { device_id: "fixture", path: directory })).items.some((item: any) => item.subject_type === "directory"), false);
     } else if (product === "eval") {
       const defined = await call("craft_evaluation_contract_define", { contract_id: "installed-contract", capability_id: "fixture", capability_version: 1, input_contract: "fixture input", output_contract: "fixture output" });
