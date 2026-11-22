@@ -783,6 +783,7 @@ test("Memory Hook preserves a conditional prohibition through two independent se
       const sessionMemories = f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId }).memories as JsonObject[];
       assert.equal(sessionMemories.length, 1);
       assert.equal(sessionMemories[0]!.content, statement);
+      f.service.memoryPromotionRun({ limit: 100 });
       const projectMemories = f.service.memoryLedgerList({ scope_kind: "project", scope_id: scope.id }).memories as JsonObject[];
       assert.equal(projectMemories.length, index);
       if (index === 1) {
@@ -815,6 +816,32 @@ test("Memory Hook automatically captures only classified stable project facts in
   } finally { await dispose(f); }
 });
 
+test("Memory Hook refuses automatic capture when its project identity differs from Context", async () => {
+  const f = await fixture();
+  const originalResolve = f.service.scopeIdentityResolveProject.bind(f.service);
+  let resolutions = 0;
+  try {
+    f.service.scopeIdentityResolveProject = ((args: JsonObject) => {
+      const result = originalResolve(args);
+      resolutions += 1;
+      if (resolutions !== 2) return result;
+      const identity = result.identity as JsonObject;
+      return { ...result, identity: { ...identity, canonical_scope: { kind: "project", id: "project:other" } } };
+    }) as typeof f.service.scopeIdentityResolveProject;
+    const bridge = new CodexHookBridge(f.service);
+    await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "mismatched-memory-project",
+      prompt: "本项目默认使用 Node.js" });
+    assert.equal(f.service.memoryLedgerList({ scope_kind: "session", scope_id: "mismatched-memory-project", include_history: true }).count, 0);
+    assert.equal(f.store.list("scope_alias", 100, item => item.alias_kind === "path" && item.alias === f.root).length, 1,
+      "Context identity resolution may bind its own path, but the mismatched Memory identity must not be written");
+    assert.equal(f.store.events("codex-hook").some(event => event.event_type === "codex_hook.failed"
+      && (event.payload as JsonObject).member === "memory"), true);
+  } finally {
+    f.service.scopeIdentityResolveProject = originalResolve as typeof f.service.scopeIdentityResolveProject;
+    await dispose(f);
+  }
+});
+
 test("Memory Hook projects explicit captures with bounded summary fields", async () => {
   const f = await fixture();
   try {
@@ -823,7 +850,7 @@ test("Memory Hook projects explicit captures with bounded summary fields", async
     const shortSummary = JSON.parse(String(output.additionalContext)) as JsonObject;
     assert.equal((shortSummary.memory_capture as JsonObject).captured_fact, "深色模式");
     assert.match(String((shortSummary.memory_capture as JsonObject).candidate_id), /^memory_candidate_statement_/u);
-    assert.equal((shortSummary.memory_capture as JsonObject).next_action, "available_for_scoped_context");
+    assert.equal((shortSummary.memory_capture as JsonObject).next_action, "memory_promotion_queued");
     assert.deepEqual((shortSummary.memory_capture as JsonObject).topic_suggestions, []);
     assert.deepEqual((shortSummary.memory_capture as JsonObject).promotions, []);
     const output2 = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "explicit-long", prompt: `/remember: ${"深".repeat(33)}` });
@@ -1101,6 +1128,7 @@ test("Knowledge, Memory and Experience hooks resolve only their named Context me
     assert.equal(sessionMemoryPath, join(sessionStorageDirectory(f.store.paths, "codex", "memory-session"), "memory", "memory.md"));
     assert.equal(existsSync(sessionMemoryPath), true);
     await bridge.handle("memory", { hook_event_name: "SessionEnd", cwd: scope, session_id: "memory-session" });
+    f.service.memoryPromotionRun({ limit: 100 });
     assert.equal(existsSync(sessionMemoryPath), false);
     assert.equal(f.service.memoryLedgerList({ scope_kind: "session", scope_id: "memory-session", include_history: true }).count, 0);
   } finally { await dispose(f); }
@@ -2564,7 +2592,7 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
     const ticket = tickets.find(item => (item.target as JsonObject).id === requestId)!;
     assert.equal((ticket.target as JsonObject).kind, "experience_scenario_classification_request");
     const resultDigest = `sha256:${"a".repeat(64)}`;
-    assert.throws(() => f.service.evaluationModelTicketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    assert.throws(() => f.service.evaluationModelTicketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact model and result Trace/u);
     const requestContext = request.context as JsonObject;
     saveReference({ identity_digest: "sha256:tampered" });
     assert.throws(() => f.service.learningCycleFinalize({ host: requestContext.host, task_id: requestContext.task_id, session_id: requestContext.source_session_id, turn_id: requestContext.turn_id,
@@ -2581,7 +2609,8 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
       expected_version: request.version, status: "classified", result_digest: `sha256:${"b".repeat(64)}` }), /conflicts/u);
     assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope, project_root: f.root,
       expected_version: request.version, status: "unclassified", result_digest: `sha256:${"c".repeat(64)}` }), /conflicts/u);
-    assert.equal((f.service.evaluationModelTicketComplete({ ticket_id: ticket.id, result_digest: resultDigest }).ticket as JsonObject).status, "completed");
+    assert.throws(() => f.service.evaluationModelTicketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact model and result Trace/u);
+    assert.notEqual(f.store.get("evaluation_model_ticket", String(ticket.id)).status, "completed");
     assert.equal((await readdir(pendingDir)).length, 0);
     const requestFile = await readFile(join(experienceDir, "scenario-classification", `${requestId}.json`), "utf8");
     assert.doesNotMatch(requestFile, /must-not-persist/u);

@@ -5720,11 +5720,16 @@ export class CraftService extends ServiceFoundation {
     if (provenance.task_contract !== undefined) assertNoSecret(JSON.stringify(provenance.task_contract), "task_contract");
     const caseId = String(args.case_id ?? id("knowledge_evaluation_case")); const existing = this.store.find("knowledge_evaluation_case", caseId); const identity = { query, scope, expected_claim_ids: expected, ...provenance,
       ...(candidateClaimRefs === undefined ? {} : { candidate_claim_refs: candidateClaimRefs }) };
-    if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge evaluation case idempotency conflict"); return { case: existing, idempotent: true }; }
     const evidence = knowledgeEvaluationEvidence(this.store, identity);
+    const sourceProjectScopes = new Set(evidence.sourceEvidence.map(record => (record.metadata as JsonObject | undefined)?.project_scope_id)
+      .filter((value): value is string => typeof value === "string" && /^project:[A-Za-z0-9_-]{1,96}$/u.test(value)));
+    const boundIdentity = evidence.sourceEvidence.length > 0 && sourceProjectScopes.size === 1
+      && evidence.sourceEvidence.every(record => (record.metadata as JsonObject | undefined)?.project_scope_id === [...sourceProjectScopes][0])
+      ? { ...identity, project_scope_id: [...sourceProjectScopes][0]! } : identity;
+    if (existing) { if (existing.identity_digest !== valueDigest(boundIdentity)) throw new Error("Knowledge evaluation case idempotency conflict"); return { case: existing, idempotent: true }; }
     if (identity.label_source === "host_adjudicated") throw new Error("host_adjudicated labels can only be created from a completed Knowledge adjudication Trace");
     const assessment = assessKnowledgeEvaluationProvenance(identity, evidence.sourceEvidence, evidence.claimEvidence);
-    return { case: this.store.create("knowledge_evaluation_case", caseId, { ...identity, ...assessment, identity_digest: valueDigest(identity) }), idempotent: false };
+    return { case: this.store.create("knowledge_evaluation_case", caseId, { ...boundIdentity, ...assessment, identity_digest: valueDigest(boundIdentity) }), idempotent: false };
   }
   /** The public MCP path owns both the model execution and its Trace. */
   async knowledgeEvaluationCaseAdjudicateManaged(args: JsonObject): Promise<JsonObject> {

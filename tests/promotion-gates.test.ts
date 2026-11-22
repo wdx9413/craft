@@ -176,6 +176,9 @@ test("evaluation run and program grader reject invalid provenance and grade idem
     const candidateRun = service.evaluationRunRecord({ run_id: "reliability-candidate", suite_id: suite.id, split: "held_out",
       subject_type: "workflow", subject_id: other.id, subject_version: other.version, trial_ids: candidateTrials });
     const comparison = service.evaluationCompare({ comparison_id: "reliability-comparison", baseline_run_id: baselineRun.id, candidate_run_id: candidateRun.id });
+    const defaultReliability = service.evaluationReliabilityAssess({ comparison_id: comparison.id });
+    assert.equal(defaultReliability.status, "eligible");
+    assert.equal((defaultReliability.assessment as JsonObject).min_trials, 5);
     assert.equal(service.evaluationReliabilityAssess({ comparison_id: comparison.id, min_trials: 20 }).status, "eligible");
     assert.throws(() => service.evaluationReliabilityAssess({ comparison_id: comparison.id, assessment_id: "invalid-budget-ratio", min_trials: 20,
       max_budget_ratio: -1 }), /max_budget_ratio/);

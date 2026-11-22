@@ -577,22 +577,41 @@ test("Experience classification tickets bind one awaiting project request throug
     const ticket = kernel.issue({ ticket_id: "scenario-ticket", profile_id: profile.id, purpose: "workflow_evolution",
       experience_scenario_classification_request_id: requestId, experience_scenario_classification_scope: scope,
       input_ref: "craft-experience://scenario-classification/request/v1", output_contract_ref: "craft-experience-scenario-classification-v1" }).ticket as JsonObject;
+    const traceId = "scenario-ticket-trace", responseDigest = `sha256:${"e".repeat(64)}`;
+    const fingerprint = stableDigest({ provider: profile.provider, model: profile.model });
+    f.service.trace.start({ trace_id: traceId, task_id: `experience:${requestId}`, operation_id: ticket.id, model_fingerprint: fingerprint });
+    f.service.trace.append({ trace_id: traceId, event_kind: "model.completed", actor: "experience-learning-worker", source: "model-transport:qwen",
+      trust: "observed", operation_id: ticket.id, model_fingerprint: fingerprint, output_refs: [responseDigest], data: {} });
+    f.service.trace.append({ trace_id: traceId, event_kind: "model.result_bound", actor: "experience-learning-worker", source: "craft-experience",
+      trust: "observed", operation_id: ticket.id, input_refs: [responseDigest], output_refs: [requestId, resultDigest], data_digest: stableDigest({ binding: resultDigest }) });
     assert.equal(((ticket.target as JsonObject).kind), "experience_scenario_classification_request");
     f.store.create("evaluation_model_ticket", "wrong-purpose-scenario-ticket", { profile_id: profile.id, profile_version: profile.version,
       purpose: "evaluation", status: "ready_for_adapter", target: ticket.target });
     assert.equal((kernel.ticketList().tickets as JsonObject[]).some(item => item.id === "wrong-purpose-scenario-ticket"), false);
-    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact model and result Trace/u);
     assert.throws(() => f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope: "project:other" }), /cannot change storage scope/u);
+    f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope, status: "classified", result_digest: resultDigest });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: traceId }), /exact model and result Trace/u,
+      "a ticket cannot be completed while its exact result Trace is still running");
+    f.service.trace.finalize({ trace_id: traceId, status: "completed", summary: "verified fixture completion" });
     f.store.save("evaluation_model_ticket", String(ticket.id), { ...ticket, target: { ...ticket.target as JsonObject, scope: "project:other" } });
-    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: traceId }), /exact resolved request/u);
     f.store.save("evaluation_model_ticket", String(ticket.id), { ...f.store.get("evaluation_model_ticket", String(ticket.id)), target: ticket.target });
     f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope, status: "awaiting_model" });
-    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: traceId }), /exact resolved request/u);
     f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope, status: "classified", result_digest: `sha256:${"c".repeat(64)}` });
-    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: traceId }), /exact resolved request/u);
     f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope, status: "classified", result_digest: resultDigest });
-    assert.equal((kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }).ticket as JsonObject).status, "completed");
-    assert.equal(kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }).idempotent, true);
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact model and result Trace/u);
+    const untrustedTraceId = "scenario-ticket-untrusted-trace";
+    f.service.trace.start({ trace_id: untrustedTraceId, task_id: `experience:${requestId}`, operation_id: ticket.id, model_fingerprint: fingerprint });
+    f.service.trace.append({ trace_id: untrustedTraceId, event_kind: "model.completed", actor: "experience-learning-worker", source: "untrusted-adapter",
+      trust: "observed", operation_id: ticket.id, model_fingerprint: fingerprint, output_refs: [responseDigest], data: {} });
+    f.service.trace.append({ trace_id: untrustedTraceId, event_kind: "model.result_bound", actor: "experience-learning-worker", source: "craft-experience",
+      trust: "observed", operation_id: ticket.id, input_refs: [responseDigest], output_refs: [requestId, resultDigest], data: {} });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: untrustedTraceId }), /exact model and result Trace/u);
+    assert.equal((kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: traceId }).ticket as JsonObject).status, "completed");
+    assert.equal(kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: traceId }).idempotent, true);
     f.store.create("experience_scenario_classification_request_ref", "already-done", { scope, status: "classified", request_version: 1,
       identity_digest: `sha256:${"d".repeat(64)}`, result_digest: resultDigest });
     assert.throws(() => kernel.issue({ ticket_id: "already-done-ticket", profile_id: profile.id, purpose: "workflow_evolution",

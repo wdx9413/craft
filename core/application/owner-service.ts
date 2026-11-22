@@ -6,7 +6,7 @@ function memberOwner(member: string): string | undefined {
   if (member === "evolutionProgramMemoryExperienceSubmit") return "experience";
   if (/^(?:workbench)?knowledge|^wiki|^projectKnowledge|^projectBrain|^relation/iu.test(member)) return "knowledge";
   if (/^(?:workbench)?memory|^episodic|^semanticMemory/iu.test(member)) return "memory";
-  if (/^(?:workbench)?experience|^workflowEvolution|^procedure|^workflowTrial|^workbenchWorkflow|^learningCycle/iu.test(member)) return "experience";
+  if (/^(?:workbench)?experience|^evaluationModel|^workflowEvolution|^procedure|^workflowTrial|^workbenchWorkflow|^learningCycle/iu.test(member)) return "experience";
   if (/^codebase/iu.test(member)) return "codebase";
   if (/^craftNotes|^contextNotesResolve/iu.test(member)) return "notes";
   if (/^evaluationContract|^workbenchEvaluation|^evalCampaign|^evalSummary/iu.test(member)) return "eval";

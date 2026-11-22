@@ -7,6 +7,8 @@ import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
 import { ContextResolutionKernel } from "../../core/context-resolution.ts";
 import { ExperienceContribution } from '@craft/capability-experience/contribution';
+import { procedureTaskEffectFixture } from "../../tests/helpers/procedure-task-effect-fixture.ts";
+import { stableDigest } from "../../core/digest.ts";
 
 /**
  * Runtime smoke for the governed experience loop:
@@ -22,9 +24,9 @@ try {
   service.scopeAliasBind({ scope_kind: "project", scope_id: "project:smoke", alias_kind: "path", alias: root });
   const procedureId = "procedure_smoke_weight";
   store.create("experience_procedure", procedureId, { scope: "project:smoke", lifecycle: "candidate",
-    routeable: false, completed_gates: [], trigger: "smoke weight", title: "smoke weight",
-    content_digest: "smoke-weight", procedure_kind: "prompt", acceptance_ref: "file",
-    scenario_signature: {}, identity_digest: "smoke-weight" });
+    routeable: false, candidate_version: 1, completed_gates: [], trigger: "smoke weight", title: "smoke weight",
+    content_digest: stableDigest("smoke-weight"), procedure_kind: "prompt", acceptance_ref: "file",
+    scenario_signature: {}, identity_digest: stableDigest("smoke-weight") });
   const gateEvidence = service.evidenceRecord({ source_type: "program", confidence: "confirmed",
     claim: "smoke gate evidence", locator: "smoke://gate" }) as JsonObject;
   const reader = new ContextResolutionKernel(store, [new ExperienceContribution(store)]);
@@ -34,8 +36,9 @@ try {
   await assert.rejects(reader.resolve(query), /Required Context reference is unavailable/u);
   console.log("PASS candidate is not recallable before gates");
 
+  const qualification = procedureTaskEffectFixture(service, store.get("experience_procedure", procedureId));
   for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
-    service.experienceProcedureGate({ procedure_id: procedureId, stage, passed: true, verdict: "passed",
+    service.experienceProcedureGate({ ...qualification, procedure_id: procedureId, stage, passed: true, verdict: "passed",
       evidence_ids: [String(gateEvidence.id)] });
   }
   const promoted = store.get("experience_procedure", procedureId);

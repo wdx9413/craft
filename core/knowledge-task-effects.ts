@@ -14,6 +14,10 @@ import { createHash } from "node:crypto";
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 const same = (a: unknown, b: unknown) => stableDigest(a) === stableDigest(b);
 const reject = (condition: unknown, message: string): void => { if (!condition) throw new Error(message); };
+const MIN_SCREENING_PAIRS = 3;
+const MIN_EFFECT_DECISION_PAIRS = 5;
+const MIN_EFFECT_DECISION_SESSIONS = 3;
+const MIN_GLOBAL_EFFECT_PROJECTS = 3;
 type ControlledEvaluations = Pick<WorkbenchEvaluations, "get" | "inputs" | "report" | "compare">;
 
 /** Craft owns evidence admission. Eval only runs tasks and computes the paired statistics. */
@@ -36,8 +40,8 @@ export class KnowledgeTaskEffects {
       && claim.content_digest === ref.content_digest && typeof claim.content === "string" && claim.content.trim()
       && knowledgeEvaluationSourceMatches(run, claim, source), "Knowledge effect Claim or Source revision is unavailable");
     const caseRefs = run.case_refs as JsonObject[];
-    reject(Array.isArray(caseRefs) && caseRefs.length >= 21 && caseRefs.length <= 200 && same(caseRefs.map(ref => ref.case_id), run.case_ids)
-      && new Set(caseRefs.map(ref => ref.case_id)).size === caseRefs.length, "Knowledge effect requires 21..200 distinct held-out cases");
+    reject(Array.isArray(caseRefs) && caseRefs.length >= MIN_SCREENING_PAIRS && caseRefs.length <= 200 && same(caseRefs.map(ref => ref.case_id), run.case_ids)
+      && new Set(caseRefs.map(ref => ref.case_id)).size === caseRefs.length, `Knowledge effect screening requires ${MIN_SCREENING_PAIRS}..200 distinct held-out cases`);
     const dependencyMap = new Map<string, JsonObject>();
     const depend = (kind: string, id: unknown) => {
       const value = this.store.find(kind, String(id), undefined, false);
@@ -45,7 +49,7 @@ export class KnowledgeTaskEffects {
       dependencyMap.set(`${kind}:${String(id)}`, { kind, id: value.id, version: value.version, digest: stableDigest(value) });
     };
     depend("knowledge_source", source.id);
-    const sessions = new Set<string>(); let positives = 0, negatives = 0;
+    const sessions = new Map<string, number>(), projects = new Set<string>(); let positives = 0, negatives = 0;
     const cases = caseRefs.map(ref => {
       const item = this.store.get("knowledge_evaluation_case", String(ref.case_id));
       const evidence = knowledgeEvaluationEvidence(this.store, item);
@@ -57,8 +61,16 @@ export class KnowledgeTaskEffects {
       const adjudication = this.store.get("knowledge_evaluation_adjudication", String(item.adjudication_id));
       const contract = knowledgeTaskContract(item.task_contract);
       reject(adjudication.task_contract_digest === stableDigest(contract), "Knowledge task checks were not adjudicated with the independent outcome evidence");
-      reject(typeof item.source_session_id === "string" && !sessions.has(item.source_session_id), "Knowledge effect cases must come from distinct independent sessions");
-      sessions.add(String(item.source_session_id));
+      reject(typeof item.source_session_id === "string" && !!item.source_session_id.trim(), "Knowledge effect case requires an independent source session");
+      const projectScopeId = item.project_scope_id;
+      reject(typeof projectScopeId === "string" && /^project:[A-Za-z0-9_-]{1,96}$/u.test(projectScopeId)
+        && evidence.sourceEvidence.length > 0 && evidence.sourceEvidence.every(record => (record.metadata as JsonObject | undefined)?.project_scope_id === projectScopeId),
+      "Knowledge effect case requires source Evidence bound to its canonical project scope");
+      if (String(claim.scope).startsWith("project:")) reject(projectScopeId === claim.scope, "Project-scoped Knowledge effects cannot use evidence from another project");
+      projects.add(String(projectScopeId));
+      const session = String(item.source_session_id), sessionCases = (sessions.get(session) ?? 0) + 1;
+      reject(sessionCases <= 2, "Knowledge effect allows at most two held-out tasks per source session");
+      sessions.set(session, sessionCases);
       const expected = item.expected_claim_ids as string[];
       if (expected.length === 1 && expected[0] === claim.id) positives++;
       else { reject(expected.length === 0, "Knowledge effect case labels belong to another Claim"); negatives++; }
@@ -66,11 +78,12 @@ export class KnowledgeTaskEffects {
       for (const record of [...evidence.sourceEvidence, ...evidence.claimEvidence.map(entry => entry.evidence)]) depend("evidence", record.id);
       return item;
     });
-    reject(positives >= 20 && negatives >= 1, "Knowledge effect requires at least 20 positive tasks and one negative task");
+    reject(positives >= 2 && negatives >= 1, "Knowledge effect screening requires at least two positive tasks and one negative task");
     const text = JSON.stringify({ claim_id: claim.id, claim_version: claim.version, content_digest: claim.content_digest, source_id: source.id, source_version: source.version, source_digest: source.content_digest, content: claim.content });
     reject(Buffer.byteLength(text) <= 64 * 1024, "Knowledge effect context exceeds the bounded input budget");
     const context: TaskContext = { id: `knowledge-effect-${sha(text).slice(0, 32)}`, text };
-    return { run, claim, claim_record_digest: stableDigest(this.store.find("knowledge_claim", String(claim.id), undefined, false)), source, cases, context, dependencies: [...dependencyMap.values()] };
+    return { run, claim, claim_record_digest: stableDigest(this.store.find("knowledge_claim", String(claim.id), undefined, false)), source, cases,
+      independent_sessions: sessions.size, independent_projects: projects.size, context, dependencies: [...dependencyMap.values()] };
   }
 
   /** Exact Subject.context to use for the candidate; baseline must omit context. */
@@ -91,8 +104,9 @@ export class KnowledgeTaskEffects {
       && typeof left.suite.approved_by === "string" && same(left.runtime, right.runtime), "Knowledge effect suites and runtime contracts must match");
     const metrics = left.suite.metrics as JsonObject | undefined, primary = metrics?.primary as JsonObject | undefined;
     reject(primary?.kind === "binary_pass_rate" && primary.direction === "higher_is_better" && Array.isArray(metrics?.guardrails)
+      && typeof primary.minimum_meaningful_effect === "number" && Number.isFinite(primary.minimum_meaningful_effect) && primary.minimum_meaningful_effect > 0
       && (metrics!.guardrails as JsonObject[]).some(guardrail => guardrail.metric === "duration_ms" && guardrail.required === true && guardrail.comparator === "lte" && typeof guardrail.threshold === "number" && Number.isFinite(guardrail.threshold) && guardrail.threshold > 0),
-    "Knowledge effect requires a binary task metric and an explicit required duration budget");
+    "Knowledge effect requires a binary task metric, a positive predeclared minimum meaningful effect, and an explicit required duration budget");
     const baseline = { ...left.subject }, candidate = { ...right.subject };
     reject(baseline.context === undefined && same(candidate.context, material.context), "Knowledge effect context does not match the exact Claim revision");
     delete baseline.context; delete candidate.context; delete baseline.id; delete candidate.id; delete baseline.version; delete candidate.version;
@@ -136,8 +150,12 @@ export class KnowledgeTaskEffects {
     const comparisonResult = await this.evaluations.compare(baselineId, candidateId);
     const comparison = (comparisonResult.comparison as JsonObject).metrics as Comparison;
     const reasons: string[] = [];
+    if (material.cases.length < MIN_EFFECT_DECISION_PAIRS) reasons.push("fewer_than_five_matched_task_pairs_screening_only");
+    if (material.independent_sessions < MIN_EFFECT_DECISION_SESSIONS) reasons.push("fewer_than_three_independent_sessions");
+    if (material.claim.scope === "global" && material.independent_projects < MIN_GLOBAL_EFFECT_PROJECTS) reasons.push("fewer_than_three_independent_projects_global_shadow_blocked");
     if (comparison.status !== "comparable" || !comparison.independent_task_runs || comparison.unmeasured_pairs !== 0) reasons.push("incomplete_or_reused_task_runs");
     if (comparison.one_sided_p === null || comparison.one_sided_p > 0.05 || !(comparison.primary_effect.risk_difference_ci95 && comparison.primary_effect.risk_difference_ci95[0] > 0)) reasons.push("task_gain_not_supported");
+    if (!(comparison.primary_effect.risk_difference_ci95 && comparison.primary_effect.risk_difference_ci95[0] > Number(primary!.minimum_meaningful_effect))) reasons.push("minimum_meaningful_effect_not_established");
     if (results.some(items => items.some(result => result.safety_verdict !== "passed")) || comparison.guardrails.some(guardrail => guardrail.status !== "passed")) reasons.push("safety_or_budget_guardrail_not_passed");
     const negativeIds = new Set(material.cases.filter(item => (item.expected_claim_ids as string[]).length === 0).map(item => item.id));
     if (results[1]!.some(result => negativeIds.has(result.case_id) && result.task_verdict !== "passed")) reasons.push("negative_task_regression");

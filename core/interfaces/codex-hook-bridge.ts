@@ -464,6 +464,15 @@ function ownedMemberService(service: CraftService, member: string): CraftService
   return target;
 }
 
+function memoryOwnerForProject(service: CraftService, scope: HookProjectScope, projectRoot: string | undefined): CraftService {
+  if (!projectRoot?.trim()) throw new Error("Memory project root is unavailable");
+  const memoryOwner = ownedMemberService(service, "memory");
+  const resolved = memoryOwner.scopeIdentityResolveProject({ project_root: projectRoot }).identity as JsonObject | undefined;
+  const canonical = resolved?.canonical_scope as JsonObject | undefined;
+  if (canonical?.kind !== "project" || canonical.id !== scope.id) throw new Error("Memory project identity does not match Context");
+  return memoryOwner;
+}
+
 export class CodexHookBridge {
   readonly service: CraftService;
   readonly signals: HookSignalSanitizer;
@@ -630,6 +639,7 @@ export class CodexHookBridge {
     const shouldWriteKnowledge = members.includes("knowledge") || members.includes("context") || members.includes("memory");
     if (shouldWriteMemory && sessionId) {
       try {
+        const memoryOwner = memoryOwnerForProject(this.service, scope, input.cwd);
         this.service.store.bindSessionStorageHost(sessionId, sessionHost);
         for (const item of autoStatements) {
           const decision = evaluateEvolutionValue({ statement: item.statement, source_kind: "user-statement", explicit: true,
@@ -637,7 +647,7 @@ export class CodexHookBridge {
           if (decision.action !== "store_as_fact" && decision.action !== "store_as_preference") continue;
           const legacyKind = item.kind === "preference" ? "preference" : item.kind === "rule" ? "procedural" : "working";
           validateConcept(mapLegacyKind("memory", legacyKind), item.statement);
-          const captured = ownedMemberService(this.service, "memory").memoryCaptureObservedFact({ content: item.statement, kind: legacyKind,
+          const captured = memoryOwner.memoryCaptureObservedFact({ content: item.statement, kind: legacyKind,
             session_id: sessionId, session_host: sessionHost, scope_kind: "session", scope_id: sessionId,
             project_scope_id: scope.id, project_root: input.cwd, sensitivity: "internal",
             ...(item.kind === "rule" ? { tags: ["auto_extracted_rule"] } : {}) });
@@ -760,8 +770,9 @@ export class CodexHookBridge {
       const sessionId = text(input.session_id);
       if (statement && sessionId) {
         try {
+          const memoryOwner = memoryOwnerForProject(this.service, scope, input.cwd);
           this.service.store.bindSessionStorageHost(sessionId, hookHost(input));
-          const captured = ownedMemberService(this.service, "memory").memoryCaptureUserStatement({ content: statement, kind: "preference", session_id: sessionId, session_host: hookHost(input), session_host_verified: false,
+          const captured = memoryOwner.memoryCaptureUserStatement({ content: statement, kind: "preference", session_id: sessionId, session_host: hookHost(input), session_host_verified: false,
             scope_kind: "session", scope_id: sessionId, project_scope_id: scope.id, project_root: input.cwd, sensitivity: "internal" });
           memoryWritten = captured.auto_committed === true;
           captureSummary = { candidate_id: (captured.candidate as JsonObject | null)?.id ?? null, next_action: captured.next_action,

@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
+import { CraftService } from "../../core/service.ts";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { CraftService } from "../../core/service.ts";
 import { CraftStore } from "../../core/infrastructure/store.ts";
 import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory, sessionStorageDirectory } from "../../core/infrastructure/paths.ts";
+import { DEFAULT_CONTEXT_MEMBERS, openCapabilityService } from "../../core/interfaces/mcp/runtime.ts";
 import { defaultSettings } from "../../core/settings.ts";
 import { projectIdentityFromRoot } from "../../core/scope-identity.ts";
 import { stableDigest } from "../../core/digest.ts";
@@ -60,6 +61,18 @@ function callPackagedMemoryHook(dataRoot: string, input: JsonObject): JsonObject
   return callPackagedContextHook(dataRoot, input);
 }
 
+function listOwned(service: Awaited<ReturnType<typeof openCapabilityService>>["service"], kind: string, limit: number,
+  predicate: (row: JsonObject) => boolean = () => true): JsonObject[] {
+  const stores = new Set([service.store, ...[...service.ownerServices.values()].map(owner => owner.store)]);
+  const records = [...stores].flatMap(store => store.list(kind, limit, predicate));
+  const current = new Map<string, JsonObject>();
+  for (const record of records) {
+    const id = String(record.id), previous = current.get(id);
+    if (!previous || Number(record.version ?? 0) >= Number(previous.version ?? 0)) current.set(id, record);
+  }
+  return [...current.values()].slice(0, limit);
+}
+
 function callPackagedContextHook(dataRoot: string, input: JsonObject): JsonObject {
   const result = spawnSync(process.execPath, [packagedContextHook, "--member", "context"], {
     cwd: typeof input.cwd === "string" ? input.cwd : projectRoot,
@@ -89,11 +102,15 @@ interface ContextWorkerProbe {
 
 async function verifyContextWorker(component: "knowledge" | "experience", expected: string[], forbidden: string[], probe: ContextWorkerProbe = {}): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), `craft-${component}-worker-data-`));
-  const entrypoint = contextPlugin;
+  const entrypoint = resolve(import.meta.dirname, "../../plugins/craft-context/dist/plugin/craft-experience-learning-worker.js");
   try { await probe.seed?.(root); }
   catch (error) { await rm(root, { recursive: true, force: true }); await probe.cleanup?.(); throw error; }
-  const processHandle = spawn(process.execPath, [entrypoint, "--product", "context"], { env: { ...process.env,
-    ...probe.environment, CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "1", CRAFT_KNOWLEDGE_POLL_MS: "1000", CRAFT_EXPERIENCE_POLL_MS: "1000" },
+  const mcpEntrypoint = contextPlugin;
+  const processHandle = spawn(process.execPath, [entrypoint, "--once"], { env: { ...process.env,
+    ...probe.environment, CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "1", CRAFT_LEARNING_COMPONENTS: component,
+    CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
+    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([mcpEntrypoint, "--surface", "component-context-complete"]),
+    CRAFT_KNOWLEDGE_POLL_MS: "1000", CRAFT_EXPERIENCE_POLL_MS: "1000" },
     stdio: ["pipe", "pipe", "pipe"] });
   let output = "", errors = "";
   processHandle.stdout.setEncoding("utf8").on("data", chunk => { output += chunk; });
@@ -103,18 +120,8 @@ async function verifyContextWorker(component: "knowledge" | "experience", expect
     processHandle.once("close", (code, signal) => resolveClose({ code, signal }));
   });
   try {
-    processHandle.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: "init", method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "smoke", version: "1" } } })}\n`);
-    await new Promise<void>((resolveReady, rejectReady) => {
-      const timeout = setTimeout(() => rejectReady(new Error(`${component} MCP initialization timed out`)), 5_000);
-      const onData = (chunk: string) => {
-        if (!output.includes('"id":"init"')) return;
-        clearTimeout(timeout);
-        processHandle.stdout.off("data", onData);
-        resolveReady();
-      };
-      processHandle.stdout.on("data", onData);
-    });
-    processHandle.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    const exit = await Promise.race([closed, delay(30_000).then(() => { throw new Error(`${component} packaged learning worker timed out`); })]);
+    assert.equal(exit.code, 0, `${component} packaged learning worker failed: stdout=${output}; stderr=${errors}`);
 
     const paths = craftPaths(root);
     let observedCalls = new Set<string>();
@@ -129,27 +136,22 @@ async function verifyContextWorker(component: "knowledge" | "experience", expect
     for (const name of forbidden) assert(!observedCalls.has(name), `${component} package worker must not call ${name}`);
     assert(!/learning worker failed|learning worker stopped/iu.test(errors), `${component} package worker must not report a worker failure: ${errors}`);
     await probe.verifyArtifact?.(root);
-
-    processHandle.stdin.end();
-    const exit = await Promise.race([closed, delay(5_000).then(() => { throw new Error(`${component} MCP did not shut down cleanly`); })]);
-    assert.equal(exit.code, 0, `${component} MCP package failed during shutdown: ${errors}`);
-    assert.equal(output.split("\n").filter(Boolean).length, 1, "standalone worker output must stay off the MCP protocol stream");
   } finally {
-    if (processHandle.exitCode === null) {
-      processHandle.stdin.end();
-      const stopped = await Promise.race([closed.then(() => true), delay(5_000).then(() => false)]);
-      if (!stopped) { processHandle.kill("SIGKILL"); await closed; }
-    }
+    if (processHandle.exitCode === null) { processHandle.kill("SIGKILL"); await closed; }
     await rm(root, { recursive: true, force: true });
     await probe.cleanup?.();
   }
 }
 
 let child: ChildProcessWithoutNullStreams | undefined;
+let ownedRuntime: Awaited<ReturnType<typeof openCapabilityService>> | undefined;
 let childOutput = "", childError = "";
 let childClosed: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
 try {
   await mkdir(projectRoot, { recursive: true });
+  const runtimeEnvironment = { ...process.env, CRAFT_DATA_DIR: dataRoot, CRAFT_CONTEXT_MEMBERS: "" };
+  const runtimeOwner = await openCapabilityService("runtime", runtimeEnvironment);
+  runtimeOwner.close();
   await writeFile(providerStatePath, JSON.stringify({ calls: 0 }));
   process.env.NODE_OPTIONS = [previousNodeOptions, `--import=${pathToFileURL(modelFixture).href}`].filter(Boolean).join(" ");
   await writeFile(join(projectRoot, "sentinel.txt"), "shadow and canary fixture");
@@ -166,65 +168,58 @@ try {
     model: "local-e2e-model", apiKeyEnv: "CRAFT_LEARNING_E2E_API_KEY", supportsTools: false }];
   await writeFile(paths.settingsFile, JSON.stringify(settings));
   process.env.CRAFT_LEARNING_E2E_API_KEY = "local-test-credential";
+  ownedRuntime = await openCapabilityService("context", { ...runtimeEnvironment, CRAFT_CONTEXT_MEMBERS: DEFAULT_CONTEXT_MEMBERS });
+  const service = ownedRuntime.service;
 
-  const store = await new CraftStore(paths).open();
-  try {
-    const service = new CraftService(store);
+  const memorySessions: string[] = [];
     ensureProjectStorageDirectory(paths, projectRoot);
-    const project = projectIdentityFromRoot(projectRoot).canonical_scope as JsonObject;
-    service.scopeAliasBind({ scope_kind: "project", scope_id: project.id, alias_kind: "path", alias: projectRoot });
+    const project = (service.scopeIdentityResolveProject({ project_root: projectRoot }).identity as JsonObject).canonical_scope as JsonObject;
+    for (const member of ["knowledge", "memory", "experience"]) {
+      const owner = service.ownerServices.get(member);
+      assert(owner, `${member} owner must be available in the packaged Context composition`);
+      const identity = owner.scopeIdentityResolveProject({ project_root: projectRoot }).identity as JsonObject;
+      assert.deepEqual(identity.canonical_scope, project, `${member} owner must bind the same canonical project identity as Context`);
+    }
     for (const [index, sourceRoot] of knowledgeSourceRoots.entries()) service.knowledgeSourceRegister({ source_id: `e2e-knowledge-${index}`,
       kind: "readme", label: `Verified fixture ${index}`, scope_kind: "project", scope_id: project.id, locator: sourceRoot,
       content_digest: `fixture:${index}`, trust: "verified", access: "read_only" });
-    const memorySessions: string[] = [];
     for (const [projectIndex, root] of memoryProjectRoots.entries()) {
       for (const sessionId of [`memory-e2e-${projectIndex}-a`, `memory-e2e-${projectIndex}-b`]) {
         memorySessions.push(sessionId);
-        callPackagedMemoryHook(dataRoot, { hook_event_name: "UserPromptSubmit", cwd: root, session_id: sessionId, prompt: "本项目默认使用 Node.js" });
+        callPackagedMemoryHook(dataRoot, { hook_event_name: "UserPromptSubmit", cwd: root, session_id: sessionId, prompt: "记住：代码评审优先使用小范围可复现验证" });
       }
     }
-    try {
-      assert.match(await readFile(join(dataRoot, "memory", "memory.md"), "utf8"), /Node\.js/u,
-        "three projects with repeated independent sessions must automatically promote Memory to global tier");
-      for (const root of memoryProjectRoots) assert.match(await readFile(join(projectStorageDirectory(paths, root), "memory", "memory.md"), "utf8"), /Node\.js/u,
-        "repeated independent sessions must promote Memory to each project tier");
-      assert(store.list("activation_proof_receipt", 1_000, proof => proof.component === "memory" && proof.event === "UserPromptSubmit" && proof.memory_written === true).length > 0,
-        "automatic Memory capture and promotion must leave a current Host invocation receipt");
-      assert(store.list("trace_event", 10_000, event => event.source === "craft-hook" && event.operation_id === "handle.context.UserPromptSubmit").length > 0,
-        "Memory Hook invocation must leave a queryable component trace");
-    } finally {
-      for (const sessionId of memorySessions) {
-        callPackagedMemoryHook(dataRoot, { hook_event_name: "SessionEnd", cwd: projectRoot, session_id: sessionId });
-        assert(service.memoryGovernance.ledger.files.isSessionArchived(sessionId), "SessionEnd must persist Memory archive state");
-        const cleanupBy = Date.now() + 5_000;
-        while (existsSync(temporaryMemoryDirectory(sessionId)) && Date.now() < cleanupBy) await delay(25);
-        assert(!existsSync(temporaryMemoryDirectory(sessionId)), "archived Memory sessions must delete their temporary directories");
-      }
+    const memoryOwner = service.ownerServices.get("memory");
+    assert(memoryOwner, "Memory owner must be available for its packaged asynchronous worker");
+    // Archive inline, then let the packaged Context worker consume every pending Memory intent.
+    for (const sessionId of memorySessions) {
+      callPackagedMemoryHook(dataRoot, { hook_event_name: "SessionEnd", cwd: projectRoot, session_id: sessionId });
+      assert(memoryOwner.memoryGovernance.ledger.files.isSessionArchived(sessionId), "SessionEnd must persist Memory archive state");
     }
     const scenarioDirectory = join(ensureProjectStorageDirectory(paths, projectRoot), "experience");
     await mkdir(scenarioDirectory, { recursive: true });
     await writeFile(join(scenarioDirectory, "experience-scenarios.json"), JSON.stringify(scenarioCatalog(projectRoot, "held-out-sentinel.txt")));
     recordVerifiedContextTask(dataRoot, "experience-session-one", "experience-turn-one");
     recordVerifiedContextTask(dataRoot, "experience-session-two", "experience-turn-two");
-    const requests = store.list("workflow_evolution_request", 100);
-    assert.equal(store.list("workflow_evolution_observation", 100).filter(row => row.scenario_key && String(row.scenario_key).startsWith("scenario:")).length, 2,
+    const requests = listOwned(service, "workflow_evolution_request", 100);
+    assert.equal(listOwned(service, "workflow_evolution_observation", 100).filter(row => row.scenario_key && String(row.scenario_key).startsWith("scenario:")).length, 2,
       "packaged Context Hook must turn two independent edit-and-passed-verification turns into Experience observations");
     const request = requests.find(row => row.lifecycle === "awaiting_model");
     assert(request, "the second independently verified Hook turn must automatically produce a Workflow Evolution request");
-    const ticket = store.list("evaluation_model_ticket", 100, row => row.purpose === "workflow_evolution"
+    const ticket = listOwned(service, "evaluation_model_ticket", 100, row => row.purpose === "workflow_evolution"
       && (row.target as JsonObject | undefined)?.id === request.id)[0];
     assert(ticket, "automatic Hook completion must issue a model ticket");
     assert.match(String(ticket.profile_id), /^evaluation_model_profile_auto_/u,
       "the only configured Craft model must bootstrap a bounded workflow evolution profile and ticket");
     assert.equal(ticket.status, "ready_for_adapter");
-    const profile = service.evaluationModelProfileGet({ profile_id: String(ticket.profile_id) }).profile as JsonObject;
+    const profileOwner = [service, ...service.ownerServices.values()].find(owner => owner.store.find("evaluation_model_profile", String(ticket.profile_id)));
+    assert(profileOwner, "automatic Workflow Evolution ticket must reference a persisted owned model profile");
+    const profile = profileOwner.evaluationModelProfileGet({ profile_id: String(ticket.profile_id) }).profile as JsonObject;
     assert.equal(profile.provider, "local-e2e");
     assert.equal(profile.model, "local-e2e-model");
     assert.equal(profile.network_execution_enabled, true);
     assert.equal(profile.max_attempts, 1);
     assert.equal(profile.max_output_tokens, 2_048);
-
-  } finally { store.close(); }
 
   child = spawn(process.execPath, [plugin, "--product", "context"], { env: { ...process.env, CRAFT_DATA_DIR: dataRoot,
     CRAFT_CONTINUOUS_LEARNING: "1", CRAFT_LEARNING_E2E_API_KEY: "local-test-credential", CRAFT_EXPERIENCE_POLL_MS: "1000",
@@ -236,6 +231,25 @@ try {
     child!.once("error", rejectClose);
     child!.once("close", (code, signal) => resolveClose({ code, signal }));
   });
+
+  let memoryPromoted = false;
+  for (let attempt = 0; attempt < 900; attempt += 1) {
+    memoryPromoted = memoryProjectRoots.every(root => existsSync(join(projectStorageDirectory(paths, root), "memory", "memory.md")))
+      && memorySessions.every(sessionId => !existsSync(temporaryMemoryDirectory(sessionId)));
+    if (memoryPromoted) break;
+    await delay(100);
+  }
+  assert(memoryPromoted, `the packaged asynchronous Memory worker must promote repeated same-project evidence and release archived session content; stderr=${childError}`);
+  const globalMemoryPath = join(memoryOwner.store.paths.memoryDir, "memory.md");
+  assert(existsSync(globalMemoryPath), `global Memory projection was not written; ledger=${JSON.stringify(listOwned(service, "memory_ledger", 100).map(({ id, status, kind, scope, topic, content_digest }) => ({ id, status, kind, scope, topic, content_digest })))}; hook_failures=${JSON.stringify(service.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed").map(event => event.payload))}; receipts=${JSON.stringify(listOwned(service, "activation_proof_receipt", 100))}`);
+  assert.match(await readFile(globalMemoryPath, "utf8"), /小范围可复现验证/u,
+    "the packaged worker must promote three independent project scopes into global Memory");
+  for (const root of memoryProjectRoots) assert.match(await readFile(join(projectStorageDirectory(paths, root), "memory", "memory.md"), "utf8"), /小范围可复现验证/u,
+    "the packaged worker must make repeated same-project Memory available to that project");
+  assert(listOwned(service, "activation_proof_receipt", 1_000, proof => proof.component === "memory" && proof.event === "UserPromptSubmit" && proof.memory_written === true).length > 0,
+    "automatic Memory capture must leave a current Host invocation receipt");
+  assert(listOwned(service, "trace_event", 10_000, event => event.source === "craft-hook" && event.operation_id === "handle.context.UserPromptSubmit").length > 0,
+    "Memory Hook invocation must leave a queryable component trace");
 
   let procedureCandidate: JsonObject | undefined;
   let evidenceCount = 0;
@@ -254,34 +268,32 @@ try {
   const expectedCalls = new Set(["handle.context.UserPromptSubmit", "craft_experience_procedure_submit", "craft_experience_learning_evaluation_dispatch",
     "craft_experience_learning_evaluation_run", "craft_knowledge_source_ingest"]);
   for (let attempt = 0; attempt < 300; attempt += 1) {
-    const observed = await new CraftStore(paths).open();
-    try {
-      procedureCandidate = observed.list("experience_procedure", 100, row => row.title === generatedWorkflow.name
+      procedureCandidate = listOwned(service, "experience_procedure", 100, row => row.title === generatedWorkflow.name
         && row.procedure_kind === "workflow" && row.lifecycle === "candidate" && row.routeable === false)[0];
-      const evaluationEvidence = observed.list("evidence", 100, row => {
+      const evaluationEvidence = listOwned(service, "evidence", 100, row => {
         const metadata = row.metadata as JsonObject | undefined;
         return typeof metadata?.experience_evaluation_dispatch_id === "string";
       });
       evidenceCount = evaluationEvidence.length;
       evidenceStages = new Set(evaluationEvidence.map(row => String((row.metadata as JsonObject).stage)));
-      runCount = observed.list("workflow_run", 100, row => typeof row.evaluator_dispatch_id === "string").length;
-      knowledgeCandidate = observed.list("knowledge_claim", 100, row => row.status === "candidate").find(claim =>
-        observed.list("knowledge_claim_support", 1_000, support => support.claim_id === claim.id).length >= 2);
+      runCount = listOwned(service, "workflow_run", 100, row => typeof row.evaluator_dispatch_id === "string").length;
+      knowledgeCandidate = listOwned(service, "knowledge_claim", 100, row => row.status === "candidate").find(claim =>
+        listOwned(service, "knowledge_claim_support", 1_000, support => support.claim_id === claim.id).length >= 2);
       knowledgeCandidateReady = Boolean(knowledgeCandidate);
-      knowledgeReviewReasons = knowledgeCandidate ? observed.list("knowledge_auto_review", 100, row => row.claim_id === knowledgeCandidate!.id)
+      knowledgeReviewReasons = knowledgeCandidate ? listOwned(service, "knowledge_auto_review", 100, row => row.claim_id === knowledgeCandidate!.id)
         .flatMap(row => Array.isArray(row.reasons) ? row.reasons.map(String) : []) : [];
-      knowledgeIngestCallsBeforeUpdate = observed.list("trace_event", 10_000, row => row.operation_id === "craft_knowledge_source_ingest").length;
-      tracedCalls = new Set(observed.list("trace_event", 10_000, row => expectedCalls.has(String(row.operation_id))).map(row => String(row.operation_id)));
-      diagnostic = { requests: observed.list("workflow_evolution_request", 20).map(({ id, lifecycle }) => ({ id, lifecycle })),
-        knowledge_claims: observed.list("knowledge_claim", 100).map(({ id, status, scenario_key, scope }) => ({ id, status, scenario_key: scenario_key ?? null, scope })),
-        knowledge_classification_tickets: observed.list("evaluation_model_ticket", 100, row => row.purpose === "knowledge_scenario_classification")
+      knowledgeIngestCallsBeforeUpdate = listOwned(service, "trace_event", 10_000, row => row.operation_id === "craft_knowledge_source_ingest").length;
+      tracedCalls = new Set(listOwned(service, "trace_event", 10_000, row => expectedCalls.has(String(row.operation_id))).map(row => String(row.operation_id)));
+      diagnostic = { requests: listOwned(service, "workflow_evolution_request", 20).map(({ id, lifecycle }) => ({ id, lifecycle })),
+        knowledge_claims: listOwned(service, "knowledge_claim", 100).map(({ id, status, scenario_key, scope }) => ({ id, status, scenario_key: scenario_key ?? null, scope })),
+        knowledge_classification_tickets: listOwned(service, "evaluation_model_ticket", 100, row => row.purpose === "knowledge_scenario_classification")
           .map(({ id, status, target }) => ({ id, status, target })),
-        tickets: observed.list("evaluation_model_ticket", 20).map(({ id, lifecycle, readiness, target }) => ({ id, lifecycle, readiness, target })),
-        procedures: observed.list("experience_procedure", 20).map(({ id, lifecycle, title, procedure_kind, routeable }) => ({ id, lifecycle, title, procedure_kind, routeable })),
-        dispatches: observed.list("experience_evaluation_dispatch", 20).map(({ id, stage, status, reason }) => ({ id, stage, status, reason })),
+        tickets: listOwned(service, "evaluation_model_ticket", 20).map(({ id, lifecycle, readiness, target }) => ({ id, lifecycle, readiness, target })),
+        procedures: listOwned(service, "experience_procedure", 20).map(({ id, lifecycle, title, procedure_kind, routeable, scenario_key, scenario_signature }) => ({ id, lifecycle, title, procedure_kind, routeable, scenario_key, scenario_signature })),
+        dispatches: listOwned(service, "experience_evaluation_dispatch", 20).map(({ id, stage, status, reason }) => ({ id, stage, status, reason })),
+        workflow_runs: listOwned(service, "workflow_run", 20).map(({ id, procedure_id, evaluator_dispatch_id, case_id, status, results }) => ({ id, procedure_id, evaluator_dispatch_id, case_id, status, results })),
         provider_calls: await providerCallCount(), knowledge_candidate_ready: knowledgeCandidateReady, knowledge_review_reasons: knowledgeReviewReasons,
         traced_calls: [...tracedCalls] };
-    } finally { observed.close(); }
     if (procedureCandidate && evidenceCount === 1 && evidenceStages.size === 1 && evidenceStages.has("shadow") && runCount === 1 && knowledgeCandidateReady
       && knowledgeReviewReasons.includes("independent_effectiveness_evaluation_required")
       && tracedCalls.size === expectedCalls.size && await providerCallCount() === 1) break;
@@ -293,11 +305,13 @@ try {
   assert.deepEqual(evidenceStages, new Set(["shadow"]), "untrusted local checks must not pass Held-out, Signoff, or Canary");
   assert.equal(runCount, 1, "The local evaluator may execute Shadow but must not impersonate the independent held-out evaluator");
   assert(diagnostic.dispatches && (diagnostic.dispatches as JsonObject[]).some(item => item.stage === "held_out" && item.status === "awaiting_adapter"),
-    "the exact candidate must remain queued for an independent trusted task-effect evaluator");
+    `the exact candidate must remain queued for an independent trusted task-effect evaluator; state=${JSON.stringify(diagnostic)}; worker=${childOutput}`);
   assert(knowledgeCandidateReady, `two independently registered verified Knowledge sources must produce a supported candidate; state=${JSON.stringify(diagnostic)}; stderr=${childError}`);
   assert(knowledgeReviewReasons.includes("independent_effectiveness_evaluation_required"),
     `Knowledge must remain unpromoted until independent held-out effectiveness evidence exists; state=${JSON.stringify(diagnostic)}; stderr=${childError}`);
-  assert(existsSync(paths.knowledgeDatabaseFile), "Knowledge artifacts must persist in the central .craft_data/knowledge store");
+  const knowledgeOwner = service.ownerServices.get("knowledge");
+  assert(knowledgeOwner && existsSync(knowledgeOwner.store.paths.databaseFile),
+    "Knowledge artifacts must persist in the configured .craft_data Knowledge owner catalog");
   assert(isUnder(join(projectStorageDirectory(paths, projectRoot), "knowledge", "md"), (knowledgeCandidate!.content_ref as JsonObject | undefined)?.path),
     "Project-scoped Knowledge Markdown must stay under shared project storage");
   assert(isUnder(join(projectStorageDirectory(paths, projectRoot), "experience", "md"), (procedureCandidate!.content_ref as JsonObject | undefined)?.path),
@@ -312,20 +326,17 @@ try {
   for (const sourceRoot of knowledgeSourceRoots) await writeFile(join(sourceRoot, "README.md"), revisedKnowledgeText);
   let knowledgeRevisionDiagnostic: JsonObject = {};
   for (let attempt = 0; attempt < 750; attempt += 1) {
-    const observed = await new CraftStore(paths).open();
-    try {
-      const claims = observed.list("knowledge_claim", 1_000);
-      knowledgeIngestCallsAfterUpdate = observed.list("trace_event", 10_000, row => row.operation_id === "craft_knowledge_source_ingest").length;
+      const claims = listOwned(service, "knowledge_claim", 1_000);
+      knowledgeIngestCallsAfterUpdate = listOwned(service, "trace_event", 10_000, row => row.operation_id === "craft_knowledge_source_ingest").length;
       const original = claims.find(claim => claim.content_digest === originalKnowledgeDigest);
       originalKnowledgeClaimStale = original?.status === "stale";
       revisedKnowledgeClaim = claims.find(claim => claim.status === "candidate" && claim.content_digest !== originalKnowledgeDigest
-        && observed.list("knowledge_claim_support", 1_000, support => support.claim_id === claim.id).length >= 2);
+        && listOwned(service, "knowledge_claim_support", 1_000, support => support.claim_id === claim.id).length >= 2);
       revisedKnowledgeSupportCount = revisedKnowledgeClaim
-        ? observed.list("knowledge_claim_support", 1_000, support => support.claim_id === revisedKnowledgeClaim!.id).length : 0;
+        ? listOwned(service, "knowledge_claim_support", 1_000, support => support.claim_id === revisedKnowledgeClaim!.id).length : 0;
       knowledgeRevisionDiagnostic = { original_claim_status: original?.status ?? null,
         revised_claims: claims.filter(claim => claim.content_digest !== originalKnowledgeDigest).map(({ id, status, content_digest }) => ({ id, status, content_digest })),
-        source_revisions: observed.list("knowledge_source_revision", 100, revision => revision.status === "current").map(({ id, source_id }) => ({ id, source_id })) };
-    } finally { observed.close(); }
+        source_revisions: listOwned(service, "knowledge_source_revision", 100, revision => revision.status === "current").map(({ id, source_id }) => ({ id, source_id })) };
     if (originalKnowledgeClaimStale && revisedKnowledgeClaim) break;
     await delay(100);
   }
@@ -346,13 +357,12 @@ try {
   const scenarioPath = join(projectStorageDirectory(paths, projectRoot), "experience", "experience-scenarios.json");
   await writeFile(scenarioPath, JSON.stringify(scenarioCatalog(projectRoot, "held-out-sentinel-v2.txt")));
 
-  const nextStore = await new CraftStore(paths).open();
-  try {
-    recordVerifiedContextTask(dataRoot, "experience-session-three", "experience-turn-three");
-    const scenario = String(nextStore.list("workflow_evolution_observation", 100)[0]?.scenario_key ?? "");
-    assert.equal(nextStore.list("workflow_evolution_request", 100, row => row.scenario_key === scenario).length, 2,
+  recordVerifiedContextTask(dataRoot, "experience-session-three", "experience-turn-three");
+  {
+    const scenario = String(listOwned(service, "workflow_evolution_observation", 100)[0]?.scenario_key ?? "");
+    assert.equal(listOwned(service, "workflow_evolution_request", 100, row => row.scenario_key === scenario).length, 2,
       "a later packaged Hook verification must create a second request for the same scenario, even if the worker already consumed it");
-  } finally { nextStore.close(); }
+  }
 
   let evolved: JsonObject | undefined;
   let evolvedEvidence: JsonObject[] = [];
@@ -360,15 +370,12 @@ try {
   let evolvedTraceCalls = new Set<string>();
   let heldOutAwaiting = false;
   for (let attempt = 0; attempt < 300; attempt += 1) {
-    const observed = await new CraftStore(paths).open();
-    try {
-      evolved = observed.list("experience_procedure", 100, row => row.title === revisedWorkflow.name && row.lifecycle === "candidate" && row.routeable === false)[0];
-      evolvedEvidence = observed.list("evidence", 100, row => typeof (row.metadata as JsonObject | undefined)?.experience_evaluation_dispatch_id === "string");
-      evolvedRunCount = observed.list("workflow_run", 100, row => typeof row.evaluator_dispatch_id === "string").length;
-      evolvedTraceCalls = new Set(observed.list("trace_event", 10_000, row => expectedCalls.has(String(row.operation_id))).map(row => String(row.operation_id)));
-      heldOutAwaiting = observed.list("experience_evaluation_dispatch", 100, row => row.procedure_id === evolved?.id
+      evolved = listOwned(service, "experience_procedure", 100, row => row.title === revisedWorkflow.name && row.lifecycle === "candidate" && row.routeable === false)[0];
+      evolvedEvidence = listOwned(service, "evidence", 100, row => typeof (row.metadata as JsonObject | undefined)?.experience_evaluation_dispatch_id === "string");
+      evolvedRunCount = listOwned(service, "workflow_run", 100, row => typeof row.evaluator_dispatch_id === "string").length;
+      evolvedTraceCalls = new Set(listOwned(service, "trace_event", 10_000, row => expectedCalls.has(String(row.operation_id))).map(row => String(row.operation_id)));
+      heldOutAwaiting = listOwned(service, "experience_evaluation_dispatch", 100, row => row.procedure_id === evolved?.id
         && row.stage === "held_out" && row.status === "awaiting_adapter").length > 0;
-    } finally { observed.close(); }
     if (evolved && evolvedEvidence.length === 2 && evolvedRunCount === 2 && heldOutAwaiting
       && evolvedTraceCalls.size === expectedCalls.size && await providerCallCount() === 2) break;
     await delay(100);
@@ -383,11 +390,8 @@ try {
   assert(heldOutAwaiting, "the second exact Procedure revision must wait for independent task-effect evaluation");
   assert.deepEqual(evolvedTraceCalls, expectedCalls, "both iterations and their Knowledge sync calls must remain observable");
   assert.equal(await providerCallCount(), 2, "the Worker must request a new model proposal for the later iteration");
-  const latest = await new CraftStore(paths).open();
-  try {
-    assert.equal(latest.find("experience_release", firstProcedureId), null,
-      "neither candidate may publish a release before trusted held-out evaluation");
-  } finally { latest.close(); }
+  assert.equal(listOwned(service, "experience_release", 100, row => row.id === firstProcedureId).length, 0,
+    "neither candidate may publish a release before trusted held-out evaluation");
 
   child.stdin.end();
   const exit = await childClosed;
@@ -514,7 +518,7 @@ try {
   };
   await verifyContextWorker("experience", ["craft_experience_procedure_submit", "craft_experience_learning_evaluation_dispatch",
     "craft_experience_learning_evaluation_run"], [], standaloneExperienceProbe);
-  process.stdout.write("Context Hook promoted Memory across tiers; the Context worker generated a supported Knowledge candidate pending independent effectiveness evidence and retained an Experience Workflow candidate at the trusted Held-out gate.\n");
+  process.stdout.write("Context Hook queued Memory evidence; the packaged Context worker promoted it across project and global tiers, generated a supported Knowledge candidate pending independent effectiveness evidence, and retained an Experience Workflow candidate at the trusted Held-out gate.\n");
 } finally {
   if (child && child.exitCode === null) {
     child.stdin.end();
@@ -525,5 +529,6 @@ try {
   else process.env.NODE_OPTIONS = previousNodeOptions;
   if (previousLearningApiKey === undefined) delete process.env.CRAFT_LEARNING_E2E_API_KEY;
   else process.env.CRAFT_LEARNING_E2E_API_KEY = previousLearningApiKey;
+  ownedRuntime?.close();
   await Promise.all([rm(dataRoot, { recursive: true, force: true }), rm(projectRoot, { recursive: true, force: true })]);
 }

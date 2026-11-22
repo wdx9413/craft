@@ -236,7 +236,7 @@ export class EvaluationRunCoordinator {
   evaluationReliabilityAssess(args: JsonObject): JsonObject {
     const comparison = this.store.get("evaluation_comparison", text(args.comparison_id, "comparison_id"));
     const baselineRun = this.store.get("evaluation_run", String(comparison.baseline_run_id)); const candidateRun = this.store.get("evaluation_run", String(comparison.candidate_run_id));
-    const minTrials = finiteInteger(args.min_trials, "min_trials", 20, 2, 10_000); const maxBudgetRatio = Number(args.max_budget_ratio ?? 1);
+    const minTrials = finiteInteger(args.min_trials, "min_trials", 5, 2, 10_000); const maxBudgetRatio = Number(args.max_budget_ratio ?? 1);
     if (!Number.isFinite(maxBudgetRatio) || maxBudgetRatio < 0) throw new Error("max_budget_ratio must be non-negative");
     const paired = this.evaluationPairedComparison(baselineRun, candidateRun);
     const baselineTrials = (baselineRun.trial_ids as string[]).map((trialId) => this.store.get("trial", trialId));

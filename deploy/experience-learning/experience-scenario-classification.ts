@@ -127,12 +127,6 @@ async function runClassificationTicket(deps: ExperienceScenarioClassificationDep
   if (!/^project:[A-Za-z0-9_-]{1,96}$/u.test(scope)) throw new Error("Experience classification ticket scope is invalid");
   const readiness = object(ticket.readiness, "ticket.readiness");
   if (readiness.status !== "ready_for_adapter") return { processed: 0, skipped: true, reason: readiness.next_action ?? "model_profile_not_ready", outcomes: [] };
-  const profileResult = await deps.client.call("craft_evaluation_model_profile_get", { profile_id: ticket.profile_id, version: ticket.profile_version });
-  const profile = object(profileResult.profile, "profile"), profileReadiness = object(profileResult.readiness, "profile.readiness");
-  if (profileReadiness.status !== "ready_for_adapter") return { processed: 0, skipped: true, reason: profileReadiness.next_action ?? "model_profile_not_ready", outcomes: [] };
-  const provider = (deps.providers ?? PROVIDER_CATALOG).find(item => item.provider === profile.provider)
-    ?? (profileResult.provider ? defineProvider(object(profileResult.provider, "profile provider")) : undefined);
-  if (!provider) return { processed: 0, skipped: true, reason: "provider_unavailable", outcomes: [] };
   const requestResult = await deps.client.call("craft_experience_scenario_classification_request_get", { request_id: requestId, scope });
   const request = object(requestResult.request, "classification request"), taxonomy = object(requestResult.taxonomy, "Experience taxonomy");
   if (request.status !== "awaiting_model" || Number(request.version) !== Number(target.version)) {
@@ -142,6 +136,27 @@ async function runClassificationTicket(deps: ExperienceScenarioClassificationDep
           outcomes: [{ ticket_id: ticketId, request_id: requestId, status: "model_result_unknown" }] };
       }
       const resultDigest = request.result_digest;
+      let traceId: string | null = null;
+      try { traceId = await findClassificationResultTrace(deps.client, ticketId, requestId, resultDigest); }
+      catch { /* An unavailable proof must leave this ticket pending without blocking unrelated tickets. */ }
+      if (traceId) {
+        try {
+          const traceResult = object(await deps.client.call("craft_trace_get", { trace_id: traceId }), "classification Trace");
+          const trace = object(traceResult.trace, "classification Trace identity");
+          if (trace.status === "running") {
+            await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "classification.reconciled", actor: "experience-learning-worker",
+              source: "craft-experience", trust: "verified", operation_id: ticketId, output_refs: [requestId, resultDigest],
+              data: { request_id: requestId, result_digest: resultDigest, request_status: request.status },
+              summary: "Recovered the classification ticket from its exact persisted request and model Trace" });
+            await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "completed", summary: "Experience scenario classification reconciled" });
+          }
+          await deps.client.call("craft_evaluation_model_ticket_complete", { ticket_id: ticketId, trace_id: traceId, result_digest: resultDigest });
+          return { processed: 1, outcomes: [{ ticket_id: ticketId, request_id: requestId, trace_id: traceId, status: "reconciled", result_digest: resultDigest }] };
+        } catch {
+          return { processed: 0, skipped: true, reason: "resolved_request_reference_stale",
+            outcomes: [{ ticket_id: ticketId, request_id: requestId, trace_id: traceId, status: "model_result_unknown", result_digest: resultDigest }] };
+        }
+      }
       let checkpointFailed = false;
       if (deps.state_file) {
         try {
@@ -162,6 +177,12 @@ async function runClassificationTicket(deps: ExperienceScenarioClassificationDep
     }
     return { processed: 0, outcomes: [{ ticket_id: ticketId, request_id: requestId, status: "stale" }] };
   }
+  const profileResult = await deps.client.call("craft_evaluation_model_profile_get", { profile_id: ticket.profile_id, version: ticket.profile_version });
+  const profile = object(profileResult.profile, "profile"), profileReadiness = object(profileResult.readiness, "profile.readiness");
+  if (profileReadiness.status !== "ready_for_adapter") return { processed: 0, skipped: true, reason: profileReadiness.next_action ?? "model_profile_not_ready", outcomes: [] };
+  const provider = (deps.providers ?? PROVIDER_CATALOG).find(item => item.provider === profile.provider)
+    ?? (profileResult.provider ? defineProvider(object(profileResult.provider, "profile provider")) : undefined);
+  if (!provider) return { processed: 0, skipped: true, reason: "provider_unavailable", outcomes: [] };
   const context = object(request.context, "classification context");
   if (context.sanitized !== true || context.content_stored !== false) throw new Error("Experience classifier received non-sanitized task context");
   const paths = array(context.observed_paths, "context.observed_paths");
@@ -210,6 +231,7 @@ async function runClassificationTicket(deps: ExperienceScenarioClassificationDep
   }
   let processingStage = "model_request";
   let responseDigest: string | null = null;
+  let requestPersisted = false;
   try {
     const modelStartedAt = Date.now();
     const result = await transport.complete(provider, buildChatRequest(provider, { model, messages,
@@ -268,18 +290,22 @@ async function runClassificationTicket(deps: ExperienceScenarioClassificationDep
     const completed = await deps.client.call("craft_experience_scenario_classification_request_complete", { request_id: requestId, scope,
       expected_version: request.version, status: decision.decision, result_digest: resultDigest,
       ...(typeof context.project_root === "string" ? { project_root: context.project_root } : {}) });
-    await deps.client.call("craft_evaluation_model_ticket_complete", { ticket_id: ticketId, trace_id: traceId, result_digest: resultDigest });
+    requestPersisted = true;
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: decision.decision === "classified" ? "classification.linked" : "classification.unclassified",
       actor: "experience-learning-worker", source: "craft-experience", trust: "verified", operation_id: ticketId,
       ...(observationId ? { output_refs: [observationId] } : {}), data: { result_digest: resultDigest, scenario_key: decision.decision === "classified" ? decision.scenario_key : null,
         request_version: (completed.request as JsonObject | undefined)?.version ?? null },
       summary: decision.decision === "classified" ? "Experience scenario classification linked to its verified Observation" : "Ambiguous Experience task retained as unclassified" });
     await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "completed", summary: "Experience scenario classification completed" });
+    await deps.client.call("craft_evaluation_model_ticket_complete", { ticket_id: ticketId, trace_id: traceId, result_digest: resultDigest });
     return { processed: 1, outcomes: [{ ticket_id: ticketId, request_id: requestId, trace_id: traceId, status: decision.decision,
       ...(observationId ? { observation_id: observationId } : {}), result_digest: resultDigest }] };
   } catch (error) {
     const failureKind = safeErrorClass(error, processingStage);
     const modelFailure = processingStage === "model_request";
+    if (requestPersisted) return { processed: 0, skipped: true, reason: "resolved_request_reconciliation_pending", reconciliation_pending: true,
+      outcomes: [{ ticket_id: ticketId, request_id: requestId, trace_id: traceId, status: "model_result_unknown", failure_kind: failureKind,
+        failure_stage: processingStage }] };
     let checkpointFailed = false;
     if (responseDigest && deps.state_file) {
       try {
@@ -300,4 +326,30 @@ async function runClassificationTicket(deps: ExperienceScenarioClassificationDep
       ...(checkpointFailed ? { reconciliation_checkpoint_failed: true } : {}), outcomes: [{ ticket_id: ticketId, request_id: requestId,
       trace_id: traceId, status: resultUnknown ? "model_result_unknown" : "failed", failure_kind: failureKind, failure_stage: processingStage }] };
   }
+}
+
+async function findClassificationResultTrace(client: ExperienceScenarioClassificationClient, ticketId: string, requestId: string, resultDigest: string): Promise<string | null> {
+  const queried = object(await client.call("craft_trace_query", { task_id: `experience:${requestId}`, event_kind: "model.result_bound",
+    operation_id: ticketId, limit: 100 }), "classification result Trace query");
+  if (queried.has_more === true) return null;
+  const events = array(queried.events, "classification result Trace events").map((value, index) => object(value, `Trace event ${index}`));
+  const matches: string[] = [];
+  for (const event of events) {
+    if (event.actor !== "experience-learning-worker" || event.source !== "craft-experience" || event.trust !== "observed"
+      || event.operation_id !== ticketId || !Array.isArray(event.output_refs) || !event.output_refs.includes(requestId)
+      || !event.output_refs.includes(resultDigest) || !Array.isArray(event.input_refs) || event.input_refs.length !== 1
+      || typeof event.trace_id !== "string") continue;
+    const responseDigest = (event.input_refs as unknown[])[0] as string;
+    const bundle = object(await client.call("craft_trace_get", { trace_id: event.trace_id }), "classification Trace bundle");
+    const trace = object(bundle.trace, "classification Trace identity");
+    if (trace.id !== event.trace_id || trace.task_id !== `experience:${requestId}` || trace.operation_id !== ticketId) continue;
+    const traceEvents = array(bundle.events, "classification Trace events").map((value, index) => object(value, `Trace event ${index}`));
+    const model = traceEvents.find(item => item.event_kind === "model.completed" && item.operation_id === ticketId
+      && item.actor === "experience-learning-worker" && typeof item.source === "string" && item.source.startsWith("model-transport:")
+      && item.trust === "observed" && item.model_fingerprint === trace.model_fingerprint
+      && Array.isArray(item.output_refs) && item.output_refs.includes(responseDigest)
+      && Number(item.sequence) < Number(event.sequence));
+    if (model) matches.push(String(event.trace_id));
+  }
+  return matches.length === 1 ? matches[0]! : null;
 }

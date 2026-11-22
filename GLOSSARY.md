@@ -106,6 +106,14 @@ _Avoid_: Ontology, candidate policy
 A versioned, predeclared acceptance definition binding a candidate family to frozen evaluation cases and environment, target metrics, regression tolerances and hard safety assertions.
 _Avoid_: Candidate-authored benchmark, generic pass score
 
+**Matched Task Pair**:
+One baseline result and one candidate result for the same frozen task under matched environment, model and budget; one pair is not two independent pairs.
+_Avoid_: Two evaluation arms, two unrelated runs
+
+**Usage Evidence**:
+Evidence that a specific asset was injected and used in distinct sessions; it supports recurrence and scope decisions but does not establish task benefit.
+_Avoid_: Effect evidence, promotion proof
+
 **Semantic Reclassification**:
 An append-only, versioned change to a record's concept assignment that preserves its stable identity, original statement and evidence provenance.
 _Avoid_: Rewriting a fact, silent migration

@@ -7,7 +7,8 @@ const ITERATION_PLAN_SCHEMA = "craft.capability-iteration-plan.v1";
 const MAX_ITEMS = 100;
 const MAX_STRING_CHARS = 2_000;
 const MIN_INDEPENDENT_SESSIONS = 2;
-const MIN_TASK_RECORDS = 20;
+const MIN_SCREENING_PAIRS = 3;
+const MIN_EFFECT_DECISION_PAIRS = 5;
 const MAX_ACTIVATION_TOOLS = 5;
 
 function stringValue(value: unknown, field: string): string {
@@ -66,7 +67,6 @@ function taskLedgerSample(seed: JsonObject): JsonObject {
   return {
     schema: TASK_LEDGER_SCHEMA,
     project_scope_id: seed.project_scope_id,
-    minimum_records: MIN_TASK_RECORDS,
     minimum_independent_sessions: MIN_INDEPENDENT_SESSIONS,
     privacy: { sanitized: true, content_stored: false, raw_conversation_excluded: true, secret_excluded: true },
     records: [{
@@ -116,10 +116,11 @@ function governedQualityPlan(args: JsonObject): JsonObject {
   const cases = listValue(args.case_ids, "case_ids");
   const baseline = stringValue(args.baseline_id, "baseline_id");
   const candidate = stringValue(args.candidate_id, "candidate_id");
-  return { status: cases.length >= 2 ? "trial_plan_ready" : "insufficient_cases", subject: { id: subject, version },
+  return { status: cases.length >= MIN_SCREENING_PAIRS ? "screening_plan_ready" : "insufficient_cases", subject: { id: subject, version },
     frozen: { cases, environment_digest: optionalString(args.environment_digest, "environment_digest"),
       budget_digest: optionalString(args.budget_digest, "budget_digest"), grader_version: optionalString(args.grader_version, "grader_version") },
     arms: { baseline, candidate }, equal_budget: true, repeated_trials: true,
+    screening_minimum_pairs: MIN_SCREENING_PAIRS, effect_decision_minimum_pairs: MIN_EFFECT_DECISION_PAIRS,
     required_stages: ["shadow", "held_out", "signoff", "canary", "rollback_target"], automatic_publication: false };
 }
 
@@ -137,21 +138,31 @@ export function buildCapabilityIterationPlan(store: CraftStore, args: JsonObject
   const records = Array.isArray(suppliedRecords) ? suppliedRecords.map(normaliseTaskRecord) : [];
   const sessions = unique(records.map(item => String(item.session_id)));
   const verified = records.filter(item => item.verification_outcome === "passed");
-  const baselineCandidatePairs = verified.filter(item => Array.isArray(item.injected_refs) && item.injected_refs.length > 0
-    && Array.isArray(item.used_refs) && item.used_refs.length > 0).length;
-  const evidenceSufficient = records.length >= MIN_TASK_RECORDS && sessions.length >= MIN_INDEPENDENT_SESSIONS && baselineCandidatePairs >= MIN_INDEPENDENT_SESSIONS;
-  const outcome = evidenceSufficient ? "eligible_for_controlled_effect_assessment" : "inconclusive";
+  const usageSessionsByRef = new Map<string, Set<string>>();
+  for (const item of verified) {
+    const used = new Set(item.used_refs as string[]);
+    for (const ref of new Set(item.injected_refs as string[])) {
+      if (!used.has(ref)) continue;
+      const refSessions = usageSessionsByRef.get(ref) ?? new Set<string>();
+      refSessions.add(String(item.session_id)); usageSessionsByRef.set(ref, refSessions);
+    }
+  }
+  const recurrentAssetRefs = [...usageSessionsByRef].filter(([, refSessions]) => refSessions.size >= MIN_INDEPENDENT_SESSIONS).map(([ref]) => ref).sort();
+  const assetUsageObservations = verified.filter(item => recurrentAssetRefs.some(ref => (item.injected_refs as string[]).includes(ref)
+    && (item.used_refs as string[]).includes(ref))).length;
+  const evidenceSufficient = recurrentAssetRefs.length > 0;
+  const outcome = evidenceSufficient ? "project_candidate_ready_for_paired_assessment" : "inconclusive";
   const digest = stableDigest({ projectScope, projectRoot, records, outcome });
   const learningRecord: JsonObject = {
     schema: LEARNING_RECORD_SCHEMA, project_scope_id: projectScope,
     record_digests: records.map(recordDigest), independent_sessions: sessions.length,
     verification_outcomes: countBy(records.map(item => String(item.verification_outcome))),
     feedback_outcomes: countBy(records.map(item => String(item.turn_outcome))),
-    baseline_candidate_pairs: baselineCandidatePairs,
-    evidence_threshold: { minimum_records: MIN_TASK_RECORDS, minimum_independent_sessions: MIN_INDEPENDENT_SESSIONS,
-      minimum_baseline_candidate_pairs: MIN_INDEPENDENT_SESSIONS },
+    recurrent_asset_refs: recurrentAssetRefs, asset_usage_observations: assetUsageObservations, matched_task_pairs: 0,
+    evidence_threshold: { minimum_recurrent_asset_sessions: MIN_INDEPENDENT_SESSIONS,
+      screening_minimum_matched_task_pairs: MIN_SCREENING_PAIRS, effect_decision_minimum_matched_task_pairs: MIN_EFFECT_DECISION_PAIRS },
     model_effect_proven: false, business_eligible: false, routeable: false,
-    outcome, outcome_reason: evidenceSufficient ? "threshold_met; independent controlled task runs still required" : "threshold_not_met",
+    outcome, outcome_reason: evidenceSufficient ? "asset_recurred_across_independent_sessions; paired_effect_not_established" : "no_asset_recurred_across_independent_sessions",
     sanitized: true, content_stored: false, raw_conversation_excluded: true,
   };
   return {
@@ -159,7 +170,7 @@ export function buildCapabilityIterationPlan(store: CraftStore, args: JsonObject
     generated_without_writes: true, automatic_apply_allowed: false, execution_context: false,
     task_ledger: { schema: TASK_LEDGER_SCHEMA, records_supplied: records.length, record_digests: records.map(recordDigest),
       independent_sessions: sessions.length, verification_outcomes: learningRecord.verification_outcomes,
-      baseline_candidate_pairs: baselineCandidatePairs, sample_template: taskLedgerSample({ project_scope_id: projectScope }) },
+      recurrent_asset_refs: recurrentAssetRefs, asset_usage_observations: assetUsageObservations, sample_template: taskLedgerSample({ project_scope_id: projectScope }) },
     learning_record: learningRecord,
     readiness: { knowledge_claim_statuses: claimStatuses(store), knowledge_evaluation_cases: store.count("knowledge_evaluation_case"),
       memory_ledger: store.count("memory_ledger"), experience_observations: store.count("experience_observation"),
@@ -173,7 +184,7 @@ export function buildCapabilityIterationPlan(store: CraftStore, args: JsonObject
       subject_version: values.subject_version ?? 1, baseline_id: values.baseline_id ?? "baseline:no-context",
       candidate_id: values.candidate_id ?? "candidate:minimal-sufficient-context" }),
     next_safe_actions: outcome === "inconclusive"
-      ? ["collect_sanitized_independent_task_records", "freeze_cases_and_equal_budget", "run_controlled_baseline_candidate_tasks", "do_not_promote"]
-      : ["attach_exact_controlled_task_effect_evidence", "review_held_out_trials", "obtain_signoff", "canary_with_rollback_target"],
+      ? ["collect_sanitized_independent_task_records", "keep_project_scoped", "do_not_claim_effect_or_promote"]
+      : ["freeze_cases_and_equal_budget", "run_three_pair_screening", "require_five_pairs_for_earliest_effect_decision", "review_safety_and_practical_effect", "do_not_promote_on_usage_alone"],
   };
 }

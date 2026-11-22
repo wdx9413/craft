@@ -108,6 +108,20 @@ test("Context public MCP composes its members and Runtime SDK and Workbench dele
   } finally { runtime?.close(); context.close(); rmSync(root, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
 });
 
+test("Context routes Evaluation Model profiles to the Experience owner", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-model-owner-route-"));
+  const context = await openMcpRuntime("component-context-complete", { CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "0" });
+  try {
+    const service = context.server.service!;
+    const profile = service.evaluationModelProfileSave({ profile_id: "owned-workflow-profile", provider: "qwen", model: "qwen-plus",
+      purposes: ["workflow_evolution"], network_execution_enabled: true }).profile as JsonObject;
+    const experience = service.ownerServices.get("experience")!;
+    assert.equal(experience.store.get("evaluation_model_profile", "owned-workflow-profile").provider, "qwen");
+    assert.equal(service.store.find("evaluation_model_profile", "owned-workflow-profile"), null);
+    assert.equal((service.evaluationModelProfileGet({ profile_id: String(profile.id) }).profile as JsonObject).id, profile.id);
+  } finally { context.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("Context reports Knowledge-owned project identity migration errors without losing their code", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-knowledge-identity-failure-"));
   const project = mkdtempSync(join(tmpdir(), "craft-knowledge-identity-project-"));

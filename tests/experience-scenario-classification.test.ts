@@ -19,7 +19,7 @@ const classified = JSON.stringify({ decision: "classified", scenario_key: "valid
 
 function fixture(options: { response?: string; ticket?: JsonObject | null; request?: JsonObject; taxonomy?: JsonObject; profile?: JsonObject;
   profileReadiness?: JsonObject; provider?: JsonObject | null; finalizeStatus?: string; throwOn?: string; throwName?: string;
-  ticketResult?: JsonObject; completionEmpty?: boolean; throwRaw?: boolean; acquire?: boolean } = {}) {
+  ticketResult?: JsonObject; completionEmpty?: boolean; throwRaw?: boolean; acquire?: boolean; traceEvents?: JsonObject[]; trace?: JsonObject; traceHasMore?: boolean } = {}) {
   const calls: Array<{ name: string; args: JsonObject }> = [];
   const requests: unknown[] = [];
   const client: ExperienceScenarioClassificationClient = { async call(name, args = {}) {
@@ -33,12 +33,14 @@ function fixture(options: { response?: string; ticket?: JsonObject | null; reque
     }
     if (name === "craft_evaluation_model_profile_get") return { profile: options.profile ?? { provider: "test", model: "test-model", version: 1, max_attempts: 1,
       max_output_tokens: 256, temperature: 0 }, readiness: options.profileReadiness ?? { status: "ready_for_adapter" }, ...(options.provider ? { provider: options.provider } : {}) };
-    if (name === "craft_experience_scenario_classification_request_get") return { request: options.request ?? { id: "scenario_classification_1", version: 1, status: "awaiting_model",
+    if (name === "craft_experience_scenario_classification_request_get") return { request: options.request?.id === args.request_id ? options.request : { id: args.request_id, version: 1, status: "awaiting_model",
       context, identity_digest: "sha256:" + "b".repeat(64) }, taxonomy: options.taxonomy ?? { catalog_version: 0, scenarios: [] } };
     if (name === "craft_learning_cycle_finalize") return { status: options.finalizeStatus ?? "observed",
       observation: { id: context.observation_id, scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "project", id: "project:craft" } } },
       scenario_catalog: { scenario_key: "validation.repair", status: "candidate", catalog_version: 1 } };
     if (name === "craft_experience_scenario_classification_request_complete") return options.completionEmpty ? {} : { request: { id: "scenario_classification_1", version: 2, status: "classified" } };
+    if (name === "craft_trace_query") return { events: options.traceEvents ?? [], ...(options.traceHasMore === undefined ? {} : { has_more: options.traceHasMore }) };
+    if (name === "craft_trace_get") return { trace: options.trace ?? {}, events: options.traceEvents ?? [] };
     if (name === "craft_evaluation_model_ticket_complete" || name.startsWith("craft_trace_")) return {};
     throw new Error(`Unexpected tool ${name}`);
   } };
@@ -71,6 +73,10 @@ test("classifies a verified task and links the model decision through the normal
   const boundIndex = f.calls.findIndex(call => call.name === "craft_trace_append" && call.args.event_kind === "model.result_bound");
   const completeIndex = f.calls.findIndex(call => call.name === "craft_experience_scenario_classification_request_complete");
   assert.ok(boundIndex >= 0 && boundIndex < completeIndex);
+  const traceFinalizeIndex = f.calls.findIndex(call => call.name === "craft_trace_finalize" && call.args.status === "completed");
+  const ticketCompleteIndex = f.calls.findIndex(call => call.name === "craft_evaluation_model_ticket_complete");
+  assert.ok(completeIndex < traceFinalizeIndex && traceFinalizeIndex < ticketCompleteIndex,
+    "persist the result request and terminal Trace before making its ticket ineligible for reconciliation");
   const bound = f.calls[boundIndex]!.args.data as JsonObject;
   assert.equal(bound.response_digest, (modelCompleted?.args.data as JsonObject).response_digest);
   assert.match(String(bound.result_digest), /^sha256:[a-f0-9]{64}$/u);
@@ -156,6 +162,96 @@ test("reports a resolved request with a stale ticket as an unknown result withou
   assert.equal(f.calls.some(call => call.name === "craft_trace_start"), false);
 });
 
+test("reconciles a resolved request only from its exact model result Trace and never replays the model", async () => {
+  const resultDigest = "sha256:" + "c".repeat(64), responseDigest = "sha256:" + "d".repeat(64);
+  const traceId = "experience_scenario_classification_prior";
+  const traceEvents: JsonObject[] = [
+    { trace_id: traceId, sequence: 1, event_kind: "model.completed", actor: "experience-learning-worker", source: "model-transport:test", trust: "observed",
+      operation_id: "ticket-1", model_fingerprint: "sha256:model", output_refs: [responseDigest] },
+    { trace_id: traceId, sequence: 2, event_kind: "model.result_bound", actor: "experience-learning-worker", source: "craft-experience",
+      trust: "observed", operation_id: "ticket-1", input_refs: [responseDigest], output_refs: ["scenario_classification_1", resultDigest] },
+  ];
+  const f = fixture({ request: { id: "scenario_classification_1", version: 2, status: "classified", result_digest: resultDigest },
+    trace: { id: traceId, task_id: "experience:scenario_classification_1", operation_id: "ticket-1", model_fingerprint: "sha256:model", status: "running" },
+    traceEvents });
+  const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "reconciled");
+  assert.equal((result.outcomes as JsonObject[])[0]?.trace_id, traceId);
+  assert.equal(f.requests.length, 0);
+  const finalizeIndex = f.calls.findIndex(call => call.name === "craft_trace_finalize" && call.args.status === "completed");
+  const completeIndex = f.calls.findIndex(call => call.name === "craft_evaluation_model_ticket_complete");
+  assert.ok(finalizeIndex >= 0 && completeIndex > finalizeIndex, "the recoverable Trace must be finalized before its queue ticket is completed");
+});
+
+test("completes a stale ticket from an already finalized exact Trace without reopening it", async () => {
+  const resultDigest = "sha256:" + "c".repeat(64), responseDigest = "sha256:" + "d".repeat(64);
+  const traceId = "experience_scenario_classification_finalized";
+  const f = fixture({ request: { id: "scenario_classification_1", version: 2, status: "classified", result_digest: resultDigest },
+    trace: { id: traceId, task_id: "experience:scenario_classification_1", operation_id: "ticket-1", model_fingerprint: "sha256:model", status: "completed" },
+    traceEvents: [
+      { trace_id: traceId, sequence: 1, event_kind: "model.completed", actor: "experience-learning-worker", source: "model-transport:test", trust: "observed",
+        operation_id: "ticket-1", model_fingerprint: "sha256:model", output_refs: [responseDigest] },
+      { trace_id: traceId, sequence: 2, event_kind: "model.result_bound", actor: "experience-learning-worker", source: "craft-experience", trust: "observed",
+        operation_id: "ticket-1", input_refs: [responseDigest], output_refs: ["scenario_classification_1", resultDigest] },
+      { trace_id: traceId, sequence: 3, event_kind: "trace.finalized", actor: "craft", source: "craft", trust: "verified" },
+    ] });
+  const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "reconciled");
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), true);
+  assert.equal(f.calls.some(call => call.name === "craft_trace_finalize"), false);
+  assert.equal(f.requests.length, 0);
+});
+
+test("does not reconcile a result when its Trace identity belongs to another task", async () => {
+  const resultDigest = "sha256:" + "c".repeat(64), responseDigest = "sha256:" + "d".repeat(64);
+  const traceId = "experience_scenario_classification_foreign";
+  const f = fixture({ request: { id: "scenario_classification_1", version: 2, status: "classified", result_digest: resultDigest },
+    trace: { id: traceId, task_id: "experience:another-request", operation_id: "ticket-1", model_fingerprint: "sha256:model", status: "running" },
+    traceEvents: [{ trace_id: traceId, sequence: 1, event_kind: "model.completed", actor: "experience-learning-worker", source: "model-transport:test",
+      trust: "observed", operation_id: "ticket-1", model_fingerprint: "sha256:model", output_refs: [responseDigest] },
+      { trace_id: traceId, sequence: 2, event_kind: "model.result_bound", actor: "experience-learning-worker", source: "craft-experience",
+      trust: "observed", operation_id: "ticket-1", input_refs: [responseDigest], output_refs: ["scenario_classification_1", resultDigest] }] });
+  const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "model_result_unknown");
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+  assert.equal(f.requests.length, 0);
+});
+
+test("does not reconcile a result bound to a Trace without a trusted model transport response", async () => {
+  const resultDigest = "sha256:" + "c".repeat(64), responseDigest = "sha256:" + "d".repeat(64);
+  const traceId = "experience_scenario_classification_untrusted_model";
+  const f = fixture({ request: { id: "scenario_classification_1", version: 2, status: "classified", result_digest: resultDigest },
+    trace: { id: traceId, task_id: "experience:scenario_classification_1", operation_id: "ticket-1", model_fingerprint: "sha256:model", status: "running" },
+    traceEvents: [
+      { trace_id: traceId, sequence: 1, event_kind: "model.completed", actor: "experience-learning-worker", source: "untrusted-adapter",
+        trust: "observed", operation_id: "ticket-1", model_fingerprint: "sha256:model", output_refs: [responseDigest] },
+      { trace_id: traceId, sequence: 2, event_kind: "model.result_bound", actor: "experience-learning-worker", source: "craft-experience",
+        trust: "observed", operation_id: "ticket-1", input_refs: [responseDigest], output_refs: ["scenario_classification_1", resultDigest] },
+    ] });
+  const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "model_result_unknown");
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+  assert.equal(f.requests.length, 0);
+});
+
+test("does not reconcile from an incomplete Trace query page", async () => {
+  const resultDigest = "sha256:" + "c".repeat(64), responseDigest = "sha256:" + "d".repeat(64);
+  const traceId = "experience_scenario_classification_incomplete_trace_page";
+  const f = fixture({ request: { id: "scenario_classification_1", version: 2, status: "classified", result_digest: resultDigest },
+    trace: { id: traceId, task_id: "experience:scenario_classification_1", operation_id: "ticket-1", model_fingerprint: "sha256:model", status: "completed" },
+    traceHasMore: true,
+    traceEvents: [
+      { trace_id: traceId, sequence: 1, event_kind: "model.completed", actor: "experience-learning-worker", source: "model-transport:test", trust: "observed",
+        operation_id: "ticket-1", model_fingerprint: "sha256:model", output_refs: [responseDigest] },
+      { trace_id: traceId, sequence: 2, event_kind: "model.result_bound", actor: "experience-learning-worker", source: "craft-experience", trust: "observed",
+        operation_id: "ticket-1", input_refs: [responseDigest], output_refs: ["scenario_classification_1", resultDigest] },
+    ] });
+  const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "model_result_unknown");
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+  assert.equal(f.requests.length, 0);
+});
+
 test("persists an unknown classification checkpoint without rewriting it on retry", async () => {
   const directory = mkdtempSync(join(tmpdir(), "craft-reconciliation-"));
   try {
@@ -218,6 +314,51 @@ test("continues to a ready ticket while reporting a stale resolved request", asy
   assert.equal((result.outcomes as JsonObject[])[0]?.ticket_id, "ready");
   assert.equal(f.requests.length, 1);
   assert.equal(f.calls.filter(call => call.name === "craft_evaluation_model_ticket_complete").length, 1);
+});
+
+test("continues to another ticket when Trace proof lookup is unavailable", async () => {
+  const tickets = [{ id: "stale", purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
+    target: { kind: "experience_scenario_classification_request", id: "scenario_classification_1", version: 1, scope: "project:craft" }, readiness: { status: "ready_for_adapter" } },
+    { id: "ready-after-stale", purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
+      target: { kind: "experience_scenario_classification_request", id: "scenario_classification_2", version: 1, scope: "project:craft" }, readiness: { status: "ready_for_adapter" } }];
+  const f = fixture({ ticketResult: { tickets }, request: { id: "scenario_classification_1", version: 2, status: "classified", result_digest: "sha256:" + "c".repeat(64) },
+    throwOn: "craft_trace_query" });
+  const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal(result.processed, 1);
+  assert.equal((result.outcomes as JsonObject[])[0]?.ticket_id, "ready-after-stale");
+  assert.equal(result.reconciliation_pending, true);
+  assert.equal(f.requests.length, 1);
+});
+
+test("keeps a recovered ticket pending when Trace finalization fails", async () => {
+  const resultDigest = "sha256:" + "c".repeat(64), responseDigest = "sha256:" + "d".repeat(64);
+  const traceId = "experience_scenario_classification_finalize_retry";
+  const f = fixture({ request: { id: "scenario_classification_1", version: 2, status: "classified", result_digest: resultDigest },
+    trace: { id: traceId, task_id: "experience:scenario_classification_1", operation_id: "ticket-1", model_fingerprint: "sha256:model", status: "running" },
+    traceEvents: [
+      { trace_id: traceId, sequence: 1, event_kind: "model.completed", actor: "experience-learning-worker", source: "model-transport:test", trust: "observed",
+        operation_id: "ticket-1", model_fingerprint: "sha256:model", output_refs: [responseDigest] },
+      { trace_id: traceId, sequence: 2, event_kind: "model.result_bound", actor: "experience-learning-worker", source: "craft-experience", trust: "observed",
+        operation_id: "ticket-1", input_refs: [responseDigest], output_refs: ["scenario_classification_1", resultDigest] },
+    ], throwOn: "craft_trace_finalize" });
+  const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal(result.processed, 0);
+  assert.equal(result.reconciliation_pending, true);
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "model_result_unknown");
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+  assert.equal(f.requests.length, 0);
+});
+
+test("keeps a persisted classification result recoverable when its original Trace cannot be finalized", async () => {
+  const f = fixture({ response: JSON.stringify({ decision: "unclassified" }), throwOn: "craft_trace_finalize" });
+  const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal(result.processed, 0);
+  assert.equal(result.reconciliation_pending, true);
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "model_result_unknown");
+  assert.equal(f.calls.some(call => call.name === "craft_experience_scenario_classification_request_complete"), true);
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+  assert.equal(f.calls.some(call => call.name === "craft_trace_append" && call.args.event_kind === "classification.failed"), false);
+  assert.equal(f.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"), false);
 });
 
 test("continues to another ticket when reconciliation checkpoint cannot be saved", async () => {

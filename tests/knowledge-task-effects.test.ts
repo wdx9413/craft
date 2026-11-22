@@ -12,6 +12,8 @@ import { knowledgeTaskEffectEvidenceVerified, knowledgeClaimPromotionProofVerifi
 import { knowledgeTaskContract } from "../core/knowledge-task-contract.ts";
 import { bindKnowledgeTaskEffectEvaluationReader, knowledgeTaskEffectAssessmentDigest } from "@craft/capability-knowledge/knowledge-task-effect-proof";
 import { KnowledgeAutoReviewKernel } from "@craft/capability-knowledge/knowledge-auto-review";
+import { KnowledgeContribution } from "@craft/capability-knowledge/contribution";
+import { ContextResolutionKernel } from "../core/context-resolution.ts";
 
 test("task contracts require bounded deterministic outcomes and safety assertions", () => {
   const valid = { checks: [{ id: "answer", kind: "json_equals", path: "answer.json", key: "ok", equals: true }], safety_checks: [{ id: "safe", kind: "exit_code", equals: 0 }] };
@@ -43,11 +45,13 @@ test("Knowledge authority requires exact adjudicated tasks and a controlled posi
   const claim = store.create("knowledge_claim", "claim", { status: "candidate", scope: "global", source_id: source.id, content: "Exact task knowledge", identity_digest: stableDigest("claim"), content_digest: stableDigest("body"), evidence_ids: ["claim-evidence"] });
   const refs = [{ claim_id: claim.id, claim_version: claim.version, identity_digest: claim.identity_digest, content_digest: claim.content_digest }];
   const contract = { checks: [{ id: "answer", kind: "stdout_contains", value: "correct" }], safety_checks: [{ id: "safe", kind: "exit_code", equals: 0 }] };
-  const cases = Array.from({ length: 21 }, (_, index) => {
+  const cases = Array.from({ length: 5 }, (_, index) => {
     const id = `task-${index}`, evidenceId = `task-evidence-${index}`, adjudicationId = `adjudication-${index}`;
-    store.create("evidence", evidenceId, { confidence: "confirmed", metadata: { source_session_id: `heldout-${index}`, task_id: id, source_ref_digest: stableDigest(id) } });
-    const item = store.create("knowledge_evaluation_case", id, { query: `Independent task ${index}`, identity_digest: stableDigest(id), scope: "global", expected_claim_ids: index === 20 ? [] : [claim.id],
-      candidate_claim_refs: refs, source_session_id: `heldout-${index}`, source_task_id: id, source_evidence_ids: [evidenceId], evaluation_channel: "real_session", dataset_partition: "held_out", sanitized: true,
+    const sourceSession = `heldout-${Math.floor(index / 2)}`;
+    const projectScopeId = index < 3 ? "project:alpha" : index === 3 ? "project:beta" : "project:gamma";
+    store.create("evidence", evidenceId, { confidence: "confirmed", metadata: { source_session_id: sourceSession, task_id: id, project_scope_id: projectScopeId, source_ref_digest: stableDigest(id) } });
+    const item = store.create("knowledge_evaluation_case", id, { query: `Independent task ${index}`, identity_digest: stableDigest(id), scope: "global", expected_claim_ids: index === 4 ? [] : [claim.id],
+      candidate_claim_refs: refs, source_session_id: sourceSession, source_task_id: id, project_scope_id: projectScopeId, source_evidence_ids: [evidenceId], evaluation_channel: "real_session", dataset_partition: "held_out", sanitized: true,
       label_source: "host_adjudicated", adjudication_id: adjudicationId, task_contract: contract });
     store.create("knowledge_evaluation_adjudication", adjudicationId, { scope: "global", execution_origin: "managed_codex_cli", case_id: id, status: "adjudicated", result_case_version: item.version,
       result_case_identity_digest: item.identity_digest, decision: "accepted", expected_claim_ids: item.expected_claim_ids, task_contract_digest: stableDigest(contract) });
@@ -60,16 +64,17 @@ test("Knowledge authority requires exact adjudicated tasks and a controlled posi
   const engine = { executable, kind: "claude", sha256: "b".repeat(64), environment_digest: stableDigest("environment") };
   const records = ["a", "b"].map(id => evaluationStore.create("workbench_evaluation", id, { state: "completed", execution_engine: engine }));
   let context: unknown;
-  const suite = { subject_kind: "agent", partition: "held_out", sanitized: true, approved_by: "fixture", metrics: { primary: { kind: "binary_pass_rate", direction: "higher_is_better" }, guardrails: [{ metric: "duration_ms", required: true, comparator: "lte", threshold: 100 }] }, cases: cases.map(item => ({ id: item.id, prompt: item.query, ...contract })) };
+  let suite = { subject_kind: "agent", partition: "held_out", sanitized: true, approved_by: "fixture", metrics: { primary: { kind: "binary_pass_rate", direction: "higher_is_better", minimum_meaningful_effect: 0.1 }, guardrails: [{ metric: "duration_ms", required: true, comparator: "lte", threshold: 100 }] }, cases: cases.map(item => ({ id: item.id, prompt: item.query, ...contract })) };
   const subjects: JsonObject[] = [0, 1].map(() => ({ kind: "agent", id: "subject", version: "1", host: { kind: "claude", binary: executable, model: "selected-model" } }));
   const results: JsonObject[][] = [0, 1].map(side => cases.map(item => ({ case_id: item.id, trial: 1, task_run_id: `${side}-${String(item.id)}`, task_verdict: side === 0 ? "failed" : "passed", safety_verdict: "passed", workspace_snapshot: { digest: "same-code", bytes: 1, files: 1 }, trace_complete: true, issue: null,
     duration_ms: 1, host: { adapter: "claude", requested_model: "selected-model", observed_models: ["actual-model"], input_tokens: 10, output_tokens: 2 } })));
-  const comparison: JsonObject = { status: "comparable", independent_task_runs: true, unmeasured_pairs: 0, one_sided_p: 0.000001, primary_effect: binaryEffect(Array.from({ length: 21 }, () => ({ baseline: false, candidate: true }))), guardrails: [] };
+  const comparison: JsonObject = { status: "comparable", independent_task_runs: true, unmeasured_pairs: 0, one_sided_p: 0.000001, primary_effect: binaryEffect(Array.from({ length: 5 }, () => ({ baseline: false, candidate: true }))), guardrails: [] };
   let integrity = "verified_against_controlled_run";
+  let controlledResults = results;
   const controlled = {
     get: (id: string) => records[id === "a" ? 0 : 1]!,
     inputs: async (id: string) => ({ suite, runtime: { budget_digest: "same" }, subject: subjects[id === "a" ? 0 : 1]! }),
-    report: async (id: string) => ({ report: { results: results[id === "a" ? 0 : 1] }, integrity }),
+    report: async (id: string) => ({ report: { results: controlledResults[id === "a" ? 0 : 1] }, integrity }),
     compare: async () => ({ comparison: { metrics: comparison } }),
   };
   const effects = new KnowledgeTaskEffects(store, controlled, async () => executable);
@@ -97,6 +102,36 @@ test("Knowledge authority requires exact adjudicated tasks and a controlled posi
     assert.equal((issued.assessment as JsonObject).status, "eligible");
     assert.equal(issued.knowledge_promotion_authorized, false); assert.equal(knowledgeTaskEffectEvidenceVerified(store, run), true);
     assert.equal((await effects.assess("retrieval", "a", "b")).idempotent, true);
+    const get = store.get.bind(store);
+    store.get = ((kind: string, id: string, version?: number) => {
+      const record = get(kind, id, version);
+      return kind === "knowledge_claim" && id === claim.id || kind === "knowledge_evaluation_case"
+        ? { ...record, scope: "project:beta" } : record;
+    }) as typeof store.get;
+    try { assert.throws(() => effects.context("retrieval"), /another project/u); }
+    finally { store.get = get; }
+    const smallGainRun = store.create("knowledge_evaluation_run", "small-gain", payload(run));
+    comparison.one_sided_p = 0.01; comparison.primary_effect = { risk_difference_ci95: [0.05, 0.4] };
+    const smallGain = (await effects.assess(String(smallGainRun.id), "a", "b")).assessment as JsonObject;
+    assert.equal(smallGain.status, "insufficient");
+    assert.ok((smallGain.reasons as string[]).includes("minimum_meaningful_effect_not_established"));
+    comparison.one_sided_p = 0.000001;
+    comparison.primary_effect = binaryEffect(Array.from({ length: 5 }, () => ({ baseline: false, candidate: true })));
+    const screeningCases = [cases[0]!, cases[1]!, cases[4]!], screeningRun = store.create("knowledge_evaluation_run", "screening-only", { ...payload(run),
+      case_ids: screeningCases.map(item => item.id), case_refs: screeningCases.map(item => ({ case_id: item.id, case_version: item.version, identity_digest: item.identity_digest })) });
+    suite = { ...suite, cases: screeningCases.map(item => ({ id: item.id, prompt: item.query, ...contract })) };
+    controlledResults = results.map(items => screeningCases.map(item => items.find(result => result.case_id === item.id)!));
+    comparison.one_sided_p = 0.125;
+    comparison.primary_effect = binaryEffect(Array.from({ length: 3 }, () => ({ baseline: false, candidate: true })));
+    const screening = (await effects.assess(String(screeningRun.id), "a", "b")).assessment as JsonObject;
+    assert.equal(screening.status, "insufficient");
+    assert.ok((screening.reasons as string[]).includes("fewer_than_five_matched_task_pairs_screening_only"));
+    assert.ok((screening.reasons as string[]).includes("fewer_than_three_independent_sessions"));
+    assert.ok((screening.reasons as string[]).includes("fewer_than_three_independent_projects_global_shadow_blocked"));
+    suite = { ...suite, cases: cases.map(item => ({ id: item.id, prompt: item.query, ...contract })) };
+    controlledResults = results;
+    comparison.one_sided_p = 0.000001;
+    comparison.primary_effect = binaryEffect(Array.from({ length: 5 }, () => ({ baseline: false, candidate: true })));
     const receipt = issued.assessment as JsonObject, find = store.find.bind(store);
     for (const patch of [{ version: 2 }, { status: "insufficient" }, { dependencies: [] }, { dependencies: null }, { dependencies: [null] },
       { dependencies: [{}] }, { dependencies: Array(10_001).fill({}) }, { dependencies: [(receipt.dependencies as JsonObject[])[0], (receipt.dependencies as JsonObject[])[0]] },
@@ -116,14 +151,14 @@ test("Knowledge authority requires exact adjudicated tasks and a controlled posi
     const insufficient = store.create("knowledge_evaluation_run", "insufficient", payload(run));
     comparison.status = "inconclusive"; comparison.independent_task_runs = false; comparison.unmeasured_pairs = 1; comparison.one_sided_p = 0.5;
     comparison.primary_effect = { risk_difference_ci95: [-0.1, 0.2] }; comparison.guardrails = [{ status: "failed" }];
-    results[1]![20]!.task_verdict = "failed";
+    results[1]![4]!.task_verdict = "failed";
     const held = (await effects.assess("insufficient", "a", "b")).assessment as JsonObject;
-    assert.equal(held.status, "insufficient"); assert.equal((held.reasons as string[]).length, 4); assert.equal(knowledgeTaskEffectEvidenceVerified(store, insufficient), false);
+    assert.equal(held.status, "insufficient"); assert.equal((held.reasons as string[]).length, 5); assert.equal(knowledgeTaskEffectEvidenceVerified(store, insufficient), false);
     comparison.one_sided_p = 0.1;
     await assert.rejects(effects.assess("insufficient", "a", "b"), /different assessment/);
     Object.assign(comparison, { status: "comparable", independent_task_runs: true, unmeasured_pairs: 0, one_sided_p: 0.000001,
-      primary_effect: binaryEffect(Array.from({ length: 21 }, () => ({ baseline: false, candidate: true }))), guardrails: [] });
-    results[1]![20]!.task_verdict = "passed";
+      primary_effect: binaryEffect(Array.from({ length: 5 }, () => ({ baseline: false, candidate: true }))), guardrails: [] });
+    results[1]![4]!.task_verdict = "passed";
     store.create("knowledge_evaluation_run", "concurrent", payload(run));
     const transact = store.transactionWithRetry.bind(store);
     let first = true, announce!: () => void, proceed!: () => void;
@@ -142,6 +177,15 @@ test("Knowledge authority requires exact adjudicated tasks and a controlled posi
     assert.equal((review.assessments as JsonObject[])[0]!.promoted, true);
     const promoted = store.get("knowledge_claim", String(claim.id));
     assert.equal(knowledgeClaimPromotionProofVerified(store, promoted), true);
+    const contextResolution = await new ContextResolutionKernel(store, [new KnowledgeContribution(store)]).resolve({
+      query: "Exact task knowledge", scope_kind: "global", scope_id: "global", members: ["knowledge"],
+    });
+    const recalled = (contextResolution.contributions as JsonObject[]).flatMap(part => part.items as JsonObject[]);
+    assert.equal(recalled.length, 1, "a formally promoted Claim must be available through normal Context resolution");
+    assert.equal(recalled[0]!.claim_id, claim.id);
+    assert.equal(recalled[0]!.content, claim.content);
+    assert((contextResolution.receipt as JsonObject).read_refs && ((contextResolution.receipt as JsonObject).read_refs as JsonObject[])
+      .some(ref => ref.kind === "knowledge_claim" && ref.id === claim.id), "actual use must record the promoted Claim in the Context receipt");
     assert.equal(store.count("workbench_evaluation"), 0, "Knowledge retains Eval references without copying its payloads");
     const item = store.get("evidence", "task-evidence-0"); store.save("evidence", "task-evidence-0", { ...item, confidence: "unverified" });
     assert.equal(knowledgeTaskEffectEvidenceVerified(store, run), false);

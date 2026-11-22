@@ -36,8 +36,10 @@ export function capabilityIterationGaps(store: CraftStore, args: JsonObject = {}
     gap("evidence_pending", "context_usage", "No durable injection/feedback evidence is present in this data space.",
       "run_real_host_turns_and_record_asset_ref_usage_and_token_measurement"));
   if (learning.outcome === "inconclusive") remediation.push(
-    gap("evidence_pending", "controlled_task_effect", "Independent sanitized Host task effects are not available.",
-      "collect_at_least_20_records_from_two_sessions_then_run_equal_budget_baseline_candidate_pairs"));
+    gap("evidence_pending", "project_asset_recurrence", "No exact asset has verified use across two independent sessions.",
+      "capture_two_verified_uses_of_the_same_asset_across_independent_sessions"));
+  remediation.push(gap("evidence_pending", "controlled_task_effect", "Asset usage or recurrence does not establish task benefit; independent matched results are still required.",
+    "freeze_contract_then_run_three_pair_screening_and_at_least_five_pairs_for_effect_decision"));
   if ((activation.components as JsonObject[] | undefined)?.some(item => item.status !== "executed")) remediation.push(
     gap("runtime_pending", "hook_execution_proof", "Configuration and installed manifests do not prove a Hook executed in this session.",
       "run_one_real_host_turn_then_recheck_this_session"));

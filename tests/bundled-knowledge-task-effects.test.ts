@@ -62,15 +62,16 @@ test("packaged Knowledge task-effect routes return domain errors rather than mod
 /** Synthetic policy records only; these never prove independent live-model benefit. */
 function material(store: CraftStore) {
   const source = store.create("knowledge_source", "source", { scope: { kind: "global", id: "global" }, status: "active", trust: "verified", content_digest: stableDigest("source") });
-  store.create("evidence", "claim-evidence", { confidence: "confirmed", metadata: { source_session_id: "claim-session", task_id: "claim-task", source_ref_digest: stableDigest("claim") } });
+  store.create("evidence", "claim-evidence", { confidence: "confirmed", metadata: { project_scope_id: "project:synthetic-project", source_session_id: "claim-session", task_id: "claim-task", source_ref_digest: stableDigest("claim") } });
   const claim = store.create("knowledge_claim", "claim", { status: "candidate", scope: "global", source_id: source.id, content: "Synthetic bundled contract knowledge", identity_digest: stableDigest("claim"), content_digest: stableDigest("body"), evidence_ids: ["claim-evidence"] });
   const refs = [{ claim_id: claim.id, claim_version: claim.version, identity_digest: claim.identity_digest, content_digest: claim.content_digest }];
   const contract = { checks: [{ id: "answer", kind: "stdout_contains", value: "correct" }], safety_checks: [{ id: "safe", kind: "exit_code", equals: 0 }] };
-  const cases = Array.from({ length: 21 }, (_, index) => {
+  const cases = Array.from({ length: 5 }, (_, index) => {
     const id = `task-${index}`, evidenceId = `task-evidence-${index}`, adjudicationId = `adjudication-${index}`;
-    store.create("evidence", evidenceId, { confidence: "confirmed", metadata: { source_session_id: `heldout-${index}`, task_id: id, source_ref_digest: stableDigest(id) } });
-    const item = store.create("knowledge_evaluation_case", id, { query: `Synthetic task ${index}`, identity_digest: stableDigest(id), scope: "global", expected_claim_ids: index === 20 ? [] : [claim.id], candidate_claim_refs: refs,
-      source_session_id: `heldout-${index}`, source_task_id: id, source_evidence_ids: [evidenceId], evaluation_channel: "real_session", dataset_partition: "held_out", sanitized: true, label_source: "host_adjudicated", adjudication_id: adjudicationId, task_contract: contract });
+    const sourceSession = `heldout-${Math.floor(index / 2)}`;
+    store.create("evidence", evidenceId, { confidence: "confirmed", metadata: { project_scope_id: "project:synthetic-project", source_session_id: sourceSession, task_id: id, source_ref_digest: stableDigest(id) } });
+    const item = store.create("knowledge_evaluation_case", id, { query: `Synthetic task ${index}`, identity_digest: stableDigest(id), scope: "global", expected_claim_ids: index === 4 ? [] : [claim.id], candidate_claim_refs: refs,
+      project_scope_id: "project:synthetic-project", source_session_id: sourceSession, source_task_id: id, source_evidence_ids: [evidenceId], evaluation_channel: "real_session", dataset_partition: "held_out", sanitized: true, label_source: "host_adjudicated", adjudication_id: adjudicationId, task_contract: contract });
     store.create("knowledge_evaluation_adjudication", adjudicationId, { scope: "global", execution_origin: "managed_codex_cli", case_id: id, status: "adjudicated", result_case_version: item.version,
       result_case_identity_digest: item.identity_digest, decision: "accepted", expected_claim_ids: item.expected_claim_ids, task_contract_digest: stableDigest(contract) });
     return item;

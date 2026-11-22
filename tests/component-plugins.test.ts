@@ -44,7 +44,7 @@ test("the notes-owned surface exposes the device discovery step required by the 
 });
 
 test("the Memory-owned surface exposes asynchronous promotion only to its owner", () => {
-  const ownedTools = surfaceToolNames("component-memory-owned", TOOLS);
+  const ownedTools = surfaceToolNames("component-memory-owned");
   assert(ownedTools.includes("craft_memory_promotion_run"));
   assert(ownedTools.includes("craft_memory_session_finalize"));
   assert(!surfaceToolNames("component-memory-daily").includes("craft_memory_promotion_run"));

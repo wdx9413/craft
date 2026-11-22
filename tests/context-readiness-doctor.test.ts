@@ -235,16 +235,22 @@ test("Capability iteration plan is dry-run, threshold-gated and never writes liv
     assert.equal((empty.migration as JsonObject).apply_allowed, false);
     assert.equal((empty.capability_activation as JsonObject).authorization_granted, false);
     assert.equal((empty.governed_quality as JsonObject).automatic_publication, false);
-    const records = Array.from({ length: 20 }, (_, index) => taskRecord(`task:${index}`, index % 2 === 0 ? "session:A" : "session:B"));
+    const records = Array.from({ length: 2 }, (_, index) => ({ ...taskRecord(`task:${index}`, index === 0 ? "session:A" : "session:B"),
+      injected_refs: ["knowledge:claim@example@1", ...(index === 0 ? ["knowledge:unused@example@1"] : [])] }));
     const qualified = buildCapabilityIterationPlan(f.store, { project_scope_id: "project:demo",
       input: { project_scope_id: "project:demo", records, asset_ids: ["asset:a", "asset:b", "asset:c", "asset:d", "asset:e", "asset:f"],
-        allowed_effects: ["read_only"], case_ids: ["case:a", "case:b"], environment_digest: "sha256:" + "a".repeat(64),
+        allowed_effects: ["read_only"], case_ids: ["case:a", "case:b", "case:c"], environment_digest: "sha256:" + "a".repeat(64),
         budget_digest: "sha256:" + "b".repeat(64), grader_version: "grader:1", subject_version: 2 } });
-    assert.equal((qualified.learning_record as JsonObject).outcome, "eligible_for_controlled_effect_assessment");
+    assert.equal((qualified.learning_record as JsonObject).outcome, "project_candidate_ready_for_paired_assessment");
     assert.equal((qualified.learning_record as JsonObject).business_eligible, false);
     assert.equal((qualified.learning_record as JsonObject).routeable, false);
+    assert.equal((qualified.learning_record as JsonObject).model_effect_proven, false);
+    assert.equal((qualified.learning_record as JsonObject).asset_usage_observations, 2);
+    assert.equal((qualified.learning_record as JsonObject).matched_task_pairs, 0);
     assert.equal((qualified.capability_activation as JsonObject).omitted_count, 1);
-    assert.equal((qualified.governed_quality as JsonObject).status, "trial_plan_ready");
+    assert.equal((qualified.governed_quality as JsonObject).status, "screening_plan_ready");
+    assert.equal((qualified.governed_quality as JsonObject).screening_minimum_pairs, 3);
+    assert.equal((qualified.governed_quality as JsonObject).effect_decision_minimum_pairs, 5);
     assert.equal((qualified.governed_quality as JsonObject).equal_budget, true);
     const after = f.store.count("knowledge_claim") + f.store.count("memory_ledger") + f.store.count("experience_observation");
     assert.equal(after, before);
@@ -296,6 +302,11 @@ test("Gap audit classifies remaining work and says no new context member is miss
     const ids = (gaps.gaps as JsonObject[]).map(item => String(item.id));
     for (const id of ["diagnostic_errors", "readiness_doctor", "codex_plugin_cache", "project_identity_migration", "context_usage", "controlled_task_effect", "hook_execution_proof"]) assert.ok(ids.includes(id));
     assert.equal((gaps.gaps as JsonObject[]).find(item => item.id === "business_data_migration"), undefined);
+    const recurring = capabilityIterationGaps(f.store, { project_scope_id: "project:demo", records: [taskRecord("a", "session:A"), taskRecord("b", "session:B")] });
+    const recurringGaps = recurring.gaps as JsonObject[];
+    assert.equal(recurringGaps.some(item => item.id === "project_asset_recurrence"), false);
+    assert.equal(recurringGaps.some(item => item.id === "controlled_task_effect"), true,
+      "verified use recurrence must not clear the independent effect-evidence gap");
     const projectRoot = join(f.root, "project");
     await mkdir(projectRoot, { recursive: true });
     f.store.create("project_registry_migration", "observed", { project_root: projectRoot, state: "applied" });
