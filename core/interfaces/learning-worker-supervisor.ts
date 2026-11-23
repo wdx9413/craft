@@ -48,7 +48,7 @@ export async function startContextLearningWorker(options: LearningWorkerSupervis
   if (!launch) { options.on_failure?.("worker_entrypoint_unavailable"); return undefined; }
   const selection = component.surface ? ["--surface", component.surface] : ["--product", component.product];
   const serverArgs = [...(launch.server_entrypoint.endsWith(".ts") ? ["--experimental-strip-types"] : []), launch.server_entrypoint, ...selection];
-  const env = { ...options.env, CRAFT_CONTINUOUS_LEARNING: "0", CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
+  const env = { ...options.env, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
     CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify(serverArgs), CRAFT_LEARNING_COMPONENTS: component.learning,
     CRAFT_LEARNING_COMPONENT_LOCKS_HELD: component.learning, CRAFT_STORAGE_OWNER: component.product };
   const spawnProcess = options.spawn_process ?? spawn;

@@ -58,6 +58,7 @@ test("worker supervisor starts one worker per free component and skips overlappi
     const stopContext = await startWorker(f, { mode: "component-context-agent", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker, on_skip: value => skips.push(value) });
     assert.equal(launches.length, 2);
     assert.deepEqual(skips, ["worker_already_running"]);
+    assert.equal(launches[0]!.env.CRAFT_CONTINUOUS_LEARNING, undefined, "the worker must not inherit the MCP recursion guard; its MCP child sets the guard itself");
     assert.deepEqual(JSON.parse(launches[0]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "experience"]);
     assert.equal(launches[0]!.env.CRAFT_STORAGE_OWNER, "experience");
     assert.equal(launches[0]!.env.CRAFT_LEARNING_COMPONENTS, "experience");
@@ -560,7 +561,7 @@ test("worker supervisor launches TypeScript MCP without recursion and settles a 
     const stop = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.serverTs, env: {}, shutdown_timeout_ms: 5,
       spawn_process: spawnFake });
     assert.equal(launch?.args[0], "--experimental-strip-types");
-    assert.equal(launch?.env.CRAFT_CONTINUOUS_LEARNING, "0");
+    assert.equal(launch?.env.CRAFT_CONTINUOUS_LEARNING, undefined, "only the worker's MCP child should disable recursive supervision");
     assert.equal(launch?.env.CRAFT_EXPERIENCE_MCP_COMMAND, process.execPath);
     assert.deepEqual(launch?.stdio, ["ignore", "ignore", "inherit"], "worker diagnostics reach MCP stderr while stdout stays off the protocol stream");
     await stop?.();
