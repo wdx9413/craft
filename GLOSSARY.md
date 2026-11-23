@@ -137,3 +137,19 @@ _Avoid_: Prompt rule, executable policy
 **Unresolved Classification**:
 A classification result whose evidence is insufficient or ambiguous; it is retained pending stronger evidence and does not change the record's retrieval or promotion behavior.
 _Avoid_: Best-guess fact, forced label
+
+**craft-eval**:
+The standalone evaluation layer for Craft capabilities, separate from the shadow/held-out/signoff/canary gates inside craft-experience or the `evaluation_run` inside craft-knowledge. It runs fixed query sets over relevant, stale, conflicting, and cross-project controls, measuring evidence coverage, wrong-scope leakage, freshness, recall, latency, and cost, with and without a Context Receipt. craft-context 0.20.4 does not ship a `craft-eval` sub-capability.
+_Avoid_: craft-experience internal gates, component-internal validation, unit coverage
+
+**Context Receipt**:
+A content-independent receipt issued by Context Resolution, fixing the selected Knowledge/Memory/Experience versions, selection reason, and budget. It does not preserve repeated body text or grant execution authority; it is historical evidence, not permanent access permission.
+_Avoid_: Prompt, Activation Profile, full context
+
+**Verified Outcome**:
+The terminal result of a task, established by an external verifier actually running tests or verification commands and producing a confirmed program receipt. `craft_learning_cycle_finalize` requires `verified: true`; a model summary or Host completion text is not a Verified Outcome.
+_Avoid_: Host completion, model confidence, test command alone
+
+**External Verifier**:
+The component outside craft-context that executes code, runs tests, and issues the verified result needed to close the self-evolution loop. craft-context sub-capabilities are read-only structural evidence and do not execute tests or produce verified results themselves.
+_Avoid_: craft-codebase, craft-experience, craft-knowledge, craft-memory

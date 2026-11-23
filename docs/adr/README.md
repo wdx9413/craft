@@ -66,3 +66,4 @@
 | 0036 | [持久化自进化 Worker 设计稿](../superpowers/specs/2026-11-21-durable-learning-worker-design.md)、[Worker 部署说明](../../deploy/experience-learning/README.md) |
 | 0037 | [Codex 自进化理想态规划](../product/craft-context-codex-self-evolution-ideal-state.zh-CN.md)、[自进化本体论与评测闭环](../technical/modules/self-evolution-ontology.md) |
 | 0038 | [持久化自进化 Worker 设计稿](../superpowers/specs/2026-11-21-durable-learning-worker-design.md) |
+| [0039](0039-craft-context-sub-capabilities-self-evolution-assessment.md) | craft-context 四个子能力作为 Codex 插件的自进化链路评估与缺项 |
