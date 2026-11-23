@@ -82,6 +82,29 @@ test("CLI Runtime commands use runtime authority and reject cross-domain migrati
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("historical replay CLI composes all four learning owners without reading archive content", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-cli-self-evolution-replay-"));
+  try {
+    const rejectedAction = cli(root, ["self-evolution", "replay", "unknown"]);
+    assert.notEqual(rejectedAction.status, 0);
+    assert.match(rejectedAction.stderr, /self-evolution replay requires capture, cleanup-preview, or cleanup-apply/u);
+    const preview = cli(root, ["self-evolution", "replay", "cleanup-preview", "--run-id", "preview-fixture"]);
+    assert.equal(preview.status, 0, preview.stderr);
+    assert.equal(JSON.parse(preview.stdout).replay_run_id, "preview-fixture");
+    for (const owner of ["context", "memory", "knowledge", "experience", "notes"]) {
+      assert(existsSync(join(root, owner, "publication.db")), `replay runtime must compose ${owner}`);
+    }
+    const legacyRoot = mkdtempSync(join(tmpdir(), "craft-cli-legacy-replay-"));
+    try {
+      const store = await new CraftStore(craftPaths(legacyRoot)).open();
+      store.close();
+      const unowned = cli(legacyRoot, ["self-evolution", "replay", "unknown"]);
+      assert.notEqual(unowned.status, 0);
+      assert.match(unowned.stderr, /requires the Context owner runtime/u);
+    } finally { rmSync(legacyRoot, { recursive: true, force: true }); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("owned standalone CLI runs its provider fixture in the Runtime catalog", async () => {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");

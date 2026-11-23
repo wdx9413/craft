@@ -128,6 +128,8 @@ import { scopeEnvelope, scopeFromKey } from "../scope-policy.ts";
 import { InternalActionApprovalBroker, type InternalApprovalPolicy } from "../internal-action-approval.ts";
 import { NativeToolKernel } from "../native-tool-kernel.ts";
 import { DshPluginHostRuntime } from "../dsh-plugin-host-runtime.ts";
+import { applyHistoricalReplayCleanup, captureHistoricalReplayBatch, previewHistoricalReplayCleanup } from "../historical-learning-replay.ts";
+import { historicalReplayArchive, historicalReplayOwners, replayEvidenceResolver } from "./coordinators/historical-learning-replay.ts";
 
 export const VERSION = CRAFT_RELEASE_VERSION;
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
@@ -510,7 +512,23 @@ export class CraftService extends ServiceFoundation {
   memoryCaptureProjectCorrection(args: JsonObject): JsonObject { return this.cognitiveWrites.captureProjectCorrection(args); }
   /** Internal Host Hook path for bounded, automatically classified stable facts. */
   memoryCaptureObservedFact(args: JsonObject): JsonObject { return this.cognitiveWrites.captureObservedFact(args); }
+  memoryCaptureHistoricalReplayCandidate(args: JsonObject): JsonObject { return this.cognitiveWrites.captureHistoricalReplayCandidate(args); }
+  memoryHistoricalReplayCleanupPreview(args: JsonObject): JsonObject { return this.cognitiveWrites.historicalReplayCleanupPreview(args); }
+  memoryHistoricalReplayCleanupApply(args: JsonObject): JsonObject { return this.cognitiveWrites.historicalReplayCleanupApply(args); }
   memoryPromotionRun(args: JsonObject = {}): JsonObject { return this.cognitiveWrites.processObservedPromotions(args); }
+
+  historicalReplayCapture(args: JsonObject = {}): Promise<JsonObject> {
+    const replayRunId = args.replay_run_id === undefined ? randomUUID() : text(args.replay_run_id, "replay_run_id");
+    return captureHistoricalReplayBatch(replayRunId, { store: this.store, ...historicalReplayArchive,
+      resolveEvidence: replayEvidenceResolver(this), owners: historicalReplayOwners(this) });
+  }
+  historicalReplayCleanupPreview(args: JsonObject): JsonObject {
+    return previewHistoricalReplayCleanup(args.replay_run_id, historicalReplayOwners(this));
+  }
+  historicalReplayCleanupApply(args: JsonObject): JsonObject {
+    return applyHistoricalReplayCleanup(args.replay_run_id, args.expected_manifest_digest,
+      { store: this.store, owners: historicalReplayOwners(this) });
+  }
 
   /** Record or reinforce a directory↔description link; see `craft-notes-location.ts`. */
   craftNotesLocationRecord(args: JsonObject): JsonObject {
@@ -759,6 +777,9 @@ export class CraftService extends ServiceFoundation {
     if (owner) return owner.craftNotesObserveDirectory(args);
     return this.craftNotes.observeDirectory(args);
   }
+  notesCaptureHistoricalReplayCandidate(args: JsonObject): JsonObject { return (this.craftNotes as unknown as { captureHistoricalReplayCandidate(args: JsonObject): JsonObject }).captureHistoricalReplayCandidate(args); }
+  notesHistoricalReplayCleanupPreview(args: JsonObject): JsonObject { return (this.craftNotes as unknown as { historicalReplayCleanupPreview(args: JsonObject): JsonObject }).historicalReplayCleanupPreview(args); }
+  notesHistoricalReplayCleanupApply(args: JsonObject): JsonObject { return (this.craftNotes as unknown as { historicalReplayCleanupApply(args: JsonObject): JsonObject }).historicalReplayCleanupApply(args); }
   craftNotesObserveFile(args: JsonObject): JsonObject {
     const owner = this.notesOwner();
     if (owner) return owner.craftNotesObserveFile(args);
@@ -1328,6 +1349,9 @@ export class CraftService extends ServiceFoundation {
 
   workflowEvolutionObserve(args: JsonObject): JsonObject { return this.workflowEvolution.observe(args); }
   workflowEvolutionPropose(args: JsonObject): JsonObject { return this.workflowEvolution.propose(args); }
+  experienceCaptureHistoricalReplayCandidate(args: JsonObject): JsonObject { return (this.workflowEvolution as unknown as { captureHistoricalReplayCandidate(args: JsonObject): JsonObject }).captureHistoricalReplayCandidate(args); }
+  experienceHistoricalReplayCleanupPreview(args: JsonObject): JsonObject { return (this.workflowEvolution as unknown as { historicalReplayCleanupPreview(args: JsonObject): JsonObject }).historicalReplayCleanupPreview(args); }
+  experienceHistoricalReplayCleanupApply(args: JsonObject): JsonObject { return (this.workflowEvolution as unknown as { historicalReplayCleanupApply(args: JsonObject): JsonObject }).historicalReplayCleanupApply(args); }
   workflowEvolutionObservations(args: JsonObject): JsonObject { return this.workflowEvolution.observations(args); }
   workflowEvolutionProposals(args: JsonObject): JsonObject { return this.workflowEvolution.proposals(args); }
   workflowEvolutionProposalGet(args: JsonObject): JsonObject { return this.workflowEvolution.get(args); }
@@ -5484,6 +5508,10 @@ export class CraftService extends ServiceFoundation {
     return { recommendation, idempotent: false };
   }
   knowledgeClaimSave(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimSave(args); }
+  knowledgeCaptureLiveHookCandidate(args: JsonObject): JsonObject { return (this.knowledgeClaims as unknown as { captureLiveHookCandidate(args: JsonObject): JsonObject }).captureLiveHookCandidate(args); }
+  knowledgeCaptureHistoricalReplayCandidate(args: JsonObject): JsonObject { return (this.knowledgeClaims as unknown as { captureHistoricalReplayCandidate(args: JsonObject): JsonObject }).captureHistoricalReplayCandidate(args); }
+  knowledgeHistoricalReplayCleanupPreview(args: JsonObject): JsonObject { return (this.knowledgeClaims as unknown as { historicalReplayCleanupPreview(args: JsonObject): JsonObject }).historicalReplayCleanupPreview(args); }
+  knowledgeHistoricalReplayCleanupApply(args: JsonObject): JsonObject { return (this.knowledgeClaims as unknown as { historicalReplayCleanupApply(args: JsonObject): JsonObject }).historicalReplayCleanupApply(args); }
   knowledgeSessionEvidenceRecord(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeSessionEvidenceRecord(args); }
   knowledgeClaimGet(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimGet(args); }
   knowledgeStorageReconcile(args: JsonObject): JsonObject {

@@ -61,13 +61,24 @@ async function main(): Promise<void> {
         ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}) });
   } catch { /* Diagnostics must never delay or prevent the Host Hook. */ }
   if (event === "SessionStart" && process.argv[1]) launchMemoryArchiveWorker(process.argv[1], paths.root);
-  // Context has no SessionStart work: its bridge deliberately returns an empty
-  // result for this event. Keep the content-free runtime receipt, but avoid
-  // opening SQLite and constructing the full service for a pure no-op.
+  // SessionStart must ensure the durable worker before exiting, but it still
+  // avoids opening SQLite and constructing the full service on this path.
   if (component === "context" && event === "SessionStart") {
+    const handlerStarted = performance.now();
+    let outcome: "completed" | "failed" = "completed";
+    let errorCode: string | undefined;
+    try {
+      const { ensureLearningWorkerLaunchAgent } = await import("../core/learning-worker-launch-agent.ts");
+      ensureLearningWorkerLaunchAgent();
+    } catch (error) {
+      outcome = "failed";
+      errorCode = operationErrorCode(error);
+      process.stderr.write(`[craft-context] Learning Worker ensure failed (${errorCode})\n`);
+    }
     process.stdout.write("{}\n");
     diagnostic?.finish({ process_elapsed_ms: process.uptime() * 1_000, input_read_ms: inputReadMs,
-      input_parse_ms: inputParseMs, store_open_ms: 0, handler_ms: 0, outcome: "skipped" });
+      input_parse_ms: inputParseMs, store_open_ms: 0, handler_ms: performance.now() - handlerStarted,
+      outcome, ...(errorCode ? { error_code: errorCode } : {}) });
     return;
   }
   // Codex sends every matching Bash call here, including commands that cannot

@@ -60,7 +60,7 @@ test("UserPromptSubmit automatically accumulates conventions into ledger records
   try {
     const bridge = new CodexHookBridge(f.service);
     await bridge.handle("context", {
-      cwd: f.root, session_id: "auto-accumulate", turn_id: "auto-accumulate-1",
+      cwd: f.root, session_id: "auto-accumulate", turn_id: "auto-accumulate-1", task_id: "auto-accumulate-task",
       hook_event_name: "UserPromptSubmit",
       prompt: "本项目约定：提交前必须运行 pnpm test。我偏好深色模式。",
     });
@@ -69,9 +69,50 @@ test("UserPromptSubmit automatically accumulates conventions into ledger records
     assert.equal(claims[0]!.kind, "rule");
     assert.equal(claims[0]!.concept_kind, "rule");
     assert.ok(String(claims[0]!.content ?? "").includes("提交前必须运行 pnpm test"));
+    const knowledgeLineage = (claims[0]!.source_lineage as JsonObject[])[0]!;
+    assert.equal(knowledgeLineage.origin, "live_hook");
+    assert.equal(knowledgeLineage.session_id, "auto-accumulate");
+    assert.equal(knowledgeLineage.turn_id, "auto-accumulate-1");
+    assert.deepEqual(knowledgeLineage.evidence_refs, [{ kind: "evidence", id: (claims[0]!.evidence_ids as string[])[0],
+      version: f.store.find("evidence", String((claims[0]!.evidence_ids as string[])[0]))!.version }]);
     const candidates = f.store.list("memory_candidate", 100, (item) => String(item.content ?? "").includes("深色模式"));
     assert.ok(candidates.length >= 1, "durable statements become Memory candidates");
     assert.ok(candidates.some((item) => String(item.content ?? "").includes("我偏好深色模式")), "preference is captured");
+    const memoryLineage = (candidates[0]!.source_lineage as JsonObject[])[0]!;
+    assert.equal(memoryLineage.origin, "live_hook");
+    assert.equal(memoryLineage.session_id, "auto-accumulate");
+    assert.equal(memoryLineage.turn_id, "auto-accumulate-1");
+    assert.equal((memoryLineage.evidence_refs as JsonObject[]).length, 1);
+  } finally { await dispose(f); }
+});
+
+test("UserPromptSubmit keeps automatic capture scoped when the Host omits its turn identifier", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    await bridge.handle("context", {
+      cwd: f.root, session_id: "auto-no-turn", task_id: "auto-no-turn-task",
+      hook_event_name: "UserPromptSubmit", prompt: "本项目约定：验证结果必须可复现。",
+    });
+    const candidates = f.store.list("memory_candidate", 100, item => String(item.content ?? "").includes("验证结果必须可复现"));
+    assert.equal(candidates.length, 1, "Memory stages a session scoped candidate");
+    assert.match(String((candidates[0]!.source_lineage as JsonObject[])[0]?.turn_id), /^hook_turn_/u,
+      "the Host bridge supplies its generated turn identifier to both owners");
+    assert.equal(f.store.count("knowledge_claim"), 1);
+
+    const accumulate = (bridge as unknown as { accumulateDurableStatements(prompt: string, input: JsonObject,
+      scope: { kind: "project"; id: string }, members: readonly string[]): { count: number } }).accumulateDurableStatements;
+    const direct = accumulate.call(bridge, "本项目约定：本地辅助入口不伪造 Host turn。",
+      { cwd: f.root, session_id: "auto-direct-no-turn", task_id: "direct-no-turn-task" },
+      { kind: "project", id: codexProjectScope(f.root)!.id }, ["memory"]);
+    assert.equal(direct.count, 1);
+    assert.equal(f.store.count("knowledge_claim"), 1, "Knowledge skips a direct capture without a Host turn");
+
+    const withoutTask = accumulate.call(bridge, "本项目约定：缺少任务编号时仍保留会话证据。",
+      { cwd: f.root, session_id: "auto-direct-no-task", turn_id: "direct-no-task-turn" },
+      { kind: "project", id: codexProjectScope(f.root)!.id }, ["memory"]);
+    assert.equal(withoutTask.count, 2, "both owners can capture when a turn exists without a task ID");
+    assert.equal(f.store.count("knowledge_claim"), 2);
   } finally { await dispose(f); }
 });
 
@@ -1332,8 +1373,14 @@ test("Experience hooks persist only redacted verified signals and propose after 
     assert(journals.every(journal => (journal.signals as JsonObject[]).filter(item => item.kind === "verification")
       .every(item => item.scenario_key === "coding.feature-implementation")));
     assert.doesNotMatch(JSON.stringify(journals), /abcdefghijklmnop|pnpm test/u);
-    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 2);
-    assert.deepEqual(f.store.list("workflow_evolution_observation", 10).map(item => (item.source as JsonObject).session_id).sort(), ["session-one", "session-two"]);
+    const observations = f.store.list("workflow_evolution_observation", 10);
+    assert.equal(observations.length, 2);
+    assert.deepEqual(observations.map(item => (item.source as JsonObject).session_id).sort(), ["session-one", "session-two"]);
+    assert(observations.every(item => {
+      const lineage = (item.source_lineage as JsonObject[])[0];
+      return lineage?.origin === "live_hook" && typeof lineage.session_id === "string"
+        && (lineage.evidence_refs as JsonObject[]).some(ref => ref.kind === "evidence" && typeof ref.version === "number");
+    }), "Experience observations keep exact live source and Evidence versions");
     const requests = f.store.list("workflow_evolution_request", 10);
     assert.equal(requests.length, 1);
     assert.equal(requests[0]!.procedure_kind, "workflow");
@@ -1859,6 +1906,10 @@ test("verified Experience completion records Notes for absolute directories of o
     ]);
     assert(usage.every(item => item.subject_type === "directory"));
     assert(usage.every(item => item.project_id === undefined || item.project_id === projectScope));
+    assert(usage.every(item => (item.evidence_ref as JsonObject).kind === "evidence"
+      && typeof (item.evidence_ref as JsonObject).version === "number"));
+    assert(usage.every(item => (item.source_lineage as JsonObject[])[0]?.origin === "live_hook"
+      && (item.source_lineage as JsonObject[])[0]?.session_id === "notes-session"));
   } finally { await dispose(f); }
 });
 

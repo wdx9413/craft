@@ -32,6 +32,8 @@ import { HookSignalSanitizer, nestedText, type HookSignal } from "./codex-hook-s
 import { codexHookLearningStageDiagnostic } from "./codex-hook-learning-diagnostic.ts";
 import { queueHookMaintenance } from "./memory-archive-worker.ts";
 import { evolutionHostTurnSource, expireEvolutionProjectBinding, mintEvolutionProjectBinding } from "../evolution-project-binding.ts";
+import { extractDurableStatements } from "../domains/durable-statements.ts";
+export { extractDurableStatements } from "../domains/durable-statements.ts";
 export { HookSignalSanitizer } from "./codex-hook-signal-sanitizer.ts";
 
 type ComponentHookMember = "knowledge" | "memory" | "experience";
@@ -148,24 +150,6 @@ function evolutionDomainFor(textValue: string): "coding" | "office" | "travel" |
  * Conservative by design: only explicit conventions, rules, preferences or
  * facts are captured so ordinary task chatter is never persisted.
  */
-export function extractDurableStatements(prompt: string): { kind: "rule" | "fact" | "preference"; statement: string }[] {
-  const results: { kind: "rule" | "fact" | "preference"; statement: string }[] = [];
-  const source = prompt.trim();
-  // Reject both inline credentials and placeholder tokens ({{SECRET_...}},
-  // {{PASSWORD_...}}) before any statement can reach a durable ledger.
-  if (!source || source.length > 1_000 || SECRET.test(source) || source.includes("{{") || source.includes("}}")) return results;
-  const sentences = source.split(/(?<=[。！!？?。]\s*)|(?<=[.!?]\s+)/u).map((item) => item.trim()).filter(Boolean);
-  for (const sentence of sentences) {
-    const pref = /^(?:我偏好|我更喜欢|我长期使用|我习惯|I prefer|I usually use|my default is)\s*[:：,，]?\s*(.+)$/iu.exec(sentence);
-    if (pref?.[1] && pref[1].trim().length > 2) { results.push({ kind: "preference", statement: sentence }); continue; }
-    const rule = /^(?:(?:本项目|这个项目|该项目)(?:的)?(?:约定|规范|默认规则|标准操作)(?:是)?\s*[:：,，]?\s*|(?:我们约定|项目要求|编码规范是|必须|始终|always|must|never|do not|don't)\s*[:：,，]?\s*|(?:以后|今后)(?:在本项目中)?(?:请)?(?:默认)?(?:使用|采用|遵循|保持|优先|避免|不要|总是)\s*[:：,，]?\s*)(.+)$/iu.exec(sentence);
-    if (rule?.[1] && rule[1].trim().length > 2) { results.push({ kind: "rule", statement: sentence }); continue; }
-    const fact = /^(?:(?:本项目|这个项目|该项目)(?:目前)?(?:默认)?(?:使用|采用|基于|运行在|部署在)\s*[:：,，]?\s*|(?:the project|this project|we use|it uses|default)\s*[:：,，]?\s*)(.+)$/iu.exec(sentence);
-    if (fact?.[1] && fact[1].trim().length > 2) { results.push({ kind: "fact", statement: sentence }); continue; }
-  }
-  return results;
-}
-
 function experienceTaskGoalArgs(service: CraftService, input: HookInput, scope: HookProjectScope | null) {
   const root = text(input.cwd), sessionId = text(input.session_id), turnId = text(input.turn_id);
   if (!root || !sessionId || !turnId || !scope) return null;
@@ -650,6 +634,7 @@ export class CodexHookBridge {
           const captured = memoryOwner.memoryCaptureObservedFact({ content: item.statement, kind: legacyKind,
             session_id: sessionId, session_host: sessionHost, scope_kind: "session", scope_id: sessionId,
             project_scope_id: scope.id, project_root: input.cwd, sensitivity: "internal",
+            ...(text(input.turn_id) ? { turn_id: text(input.turn_id) } : {}), ...(text(input.task_id) ? { task_id: text(input.task_id) } : {}),
             ...(item.kind === "rule" ? { tags: ["auto_extracted_rule"] } : {}) });
           written = written || captured.auto_committed === true;
           count += 1;
@@ -673,12 +658,18 @@ export class CodexHookBridge {
             const registered = knowledgeOwner.scopeIdentityResolveProject({ project_root: input.cwd });
             if (((registered.identity as JsonObject).canonical_scope as JsonObject).id !== scope.id) throw new Error("Knowledge project binding mismatch");
           }
-          knowledgeOwner.evidenceRecord({ evidence_id: evidenceId, source_type: "codex-hook",
+          const evidence = knowledgeOwner.evidenceRecord({ evidence_id: evidenceId, source_type: "codex-hook",
             claim: "user-stated-convention", confidence: "unverified",
             locator: sessionId ?? "codex-hook" });
-          ownedMemberService(this.service, "knowledge").knowledgeClaimSave({ kind: "rule", content: item.statement, scope: scope.id,
+          const turnId = text(input.turn_id);
+          if (!sessionId || !turnId) continue;
+          knowledgeOwner.knowledgeCaptureLiveHookCandidate({ kind: "rule", content: item.statement, scope: scope.id,
             project_root: input.cwd, evidence_ids: [evidenceId],
-            tags: ["auto_extracted_rule"], proposed_by: sessionId ?? "codex-hook" });
+            source_lineage: [{ origin: "live_hook", session_id: sessionId, turn_id: turnId,
+              ...(text(input.task_id) ? { task_id: text(input.task_id) } : {}), project_scope_id: scope.id,
+              source_ref: { kind: "codex_hook_turn", id: turnId, digest: stableDigest({ session_id: sessionId, turn_id: turnId, statement_digest: stableDigest(item.statement) }) },
+              evidence_refs: [{ kind: "evidence", id: evidence.id, version: Number(evidence.version) }] }],
+            tags: ["auto_extracted_rule"], proposed_by: sessionId });
           count += 1;
         }
       } catch (error) {

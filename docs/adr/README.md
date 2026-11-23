@@ -41,6 +41,7 @@
 | [0035](0035-craft-context-learning-scope-and-data-boundary.md) | Craft Context 学习遵循最小持久化与作用域晋级 |
 | [0036](0036-learning-worker-outlives-host.md) | 学习 Worker 生命周期独立于 Host；各子能力保留自己的晋级门槛 |
 | [0037](0037-evolution-thresholds-follow-evidence-purpose.md) | 自进化门槛按证据用途分层：项目内复现、配对筛查、效果判断和跨项目 Shadow 不互相替代 |
+| [0038](0038-historical-session-replay-provenance-and-cleanup.md) | 历史会话回放候选绑定批次来源；清理只撤销纯回放资产，不误删正常来源 |
 
 ## 与技术文档的关系
 
@@ -64,3 +65,4 @@
 | 0035 | [Codex 自进化理想态规划](../product/craft-context-codex-self-evolution-ideal-state.zh-CN.md)、[Craft Context 接入](../technical/modules/craft-context.md) |
 | 0036 | [持久化自进化 Worker 设计稿](../superpowers/specs/2026-11-21-durable-learning-worker-design.md)、[Worker 部署说明](../../deploy/experience-learning/README.md) |
 | 0037 | [Codex 自进化理想态规划](../product/craft-context-codex-self-evolution-ideal-state.zh-CN.md)、[自进化本体论与评测闭环](../technical/modules/self-evolution-ontology.md) |
+| 0038 | [持久化自进化 Worker 设计稿](../superpowers/specs/2026-11-21-durable-learning-worker-design.md) |

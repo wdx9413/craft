@@ -6,6 +6,11 @@ import type { MemoryGovernanceKernel } from "../../memory-governance.ts";
 import { text } from "../../validation.ts";
 
 type Command = (args: JsonObject) => JsonObject;
+type HistoricalReplayMemoryCapture = MemoryCapture & {
+  captureHistoricalReplayCandidate(args: JsonObject): JsonObject;
+  historicalReplayCleanupPreview(args: JsonObject): JsonObject;
+  historicalReplayCleanupApply(args: JsonObject): JsonObject;
+};
 
 /** Owns the capture/revalidation sequence; existing kernels retain their gates. */
 export class CognitiveWriteCoordinator {
@@ -40,6 +45,18 @@ export class CognitiveWriteCoordinator {
 
   captureObservedFact(args: JsonObject): JsonObject {
     return new MemoryCapture(this.memory, () => this.sources.installBuiltins(), this.evidenceRecord).captureObservedFact(args);
+  }
+
+  captureHistoricalReplayCandidate(args: JsonObject): JsonObject {
+    return (new MemoryCapture(this.memory, () => this.sources.installBuiltins(), this.evidenceRecord) as HistoricalReplayMemoryCapture).captureHistoricalReplayCandidate(args);
+  }
+
+  historicalReplayCleanupPreview(args: JsonObject): JsonObject {
+    return (new MemoryCapture(this.memory, () => this.sources.installBuiltins(), this.evidenceRecord) as HistoricalReplayMemoryCapture).historicalReplayCleanupPreview(args);
+  }
+
+  historicalReplayCleanupApply(args: JsonObject): JsonObject {
+    return (new MemoryCapture(this.memory, () => this.sources.installBuiltins(), this.evidenceRecord) as HistoricalReplayMemoryCapture).historicalReplayCleanupApply(args);
   }
 
   processObservedPromotions(args: JsonObject = {}): JsonObject {

@@ -1,6 +1,6 @@
 # 持久化自进化 Worker 设计稿
 
-状态：用户已批准实现；本地代码已实现，Marketplace 所用精确依赖包和真实 Host 效果验收仍待完成。
+状态：Worker、能力隔离和 LaunchAgent 管理代码已存在；插件 SessionStart 自动确保 Worker、Marketplace 精确制品验证、真实 Host 闭环及效果验收仍待完成。当前本地实现分解见 `.scratch/self-evolution-e2e/spec.md`。
 
 ## 1. 目标
 
@@ -48,10 +48,10 @@
 | 方案 | 取舍 |
 | --- | --- |
 | 继续由 MCP 管理子进程 | 改动最少，但 Host/MCP 生命周期仍控制 Worker，不满足持久运行目标。 |
-| 操作系统托管 Worker，MCP 只负责捕获和诊断 | 可跨 Host 生命周期运行，能利用现有独立 Worker 命令及持久记录；需要安装、升级、状态诊断和防止双 Worker。**采用：macOS 首发使用用户级 LaunchAgent。** |
+| 操作系统托管 Worker，MCP 只负责捕获和诊断 | 可跨 Host 生命周期运行，能利用现有独立 Worker 命令及持久记录；需要插件启动时幂等安装/升级、状态诊断和防止双 Worker。**采用：macOS 首发使用用户级 LaunchAgent。** |
 | 远程常驻服务 | 可以 24/7 运行，但会引入远程身份、数据出域、凭据和部署治理；当前本地 `.craft_data` 及项目隔离不支持无额外设计地迁移。暂不采用。 |
 
-LaunchAgent 在用户登录时启动，不需要 root。用户注销或关机时暂停；本地队列保留，下一次登录自动恢复。自动安装不是 Marketplace 插件安装的隐式副作用，须由用户明确调用安装入口。
+LaunchAgent 在用户登录时启动，不需要 root。craft-context 插件首次有效的 SessionStart 幂等确保 LaunchAgent 已安装、版本匹配且已加载；用户注销或关机时暂停，本地队列保留并在下次登录恢复。显式 CLI 仍提供状态、停止、恢复、升级和卸载；插件启动不得静默覆盖内容冲突的既有服务。
 
 ## 6. 处理流程
 
@@ -97,7 +97,7 @@ flowchart LR
 ## 9. 交付顺序
 
 1. **持久队列契约**：对齐现有 Knowledge/Experience 阶段和 Memory 的候选/归档生命周期；定义 Work Item、租约、幂等键、恢复与诊断字段。Notes 保持自己的确认边界。
-2. **独立 Worker 所有权**：复用现有 Worker 命令；增加 macOS LaunchAgent 适配和显式 CLI 管理；停用或协调 MCP 内嵌 Worker，保证同一数据根唯一 owner。
+2. **独立 Worker 所有权**：复用现有 Worker 命令；由插件 SessionStart 幂等确保 macOS LaunchAgent 安装、升级和加载，并保留 CLI 管理；停用或协调 MCP 内嵌 Worker，保证同一数据根唯一 owner。
 3. **异步 Memory**：捕获与跨会话/跨项目晋级分离；待处理项目候选可在会话归档后继续，但只保留治理所需的脱敏内容、Scope、证据引用和期限。
 4. **观察与恢复**：诊断服务状态、能力锁、心跳、队列阶段、阻塞原因、上次成功和重试；提供用户暂停、恢复、卸载和撤销路径。
 5. **Host 与业务验收**：安装精确 Marketplace 包，在真实 Codex Host 验证任务结束后候选写入、关闭 MCP 后后台推进、重启续跑、每能力状态可读；之后执行固定预算的 baseline/candidate 配对和独立盲评。
@@ -108,7 +108,7 @@ flowchart LR
 
 ### 机制与恢复
 
-- LaunchAgent 可显式安装、查询、停止、恢复和卸载；安装不会静默覆盖现存服务或更改数据目录。
+- 插件 SessionStart 可幂等确保 LaunchAgent 安装、版本和加载状态；CLI 可查询、停止、恢复和卸载；冲突不会被静默覆盖，数据目录不会被擅自更改。
 - 停止 Codex/MCP 后，Worker 仍能处理已入队候选；停止 Worker、杀进程、升级重启后，待处理工作恢复且阶段不重复提交。
 - 两个 MCP/Worker 并发竞争同一数据根时，只有一个有效 owner；MCP 内嵌模式与 LaunchAgent 不会双跑。
 - Worker 崩溃、版本不匹配、数据根不可用、凭据缺失、策略禁用、模型超时和评测器不可用时均失败关闭，并显示稳定状态。
@@ -138,6 +138,6 @@ flowchart LR
 
 ## 12. 已确认的实现选择
 
-- CLI 命令为 `craft learning-worker launch-agent <install|status|start|stop|resume|upgrade|uninstall>`；LaunchAgent label 为 `com.craft.learning-worker`。安装必须显式调用。
+- CLI 命令为 `craft learning-worker launch-agent <install|status|start|stop|resume|upgrade|uninstall>`；LaunchAgent label 为 `com.craft.learning-worker`。插件 SessionStart 自动调用幂等 ensure；CLI 保留显式生命周期管理。
 - Service 状态与各子能力 owner 回执组成诊断入口；Workbench UI 仍是后续投影，不另建状态源。
 - 复用跨平台 Worker 命令和能力级锁，macOS LaunchAgent 仅负责服务托管；Windows/Linux 的服务适配不阻塞首期。

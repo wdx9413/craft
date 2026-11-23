@@ -28,6 +28,7 @@ import { credentialStatus, createFetchTransport, providerFromConfig } from "./mo
 import { hydrateSecretsIntoEnv } from "./secrets-store.ts";
 import { digestJson } from "./digest.ts";
 import { contextReadinessDoctor } from "./context-readiness-doctor.ts";
+import { dispatchHistoricalReplayCommand, historicalReplayContextMembers } from "./historical-replay-cli.ts";
 import { ActivationProofKernel } from "./activation-proof.ts";
 import { routeOwnedService } from "./application/owner-service.ts";
 import { installLearningWorkerLaunchAgent, learningWorkerLaunchAgentStatus, startLearningWorkerLaunchAgent,
@@ -111,7 +112,9 @@ Usage:
   craft worker run [options]    Run the persistent local maintenance worker
   craft worker status           Read the last local worker heartbeat
   craft learning-worker launch-agent <install|status|start|stop|resume|upgrade|uninstall> (resume aliases start)
-                                Manage the explicitly installed macOS learning Worker
+                                Manage the Craft-owned macOS learning Worker
+  craft self-evolution replay <capture|cleanup-preview|cleanup-apply> [options]
+                                Replay approved historical sessions and clean by digest
   craft command plan --argv '["node","-v"]'
                                 Plan a cross-platform command without executing
   craft command run --argv '["node","-v"]'
@@ -445,16 +448,18 @@ export async function main(args = process.argv.slice(2), launchAgentDependencies
   }
   if (args.includes("--help") || args.includes("-h") || ["version", "paths"].includes(args[0] ?? "")) return dispatchMain(args);
   const paths = craftPaths();
-  const inferred = args[0] === "notes" ? "notes" : "runtime";
+  const inferred = args[0] === "notes" ? "notes" : args[0] === "self-evolution" ? "context" : "runtime";
   const hasSharedDatabase = [paths.databaseFile, paths.legacyDatabaseFile].some(path => lstatSync(path, { throwIfNoEntry: false })?.isFile());
   const owned = requested !== undefined || presentStorageOwners(paths.root).length > 0 || !hasSharedDatabase;
   if (owned) {
-    if (![undefined, "doctor", "run", "config", "mode", "semantic", "source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor", "command", "adapter", "openapi", "migrate", "notes", "init"].includes(args[0])) throw new Error(`Unknown command: ${args[0]}`);
+    if (![undefined, "doctor", "run", "config", "mode", "semantic", "source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor", "command", "adapter", "openapi", "migrate", "notes", "self-evolution", "init"].includes(args[0])) throw new Error(`Unknown command: ${args[0]}`);
     if (requested && requested !== inferred) throw new Error(`CLI ${args[0] ?? "home"} belongs to ${inferred}; --product ${requested} cannot own this command`);
     if (args[0] === "migrate") throw new Error("Owned storage history requires the verified capability migration entry points shipped in the Craft package: dist/scripts/owner-history-archive.js, dist/scripts/owner-history-compress.js, dist/scripts/owner-history-import.js, dist/scripts/owner-storage-cutover.js and dist/scripts/storage-capacity.js");
-    const runtime = await openCapabilityService(inferred, args[0] === "run" && inferred === "runtime"
+    const replayMembers = historicalReplayContextMembers(args, process.env.CRAFT_CONTEXT_MEMBERS);
+    const runtimeEnvironment = args[0] === "run" && inferred === "runtime"
       ? { ...process.env, CRAFT_CONTEXT_MEMBERS: process.env.CRAFT_CONTEXT_MEMBERS ?? DEFAULT_RUNTIME_MEMBERS }
-      : process.env);
+      : replayMembers ? { ...process.env, CRAFT_CONTEXT_MEMBERS: replayMembers } : process.env;
+    const runtime = await openCapabilityService(inferred, runtimeEnvironment);
     try {
       await new ComponentTraceKernel(new TraceKernel(runtime.store), "cli").run({ requestId: "command", component: "craft-cli", operation: "command", input: { args }, handler: () => dispatchMain(args, runtime) });
     } finally { runtime.close(); }
@@ -496,6 +501,11 @@ async function dispatchMain(args: string[], owned?: CliRuntime, launchAgentDepen
       default: throw new Error("learning-worker launch-agent requires install, status, start, stop, resume, upgrade, or uninstall");
     }
     stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  if (args[0] === "self-evolution" && args[1] === "replay") {
+    if (!owned) throw new Error("Historical replay requires the Context owner runtime");
+    await dispatchHistoricalReplayCommand(args, owned.service);
     return;
   }
   if (args[0] === "doctor") {

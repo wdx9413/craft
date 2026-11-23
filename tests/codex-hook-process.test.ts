@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -32,8 +32,8 @@ async function replayFixture(host: "codex" | "claude") {
     assert(handler, `Missing ${host} ${eventName} command`);
     assert.equal(handler.command, `node "\${${host === "codex" ? "PLUGIN_ROOT" : "CLAUDE_PLUGIN_ROOT"}}/dist/plugin/craft-codex-hook.cjs" --member context${host === "claude" ? " --host claude" : ""}`);
     const child = spawn(process.execPath, [bundle, "--member", "context", ...(host === "claude" ? ["--host", "claude"] : [])], { cwd: repository,
-      env: { PATH: process.env.PATH, CRAFT_DATA_DIR: data, NODE_NO_WARNINGS: "1" },
-      stdio: ["pipe", "pipe", "pipe"], timeout: 10_000 });
+      env: { PATH: process.env.PATH, CRAFT_DATA_DIR: data, CRAFT_CONTINUOUS_LEARNING: "0", NODE_NO_WARNINGS: "1" },
+      stdio: ["pipe", "pipe", "pipe"], timeout: 30_000 });
     let stdout = "", stderr = "";
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
@@ -269,6 +269,61 @@ test("Context SessionStart records a runtime receipt without opening SQLite", as
     assert.equal(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='memory_ledger' AND id='legacy-invalid'")
       .get()?.payload_json, "{");
   } finally { await f.close(); }
+});
+
+test("Context SessionStart ensures and reloads the user LaunchAgent without opening SQLite", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "craft-hook-launch-agent-"));
+  const home = join(temporary, "home"), data = join(temporary, "data"), bin = join(temporary, "bin");
+  const state = join(temporary, "launch-agent-loaded"), log = join(temporary, "launchctl.log");
+  await Promise.all([mkdir(home, { recursive: true }), mkdir(bin, { recursive: true })]);
+  const launchctl = join(bin, "launchctl");
+  await writeFile(launchctl, `#!/usr/bin/env node
+const { appendFileSync, existsSync, writeFileSync, unlinkSync } = require("node:fs");
+const [action] = process.argv.slice(2);
+appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(" ") + "\\n");
+if (action === "print") { if (!existsSync(${JSON.stringify(state)})) process.exit(113); process.stdout.write("loaded"); }
+else if (action === "bootstrap") writeFileSync(${JSON.stringify(state)}, "loaded");
+else if (action === "bootout") { try { unlinkSync(${JSON.stringify(state)}); } catch {} }
+`, { mode: 0o700 });
+  await chmod(launchctl, 0o700);
+  const hook = join(root, "bin/craft-codex-hook.ts");
+  const run = () => new Promise<{ stdout: string; stderr: string; code: number | null }>((resolveResult, reject) => {
+    const child = spawn(process.execPath, ["--experimental-strip-types", hook, "--member", "context"], { cwd: root,
+      env: { ...process.env, HOME: home, CRAFT_DATA_DIR: data, PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`, NODE_NO_WARNINGS: "1" },
+      stdio: ["pipe", "pipe", "pipe"], timeout: 30_000 });
+    let stdout = "", stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", code => resolveResult({ stdout, stderr, code }));
+    child.stdin.end(JSON.stringify({ hook_event_name: "SessionStart", session_id: "launch-agent-session" }));
+  });
+  try {
+    const first = await run();
+    assert.equal(first.code, 0, first.stderr);
+    assert.equal(first.stdout.trim(), "{}");
+    assert.equal(first.stderr, "");
+    assert.equal(await readFile(state, "utf8"), "loaded");
+    const plist = await readFile(join(home, "Library", "LaunchAgents", "com.craft.learning-worker.plist"), "utf8");
+    assert.match(plist, /CRAFT_LEARNING_COMPONENTS/u);
+    const second = await run();
+    assert.equal(second.code, 0, second.stderr);
+    const invocations = (await readFile(log, "utf8")).trim().split("\n");
+    assert.deepEqual(invocations.map(line => line.split(" ")[0]), ["print", "print", "bootstrap", "print", "print"]);
+    await writeFile(join(home, "Library", "LaunchAgents", "com.craft.learning-worker.plist"), "foreign service", "utf8");
+    const conflict = await run();
+    assert.equal(conflict.code, 0, conflict.stderr);
+    assert.equal(conflict.stdout.trim(), "{}");
+    assert.match(conflict.stderr, /Learning Worker ensure failed/u);
+    const diagnosticFiles = await readdir(join(data, "trace", "hook-runtime", "v1"));
+    assert.equal(diagnosticFiles.length, 3);
+    const records = (await Promise.all(diagnosticFiles.map(async name => (await readFile(join(data, "trace", "hook-runtime", "v1", name), "utf8")))))
+      .flatMap(content => content.trim().split("\n").map(line => JSON.parse(line) as JsonObject));
+    const finished = records.filter(record => record.phase === "finished");
+    assert.equal(finished.length, 3);
+    assert.equal(finished.filter(record => record.outcome === "completed" && record.store_open_ms === 0).length, 2);
+    assert(finished.some(record => record.outcome === "failed" && record.error_code));
+  } finally { await rm(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }
 });
 
 test("packaged Hook records event and phase timings without logging prompt content", async () => {

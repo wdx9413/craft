@@ -100,6 +100,38 @@ function launchctl(deps: LaunchAgentDependencies, args: string[]): string {
   return deps.launchctl ? deps.launchctl(args) : execFileSync("launchctl", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
+function isCraftLearningWorkerPlist(contents: string): boolean {
+  return contents.includes(`<key>Label</key><string>${LEARNING_WORKER_LAUNCH_AGENT_LABEL}</string>`)
+    && contents.includes(`<key>CRAFT_LEARNING_COMPONENTS</key><string>${COMPONENTS}</string>`)
+    && contents.includes("<key>ProgramArguments</key><array>");
+}
+
+/** Ensure the user-level worker for a valid plugin session without taking over an unknown service. */
+export function ensureLearningWorkerLaunchAgent(deps: LaunchAgentDependencies = {}): { status: string; plist_path?: string } {
+  const env = deps.env ?? process.env;
+  const platform = deps.platform ?? process.platform;
+  if (env.CRAFT_CONTINUOUS_LEARNING === "0") return { status: "disabled" };
+  if (platform !== "darwin") return { status: "unsupported_platform" };
+
+  const location = paths(deps);
+  const read = deps.read_file ?? ((path: string) => readFileSync(path, "utf8"));
+  let current: string | undefined;
+  try { current = read(location.plist); }
+  catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+  }
+
+  if (current === undefined) {
+    const status = learningWorkerLaunchAgentStatus(deps);
+    if (status.loaded) throw new Error("learning_worker_launch_agent_conflicting_installation");
+    return installLearningWorkerLaunchAgent(deps);
+  }
+  if (!isCraftLearningWorkerPlist(current)) throw new Error("learning_worker_launch_agent_conflicting_installation");
+  const status = learningWorkerLaunchAgentStatus(deps);
+  if (status.reason === "program_missing") throw new Error("learning_worker_launch_agent_program_missing");
+  return upgradeLearningWorkerLaunchAgent(deps);
+}
+
 export function installLearningWorkerLaunchAgent(deps: LaunchAgentDependencies = {}): { status: string; plist_path: string } {
   ensureMac(deps);
   const location = paths(deps);
@@ -187,7 +219,7 @@ export function uninstallLearningWorkerLaunchAgent(deps: LaunchAgentDependencies
     return { status: "already_uninstalled" };
   }
   const current = (deps.read_file ?? ((path: string) => readFileSync(path, "utf8")))(location.plist);
-  if (!current.includes(`<key>Label</key><string>${LEARNING_WORKER_LAUNCH_AGENT_LABEL}</string>`)) {
+  if (!isCraftLearningWorkerPlist(current)) {
     throw new Error("learning_worker_launch_agent_changed_after_install");
   }
   if (state.loaded) launchctl(deps, ["bootout", location.target]);
@@ -206,7 +238,7 @@ export function upgradeLearningWorkerLaunchAgent(deps: LaunchAgentDependencies =
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return installLearningWorkerLaunchAgent(deps);
     throw error;
   }
-  if (!current.includes(`<key>Label</key><string>${LEARNING_WORKER_LAUNCH_AGENT_LABEL}</string>`)) {
+  if (!isCraftLearningWorkerPlist(current)) {
     throw new Error("learning_worker_launch_agent_changed_after_install");
   }
   const worker = workerEntrypoint(deps);

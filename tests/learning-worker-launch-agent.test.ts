@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { LEARNING_WORKER_LAUNCH_AGENT_LABEL, installLearningWorkerLaunchAgent, learningWorkerLaunchAgentStatus,
   renderLearningWorkerLaunchAgent, startLearningWorkerLaunchAgent, stopLearningWorkerLaunchAgent,
-  uninstallLearningWorkerLaunchAgent, upgradeLearningWorkerLaunchAgent, type LaunchAgentDependencies } from "../core/learning-worker-launch-agent.ts";
+  ensureLearningWorkerLaunchAgent, uninstallLearningWorkerLaunchAgent, upgradeLearningWorkerLaunchAgent, type LaunchAgentDependencies } from "../core/learning-worker-launch-agent.ts";
 
 function fixture(options: { installed?: boolean; loaded?: boolean; contents?: string; platform?: NodeJS.Platform } = {}) {
   const files = new Map<string, string>();
@@ -99,6 +99,75 @@ test("install refuses to overwrite a conflicting LaunchAgent", () => {
   const f = fixture({ installed: true });
   assert.throws(() => installLearningWorkerLaunchAgent(f.deps), /conflicting_installation/u);
   assert.equal(f.calls.length, 0);
+});
+
+test("SessionStart ensure installs, reloads and upgrades only an owned LaunchAgent", () => {
+  const first = fixture();
+  first.deps.env = { ...first.deps.env, CRAFT_LEARNING_MODEL_HOST: "codex" };
+  assert.equal(ensureLearningWorkerLaunchAgent(first.deps).status, "installed");
+  assert.equal(first.loaded(), true);
+  assert.match(first.files.get(first.plistPath) ?? "", /CRAFT_LEARNING_MODEL_HOST/u);
+  assert.equal(ensureLearningWorkerLaunchAgent(first.deps).status, "already_current");
+  assert.equal(first.calls.filter(args => args[0] === "bootstrap").length, 1);
+
+  const stopped = fixture({ installed: true, contents: installedPlist("/opt/craft/worker.js") });
+  assert.equal(ensureLearningWorkerLaunchAgent(stopped.deps).status, "already_current");
+  assert.equal(stopped.loaded(), true);
+  assert.equal(stopped.calls.filter(args => args[0] === "bootstrap").length, 1);
+
+  const upgraded = fixture({ installed: true, loaded: true, contents: installedPlist("/opt/old/worker.js") });
+  assert.equal(ensureLearningWorkerLaunchAgent(upgraded.deps).status, "upgraded");
+  assert.match(upgraded.files.get(upgraded.plistPath) ?? "", /\/opt\/craft\/worker\.js/u);
+  assert.deepEqual(upgraded.calls.filter(args => args[0] === "bootout" || args[0] === "bootstrap").map(args => args[0]), ["bootout", "bootstrap"]);
+});
+
+test("SessionStart ensure refuses an unowned or conflicting LaunchAgent and honors explicit worker disable", () => {
+  const conflict = fixture({ installed: true, contents: "<key>Label</key><string>com.craft.learning-worker</string>" });
+  assert.throws(() => ensureLearningWorkerLaunchAgent(conflict.deps), /conflicting_installation/u);
+  assert.equal(conflict.calls.length, 0);
+
+  const disabled = fixture();
+  disabled.deps.env = { CRAFT_CONTINUOUS_LEARNING: "0" };
+  assert.equal(ensureLearningWorkerLaunchAgent(disabled.deps).status, "disabled");
+  assert.equal(disabled.files.size, 0);
+  assert.equal(disabled.calls.length, 0);
+
+  const unsupported = fixture({ platform: "linux" });
+  assert.equal(ensureLearningWorkerLaunchAgent(unsupported.deps).status, "unsupported_platform");
+  assert.equal(unsupported.calls.length, 0);
+
+  const orphan = fixture({ loaded: true });
+  assert.throws(() => ensureLearningWorkerLaunchAgent(orphan.deps), /conflicting_installation/u);
+  assert.deepEqual(orphan.calls.map(args => args[0]), ["print"]);
+
+  const missingProgram = fixture({ installed: true, contents: installedPlist("/opt/craft/worker.js") });
+  missingProgram.deps.exists = () => false;
+  assert.throws(() => ensureLearningWorkerLaunchAgent(missingProgram.deps), /program_missing/u);
+
+  const badRead = fixture();
+  badRead.deps.read_file = () => { throw Object.assign(new Error("denied"), { code: "EACCES" }); };
+  assert.throws(() => ensureLearningWorkerLaunchAgent(badRead.deps), /denied/u);
+});
+
+test("SessionStart ensure uses process defaults while keeping filesystem effects in the selected home", () => {
+  const temporary = mkdtempSync(join(tmpdir(), "craft-launch-agent-ensure-"));
+  const previous = process.env.CRAFT_CONTINUOUS_LEARNING;
+  try {
+    process.env.CRAFT_CONTINUOUS_LEARNING = "0";
+    assert.equal(ensureLearningWorkerLaunchAgent().status, "disabled");
+    delete process.env.CRAFT_CONTINUOUS_LEARNING;
+    const calls: string[][] = [];
+    const result = ensureLearningWorkerLaunchAgent({ platform: "darwin", home_dir: temporary, exec_path: "/usr/bin/node",
+      worker_entrypoint: "/opt/craft/worker.js", env: { CRAFT_DATA_DIR: join(temporary, "data") }, exists: () => true,
+      launchctl(args) { calls.push(args); if (args[0] === "print") throw Object.assign(new Error("not loaded"), { status: 113 }); return ""; } });
+    assert.equal(result.status, "installed");
+    assert(existsSync(join(temporary, "Library", "LaunchAgents", `${LEARNING_WORKER_LAUNCH_AGENT_LABEL}.plist`)));
+    assert(calls.some(args => args[0] === "bootstrap"));
+  } finally {
+    if (previous === undefined) delete process.env.CRAFT_CONTINUOUS_LEARNING;
+    else process.env.CRAFT_CONTINUOUS_LEARNING = previous;
+    rmSync(temporary, { recursive: true, force: true });
+  }
 });
 
 test("install propagates LaunchAgents directory and file access failures", () => {

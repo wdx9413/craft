@@ -303,6 +303,10 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     const scenarioKey = scenarioSignature ? `scenario:${stableDigest(scenarioSignature).slice(-24)}` : null;
     const evidenceId = `evidence_learning_cycle_${sourceDigest.slice(-20)}`;
     const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId, source_type: "host_completion_signal", confidence: "bounded", claim: `Host reported terminal verification ${outcome}.`, locator: `context-receipt:${receipt.id}`, metadata: { provenance: "host_completion_signal", terminal_identity_digest: terminalDigest, host, ...(sessionId ? { source_session_id: sessionId } : {}), ...(projectScope ? { project_scope_id: projectScope } : {}), ...(scenarioContext ? { task_goal_digest: codexTaskGoalDigest(scenarioContext.task_goal) } : {}), task_id: effectiveTaskId, turn_id: turnId, verification_outcome: outcome, verification_ref_digest: stableDigest(verificationRef), context_receipt_id: receipt.id, content_stored: false } });
+    const liveSourceLineage = sessionId && projectScope ? [{ origin: "live_hook", session_id: sessionId,
+      turn_id: turnId, task_id: effectiveTaskId, project_scope_id: projectScope,
+      source_ref: { kind: "host_terminal_task", id: effectiveTaskId, digest: stableDigest(identity) },
+      evidence_refs: [{ kind: "evidence", id: String(evidence.id), version: Number(evidence.version) }] }] : [];
     const observationId = `workflow_evolution_observation_${sourceDigest.slice(-20)}`;
     const observedPaths = Array.isArray(args.observed_paths) ? args.observed_paths : [];
     // Notes usage is counted only after an attested, successful terminal result.
@@ -318,12 +322,12 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
         directories.add(dirname(absoluteFile));
       }
       for (const path of [...directories].slice(0, 16)) {
-        try { this.craftNotesObserveDirectory({ path, device_id: args.device_id ?? "local", project_id: projectScope,
-          task_id: effectiveTaskId, session_id: sessionId, outcome: "completed", evidence_ref: evidence.id }); }
+        try { this.craftNotesObserveDirectory({ path, device_id: args.device_id ?? "local", project_id: projectScope.slice("project:".length),
+          task_id: effectiveTaskId, session_id: sessionId, outcome: "completed", evidence_ref: { kind: "evidence", id: evidence.id, version: evidence.version }, source_lineage: liveSourceLineage }); }
         catch { /* Notes capture is an optional learning side effect; task verification remains authoritative. */ }
       }
     }
-    const observed = this.workflowEvolutionObserve({ observation_id: observationId, scenario_key: scenarioKey ?? `unclassified:${stableDigest({ scope, host }).slice(-24)}`, source_kind: `host:${host}`, source_id: effectiveTaskId, ...(sessionId ? { source_session_id: sessionId } : {}), source_digest: stableDigest({ taskId: effectiveTaskId, turnId, outcome, verificationRef, source_session_id: sessionId }), outcome, scope: observationScope, ...(observationSignature ? { scenario_signature: observationSignature } : {}), evidence_ids: [evidence.id], observed_paths: observedPaths, sanitized: true, content_stored: false });
+    const observed = this.workflowEvolutionObserve({ observation_id: observationId, scenario_key: scenarioKey ?? `unclassified:${stableDigest({ scope, host }).slice(-24)}`, source_kind: `host:${host}`, source_id: effectiveTaskId, ...(sessionId ? { source_session_id: sessionId } : {}), source_digest: stableDigest({ taskId: effectiveTaskId, turnId, outcome, verificationRef, source_session_id: sessionId }), ...(liveSourceLineage.length ? { source_lineage: liveSourceLineage } : {}), outcome, scope: observationScope, ...(observationSignature ? { scenario_signature: observationSignature } : {}), evidence_ids: [evidence.id], observed_paths: observedPaths, sanitized: true, content_stored: false });
     const observationReplay = observed.idempotent === true;
     if (!scenarioKey) {
       let classificationRequest: JsonObject | null = null, ticket: JsonObject | null = null;

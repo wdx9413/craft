@@ -54,6 +54,14 @@ _Avoid_: Self-modifying Agent, automatic publication
 A durable reference to one capability-owned candidate and its pending assessment progress; it preserves that capability's evidence, evaluation and activation rules.
 _Avoid_: Shared promotion verdict, executable candidate
 
+**Historical Replay Run**:
+A bounded replay over explicitly authorized historical session references; generated candidates retain the replay batch and source references and can be cleaned up independently.
+_Avoid_: Live capture, raw session archive
+
+**Historical Replay Candidate**:
+A capability-owned candidate with `historical_replay` lineage; cleanup removes replay-only candidates and descendants while preserving assets that also have normal live provenance.
+_Avoid_: Normal Hook candidate, verified production asset
+
 **Evolution Value Gate**:
 A versioned decision step that routes a task observation to a durable asset candidate, review, or discard with an auditable reason; it does not verify truth or grant authority.
 _Avoid_: Truth validator, scenario allowlist
