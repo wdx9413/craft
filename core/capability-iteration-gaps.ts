@@ -35,6 +35,26 @@ function identityFailure(status: string, issue?: JsonObject): JsonObject {
   return { status, project_scope_id: null, gaps: issue ? [issue] : [], unresolved_count: 1, ...SAFETY };
 }
 
+class EvalOwnerReadFailure extends Error {}
+
+function verifyEffect(evaluation: EvaluationContractKernel, ref: EffectEvaluationRef): JsonObject {
+  const ownerStore = evaluation.store;
+  const read = <T>(operation: () => T, missingMessage?: string): T => {
+    try { return operation(); }
+    catch (error) {
+      if (error instanceof Error && error.message === missingMessage) throw error;
+      throw new EvalOwnerReadFailure("Eval owner record read failed", { cause: error });
+    }
+  };
+  const store: Pick<CraftStore, "get" | "find"> = {
+    get: (kind, id, version) => read(() => ownerStore.get(kind, id, version), `Unknown ${kind}: ${id}`),
+    find: (...args) => read(() => ownerStore.find(...args)),
+  };
+  // Preserve the owner's trusted evaluators and reference readers on a per-call receiver.
+  const verifier: EvaluationContractKernel = Object.create(evaluation, { store: { value: store } });
+  return verifier.verifyTaskEffectEvaluation(ref);
+}
+
 function effectGap(scope: JsonObject, raw: unknown, evaluation: GapSources["evaluation"]): JsonObject | null {
   if (!evaluation) return gap("owner_unavailable", "controlled_task_effect", "The Eval owner is unavailable.", "mount_eval_owner");
   const pending = gap("evidence_pending", "controlled_task_effect", "An eligible candidate-bound evaluation in this scope is required.",
@@ -44,21 +64,21 @@ function effectGap(scope: JsonObject, raw: unknown, evaluation: GapSources["eval
   catch { return pending; }
 
   const ref = raw as EffectEvaluationRef;
+  const unavailable = gap("owner_unavailable", "controlled_task_effect", "The Eval owner could not provide the requested evaluation.", "restore_eval_owner_access");
   try {
     const contract = evaluation.store.find("evaluation_contract", ref.contract_id, undefined, false);
     const contractScope = contract?.scope as JsonObject | undefined;
     if (contractScope?.kind !== scope.kind || contractScope?.id !== scope.id) return pending;
     if (!evaluation.store.find("task_effect_evaluation", ref.evaluation_id, undefined, false)) return pending;
   } catch {
-    return gap("owner_unavailable", "controlled_task_effect", "The Eval owner could not provide the requested evaluation.", "restore_eval_owner_access");
+    return unavailable;
   }
 
   try {
-    const verified = evaluation.verifyTaskEffectEvaluation(ref);
+    const verified = verifyEffect(evaluation, ref);
     return verified.eligible === true ? null : pending;
-  } catch {
-    // The verifier also throws for invalid frozen contracts or missing referenced evidence.
-    return pending;
+  } catch (error) {
+    return error instanceof EvalOwnerReadFailure ? unavailable : pending;
   }
 }
 

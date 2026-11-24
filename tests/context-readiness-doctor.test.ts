@@ -494,6 +494,32 @@ test("Gap audit clears task effect only for an eligible signed report from the E
       } finally { failingRead.mock.restore(); }
     }
 
+    for (const failedKind of ["evaluation_contract", "task_effect_evaluation"]) {
+      let reads = 0;
+      const interruptedRead = context.mock.method(evalFixture.store, "find", (...parameters: Parameters<typeof find>) => {
+        if (parameters[0] === failedKind && ++reads === 2) throw new Error("Private verification read error");
+        return find(...parameters);
+      });
+      try {
+        const result = await callGapTool(service, args);
+        assert.equal(reads, 2);
+        const effect = gapById(result, "controlled_task_effect");
+        assert.equal(effect?.status, "owner_unavailable");
+        assert.equal(effect?.next_action, "restore_eval_owner_access");
+        assert.ok(!JSON.stringify(result).includes("Private verification read error"));
+      } finally { interruptedRead.mock.restore(); }
+    }
+
+    let contractReads = 0;
+    const removedContract = context.mock.method(evalFixture.store, "find", (...parameters: Parameters<typeof find>) => {
+      if (parameters[0] === "evaluation_contract" && ++contractReads === 2) return null;
+      return find(...parameters);
+    });
+    try {
+      assert.equal(gapById(await callGapTool(service, args), "controlled_task_effect")?.status, "evidence_pending");
+      assert.equal(contractReads, 2);
+    } finally { removedContract.mock.restore(); }
+
     const corruptReport = context.mock.method(evalFixture.store, "find", (...parameters: Parameters<typeof find>) => {
       const record = find(...parameters);
       return parameters[0] === "task_effect_evaluation" && record ? { ...record, evaluator_signature: "bad-signature" } : record;
