@@ -446,7 +446,7 @@ test("Gap audit reports observed runtime versions without a static plugin cache 
   } finally { await dispose(f); }
 });
 
-test("Gap audit clears task effect only for an eligible signed report from the Eval owner", async () => {
+test("Gap audit clears task effect only for an eligible signed report from the Eval owner", async (context) => {
   const f = await fixture();
   const evalFixture = await fixture();
   try {
@@ -455,6 +455,8 @@ test("Gap audit clears task effect only for an eligible signed report from the E
     const scope = identity.canonical_scope as JsonObject;
     const candidate = evalFixture.store.create("experience_procedure", "candidate", { scope, content_digest: "sha256:" + "a".repeat(64) });
     const report = procedureTaskEffectFixture(evalOwner, candidate);
+    const otherReport = procedureTaskEffectFixture(evalOwner, candidate);
+    assert.notEqual(otherReport.evaluation_contract_id, report.evaluation_contract_id);
     const candidateRef = evalOwner.evaluationContracts.artifactRef("experience_procedure", String(candidate.id), Number(candidate.version));
     const ref = { contract_id: report.evaluation_contract_id, evaluation_id: report.evaluation_id, candidate_ref: candidateRef };
     const service = await CraftService.open(f.store, undefined, { owner: "context", stores: new Map([["eval", evalFixture.store]]),
@@ -463,13 +465,44 @@ test("Gap audit clears task effect only for an eligible signed report from the E
     const result = await callGapTool(service, args);
     assert.equal(gapById(result, "controlled_task_effect"), undefined);
     assert.ok(!JSON.stringify(result).includes(String(report.evaluation_id)));
+    const otherPair = { ...ref, contract_id: otherReport.evaluation_contract_id, evaluation_id: otherReport.evaluation_id };
+    assert.equal(gapById(await callGapTool(service, { ...args, effect_evaluation_ref: otherPair }), "controlled_task_effect"), undefined);
     for (const patched of [
       { ...args, effect_evaluation_ref: { ...ref, candidate_ref: { ...candidateRef, version: candidateRef.version + 1 } } },
       { ...args, effect_evaluation_ref: { ...ref, contract_id: "missing-contract" } },
+      { ...args, effect_evaluation_ref: { ...ref, contract_id: otherPair.contract_id } },
+      { ...args, effect_evaluation_ref: { ...ref, evaluation_id: "missing-report" } },
       { ...args, project_scope_id: "project:other" },
     ]) assert.equal(gapById(await callGapTool(service, patched), "controlled_task_effect")?.status, "evidence_pending");
     const absent = await CraftService.open(f.store, undefined, { owner: "context", stores: new Map(), contributors: [] });
-    assert.equal(gapById(await callGapTool(absent, args), "controlled_task_effect")?.status, "owner_unavailable");
+    const unmounted = gapById(await callGapTool(absent, args), "controlled_task_effect");
+    assert.equal(unmounted?.status, "owner_unavailable");
+    assert.equal(unmounted?.next_action, "mount_eval_owner");
+
+    const find = evalFixture.store.find.bind(evalFixture.store);
+    for (const failedKind of ["evaluation_contract", "task_effect_evaluation"]) {
+      const failingRead = context.mock.method(evalFixture.store, "find", (...parameters: Parameters<typeof find>) => {
+        if (parameters[0] === failedKind) throw new Error("Private storage details");
+        return find(...parameters);
+      });
+      try {
+        const unavailable = await callGapTool(service, args);
+        const effect = gapById(unavailable, "controlled_task_effect");
+        assert.equal(effect?.status, "owner_unavailable");
+        assert.equal(effect?.next_action, "restore_eval_owner_access");
+        assert.ok(!JSON.stringify(unavailable).includes("Private storage details"));
+      } finally { failingRead.mock.restore(); }
+    }
+
+    const corruptReport = context.mock.method(evalFixture.store, "find", (...parameters: Parameters<typeof find>) => {
+      const record = find(...parameters);
+      return parameters[0] === "task_effect_evaluation" && record ? { ...record, evaluator_signature: "bad-signature" } : record;
+    });
+    try {
+      assert.equal(gapById(await callGapTool(service, args), "controlled_task_effect")?.status, "evidence_pending");
+    } finally { corruptReport.mock.restore(); }
+    const malformed = service.contextCapabilityIterationGaps({ ...args, effect_evaluation_ref: { contract_id: ref.contract_id } });
+    assert.equal(gapById(malformed, "controlled_task_effect")?.status, "evidence_pending");
     const defaultOwner = await CraftService.open(f.store, undefined, { stores: new Map(), contributors: [] });
     assert.equal(gapById(defaultOwner.contextCapabilityIterationGaps(args), "context_usage")?.status, "evidence_pending");
 

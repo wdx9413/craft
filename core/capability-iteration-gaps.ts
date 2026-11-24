@@ -37,22 +37,22 @@ function identityFailure(status: string, issue?: JsonObject): JsonObject {
 
 function effectGap(scope: JsonObject, raw: unknown, evaluation: GapSources["evaluation"]): JsonObject | null {
   if (!evaluation) return gap("owner_unavailable", "controlled_task_effect", "The Eval owner is unavailable.", "mount_eval_owner");
-  if (raw !== undefined) {
-    try {
-      validateJsonSchema(raw as JsonValue, EFFECT_EVALUATION_REF_SCHEMA);
-      const ref = raw as EffectEvaluationRef;
-      const contract = evaluation.store.get("evaluation_contract", ref.contract_id);
-      const contractScope = contract.scope as JsonObject | undefined;
-      if (contractScope?.kind === scope.kind && contractScope?.id === scope.id) {
-        const verified = evaluation.verifyTaskEffectEvaluation(ref);
-        if (verified.eligible === true) return null;
-      }
-    } catch {
-      // Unknown, malformed or inaccessible evidence leaves the effect unverified.
-    }
-  }
-  return gap("evidence_pending", "controlled_task_effect", "An eligible candidate-bound evaluation in this scope is required.",
+  const pending = gap("evidence_pending", "controlled_task_effect", "An eligible candidate-bound evaluation in this scope is required.",
     "freeze_contract_then_run_three_pair_screening_and_at_least_five_pairs_for_effect_decision");
+  if (raw === undefined) return pending;
+  try { validateJsonSchema(raw as JsonValue, EFFECT_EVALUATION_REF_SCHEMA); }
+  catch { return pending; }
+
+  const ref = raw as EffectEvaluationRef;
+  try {
+    const contract = evaluation.store.find("evaluation_contract", ref.contract_id, undefined, false);
+    const contractScope = contract?.scope as JsonObject | undefined;
+    if (contractScope?.kind !== scope.kind || contractScope?.id !== scope.id) return pending;
+    const verified = evaluation.verifyTaskEffectEvaluation(ref);
+    return verified.eligible === true ? null : pending;
+  } catch {
+    return gap("owner_unavailable", "controlled_task_effect", "The Eval owner could not provide the requested evaluation.", "restore_eval_owner_access");
+  }
 }
 
 function contextUsageGap(contextStore: CraftStore | null, scope: JsonObject, context: JsonObject): JsonObject | null {
