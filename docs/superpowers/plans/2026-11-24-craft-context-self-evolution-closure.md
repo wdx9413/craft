@@ -168,7 +168,7 @@
 
   Run the repository's existing `build`, `pack:plugin`, `release:check`, and `check-plugin-package` scripts in their documented order. Verify the packed bundle's embedded MCP version equals `0.21.9`.
 
-- [ ] **Step 4: Sync and validate Marketplace payload**
+- [x] **Step 4: Sync and validate Marketplace payload**
 
   In `craft-marketplace`, run `node scripts/sync-from-craft.mjs ../craft/plugins --apply`, then `--check`; build the Marketplace package and verify ZIP integrity and bundle hashes.
 
