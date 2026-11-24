@@ -6,9 +6,10 @@ import { completeExperienceScenarioClassificationRequest, createExperienceScenar
 import { projectExperienceDirectory, projectPathAliasDigest } from "../../project-experience-directory.ts";
 import { assertContextReadCurrent } from "../../context-access-guard.ts";
 import { codexTaskGoalDigest } from "../../codex-task-prose.ts";
+import { isCompletePassingControlledReport, normalizeLearningEvaluationBinding } from "../../learning-cycle-evaluation-binding.ts";
 
 declare module "../craft-service.ts" {
-  interface CraftService { learningCycleFinalize(args: JsonObject): JsonObject; learningCycleRequestGet(args: JsonObject): JsonObject; learningCycleTaskEvidenceList(args: JsonObject): JsonObject; experienceScenarioList(args: JsonObject): JsonObject; experienceScenarioRetire(args: JsonObject): JsonObject; experienceScenarioMigrationPropose(args: JsonObject): JsonObject; experienceScenarioClassificationRequestGet(args: JsonObject): JsonObject; experienceScenarioClassificationRequestComplete(args: JsonObject): JsonObject; craftNotesObserveDirectory(args: JsonObject): JsonObject; }
+  interface CraftService { learningCycleFinalize(args: JsonObject): JsonObject; learningCycleFinalizeEvaluation(args: JsonObject): Promise<JsonObject>; learningCycleRequestGet(args: JsonObject): JsonObject; learningCycleTaskEvidenceList(args: JsonObject): JsonObject; experienceScenarioList(args: JsonObject): JsonObject; experienceScenarioRetire(args: JsonObject): JsonObject; experienceScenarioMigrationPropose(args: JsonObject): JsonObject; experienceScenarioClassificationRequestGet(args: JsonObject): JsonObject; experienceScenarioClassificationRequestComplete(args: JsonObject): JsonObject; craftNotesObserveDirectory(args: JsonObject): JsonObject; }
 }
 
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
@@ -138,7 +139,16 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     if (typeof id !== "string" || !id.trim()) throw new Error("request_id must not be empty");
     const request = this.store.get("workflow_evolution_request", id.trim());
     const refs = Array.isArray(request.observation_refs) ? request.observation_refs as JsonObject[] : [];
-    const observations = refs.map(ref => this.store.get("workflow_evolution_observation", String(ref.id), Number(ref.version)));
+    const observations = refs.map(ref => {
+      const observation = this.store.get("workflow_evolution_observation", String(ref.id), Number(ref.version));
+      const evaluationLinks = this.store.list("experience_learning_evaluation_link", 17,
+        item => item.observation_id === observation.id && item.status === "passed");
+      const controlledEvaluations = evaluationLinks.slice(0, 16).map(item => ({ evaluation_id: item.evaluation_id, evidence_id: item.evidence_id, report_digest: item.report_digest,
+          host_evidence_digest: item.host_evidence_digest, expected: item.expected, passed: item.passed }));
+      const hasControlledEvaluations = controlledEvaluations.length > 0;
+      return hasControlledEvaluations ? { ...observation, controlled_evaluations: controlledEvaluations,
+        controlled_evaluations_truncated: evaluationLinks.length > controlledEvaluations.length } : observation;
+    });
     return { request, observations, content_stored: false, execution_authority: false };
   };
   serviceClass.prototype.learningCycleTaskEvidenceList = function (args) {
@@ -302,7 +312,8 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
       ? { schema: "craft.scenario-signature.v1", project: scope, source: "unclassified" } : null);
     const scenarioKey = scenarioSignature ? `scenario:${stableDigest(scenarioSignature).slice(-24)}` : null;
     const evidenceId = `evidence_learning_cycle_${sourceDigest.slice(-20)}`;
-    const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId, source_type: "host_completion_signal", confidence: "bounded", claim: `Host reported terminal verification ${outcome}.`, locator: `context-receipt:${receipt.id}`, metadata: { provenance: "host_completion_signal", terminal_identity_digest: terminalDigest, host, ...(sessionId ? { source_session_id: sessionId } : {}), ...(projectScope ? { project_scope_id: projectScope } : {}), ...(scenarioContext ? { task_goal_digest: codexTaskGoalDigest(scenarioContext.task_goal) } : {}), task_id: effectiveTaskId, turn_id: turnId, verification_outcome: outcome, verification_ref_digest: stableDigest(verificationRef), context_receipt_id: receipt.id, content_stored: false } });
+    const taskGoalDigest = scenarioContext ? codexTaskGoalDigest(scenarioContext.task_goal) : null;
+    const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId, source_type: "host_completion_signal", confidence: "bounded", claim: `Host reported terminal verification ${outcome}.`, locator: `context-receipt:${receipt.id}`, metadata: { provenance: "host_completion_signal", terminal_identity_digest: terminalDigest, host, ...(sessionId ? { source_session_id: sessionId } : {}), ...(projectScope ? { project_scope_id: projectScope } : {}), ...(taskGoalDigest ? { task_goal_digest: taskGoalDigest } : {}), task_id: effectiveTaskId, turn_id: turnId, verification_outcome: outcome, verification_ref_digest: stableDigest(verificationRef), context_receipt_id: receipt.id, content_stored: false } });
     const liveSourceLineage = sessionId && projectScope ? [{ origin: "live_hook", session_id: sessionId,
       turn_id: turnId, task_id: effectiveTaskId, project_scope_id: projectScope,
       source_ref: { kind: "host_terminal_task", id: effectiveTaskId, digest: stableDigest(identity) },
@@ -327,6 +338,7 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
         catch { /* Notes capture is an optional learning side effect; task verification remains authoritative. */ }
       }
     }
+    const observationExisted = this.store.find("workflow_evolution_observation", observationId) !== null;
     const observed = this.workflowEvolutionObserve({ observation_id: observationId, scenario_key: scenarioKey ?? `unclassified:${stableDigest({ scope, host }).slice(-24)}`, source_kind: `host:${host}`, source_id: effectiveTaskId, ...(sessionId ? { source_session_id: sessionId } : {}), source_digest: stableDigest({ taskId: effectiveTaskId, turnId, outcome, verificationRef, source_session_id: sessionId }), ...(liveSourceLineage.length ? { source_lineage: liveSourceLineage } : {}), outcome, scope: observationScope, ...(observationSignature ? { scenario_signature: observationSignature } : {}), evidence_ids: [evidence.id], observed_paths: observedPaths, sanitized: true, content_stored: false });
     const observationReplay = observed.idempotent === true;
     if (!scenarioKey) {
@@ -360,6 +372,7 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
         }
       }
       return { status: "observed", observation: observed.observation, evidence, request: null, scenario_catalog: null,
+        observation_created: !observationExisted,
         scenario_classification_request: classificationRequest, model_ticket: ticket,
         next_action: classificationRequest ? ticket?.status === "ready_for_adapter" ? "experience_scenario_classification_queued"
           : "experience_scenario_classification_waiting_for_model_profile"
@@ -429,7 +442,8 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
       observation_id: observationId, ...(typeof verifierDigest === "string" ? { verifier_digest: verifierDigest } : {}),
       verified_task_id: stableDigest({ host, task_id: taskId }) });
     if (!distinct.length) return { status: workflowPromotion ? "workflow_promoted" : "observed", observation: observed.observation, evidence, request: null, workflow_promotion: workflowPromotion,
-      scenario_catalog: taxonomy, next_action: sessionId ? "await_an_independent_verified_host_session" : "host_session_id_required_for_independent_learning", idempotent: observationReplay };
+      scenario_catalog: taxonomy, next_action: sessionId ? "await_an_independent_verified_host_session" : "host_session_id_required_for_independent_learning", idempotent: observationReplay,
+      observation_created: !observationExisted };
     const hypothesis = validatedScenarioDefinition
       ? `Distill a reusable Workflow for this fine scene. Summary: ${validatedScenarioDefinition.summary}. Applies when: ${validatedScenarioDefinition.applies_when}. Excludes: ${validatedScenarioDefinition.excludes}.`
       : "Require a recorded terminal verification before marking a task complete, and preserve failed verification for bounded recovery.";
@@ -452,6 +466,121 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
       next_action: submitted ? "run_the_pinned_candidate_through_ordered_external_evaluation_gates"
         : ticket?.status === "ready_for_adapter" ? "model_adapter_distills_proposal_then_external_evaluator_runs_ordered_gates"
           : "current_host_model_reads_pinned_request_submits_candidate_then_runs_ordered_evaluation_gates",
-      idempotent: observationReplay && request.idempotent === true && !ticketWasCreated };
+      idempotent: observationReplay && request.idempotent === true && !ticketWasCreated,
+      observation_created: !observationExisted };
+  };
+  serviceClass.prototype.learningCycleFinalizeEvaluation = async function (args) {
+    const experienceOwner = this.storageOwner === "experience" ? this : this.ownerServices.get("experience");
+    if (!experienceOwner) throw new Error("Experience owner is unavailable");
+    const evaluationOwner = this.storageOwner === "eval" ? this : this.ownerServices.get("eval");
+    if (!evaluationOwner) throw new Error("Evaluation owner is unavailable");
+    const evaluationId = typeof args.evaluation_id === "string" ? args.evaluation_id.trim() : "";
+    if (!/^[a-f0-9]{64}$/u.test(evaluationId)) throw new Error("evaluation_id must reference a controlled Workbench evaluation");
+    const before = evaluationOwner.store.find("workbench_evaluation", evaluationId);
+    if (!before) throw new Error("controlled evaluation not found");
+    if (before.state !== "completed" || before.result_evidence !== "worker_ipc_v1") return { status: "rejected", reason: "evaluation_not_completed_or_controlled", observation_created: false };
+    const learningBinding = normalizeLearningEvaluationBinding(before.learning_binding);
+    const { WorkbenchEvaluations } = await import("../../workbench-evaluations.ts");
+    const checked = await new WorkbenchEvaluations(evaluationOwner.store).report(evaluationId);
+    if (checked.integrity !== "verified_against_controlled_run" || !isCompletePassingControlledReport(checked.report)) {
+      return { status: "rejected", reason: "evaluation_report_not_fully_passing", observation_created: false };
+    }
+    const controlledReport = checked.report as JsonObject;
+    const after = evaluationOwner.store.find("workbench_evaluation", evaluationId);
+    if (!after || after.state !== "completed" || after.result_evidence !== "worker_ipc_v1"
+      || after.input_digest !== before.input_digest || after.report_digest !== before.report_digest
+      || stableDigest(after.learning_binding) !== stableDigest(before.learning_binding)) throw new Error("controlled evaluation binding changed during finalization");
+    const hostEvidence = experienceOwner.store.find("evidence", String(learningBinding.host_evidence_id));
+    if (!hostEvidence) throw new Error("bound Host completion evidence was not found");
+    const { resolveCodexHostEvidenceRecord } = await import("../../codex-session-archive.ts");
+    const hostVerification = await resolveCodexHostEvidenceRecord(hostEvidence, {}, { ...experienceOwner.serviceEnvironment,
+      CRAFT_DATA_DIR: experienceOwner.store.paths.root });
+    const hostMetadata = hostEvidence.metadata as JsonObject | undefined;
+    const hostMismatches = [
+      ...(hostVerification.status === "matched" ? [] : ["current_archive"]),
+      ...(hostMetadata?.host === learningBinding.host ? [] : ["host"]),
+      ...(hostMetadata?.task_id === learningBinding.task_id ? [] : ["task_id"]),
+      ...(hostVerification.session_id === learningBinding.session_id ? [] : ["session_id"]),
+      ...(hostVerification.turn_id === learningBinding.turn_id ? [] : ["turn_id"]),
+      ...(hostVerification.context_receipt_id === learningBinding.context_receipt_id ? [] : ["context_receipt_id"]),
+      ...(hostVerification.verification_ref_digest === stableDigest(learningBinding.verification_ref) ? [] : ["verification_ref"]),
+      ...(hostVerification.verification_outcome === "passed" ? [] : ["terminal_outcome"]),
+    ];
+    if (hostMismatches.length) return { status: "rejected", reason: "host_completion_evidence_not_current_or_mismatched",
+      mismatched_fields: hostMismatches, observation_created: false };
+    const reportDigest = stableDigest(controlledReport);
+    const hostEvidenceDigest = stableDigest({ evidence_id: hostEvidence.id, source_ref_digest: hostVerification.source_ref_digest,
+      terminal_identity_digest: hostVerification.terminal_identity_digest, verification_ref_digest: hostVerification.verification_ref_digest });
+    const evaluationEvidenceId = `evidence_workbench_${evaluationId.slice(-32)}`;
+    const evidenceMetadata = { provenance: "controlled_workbench_evaluation", evaluation_id: evaluationId,
+      report_digest: reportDigest, input_digest: before.input_digest, host_evidence_id: hostEvidence.id, host_evidence_digest: hostEvidenceDigest,
+      task_id: learningBinding.task_id, session_id: learningBinding.session_id, turn_id: learningBinding.turn_id,
+      expected: controlledReport.expected, passed: controlledReport.passed, content_stored: false };
+    const priorLinks = experienceOwner.store.list("experience_learning_evaluation_link", 65, item => item.evaluation_id === evaluationId);
+    if (priorLinks.length > 64) throw new Error("controlled evaluation has too many observation links");
+    for (const prior of priorLinks) {
+      const priorEvidence = experienceOwner.store.find("evidence", String(prior.evidence_id));
+      const priorMetadata = priorEvidence?.metadata as JsonObject | undefined;
+      if (prior.report_digest !== reportDigest || prior.host_evidence_digest !== hostEvidenceDigest || prior.status !== "passed"
+        || prior.expected !== controlledReport.expected || prior.passed !== controlledReport.passed || prior.content_stored !== false
+        || prior.evidence_id !== evaluationEvidenceId || priorEvidence?.source_type !== "program" || priorEvidence.confidence !== "confirmed"
+        || priorEvidence.locator !== `workbench-evaluation:${evaluationId}` || stableDigest(priorMetadata ?? {}) !== stableDigest(evidenceMetadata)) {
+        throw new Error("controlled evaluation evidence link idempotency conflict");
+      }
+    }
+    const evaluationClaim = `Controlled Workbench evaluation passed ${controlledReport.passed}/${controlledReport.expected} cases.`;
+    const finalized = experienceOwner.store.transaction(() => {
+      const currentEvaluation = evaluationOwner.store.find("workbench_evaluation", evaluationId);
+      if (!currentEvaluation || currentEvaluation.state !== "completed" || currentEvaluation.result_evidence !== "worker_ipc_v1"
+        || currentEvaluation.input_digest !== before.input_digest || currentEvaluation.report_digest !== before.report_digest
+        || stableDigest(currentEvaluation.learning_binding) !== stableDigest(before.learning_binding)) {
+        throw new Error("controlled evaluation binding changed during finalization");
+      }
+      const currentHostEvidence = experienceOwner.store.find("evidence", String(learningBinding.host_evidence_id));
+      if (!currentHostEvidence || stableDigest(currentHostEvidence) !== stableDigest(hostEvidence)) {
+        throw new Error("bound Host completion evidence changed during finalization");
+      }
+      const boundObservations = experienceOwner.store.list("workflow_evolution_observation", 10_001, item => {
+        const source = item.source as JsonObject | undefined;
+        return item.outcome === "passed" && Array.isArray(item.evidence_ids) && (item.evidence_ids as unknown[]).includes(hostEvidence.id)
+          && source?.kind === `host:${learningBinding.host}` && source.id === learningBinding.task_id
+          && source.session_id === learningBinding.session_id && source.scope === hostMetadata?.project_scope_id;
+      });
+      if (boundObservations.length > 10_000) throw new Error("Host completion evidence exceeds the supported observation bound");
+      if (boundObservations.length > 1) throw new Error("Host completion evidence maps to multiple Experience Observations");
+      const currentFinalized = boundObservations[0]
+        ? { status: "observed", observation: boundObservations[0], evidence: currentHostEvidence, idempotent: true, observation_created: false }
+        : experienceOwner.learningCycleFinalize({ ...learningBinding, verified: true, verification_outcome: "passed",
+          verification_ref: learningBinding.verification_ref });
+      if (currentFinalized.status !== "observed" || !currentFinalized.observation || typeof currentFinalized.observation !== "object") {
+        throw new Error("validated Host completion did not produce an Experience Observation");
+      }
+      const observation = currentFinalized.observation as JsonObject;
+      const linkId = `experience_learning_evaluation_${stableDigest({ evaluation_id: evaluationId, observation_id: observation.id }).slice(-32)}`;
+      const link = { evaluation_id: evaluationId, observation_id: observation.id, evidence_id: evaluationEvidenceId,
+        report_digest: reportDigest, host_evidence_digest: hostEvidenceDigest, expected: controlledReport.expected, passed: controlledReport.passed,
+        status: "passed", content_stored: false };
+      const existing = experienceOwner.store.find("experience_learning_evaluation_link", linkId);
+      const existingIdentity = existing ? { evaluation_id: existing.evaluation_id, observation_id: existing.observation_id, evidence_id: existing.evidence_id,
+        report_digest: existing.report_digest, host_evidence_digest: existing.host_evidence_digest, expected: existing.expected,
+        passed: existing.passed, status: existing.status, content_stored: existing.content_stored } : null;
+      if (existing && stableDigest(existingIdentity) !== stableDigest(link)) {
+        throw new Error("controlled evaluation evidence link idempotency conflict");
+      }
+      const existingEvidence = experienceOwner.store.find("evidence", evaluationEvidenceId);
+      if (existingEvidence && (existingEvidence.source_type !== "program" || existingEvidence.confidence !== "confirmed"
+        || existingEvidence.claim !== evaluationClaim || existingEvidence.locator !== `workbench-evaluation:${evaluationId}`
+        || stableDigest(existingEvidence.metadata ?? {}) !== stableDigest(evidenceMetadata))) {
+        throw new Error("controlled evaluation evidence idempotency conflict");
+      }
+      if (!existing) {
+        if (!existingEvidence) experienceOwner.evidenceRecord({ evidence_id: evaluationEvidenceId, source_type: "program", confidence: "confirmed",
+          claim: evaluationClaim, locator: `workbench-evaluation:${evaluationId}`, metadata: evidenceMetadata });
+        experienceOwner.store.create("experience_learning_evaluation_link", linkId, link);
+      }
+      return currentFinalized;
+    });
+    return { ...finalized, evaluation_id: evaluationId, evaluation_report_digest: reportDigest, host_evidence_digest: hostEvidenceDigest,
+      evaluation_evidence_id: evaluationEvidenceId, observation_created: finalized.observation_created === true };
   };
 }

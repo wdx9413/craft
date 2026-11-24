@@ -43,7 +43,8 @@ test("CLI routes every LaunchAgent lifecycle command and supports resume as star
       await main(["learning-worker", "launch-agent", command], dependencies);
       assert.deepEqual(JSON.parse(writes.pop() ?? "null"), {
         install: { status: "installed", plist_path: join(home, "Library", "LaunchAgents", "com.craft.learning-worker.plist") },
-        status: { installed: true, loaded: true, plist_path: join(home, "Library", "LaunchAgents", "com.craft.learning-worker.plist"), reason: null },
+        status: { installed: true, loaded: true, plist_path: join(home, "Library", "LaunchAgents", "com.craft.learning-worker.plist"), reason: null,
+          held_out_adapter_configured: false, program_memory_designs_configured: false },
         start: { status: "already_running" }, resume: { status: "already_running" }, stop: { status: "stopped" },
         upgrade: { status: "already_current", plist_path: join(home, "Library", "LaunchAgents", "com.craft.learning-worker.plist") },
         uninstall: { status: "uninstalled" },
@@ -51,7 +52,7 @@ test("CLI routes every LaunchAgent lifecycle command and supports resume as star
     }
     await assert.rejects(main(["learning-worker", "launch-agent", "unknown"], dependencies), /requires install, status, start, stop, resume, upgrade, or uninstall/u);
     await main(["learning-worker", "launch-agent", "status", "--help"], dependencies);
-    assert.match(writes.pop() ?? "", /Manage the explicitly installed macOS learning Worker/u);
+    assert.match(writes.pop() ?? "", /Manage the Craft-owned macOS learning Worker/u);
   } finally {
     process.stdout.write = originalWrite;
     if (previousData === undefined) delete process.env.CRAFT_DATA_DIR;

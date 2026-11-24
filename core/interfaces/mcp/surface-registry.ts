@@ -91,7 +91,7 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
   // Graph transitions and paired evaluation complete the scenario iteration path.
   // Diagnostic compatibility aliases remain on the explicit advanced surface.
   "component-experience-daily": [
-    "craft_experience_scenario_list", "craft_experience_scenario_migration_propose", "craft_learning_cycle_finalize", "craft_experience_runbook_capture", "craft_experience_runbook_revoke",
+    "craft_experience_scenario_list", "craft_experience_scenario_migration_propose", "craft_learning_cycle_finalize", "craft_learning_cycle_evaluation_finalize", "craft_experience_runbook_capture", "craft_experience_runbook_revoke",
     "craft_component_readiness_get", "craft_evidence_record", "craft_experience_observe",
     "craft_experience_patterns_list", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get",
     "craft_experience_learning_request_get", "craft_experience_scenario_classification_request_get", "craft_experience_scenario_classification_request_complete",
@@ -136,7 +136,7 @@ export function surfaceToolNames(surface: string, activeTools: readonly Tool[], 
     const names = new Set([
       "craft_info", "craft_component_readiness_get", "craft_component_diagnose",
       "craft_context_open", "craft_context_resolution_resolve", "craft_context_tools_discover", "craft_notes_context_resolve", "craft_context_doctor", "craft_context_usage_statusline", "craft_capability_iteration_plan", "craft_capability_iteration_gaps", "craft_lsp_readiness",
-      "craft_knowledge_search", "craft_memory_capture_observed_fact", "craft_learning_cycle_finalize",
+      "craft_knowledge_search", "craft_memory_capture_observed_fact", "craft_learning_cycle_finalize", "craft_learning_cycle_evaluation_finalize",
       // The Context Agent must expose each owner's bounded capture path; the
       // owned ledgers still enforce provenance, scope, review and promotion.
       "craft_knowledge_session_evidence_record", "craft_knowledge_source_list", "craft_knowledge_bootstrap_install",

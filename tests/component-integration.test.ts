@@ -443,8 +443,51 @@ test("semantic review packet is fragment-bound and a Prompt Procedure cannot rou
     const evidence = f.service.evidenceRecord({ evidence_id: "procedure-evidence", source_type: "fixture", confidence: "confirmed", claim: "Verification passed.", locator: "fixture://procedure" }) as JsonObject;
     const signature = { schema: "craft.scenario-signature.v1", project: "p", verifier: "test", effect_class: "read" };
     for (const id of ["one", "two"]) f.service.workflowEvolutionObserve({ observation_id: `procedure-${id}`, scenario_key: "delivery.tests", scenario_signature: signature, source_kind: "fixture", source_id: id, source_digest: `sha256:${id}`, scope: "project:p", outcome: "passed", evidence_ids: [evidence.id], sanitized: true, content_stored: false });
+    const evaluationEvidence = f.service.evidenceRecord({ evidence_id: "controlled-evaluation-evidence", source_type: "program", confidence: "confirmed",
+      claim: "Controlled evaluation passed its case.", locator: "workbench-evaluation:fixture", metadata: { provenance: "controlled_workbench_evaluation",
+        evaluation_id: "evaluation-one", report_digest: "report-digest", host_evidence_digest: "host-digest", content_stored: false } }) as JsonObject;
+    f.store.create("experience_learning_evaluation_link", "controlled-evaluation-link", { evaluation_id: "evaluation-one", observation_id: "procedure-one",
+      evidence_id: evaluationEvidence.id, report_digest: "report-digest", host_evidence_digest: "host-digest", expected: 1, passed: 1, status: "passed", content_stored: false });
+    f.store.create("experience_learning_evaluation_link", "tampered-controlled-evaluation-link", { evaluation_id: "evaluation-two", observation_id: "procedure-two",
+      evidence_id: evaluationEvidence.id, report_digest: "wrong-report-digest", host_evidence_digest: "host-digest", expected: 1, passed: 1, status: "passed", content_stored: false });
     const request = f.service.workflowEvolutionPropose({ scenario_key: "delivery.tests", observation_ids: ["procedure-one", "procedure-two"], hypothesis: "Verify before delivery.", design_axes: ["orchestration"], procedure_kind: "workflow", output_contract_ref: "acceptance:tests" }).request as JsonObject;
-    const proposal = f.service.workflowEvolutionProposalSubmit({ request_id: request.id, workflow_id: "procedure-workflow", name: "Verified delivery", description: "Run focused tests before delivery.", inputs: [], steps: [{ type: "assertion" }] }).proposal as JsonObject;
+    const actualObservationRefs = request.observation_refs as JsonObject[];
+    const { id: requestIdForLegacyRefs, version: _requestVersion, ...requestPayloadForLegacyRefs } = request;
+    f.store.save("workflow_evolution_request", String(requestIdForLegacyRefs), { ...requestPayloadForLegacyRefs,
+      scope: { kind: "project", id: "p" },
+      observation_refs: actualObservationRefs.map(ref => ({ ...ref, source: { scope: "project:p" } })) });
+    const workflowArgs = { request_id: request.id, proposal_id: "controlled-evidence-workflow", workflow_id: "procedure-workflow", name: "Verified delivery",
+      description: "Run focused tests before delivery.", inputs: [], steps: [{ type: "assertion" }], evidence_ids: [evidence.id] };
+    const unrelatedEvidence = f.service.evidenceRecord({ evidence_id: "unrelated-proposal-evidence", source_type: "fixture", confidence: "confirmed",
+      claim: "Unrelated evidence must not be attached to this candidate.", locator: "fixture://unrelated" }) as JsonObject;
+    assert.throws(() => f.service.workflowEvolutionProposalSubmit({ ...workflowArgs, evidence_ids: [String(unrelatedEvidence.id)] }),
+      /evidence_ids may only select evidence inherited/u);
+    assert.throws(() => f.service.workflowEvolutionProposalSubmit({ ...workflowArgs, evidence_ids: "not-an-array" as unknown as string[] }),
+      /evidence_ids must be an array/u);
+    const originalGet = f.store.get.bind(f.store);
+    let omitObservationEvidence = true;
+    f.store.get = ((kind: string, id: string, version?: number) => {
+      const record = originalGet(kind, id, version);
+      if (kind === "workflow_evolution_observation" && omitObservationEvidence) {
+        omitObservationEvidence = false;
+        return { ...record, evidence_ids: null };
+      }
+      return record;
+    }) as typeof f.store.get;
+    try { assert.throws(() => f.service.workflowEvolutionProposalSubmit({ ...workflowArgs, evidence_ids: "not-an-array" as unknown as string[] }), /evidence_ids must be an array/u); }
+    finally { f.store.get = originalGet; }
+    const originalList = f.store.list.bind(f.store);
+    f.store.list = ((kind: string, limit: number, predicate?: (item: JsonObject) => boolean) =>
+      kind === "experience_learning_evaluation_link" ? Array.from({ length: 10_001 }, (_, index) => ({ id: `bound-${index}` })) : originalList(kind, limit, predicate)) as typeof f.store.list;
+    try { assert.throws(() => f.service.workflowEvolutionProposalSubmit(workflowArgs), /exceeds the supported proposal bound/u); }
+    finally { f.store.list = originalList; }
+    const submitted = f.service.workflowEvolutionProposalSubmit(workflowArgs);
+    const proposal = submitted.proposal as JsonObject;
+    const submittedProcedure = submitted.procedure as JsonObject;
+    assert.deepEqual(new Set(submittedProcedure.evidence_ids as string[]), new Set([evidence.id, evaluationEvidence.id]));
+    const workflowRetry = f.service.workflowEvolutionProposalSubmit({ ...workflowArgs, evidence_ids: undefined });
+    assert.equal(workflowRetry.idempotent, true);
+    assert((workflowRetry.procedure as JsonObject).evidence_ids && ((workflowRetry.procedure as JsonObject).evidence_ids as string[]).includes(String(evaluationEvidence.id)), JSON.stringify(workflowRetry));
     const procedure = f.service.experienceProcedureDraft({ proposal_id: proposal.id, procedure_kind: "prompt", allowed_effects: ["read"], evidence_ids: [evidence.id] }).procedure as JsonObject;
     assert.equal(procedure.definition_ref, null);
     f.service.experienceProcedures.gate({ procedure_id: procedure.id, stage: "shadow", evidence_ids: [evidence.id], passed: true });
@@ -455,6 +498,22 @@ test("semantic review packet is fragment-bound and a Prompt Procedure cannot rou
     assert.match(procedurePath, /experience[\\/]md[\\/]prompts[\\/]/u);
     const markdown = await readFile(procedurePath, "utf8");
     assert.match(markdown, /procedure_kind: "prompt"[\s\S]*lifecycle: "candidate"/u);
+    const promptRequest = f.service.workflowEvolutionPropose({ scenario_key: "delivery.tests", observation_ids: ["procedure-one", "procedure-two"],
+      hypothesis: "Keep the delivery check as a prompt.", design_axes: ["output"], procedure_kind: "prompt", output_contract_ref: "acceptance:prompt" }).request as JsonObject;
+    const promptArgs = { request_id: promptRequest.id, proposal_id: "controlled-evidence-prompt", name: "Evidence-backed delivery", description: "Check delivery evidence.",
+      prompt: "Run the controlled evaluation and check its evidence.", inputs: [] };
+    const promptSubmitted = f.service.workflowEvolutionProposalSubmit(promptArgs);
+    assert((promptSubmitted.procedure as JsonObject).evidence_ids && ((promptSubmitted.procedure as JsonObject).evidence_ids as string[]).includes(String(evaluationEvidence.id)), JSON.stringify(promptSubmitted));
+    const promptRetry = f.service.workflowEvolutionProposalSubmit(promptArgs);
+    assert.equal(promptRetry.idempotent, true);
+    assert((promptRetry.procedure as JsonObject).evidence_ids && ((promptRetry.procedure as JsonObject).evidence_ids as string[]).includes(String(evaluationEvidence.id)), JSON.stringify(promptRetry));
+    const legacyRequest = f.service.workflowEvolutionPropose({ scenario_key: "delivery.tests", observation_ids: ["procedure-one", "procedure-two"],
+      hypothesis: "Preserve older observation references.", design_axes: ["output"], procedure_kind: "prompt", output_contract_ref: "acceptance:legacy" }).request as JsonObject;
+    const { id: legacyRequestId, version: _legacyRequestVersion, ...legacyRequestPayload } = legacyRequest;
+    f.store.save("workflow_evolution_request", String(legacyRequestId), { ...legacyRequestPayload, scope: { kind: "project", id: "p" }, observation_refs: null });
+    assert.throws(() => f.service.workflowEvolutionProposalSubmit({ request_id: legacyRequest.id, proposal_id: "legacy-refs-evidence-workflow",
+      workflow_id: "legacy-evidence-workflow", name: "Legacy refs", description: "Reject a legacy request without refs.", inputs: [], steps: [{ type: "assertion" }], evidence_ids: [evidence.id] }),
+    /Workflow Evolution request observation_refs must be an array/u);
     const context = await f.service.contextResolutionResolve({ receipt_id: "procedure-context", query: "delivery tests", scope_kind: "project", scope_id: "p", members: ["experience"] });
     const experience = (context.contributions as JsonObject[])[0]!;
     assert.equal((experience.items as JsonObject[]).length, 0);

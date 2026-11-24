@@ -7,7 +7,7 @@ import { LEARNING_WORKER_LAUNCH_AGENT_LABEL, installLearningWorkerLaunchAgent, l
   renderLearningWorkerLaunchAgent, startLearningWorkerLaunchAgent, stopLearningWorkerLaunchAgent,
   ensureLearningWorkerLaunchAgent, uninstallLearningWorkerLaunchAgent, upgradeLearningWorkerLaunchAgent, type LaunchAgentDependencies } from "../core/learning-worker-launch-agent.ts";
 
-function fixture(options: { installed?: boolean; loaded?: boolean; contents?: string; platform?: NodeJS.Platform } = {}) {
+function fixture(options: { installed?: boolean; loaded?: boolean; contents?: string; platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv } = {}) {
   const files = new Map<string, string>();
   const calls: string[][] = [];
   const modes: number[] = [];
@@ -19,7 +19,7 @@ function fixture(options: { installed?: boolean; loaded?: boolean; contents?: st
   let loaded = options.loaded ?? false;
   const deps: LaunchAgentDependencies = {
     platform: options.platform ?? "darwin", home_dir: "/tmp/craft-test-home", uid: 501, exec_path: "/usr/bin/node",
-    worker_entrypoint: "/opt/craft/worker.js", env: { CRAFT_DATA_DIR: "/tmp/craft-test-data", PATH: process.env.PATH },
+    worker_entrypoint: "/opt/craft/worker.js", env: { CRAFT_DATA_DIR: "/tmp/craft-test-data", PATH: process.env.PATH, ...options.env },
     exists: () => true,
     mkdir: path => { directories.push(path); },
     read_file: path => {
@@ -67,12 +67,23 @@ test("LaunchAgent plist pins the exact worker and scoped data root without crede
   assert.doesNotMatch(plist, /TOKEN|SECRET|API_KEY/u);
 });
 
-test("LaunchAgent preserves only the project scope configuration needed by held-out evaluations", () => {
-  const plist = renderLearningWorkerLaunchAgent({ exec_path: "/usr/bin/node", worker_entrypoint: "/opt/craft/worker.js", data_root: "/tmp/data",
-    environment: { CRAFT_LEARNING_PROJECT_SCOPES: '[{"kind":"project","id":"project:fixture"}]', CRAFT_PROGRAM_MEMORY_DESIGNS: "{}" } });
+test("LaunchAgent preserves held-out evaluator configuration without copying credentials", () => {
+  const f = fixture({ env: { CRAFT_LEARNING_PROJECT_SCOPES: '[{"kind":"project","id":"project:fixture"}]', CRAFT_PROGRAM_MEMORY_DESIGNS: "{}",
+    CRAFT_HELD_OUT_ADAPTER_COMMAND: '["/opt/craft/evaluator","--stdio"]', CRAFT_HELD_OUT_ADAPTER_TIMEOUT_MS: "120000",
+    CRAFT_TRUSTED_EVALUATORS: '[{"id":"fixture-evaluator","version":"1"}]',
+    OPENAI_API_KEY: "must-not-be-copied" } });
+  installLearningWorkerLaunchAgent(f.deps);
+  const plist = f.files.get(f.plistPath)!;
   assert.match(plist, /CRAFT_LEARNING_PROJECT_SCOPES/u);
   assert.match(plist, /CRAFT_PROGRAM_MEMORY_DESIGNS/u);
+  assert.match(plist, /CRAFT_HELD_OUT_ADAPTER_COMMAND/u);
+  assert.match(plist, /\[&quot;\/opt\/craft\/evaluator&quot;,&quot;--stdio&quot;\]/u);
+  assert.match(plist, /CRAFT_HELD_OUT_ADAPTER_TIMEOUT_MS/u);
+  assert.match(plist, /CRAFT_TRUSTED_EVALUATORS/u);
   assert.doesNotMatch(plist, /OPENAI_API_KEY|TOKEN|SECRET/u);
+  const readiness = learningWorkerLaunchAgentStatus(f.deps);
+  assert.equal(readiness.held_out_adapter_configured, true);
+  assert.equal(readiness.program_memory_designs_configured, true);
 });
 
 test("install writes a private plist once and an identical reinstall is idempotent", () => {
@@ -140,9 +151,12 @@ test("SessionStart ensure refuses an unowned or conflicting LaunchAgent and hono
   assert.throws(() => ensureLearningWorkerLaunchAgent(orphan.deps), /conflicting_installation/u);
   assert.deepEqual(orphan.calls.map(args => args[0]), ["print"]);
 
-  const missingProgram = fixture({ installed: true, contents: installedPlist("/opt/craft/worker.js") });
-  missingProgram.deps.exists = () => false;
-  assert.throws(() => ensureLearningWorkerLaunchAgent(missingProgram.deps), /program_missing/u);
+  const missingProgram = fixture({ installed: true, loaded: true, contents: installedPlist("/opt/craft/worker.js") });
+  missingProgram.deps.worker_entrypoint = "/opt/craft/current-worker.js";
+  missingProgram.deps.exists = path => path !== "/opt/craft/worker.js";
+  assert.equal(ensureLearningWorkerLaunchAgent(missingProgram.deps).status, "upgraded");
+  assert.match(missingProgram.files.get(missingProgram.plistPath) ?? "", /\/opt\/craft\/current-worker\.js/u);
+  assert.deepEqual(missingProgram.calls.filter(args => args[0] === "bootout" || args[0] === "bootstrap").map(args => args[0]), ["bootout", "bootstrap"]);
 
   const badRead = fixture();
   badRead.deps.read_file = () => { throw Object.assign(new Error("denied"), { code: "EACCES" }); };
@@ -181,7 +195,8 @@ test("install propagates LaunchAgents directory and file access failures", () =>
 
 test("status, start, stop, resume, and uninstall preserve explicit lifecycle semantics", () => {
   const f = fixture({ installed: true, contents: renderLearningWorkerLaunchAgent({ exec_path: "/usr/bin/node", worker_entrypoint: "/opt/craft/worker.js", data_root: "/tmp/craft-test-data" }) });
-  assert.deepEqual(learningWorkerLaunchAgentStatus(f.deps), { installed: true, loaded: false, plist_path: f.plistPath, reason: "not_loaded" });
+  assert.deepEqual(learningWorkerLaunchAgentStatus(f.deps), { installed: true, loaded: false, plist_path: f.plistPath, reason: "not_loaded",
+    held_out_adapter_configured: false, program_memory_designs_configured: false });
   assert.deepEqual(startLearningWorkerLaunchAgent(f.deps), { status: "started" });
   assert.deepEqual(startLearningWorkerLaunchAgent(f.deps), { status: "already_running" });
   assert.deepEqual(stopLearningWorkerLaunchAgent(f.deps), { status: "stopped" });
@@ -196,7 +211,8 @@ test("lifecycle commands fail closed for unsupported platforms and missing insta
   const unsupported = fixture({ platform: "linux" });
   assert.throws(() => learningWorkerLaunchAgentStatus(unsupported.deps), /requires_macos/u);
   const missing = fixture();
-  assert.deepEqual(learningWorkerLaunchAgentStatus(missing.deps), { installed: false, loaded: false, plist_path: missing.plistPath, reason: "not_installed" });
+  assert.deepEqual(learningWorkerLaunchAgentStatus(missing.deps), { installed: false, loaded: false, plist_path: missing.plistPath, reason: "not_installed",
+    held_out_adapter_configured: false, program_memory_designs_configured: false });
   assert.throws(() => startLearningWorkerLaunchAgent(missing.deps), /not_installed/u);
   assert.deepEqual(stopLearningWorkerLaunchAgent(missing.deps), { status: "not_installed" });
   assert.deepEqual(uninstallLearningWorkerLaunchAgent(missing.deps), { status: "already_uninstalled" });

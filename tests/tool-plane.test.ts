@@ -75,6 +75,12 @@ test("effect, risk and audit metadata follow the declared read-only hint", () =>
   assert.equal(local.effect, "local_write");
   assert.equal(local.audit_policy, "on_write");
   assert.equal(local.idempotent, false);
+
+  const [finalized] = buildRegistry([{ name: "craft_learning_cycle_evaluation_finalize", description: "x", inputSchema: { type: "object", properties: {} } }]);
+  assert.equal(finalized.operation, "finalize");
+  assert.equal(finalized.effect, "local_write");
+  assert.equal(finalized.approval_required, true);
+  assert.equal(finalized.audit_policy, "on_write");
 });
 
 test("resolution finds an address, falls back to the lone operation, and reports misses", () => {

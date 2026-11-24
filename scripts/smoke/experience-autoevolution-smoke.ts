@@ -294,9 +294,10 @@ try {
         workflow_runs: listOwned(service, "workflow_run", 20).map(({ id, procedure_id, evaluator_dispatch_id, case_id, status, results }) => ({ id, procedure_id, evaluator_dispatch_id, case_id, status, results })),
         provider_calls: await providerCallCount(), knowledge_candidate_ready: knowledgeCandidateReady, knowledge_review_reasons: knowledgeReviewReasons,
         traced_calls: [...tracedCalls] };
+    const heldOutAwaitingAdapter = (diagnostic.dispatches as JsonObject[]).some(item => item.stage === "held_out" && item.status === "awaiting_adapter");
     if (procedureCandidate && evidenceCount === 1 && evidenceStages.size === 1 && evidenceStages.has("shadow") && runCount === 1 && knowledgeCandidateReady
       && knowledgeReviewReasons.includes("independent_effectiveness_evaluation_required")
-      && tracedCalls.size === expectedCalls.size && await providerCallCount() === 1) break;
+      && tracedCalls.size === expectedCalls.size && await providerCallCount() === 1 && heldOutAwaitingAdapter) break;
     await delay(100);
   }
 

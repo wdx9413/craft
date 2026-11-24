@@ -75,13 +75,13 @@ async function openServiceRuntime(mode: string, environment = process.env): Prom
         if (member === "experience") peerContributors.push(new ExperienceContribution(target));
       }
       services.set(owner, routeOwnedService(await CraftService.open(ownerStore, undefined,
-        { contributors: peerContributors, stores: peerStores, services, owner })));
+        { contributors: peerContributors, stores: peerStores, services, owner }, environment)));
     }
     const localContributors: ContextContributionProvider[] = primaryOwner === "knowledge" ? [new KnowledgeContribution(store)]
       : primaryOwner === "memory" ? [new MemoryContribution(store)] : primaryOwner === "experience" ? [new ExperienceContribution(store)] : [];
     const service = await CraftService.open(store, undefined,
       environment.CRAFT_STORAGE_OWNER === "context" ? { contributors, stores, services, owner: "context" }
-        : primaryOwner ? { contributors: localContributors, stores: peerStores, services, owner: primaryOwner } : undefined);
+        : primaryOwner ? { contributors: localContributors, stores: peerStores, services, owner: primaryOwner } : undefined, environment);
     const exposed = routeOwnedService(service);
     if (primaryOwner) services.set(primaryOwner, exposed);
     return { service: exposed, store, mode: launch.mode, close: () => {
