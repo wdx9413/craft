@@ -235,7 +235,9 @@ test("unratedFeedbackDoesNotCountAsEffect", async () => {
   const ref = refs[0]!;
   assert.equal(ref.id, procedure.id);
   assert.equal(ref.version, procedure.version);
-  const input = { receipt_id: receipt.id, outcome: "unrated", turn_outcome: "passed", asset_refs: [ref] };
+  const evidence = service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "Synthetic usage verified",
+    metadata: { context_receipt_id: receipt.id, verdict: "passed" } });
+  const input = { receipt_id: receipt.id, outcome: "unrated", turn_outcome: "passed", asset_refs: [ref], evidence_ids: [evidence.id] };
   assert.throws(() => service.contextResolutionFeedback({ ...input, usage_stage: "used" }), /require shown usage/u);
   const result = service.contextResolutionFeedback({ ...input, usage_stage: "shown" });
   const feedback = result.feedback as JsonObject;
@@ -244,10 +246,12 @@ test("unratedFeedbackDoesNotCountAsEffect", async () => {
   assert.deepEqual(feedback.asset_refs, refs);
   assert.equal(feedback.outcome, "unrated");
   assert.equal(feedback.turn_outcome, "passed");
-  assert.equal(feedback.evidence_verified, false);
-  assert.deepEqual(feedback.verified_evidence_refs, []);
+  assert.equal(feedback.evidence_verified, true);
+  assert.deepEqual(feedback.verified_evidence_refs, [{ id: evidence.id, version: evidence.version }]);
   assert.deepEqual(result.auto_demotions, []);
   assert.equal(result.procedure_release_changed, false);
+  const currentRelease = service.experienceProcedureGet({ procedure_id: procedure.id, release_channel: "current" });
+  assert.deepEqual(currentRelease.procedure, procedure);
   const history = service.workbenchExperienceFeedbackHistory({ asset_id: ref.id, member: "experience" });
   assert.deepEqual(history.counts, { positive: 0, negative: 0, dismissed: 0, events: 1 });
   const weights = contextFeedbackWeights(store, "experience", [String(ref.id)]);
