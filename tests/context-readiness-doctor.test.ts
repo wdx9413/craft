@@ -330,7 +330,36 @@ test("Gap audit classifies remaining work and says no new context member is miss
     f.store.create("context_feedback", "feedback", { outcome: "helpful", scope, token_measurement: { injected_tokens: 10 } });
     const withMigration = capabilityIterationGaps(f.store, { project_scope_id: scope.id, project_root: projectRoot });
     assert.ok((withMigration.gaps as JsonObject[]).some(item => item.id === "business_data_migration"));
-    assert.ok(!(withMigration.gaps as JsonObject[]).some(item => item.id === "context_usage"));
+    assert.ok((withMigration.gaps as JsonObject[]).some(item => item.id === "context_usage"),
+      "unlinked emission and feedback records are not evidence of actual asset use");
+  } finally { await dispose(f); }
+});
+
+test("Context usage gap requires exact emitted asset use and reports unrated feedback separately", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "workspace");
+    await mkdir(root);
+    const scope = projectIdentityFromRoot(root).canonical_scope as JsonObject;
+    const args = { project_scope_id: String(scope.id), project_root: root };
+    const ref = { member: "knowledge", id: "claim-1", version: 2, digest: "claim-digest" };
+    f.store.create("context_emission", "emission", { scope, source_receipt_id: "receipt", asset_refs: [ref], status: "shown" });
+    f.store.create("context_feedback", "wrong-receipt", { scope, receipt_id: "other-receipt", asset_refs: [ref], usage_stage: "used", outcome: "helpful" });
+    f.store.create("context_feedback", "wrong-ref", { scope, receipt_id: "receipt", asset_refs: [{ ...ref, version: 1 }], usage_stage: "used", outcome: "helpful" });
+    f.store.create("context_feedback", "missing-version", { scope, receipt_id: "receipt", asset_refs: [{ member: ref.member, id: ref.id, digest: ref.digest }], usage_stage: "used", outcome: "helpful" });
+    f.store.create("context_feedback", "missing-digest", { scope, receipt_id: "receipt", asset_refs: [{ member: ref.member, id: ref.id, version: ref.version }], usage_stage: "used", outcome: "helpful" });
+    f.store.create("context_feedback", "malformed-ref", { scope, receipt_id: "receipt", asset_refs: [null], usage_stage: "used", outcome: "helpful" });
+    f.store.create("context_feedback", "unrated", { scope, receipt_id: "receipt", asset_refs: [ref], usage_stage: "shown", outcome: "unrated" });
+
+    const beforeUse = capabilityIterationGaps(f.store, args);
+    assert.equal(gapById(beforeUse, "context_usage")?.status, "evidence_pending");
+    assert.equal(gapById(beforeUse, "context_feedback")?.status, "evidence_pending");
+
+    f.store.create("context_feedback", "used", { scope, receipt_id: "receipt", asset_refs: [ref], usage_stage: "used", outcome: "helpful" });
+    const afterUse = capabilityIterationGaps(f.store, args);
+    assert.equal(gapById(afterUse, "context_usage"), undefined);
+    assert.equal(gapById(afterUse, "context_feedback")?.status, "evidence_pending",
+      "later rated usage does not erase an independent unrated shown observation");
   } finally { await dispose(f); }
 });
 
@@ -359,7 +388,8 @@ test("Gap audit uses canonical workspace scope and excludes other projects' usag
     f.store.create("context_feedback", "other-feedback", { scope: { kind: "project", id: "project:other" } });
     const global = capabilityIterationGaps(f.store);
     assert.equal(global.project_scope_id, "global");
-    assert.equal(gapById(global, "context_usage"), undefined);
+    assert.equal(gapById(global, "context_usage")?.status, "evidence_pending",
+      "project records must not satisfy the global use gap");
     const rootOnly = capabilityIterationGaps(f.store, { project_root: root });
     assert.equal(rootOnly.project_scope_id, scope.id);
     assert.equal(gapById(rootOnly, "project_identity_migration"), undefined);
@@ -420,7 +450,7 @@ test("Gap audit leaves inaccessible project usage unknown", async (context) => {
   try {
     const list = f.store.list.bind(f.store);
     context.mock.method(f.store, "list", (kind: string, ...args: Parameters<typeof list> extends [string, ...infer Rest] ? Rest : never) => {
-      if (kind === "context_emission" && args[0] === 1) throw new Error("Scoped emissions are inaccessible");
+      if (kind === "context_emission" && args[0] === 10_000) throw new Error("Scoped emissions are inaccessible");
       return list(kind, ...args);
     });
     const result = capabilityIterationGaps(f.store, { project_scope_id: "project:demo" });
@@ -532,8 +562,10 @@ test("Gap audit clears task effect only for an eligible signed report from the E
     const defaultOwner = await CraftService.open(f.store, undefined, { stores: new Map(), contributors: [] });
     assert.equal(gapById(defaultOwner.contextCapabilityIterationGaps(args), "context_usage")?.status, "evidence_pending");
 
-    f.store.create("context_emission", "project-emission", { scope });
-    f.store.create("context_feedback", "project-feedback", { scope });
+    const usedRef = { member: "knowledge", id: "claim-1", version: 1, digest: "claim-digest" };
+    f.store.create("context_emission", "project-emission", { scope, source_receipt_id: "usage-receipt", asset_refs: [usedRef] });
+    f.store.create("context_feedback", "project-feedback", { scope, receipt_id: "usage-receipt", asset_refs: [usedRef],
+      usage_stage: "used", outcome: "helpful" });
     for (const component of ["knowledge", "memory", "experience"]) {
       f.store.create("activation_proof_receipt", component, { component, session_id: "verified-hook",
         plugin_release: CRAFT_RELEASE_VERSION, hook_trust_status: "trusted", mcp_reachable: true });

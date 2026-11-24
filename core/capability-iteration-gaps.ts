@@ -1,6 +1,7 @@
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { catalogOwner } from "./infrastructure/owned-catalog.ts";
 import { contextReadinessDoctor, type ContextDoctorSources } from "./context-readiness-doctor.ts";
+import { contextAssetMatches } from "craft-common-base/context-assets";
 import { buildCapabilityIterationPlan } from "./capability-iteration-plan.ts";
 import type { EvaluationContractKernel } from "./evaluation-contract.ts";
 import { validateJsonSchema, type JsonValue } from "./json-schema.ts";
@@ -33,6 +34,14 @@ function gap(status: GapStatus, id: string, reason: string, nextAction: string):
 
 function identityFailure(status: string, issue?: JsonObject): JsonObject {
   return { status, project_scope_id: null, gaps: issue ? [issue] : [], unresolved_count: 1, ...SAFETY };
+}
+
+function exactContextAssetRef(value: unknown): value is JsonObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const ref = value as JsonObject;
+  return typeof ref.member === "string" && typeof ref.id === "string"
+    && Number.isSafeInteger(ref.version) && Number(ref.version) > 0
+    && typeof ref.digest === "string" && ref.digest.length > 0;
 }
 
 class EvalOwnerReadFailure extends Error {}
@@ -82,22 +91,33 @@ function effectGap(scope: JsonObject, raw: unknown, evaluation: GapSources["eval
   }
 }
 
-function contextUsageGap(contextStore: CraftStore | null, scope: JsonObject, context: JsonObject): JsonObject | null {
-  const unavailable = () => gap("owner_unavailable", "context_usage", "The Context owner data is unavailable.", "restore_context_owner_access");
+function contextUsageGaps(contextStore: CraftStore | null, scope: JsonObject, context: JsonObject): JsonObject[] {
+  const unavailable = () => [gap("owner_unavailable", "context_usage", "The Context owner data is unavailable.", "restore_context_owner_access")];
   if (!contextStore || context.emissions === null || context.feedback === null) return unavailable();
   const matches = (record: JsonObject) => {
     const recordScope = record.scope as JsonObject | undefined;
     return recordScope?.kind === scope.kind && recordScope?.id === scope.id;
   };
   try {
-    const present = scope.kind === "global"
-      ? Number(context.emissions) > 0 && Number(context.feedback) > 0
-      : contextStore.list("context_emission", 1, matches, false).length > 0
-        && contextStore.list("context_feedback", 1, matches, false).length > 0;
-    if (present) return null;
+    const emissions = contextStore.list("context_emission", 10_000, record => matches(record)
+      && typeof record.source_receipt_id === "string" && Array.isArray(record.asset_refs) && record.asset_refs.length > 0, false);
+    const feedback = contextStore.list("context_feedback", 10_000, matches, false);
+    const referencesMatchEmission = (entry: JsonObject) => emissions.some(emission => emission.source_receipt_id === entry.receipt_id
+      && Array.isArray(entry.asset_refs) && entry.asset_refs.some(ref => exactContextAssetRef(ref)
+        && (emission.asset_refs as JsonObject[]).some(emitted => exactContextAssetRef(emitted) && contextAssetMatches(ref, emitted))));
+    const ratedUse = feedback.some(entry => referencesMatchEmission(entry)
+      && (entry.usage_stage === "used" || entry.usage_stage === "verified")
+      && ["helpful", "irrelevant", "incorrect", "stale"].includes(String(entry.outcome)));
+    const gaps: JsonObject[] = [];
+    if (!ratedUse) gaps.push(gap("evidence_pending", "context_usage",
+      "No exact emitted asset reference has rated used or verified feedback in this scope.",
+      "run_real_host_turns_and_record_asset_ref_usage_and_token_measurement"));
+    const unratedShown = feedback.some(entry => entry.outcome === "unrated" && entry.usage_stage === "shown" && referencesMatchEmission(entry));
+    if (unratedShown) gaps.push(gap("evidence_pending", "context_feedback",
+      "Context was shown, but feedback remains unrated and does not prove asset use or effect.",
+      "record_a_rated_outcome_for_the_exact_emitted_asset_reference"));
+    return gaps;
   } catch { return unavailable(); }
-  return gap("evidence_pending", "context_usage", "Durable injection or feedback evidence is missing for this scope.",
-    "run_real_host_turns_and_record_asset_ref_usage_and_token_measurement");
 }
 
 export function capabilityIterationGaps(store: CraftStore, args: JsonObject = {}, sources: GapSources = {}): JsonObject {
@@ -141,8 +161,7 @@ export function capabilityIterationGaps(store: CraftStore, args: JsonObject = {}
   if (migration.state === "applied" && migration.data_migrated !== true) remediation.push(
     gap("authorization_pending", "business_data_migration", "Registry migration does not import business records or authority.",
       "inventory_then_plan_selected_record_refs_before_explicit_apply"));
-  const usage = contextUsageGap(contextStore, scope, doctor.context as JsonObject);
-  if (usage) remediation.push(usage);
+  remediation.push(...contextUsageGaps(contextStore, scope, doctor.context as JsonObject));
   if (!contextStore) remediation.push(gap("owner_unavailable", "project_asset_recurrence", "The Context owner is unavailable.", "mount_context_owner"));
   else {
     const plan = args.records === undefined
