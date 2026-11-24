@@ -19,7 +19,7 @@ export type ReleaseProduct = {
 
 export const RELEASE_PRODUCTS: readonly ReleaseProduct[] = [
   { name: "craft", surface: "full", category: "Productivity", external_marketplace: false },
-  { name: "craft-context", version: "0.21.8", surface: "component-context-agent", hookMember: "context", category: "Developer Tools", external_marketplace: true },
+  { name: "craft-context", version: "0.21.9", surface: "component-context-agent", hookMember: "context", category: "Developer Tools", external_marketplace: true },
   { name: "craft-knowledge", version: "0.13.1", surface: "component-knowledge-daily", hookMember: "knowledge", category: "Developer Tools", external_marketplace: false },
   { name: "craft-memory", version: "0.13.1", surface: "component-memory-daily", hookMember: "memory", category: "Developer Tools", external_marketplace: false },
   { name: "craft-experience", version: "0.13.1", surface: "component-experience-daily", hookMember: "experience", category: "Developer Tools", external_marketplace: false },
