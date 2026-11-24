@@ -1411,7 +1411,7 @@ export class CraftService extends ServiceFoundation {
     const submitted = this.workflowEvolution.submit(args); const proposal = submitted.proposal as JsonObject;
     const nextAction = "Run shadow and held-out evaluation, then use the existing Signoff and Canary gates before this Procedure can be selected.";
     if (proposal.composition !== undefined || (proposal.graph as JsonObject | null)?.graph_control !== undefined) {
-      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, ...revisionArgs });
+      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, ...revisionArgs, evidence_ids: procedureEvidenceIds });
       return { ...submitted, workflow: null, procedure: procedure.procedure, next_action: nextAction };
     }
     if (procedureKind === "prompt") {

@@ -429,7 +429,7 @@ test("eligible vector retrieval persists safe configuration, caches embeddings, 
   } finally { globalThis.fetch = originalFetch; if (originalKey === undefined) delete process.env.CRAFT_VECTOR_TEST_KEY; else process.env.CRAFT_VECTOR_TEST_KEY = originalKey; await dispose(f); }
 });
 
-test("semantic review packet is fragment-bound and a Prompt Procedure cannot route without signed evaluation", async () => {
+test("semantic review packet is fragment-bound and a Prompt Procedure cannot route without signed evaluation", async (t) => {
   const f = await fixture();
   try {
     const root = join(f.root, "source"); await mkdir(root); await writeFile(join(root, "README.md"), "# Delivery rule\nRun focused tests before delivery.\n", "utf8");
@@ -442,14 +442,21 @@ test("semantic review packet is fragment-bound and a Prompt Procedure cannot rou
     assert.deepEqual(review.blocking_reasons, ["independent_effectiveness_evaluation_required"]);
     const evidence = f.service.evidenceRecord({ evidence_id: "procedure-evidence", source_type: "fixture", confidence: "confirmed", claim: "Verification passed.", locator: "fixture://procedure" }) as JsonObject;
     const signature = { schema: "craft.scenario-signature.v1", project: "p", verifier: "test", effect_class: "read" };
-    for (const id of ["one", "two"]) f.service.workflowEvolutionObserve({ observation_id: `procedure-${id}`, scenario_key: "delivery.tests", scenario_signature: signature, source_kind: "fixture", source_id: id, source_digest: `sha256:${id}`, scope: "project:p", outcome: "passed", evidence_ids: [evidence.id], sanitized: true, content_stored: false });
+    for (const id of ["one", "two"]) f.service.workflowEvolutionObserve({ observation_id: `procedure-${id}`, scenario_key: "delivery.tests", scenario_signature: signature, source_kind: "fixture", source_id: id, source_digest: `sha256:${id}`, scope: "project:p", outcome: "passed", evidence_ids: [evidence.id], execution_shape: ["recovery"], sanitized: true, content_stored: false });
     const evaluationEvidence = f.service.evidenceRecord({ evidence_id: "controlled-evaluation-evidence", source_type: "program", confidence: "confirmed",
       claim: "Controlled evaluation passed its case.", locator: "workbench-evaluation:fixture", metadata: { provenance: "controlled_workbench_evaluation",
         evaluation_id: "evaluation-one", report_digest: "report-digest", host_evidence_digest: "host-digest", content_stored: false } }) as JsonObject;
     f.store.create("experience_learning_evaluation_link", "controlled-evaluation-link", { evaluation_id: "evaluation-one", observation_id: "procedure-one",
       evidence_id: evaluationEvidence.id, report_digest: "report-digest", host_evidence_digest: "host-digest", expected: 1, passed: 1, status: "passed", content_stored: false });
+    const tamperedEvaluationEvidence = f.service.evidenceRecord({ evidence_id: "tampered-controlled-evaluation-evidence", source_type: "program", confidence: "confirmed",
+      claim: "Evidence for a report whose link digest was tampered with.", locator: "workbench-evaluation:tampered-fixture", metadata: { provenance: "controlled_workbench_evaluation",
+        evaluation_id: "evaluation-two", report_digest: "report-digest-two", host_evidence_digest: "host-digest", content_stored: false } }) as JsonObject;
     f.store.create("experience_learning_evaluation_link", "tampered-controlled-evaluation-link", { evaluation_id: "evaluation-two", observation_id: "procedure-two",
-      evidence_id: evaluationEvidence.id, report_digest: "wrong-report-digest", host_evidence_digest: "host-digest", expected: 1, passed: 1, status: "passed", content_stored: false });
+      evidence_id: tamperedEvaluationEvidence.id, report_digest: "wrong-report-digest", host_evidence_digest: "host-digest", expected: 1, passed: 1, status: "passed", content_stored: false });
+    function assertProcedureEvidence(procedure: JsonObject) {
+      assert(Array.isArray(procedure.evidence_ids));
+      assert.deepEqual([...procedure.evidence_ids].sort(), [evaluationEvidence.id, evidence.id]);
+    }
     const request = f.service.workflowEvolutionPropose({ scenario_key: "delivery.tests", observation_ids: ["procedure-one", "procedure-two"], hypothesis: "Verify before delivery.", design_axes: ["orchestration"], procedure_kind: "workflow", output_contract_ref: "acceptance:tests" }).request as JsonObject;
     const actualObservationRefs = request.observation_refs as JsonObject[];
     const { id: requestIdForLegacyRefs, version: _requestVersion, ...requestPayloadForLegacyRefs } = request;
@@ -484,10 +491,10 @@ test("semantic review packet is fragment-bound and a Prompt Procedure cannot rou
     const submitted = f.service.workflowEvolutionProposalSubmit(workflowArgs);
     const proposal = submitted.proposal as JsonObject;
     const submittedProcedure = submitted.procedure as JsonObject;
-    assert.deepEqual(new Set(submittedProcedure.evidence_ids as string[]), new Set([evidence.id, evaluationEvidence.id]));
+    assertProcedureEvidence(submittedProcedure);
     const workflowRetry = f.service.workflowEvolutionProposalSubmit({ ...workflowArgs, evidence_ids: undefined });
     assert.equal(workflowRetry.idempotent, true);
-    assert((workflowRetry.procedure as JsonObject).evidence_ids && ((workflowRetry.procedure as JsonObject).evidence_ids as string[]).includes(String(evaluationEvidence.id)), JSON.stringify(workflowRetry));
+    assertProcedureEvidence(workflowRetry.procedure as JsonObject);
     const procedure = f.service.experienceProcedureDraft({ proposal_id: proposal.id, procedure_kind: "prompt", allowed_effects: ["read"], evidence_ids: [evidence.id] }).procedure as JsonObject;
     assert.equal(procedure.definition_ref, null);
     f.service.experienceProcedures.gate({ procedure_id: procedure.id, stage: "shadow", evidence_ids: [evidence.id], passed: true });
@@ -503,10 +510,58 @@ test("semantic review packet is fragment-bound and a Prompt Procedure cannot rou
     const promptArgs = { request_id: promptRequest.id, proposal_id: "controlled-evidence-prompt", name: "Evidence-backed delivery", description: "Check delivery evidence.",
       prompt: "Run the controlled evaluation and check its evidence.", inputs: [] };
     const promptSubmitted = f.service.workflowEvolutionProposalSubmit(promptArgs);
-    assert((promptSubmitted.procedure as JsonObject).evidence_ids && ((promptSubmitted.procedure as JsonObject).evidence_ids as string[]).includes(String(evaluationEvidence.id)), JSON.stringify(promptSubmitted));
+    assertProcedureEvidence(promptSubmitted.procedure as JsonObject);
     const promptRetry = f.service.workflowEvolutionProposalSubmit(promptArgs);
     assert.equal(promptRetry.idempotent, true);
-    assert((promptRetry.procedure as JsonObject).evidence_ids && ((promptRetry.procedure as JsonObject).evidence_ids as string[]).includes(String(evaluationEvidence.id)), JSON.stringify(promptRetry));
+    assertProcedureEvidence(promptRetry.procedure as JsonObject);
+    const graph = {
+      nodes: [
+        { id: "verify", type: "action", side_effect: "read_only", requires: [], provides: ["report"], acceptance_ref: "acceptance:verify" },
+        { id: "exit", type: "action", side_effect: "read_only", requires: ["report"], provides: [], acceptance_ref: "acceptance:tests" },
+      ],
+      edges: [{ id: "verified", from: "verify", to: "exit", kind: "success", max_traversals: 1 }],
+      graph_control: {
+        scenario_id: "delivery-tests", title: "Delivery tests",
+        entries: [{ id: "start", node_id: "verify", required_inputs: [], preconditions: [] }],
+        exits: [{ id: "done", node_id: "exit", required_outputs: ["report"], acceptance_ref: "acceptance:tests" }],
+        subscenarios: [{ id: "delivery", title: "Delivery", entry_id: "start", exit_id: "done",
+          allowed_nodes: ["verify", "exit"], allowed_edges: ["verified"], allowed_effects: ["read_only"], max_transitions: 2, max_visits: 2 }],
+      },
+    };
+    const composition = {
+      steps: [{ id: "verify", type: "instruction", instruction: "Check the test report.", side_effect: "read_only", requires: ["report"], provides: ["result"] }],
+      composition: {
+        entries: [{ id: "start", title: "Verify delivery", required_inputs: ["report"], preconditions: [], routes: [{ exit_id: "done", step_ids: ["verify"] }] }],
+        exits: [{ id: "done", title: "Delivery verified", required_outputs: ["result"], acceptance_ref: "acceptance:tests" }],
+      },
+    };
+    for (const draft of [
+      { name: "graph", kind: "graph", definition: graph },
+      { name: "composition", kind: "workflow", definition: composition },
+    ]) {
+      await t.test(`${draft.name} binds only allowed Evidence on submission and retry`, () => {
+        const draftRequest = f.service.workflowEvolutionPropose({ scenario_key: "delivery.tests", observation_ids: ["procedure-one", "procedure-two"],
+          hypothesis: `Verify delivery with a ${draft.name}.`, design_axes: ["orchestration"], procedure_kind: draft.kind,
+          output_contract_ref: "acceptance:tests" }).request as JsonObject;
+        const args = { request_id: draftRequest.id, proposal_id: `controlled-evidence-${draft.name}`, workflow_id: `procedure-${draft.name}`,
+          procedure_id: `delivery-${draft.name}`, name: `Verified delivery ${draft.name}`, description: "Verify delivery with a test report.",
+          inputs: [], ...draft.definition };
+        assert.throws(() => f.service.workflowEvolutionProposalSubmit({ ...args, evidence_ids: [unrelatedEvidence.id] }),
+          /evidence_ids may only select evidence inherited/u);
+        assert.throws(() => f.service.workflowEvolutionProposalSubmit({ ...args, evidence_ids: [tamperedEvaluationEvidence.id] }),
+          /evidence_ids may only select evidence inherited/u);
+        const first = f.service.workflowEvolutionProposalSubmit(args);
+        const firstProcedure = first.procedure as JsonObject;
+        assert.equal(first.workflow, null);
+        assertProcedureEvidence(firstProcedure);
+        const retry = f.service.workflowEvolutionProposalSubmit({ ...args, evidence_ids: [evidence.id] });
+        const retriedProcedure = retry.procedure as JsonObject;
+        assert.equal(retry.idempotent, true);
+        assert.equal(retriedProcedure.id, firstProcedure.id);
+        assert.equal(retriedProcedure.version, firstProcedure.version);
+        assertProcedureEvidence(retriedProcedure);
+      });
+    }
     const legacyRequest = f.service.workflowEvolutionPropose({ scenario_key: "delivery.tests", observation_ids: ["procedure-one", "procedure-two"],
       hypothesis: "Preserve older observation references.", design_axes: ["output"], procedure_kind: "prompt", output_contract_ref: "acceptance:legacy" }).request as JsonObject;
     const { id: legacyRequestId, version: _legacyRequestVersion, ...legacyRequestPayload } = legacyRequest;
