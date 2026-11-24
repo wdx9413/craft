@@ -21,14 +21,13 @@ let otherProject: JsonObject;
 let feedbackProject: JsonObject;
 const originalDataRoot = process.env.CRAFT_DATA_DIR;
 
-before(async t => {
+before(async () => {
   root = await mkdtemp(join(await realpath(tmpdir()), "craft-context-self-evolution-usage-"));
   const isolatedDataRoot = join(root, "data");
   process.env.CRAFT_DATA_DIR = isolatedDataRoot;
   assert.equal(dataRoot(), isolatedDataRoot);
   store = await new CraftStore(craftPaths()).open();
   assert.equal(store.paths.root, isolatedDataRoot);
-  t.diagnostic(`CRAFT_DATA_DIR=${isolatedDataRoot}`);
   service = new CraftService(store);
   const register = async (name: string) => {
     const projectRoot = join(root, name);
@@ -81,7 +80,8 @@ function independentEvidence(key: string): JsonObject {
   });
 }
 
-test("eligibleKnowledgeAssetIsSelectedOnlyForMatchingProject", async () => {
+test("eligibleKnowledgeAssetIsSelectedOnlyForMatchingProject", async t => {
+  t.diagnostic(`CRAFT_DATA_DIR=${store.paths.root}`);
   const query = "Aster checksum verifies example reports.";
   const scope = `project:${String(project.id)}`;
   const source = service.knowledgeSourceRegister({
