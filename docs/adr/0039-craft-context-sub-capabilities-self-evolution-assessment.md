@@ -39,4 +39,8 @@ craft-context 0.20.4 插件下的四个子能力（craft-codebase、craft-experi
 
 ## 后续迭代（2026-11-24）
 
-本 ADR 的缺项已分批落地：权限与数据边界模型（`permission-boundary.ts`）、外部验证器契约（`external-verifier.ts`）、craft-eval 五场景 held-out suite、Hook context receipt 审计用例、`.codex` 安装规范和双向集成说明。**关键增量是 learning-cycle-bridge**：把 craft-eval 的 verified run report 转成 Evolution Value Gate 输入，使 verified outcome 能回流成 `candidate_procedure`/`candidate_mod`。端到端测试用实测的 coding held-out 5/5 complete 结果验证了“评测→验证→积累”链路，失败/未验证结果不会成为持久候选。craft-context 全量测试 42/42 通过，craft-eval 全量测试与 100% 覆盖率门禁通过；真实 Codex 环境下的 end-to-end 触发仍是未覆盖风险。
+2026-11-24 复核发现，之前的 `learning-cycle-bridge` 只接收调用方传入的报告计数和引用；对应“5/5”测试也只是硬编码对象，不能证明评测执行、报告来源或持久化。该断言已撤回。
+
+当前改造增加了受控链路：Workbench 评测提交时把 Host、任务、会话、回合、Context receipt、已存 Host completion Evidence ID 和该 Evidence 的 verification ref 绑定进评测输入摘要；`craft_learning_cycle_evaluation_finalize` 按评测 ID 从 Eval owner 读取终态记录，重新计算报告，重新核验 Host Evidence 对应的当前 Codex 会话归档，并核对任务身份与成功终态。两类来源都通过后，才复用 Experience 的 `learningCycleFinalize` 写入/幂等复用 Observation，并持久化受控评测 Evidence 与 Observation 的关联；后续 `learningCycleRequestGet` 会把评测摘要和 Evidence ID 一并交给候选起草读取，`workflowEvolutionProposalSubmit` 会自动将仍匹配该关联的 Evidence ID 并入 Procedure 草案。失败、未完成、报告被改、Host 归档缺失/变化或绑定身份不一致都不会写成功 Observation 或评测关联。归档核验不等于密码学 Host 身份认证。Observation 后续仍走现有异步分类、候选提交和 Shadow/Held-out/Signoff/Canary 门禁；写入 Observation 不等于已有候选或已经启用。
+
+定向集成测试实际启动 Workbench evaluator 子进程，分别验证通过报告产生一条任务 Evidence/Observation、失败报告不增加成功记录。它证明本地受控评测到 Observation 的接线，不证明真实 Codex Host 的身份、模型质量或候选最终启用。评测报告是本机受控执行及完整性复算结果，不是密码学签名。`permission-boundary.ts` 是独立策略判断组件，默认不授予任何路径访问；Craft 运行时的实际存储权限仍由 owner store、路径绑定与调用边界实施。Marketplace 包、真实 Codex Host 安装和异步 worker 后续晋级仍须单独验证。

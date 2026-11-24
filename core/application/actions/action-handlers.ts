@@ -113,6 +113,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_codebase_symbol_usage_record: service.contextExtensionsRecordCodebaseUsage.bind(service),
       craft_codebase_symbol_usage_get: service.contextExtensionsGetCodebaseUsage.bind(service),
       craft_learning_cycle_finalize: (a) => service.learningCycleFinalize(a),
+      craft_learning_cycle_evaluation_finalize: (a) => service.learningCycleFinalizeEvaluation(a),
       craft_learning_cycle_task_evidence_list: (a) => service.learningCycleTaskEvidenceList(a),
       craft_experience_learning_request_get: (a) => service.learningCycleRequestGet(a),
       craft_experience_scenario_classification_request_get: (a) => service.experienceScenarioClassificationRequestGet(a),

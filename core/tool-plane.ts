@@ -88,7 +88,7 @@ const OPERATIONS: readonly string[] = [
   // Memory Ledger is part of the primary composition. These verbs must remain
   // semantic addresses on the syscall surface instead of degrading to an
   // opaque resource name such as `memory_ledger_remember`.
-  "remember", "transition",
+  "remember", "transition", "finalize",
 ];
 
 const DESTRUCTIVE_OPERATIONS = new Set(["delete", "remove", "revoke", "purge", "rollback"]);

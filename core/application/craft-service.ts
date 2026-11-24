@@ -305,6 +305,7 @@ export class CraftService extends ServiceFoundation {
   readonly ownerServices: ReadonlyMap<string, CraftService>;
   readonly capabilityOwned: boolean;
   readonly storageOwner: string | undefined;
+  serviceEnvironment: NodeJS.ProcessEnv = process.env;
   readonly internalApprovalBroker: InternalActionApprovalBroker;
   readonly nativeTools: NativeToolKernel;
   readonly dshPluginHost: DshPluginHostRuntime;
@@ -1357,6 +1358,7 @@ export class CraftService extends ServiceFoundation {
   workflowEvolutionProposalGet(args: JsonObject): JsonObject { return this.workflowEvolution.get(args); }
   workflowEvolutionProposalSubmit(args: JsonObject): JsonObject {
     const request = this.store.get("workflow_evolution_request", String(args.request_id));
+    if (!Array.isArray(request.observation_refs)) throw new Error("Workflow Evolution request observation_refs must be an array");
     const signature = request.scenario_signature as JsonObject | undefined;
     const project = signature?.project as JsonObject | undefined;
     const projectId = typeof project?.id === "string" ? project.id.replace(/^project:/u, "") : "";
@@ -1365,6 +1367,38 @@ export class CraftService extends ServiceFoundation {
       throw new Error("Experience scenario is retired; proposal submission is blocked");
     }
     const procedureKind = String(request.procedure_kind ?? "workflow");
+    const observationRefs = request.observation_refs as JsonObject[];
+    const observationIds = new Set(observationRefs.map(item => String(item.id)));
+    const observationEvidenceIds = observationRefs.flatMap(ref => {
+      const observation = this.store.get("workflow_evolution_observation", String(ref.id), Number(ref.version));
+      return Array.isArray(observation.evidence_ids) ? observation.evidence_ids.filter((id): id is string => typeof id === "string") : [];
+    });
+    // Store.list applies its predicate before counting the bounded result limit, so this
+    // sentinel detects overflow among matching Observation links, not unrelated rows.
+    const matchingEvaluationLinks = this.store.list("experience_learning_evaluation_link", 10_001,
+      item => item.status === "passed" && observationIds.has(String(item.observation_id)));
+    if (matchingEvaluationLinks.length > 10_000) throw new Error("controlled evaluation evidence exceeds the supported proposal bound");
+    const controlledEvaluationEvidenceIds = matchingEvaluationLinks.flatMap(link => {
+      const evidence = this.store.find("evidence", String(link.evidence_id));
+      const metadata = evidence?.metadata as JsonObject | undefined;
+      const matchesLink = evidence?.source_type === "program" && evidence.confidence === "confirmed"
+        && evidence.record_origin !== "caller_asserted" && metadata?.provenance === "controlled_workbench_evaluation"
+        && metadata.evaluation_id === link.evaluation_id && metadata.report_digest === link.report_digest
+        && metadata.host_evidence_digest === link.host_evidence_digest && metadata.content_stored === false
+        && Number.isSafeInteger(link.expected) && Number(link.expected) > 0 && link.passed === link.expected;
+      return matchesLink ? [String(link.evidence_id)] : [];
+    });
+    const inheritedEvidenceIds = [...new Set([...observationEvidenceIds, ...controlledEvaluationEvidenceIds])];
+    if (args.evidence_ids !== undefined && !Array.isArray(args.evidence_ids)) throw new Error("evidence_ids must be an array of inherited Observation evidence");
+    const suppliedEvidenceIds = Array.isArray(args.evidence_ids) ? args.evidence_ids : [];
+    if (suppliedEvidenceIds.some(id => typeof id !== "string" || !id.trim())
+      || new Set(suppliedEvidenceIds).size !== suppliedEvidenceIds.length
+      || suppliedEvidenceIds.some(id => !inheritedEvidenceIds.includes(id as string))) {
+      throw new Error("evidence_ids may only select evidence inherited from the request Observations and controlled evaluations");
+    }
+    // Observation and passing controlled-evaluation proof is mandatory on every draft.
+    // A caller may repeat an allowed reference, but cannot attach unrelated Evidence.
+    const procedureEvidenceIds = [...new Set([...inheritedEvidenceIds, ...(suppliedEvidenceIds as string[])])];
     const firstObservation = (request.observation_refs as JsonObject[] | undefined)?.[0];
     const source = firstObservation?.source as JsonObject | undefined;
     const scope = typeof source?.scope === "string" ? source.scope : "project:unresolved";
@@ -1383,14 +1417,14 @@ export class CraftService extends ServiceFoundation {
     if (procedureKind === "prompt") {
       const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, ...revisionArgs, procedure_kind: "prompt", title: proposal.name,
         description: proposal.prompt ?? proposal.description, trigger: args.trigger ?? request.scenario_key,
-        acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: args.evidence_ids ?? (request.observation_refs as JsonObject[]).flatMap((item) => item.evidence_ids as string[]) });
+        acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: procedureEvidenceIds });
       return { ...submitted, procedure: procedure.procedure, next_action: nextAction };
     }
     if (submitted.idempotent === true) {
       const kind = String(proposal.procedure_kind ?? "workflow") === "graph" ? "workflow_dag" : "workflow";
       const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, ...revisionArgs, procedure_kind: proposal.procedure_kind,
         title: proposal.name, description: proposal.description, trigger: args.trigger ?? request.scenario_key,
-        acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: args.evidence_ids ?? (request.observation_refs as JsonObject[]).flatMap((item) => item.evidence_ids as string[]) });
+        acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: procedureEvidenceIds });
       return { ...submitted, workflow: this.store.get(kind, String(proposal.workflow_id)), procedure: procedure.procedure, next_action: nextAction };
     }
     const derivedFrom = { workflow_evolution_proposal_id: proposal.id, workflow_evolution_proposal_version: proposal.version,
@@ -1404,7 +1438,7 @@ export class CraftService extends ServiceFoundation {
         inputs: (proposal.inputs as unknown[]).map(input => typeof input === "string" ? { name: input, required: true } : input), steps: proposal.steps, derived_from: derivedFrom });
     const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, ...revisionArgs, procedure_kind: proposal.procedure_kind,
       title: proposal.name, description: proposal.description, trigger: args.trigger ?? request.scenario_key,
-      acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: args.evidence_ids ?? (request.observation_refs as JsonObject[]).flatMap((item) => item.evidence_ids as string[]) });
+      acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: procedureEvidenceIds });
     return { ...submitted, workflow, procedure: procedure.procedure, next_action: nextAction };
   }
 
@@ -1455,12 +1489,14 @@ export class CraftService extends ServiceFoundation {
 
   static async open(store: CraftStore, hostOwnerId?: string,
     contextSources?: { contributors: readonly import("../capability-protocol.ts").ContextContributionProvider[];
-      stores: import("../context-access-guard.ts").ContextOwnerStores; services?: ReadonlyMap<string, CraftService>; owner?: string }): Promise<CraftService> {
+      stores: import("../context-access-guard.ts").ContextOwnerStores; services?: ReadonlyMap<string, CraftService>; owner?: string },
+    runtimeEnvironment: NodeJS.ProcessEnv = process.env): Promise<CraftService> {
     const config = await loadConfig(store.paths);
     const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : undefined;
     const declared = hostProfilesFromConfig(config?.hostProfiles);
     const service = new CraftService(store, semanticProvider, undefined, undefined, undefined, hostOwnerId, declared,
       undefined, undefined, undefined, config?.contentLanguage ?? "zh-CN", undefined, undefined, undefined, contextSources);
+    service.serviceEnvironment = runtimeEnvironment;
     return service;
   }
 

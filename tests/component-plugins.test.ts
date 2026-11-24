@@ -51,6 +51,11 @@ test("the Memory-owned surface exposes asynchronous promotion only to its owner"
   assert(surfaceToolNames("component-memory-daily").includes("craft_memory_policy_save"));
 });
 
+test("the Experience daily surface exposes controlled evaluation finalization", () => {
+  assert(surfaceToolNames("component-experience-daily").includes("craft_learning_cycle_evaluation_finalize"));
+  assert(surfaceToolNames("component-context-agent").includes("craft_learning_cycle_evaluation_finalize"));
+});
+
 test("the internal Context worker retains the complete component surfaces", () => {
   const context = new Set(surfaceToolNames("component-context-complete"));
   for (const component of ["component-codebase", "component-knowledge", "component-memory", "component-experience"]) {

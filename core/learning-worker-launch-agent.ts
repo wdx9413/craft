@@ -77,7 +77,8 @@ function workerRevision(deps: LaunchAgentDependencies, worker: string): string {
 
 function launchEnvironment(env: NodeJS.ProcessEnv): Record<string, string> {
   const names = ["CODEX_HOME", "CRAFT_LEARNING_MODEL_HOST", "CRAFT_EXPERIENCE_POLL_MS", "CRAFT_KNOWLEDGE_POLL_MS",
-    "CRAFT_MEMORY_POLL_MS", "CRAFT_NOTES_POLL_MS", "CRAFT_LEARNING_PROJECT_SCOPES", "CRAFT_PROGRAM_MEMORY_DESIGNS"];
+    "CRAFT_MEMORY_POLL_MS", "CRAFT_NOTES_POLL_MS", "CRAFT_LEARNING_PROJECT_SCOPES", "CRAFT_PROGRAM_MEMORY_DESIGNS",
+    "CRAFT_HELD_OUT_ADAPTER_COMMAND", "CRAFT_HELD_OUT_ADAPTER_TIMEOUT_MS", "CRAFT_TRUSTED_EVALUATORS"];
   return Object.fromEntries([["PATH", env.PATH ?? "/usr/bin:/bin"], ...names.filter(name => env[name]).map(name => [name, env[name]!] as const)]);
 }
 
@@ -127,8 +128,6 @@ export function ensureLearningWorkerLaunchAgent(deps: LaunchAgentDependencies = 
     return installLearningWorkerLaunchAgent(deps);
   }
   if (!isCraftLearningWorkerPlist(current)) throw new Error("learning_worker_launch_agent_conflicting_installation");
-  const status = learningWorkerLaunchAgentStatus(deps);
-  if (status.reason === "program_missing") throw new Error("learning_worker_launch_agent_program_missing");
   return upgradeLearningWorkerLaunchAgent(deps);
 }
 
@@ -161,7 +160,8 @@ export function installLearningWorkerLaunchAgent(deps: LaunchAgentDependencies =
   return { status: "installed", plist_path: location.plist };
 }
 
-export function learningWorkerLaunchAgentStatus(deps: LaunchAgentDependencies = {}): { installed: boolean; loaded: boolean; plist_path: string; reason: string | null } {
+export function learningWorkerLaunchAgentStatus(deps: LaunchAgentDependencies = {}): { installed: boolean; loaded: boolean; plist_path: string; reason: string | null;
+  held_out_adapter_configured: boolean; program_memory_designs_configured: boolean } {
   ensureMac(deps);
   const location = paths(deps);
   let installed = false;
@@ -187,7 +187,9 @@ export function learningWorkerLaunchAgentStatus(deps: LaunchAgentDependencies = 
   if (!installed) reason = "not_installed";
   else if (programMissing) reason = "program_missing";
   else if (!loaded) reason = "not_loaded";
-  return { installed, loaded, plist_path: location.plist, reason };
+  return { installed, loaded, plist_path: location.plist, reason,
+    held_out_adapter_configured: /<key>CRAFT_HELD_OUT_ADAPTER_COMMAND<\/key>\s*<string>[^<]+<\/string>/u.test(contents),
+    program_memory_designs_configured: /<key>CRAFT_PROGRAM_MEMORY_DESIGNS<\/key>\s*<string>[^<]+<\/string>/u.test(contents) };
 }
 
 export function startLearningWorkerLaunchAgent(deps: LaunchAgentDependencies = {}): { status: string } {

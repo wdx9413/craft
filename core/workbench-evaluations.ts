@@ -10,6 +10,7 @@ import evaluationPackage from "craft-eval/package.json" with { type: "json" };
 import { evaluationEngineIdentity } from "./evaluation-engine-identity.ts";
 import { KnowledgeTaskEffects } from "./knowledge-task-effects.ts";
 import { WorkbenchContextAudits } from "./workbench-context-audit.ts";
+import { normalizeLearningEvaluationBinding } from "./learning-cycle-evaluation-binding.ts";
 const evaluationVersion = evaluationPackage.version;
 
 const KIND = "workbench_evaluation";
@@ -79,7 +80,8 @@ export class WorkbenchEvaluations {
     const suite = JSON.parse(inputs[0]!.toString("utf8")) as { cases?: Array<{ in_place?: boolean }> };
     if (Array.isArray(suite?.cases) && suite.cases.some(item => item.in_place === true)) throw new Error("Workbench evaluations require isolated workspaces; in_place is only available through the developer CLI");
     const subject = JSON.parse(inputs[1]!.toString("utf8")) as Record<string, unknown>;
-    const binding = hash(JSON.stringify({ paths, digests: inputs.map(hash) }));
+    const learningBinding = args.learning_binding === undefined ? undefined : normalizeLearningEvaluationBinding(args.learning_binding);
+    const binding = hash(JSON.stringify({ paths, digests: inputs.map(hash), ...(learningBinding ? { learning_binding: learningBinding } : {}) }));
     const id = hash(args.operation_id);
     const existing = this.store.find(KIND, id);
     if (existing) {
@@ -90,6 +92,7 @@ export class WorkbenchEvaluations {
     if (this.active.size >= 4) throw new Error("evaluation capacity reached");
     const directory = join(this.store.paths.root, "evaluations", id);
     this.store.create(KIND, id, { state: "starting", input_digest: binding, workspace: paths[3], input_paths: paths.slice(0, 3), report_root: directory,
+      ...(learningBinding ? { learning_binding: learningBinding } : {}),
       evaluator_version: evaluationVersion, node_version: process.versions.node, platform: process.platform, architecture: process.arch });
     const abort = new AbortController();
     const live = { abort, done: Promise.resolve(), events: [] as JsonObject[] };
@@ -148,7 +151,9 @@ export class WorkbenchEvaluations {
   async inputs(id: string): Promise<{ suite: JsonObject; subject: JsonObject; runtime: JsonObject }> {
     const record = this.get(id);
     const bytes = await Promise.all(["suite", "subject", "runtime"].map(key => configurationBytes(join(String(record.report_root), `${key}.json`))));
-    if (!Array.isArray(record.input_paths) || hash(JSON.stringify({ paths: [...record.input_paths, record.workspace], digests: bytes.map(hash) })) !== record.input_digest) throw new Error("controlled evaluation inputs changed after reservation");
+    const learningBinding = record.learning_binding === undefined ? undefined : normalizeLearningEvaluationBinding(record.learning_binding);
+    if (!Array.isArray(record.input_paths) || hash(JSON.stringify({ paths: [...record.input_paths, record.workspace], digests: bytes.map(hash),
+      ...(learningBinding ? { learning_binding: learningBinding } : {}) })) !== record.input_digest) throw new Error("controlled evaluation inputs changed after reservation");
     return { suite: JSON.parse(bytes[0]!.toString("utf8")), subject: JSON.parse(bytes[1]!.toString("utf8")), runtime: JSON.parse(bytes[2]!.toString("utf8")) };
   }
 

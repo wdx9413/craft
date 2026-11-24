@@ -60,6 +60,24 @@ test("concurrent duplicate submissions run once and the fifth active reservation
   } finally { await f.close(); }
 });
 
+test("controlled evaluation binds learning identity into its idempotency digest and refuses binding edits", { timeout: 15_000 }, async () => {
+  const f = await fixture();
+  try {
+    const learning_binding = { host: "codex", task_id: "task-bound", turn_id: "turn-bound", context_receipt_id: "receipt-bound", session_id: "session-bound",
+      host_evidence_id: "evidence-host-bound", verification_ref: "host-run:bound" };
+    await assert.rejects(f.evaluations.submit({ ...f.args, operation_id: "binding-invalid", learning_binding: { ...learning_binding, host: "Codex" } }), /host is invalid/);
+    assert.equal(f.store.list("workbench_evaluation", 10).length, 0);
+    const record = await f.evaluations.submit({ ...f.args, operation_id: "binding-valid", learning_binding });
+    assert.deepEqual(record.learning_binding, learning_binding);
+    await until(() => !["starting", "running", "cancelling"].includes(String(f.evaluations.get(String(record.id)).state)), "bound evaluation did not finish");
+    assert.equal(f.evaluations.get(String(record.id)).state, "completed");
+    assert.equal((await f.evaluations.report(String(record.id))).integrity, "verified_against_controlled_run");
+    f.store.save("workbench_evaluation", String(record.id), { ...f.store.get("workbench_evaluation", String(record.id)),
+      learning_binding: { ...learning_binding, task_id: "other-task" } });
+    await assert.rejects(f.evaluations.report(String(record.id)), /inputs changed after reservation/);
+  } finally { await f.close(); }
+});
+
 test("progress retention is bounded while a real worker is active and cancellation settles", { timeout: 15_000 }, async () => {
   const f = await fixture(), original = cp.fork; let worker: ReturnType<typeof cp.fork> | undefined;
   try {
