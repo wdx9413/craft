@@ -522,6 +522,40 @@ test("Gap audit clears task effect only for an eligible signed report from the E
   }
 });
 
+test("Gap audit keeps evidence pending when a signed report's frozen baseline is missing", async () => {
+  const f = await fixture();
+  const evalFixture = await fixture();
+  try {
+    const evalOwner = new CraftService(evalFixture.store);
+    const identity = evalOwner.scopeIdentityResolveProject({ project_root: evalFixture.root }).identity as JsonObject;
+    const scope = identity.canonical_scope as JsonObject;
+    const candidate = evalFixture.store.create("experience_procedure", "candidate", { scope, content_digest: "sha256:" + "a".repeat(64) });
+    const report = procedureTaskEffectFixture(evalOwner, candidate);
+    const contractId = String(report.evaluation_contract_id);
+    const candidateRef = evalOwner.evaluationContracts.artifactRef("experience_procedure", String(candidate.id), Number(candidate.version));
+    const args = { project_scope_id: scope.id, effect_evaluation_ref: {
+      contract_id: contractId, evaluation_id: report.evaluation_id, candidate_ref: candidateRef,
+    } };
+    const service = await CraftService.open(f.store, undefined, { owner: "context", stores: new Map([["eval", evalFixture.store]]),
+      services: new Map([["eval", evalOwner]]), contributors: [] });
+    assert.equal(gapById(await callGapTool(service, args), "controlled_task_effect"), undefined);
+
+    const frozen = evalFixture.store.get("evaluation_contract", contractId).task_effect as JsonObject;
+    const baseline = frozen.baseline_ref as JsonObject;
+    assert.equal(evalFixture.store.remove(String(baseline.kind), String(baseline.id)), 1);
+    assert.ok(evalFixture.store.find("evaluation_contract", contractId));
+    assert.ok(evalFixture.store.find("task_effect_evaluation", String(report.evaluation_id)));
+    const result = await callGapTool(service, args);
+    const effect = gapById(result, "controlled_task_effect");
+    assert.equal(effect?.status, "evidence_pending");
+    assert.equal(effect?.next_action, "freeze_contract_then_run_three_pair_screening_and_at_least_five_pairs_for_effect_decision");
+    assert.ok(!JSON.stringify(result).includes(String(baseline.id)));
+  } finally {
+    await dispose(evalFixture);
+    await dispose(f);
+  }
+});
+
 test("Context usage status line prefers host measurement and exposes omissions", async () => {
   const f = await fixture();
   try {

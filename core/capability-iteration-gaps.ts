@@ -48,10 +48,17 @@ function effectGap(scope: JsonObject, raw: unknown, evaluation: GapSources["eval
     const contract = evaluation.store.find("evaluation_contract", ref.contract_id, undefined, false);
     const contractScope = contract?.scope as JsonObject | undefined;
     if (contractScope?.kind !== scope.kind || contractScope?.id !== scope.id) return pending;
+    if (!evaluation.store.find("task_effect_evaluation", ref.evaluation_id, undefined, false)) return pending;
+  } catch {
+    return gap("owner_unavailable", "controlled_task_effect", "The Eval owner could not provide the requested evaluation.", "restore_eval_owner_access");
+  }
+
+  try {
     const verified = evaluation.verifyTaskEffectEvaluation(ref);
     return verified.eligible === true ? null : pending;
   } catch {
-    return gap("owner_unavailable", "controlled_task_effect", "The Eval owner could not provide the requested evaluation.", "restore_eval_owner_access");
+    // The verifier also throws for invalid frozen contracts or missing referenced evidence.
+    return pending;
   }
 }
 
