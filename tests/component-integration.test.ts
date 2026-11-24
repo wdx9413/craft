@@ -537,6 +537,7 @@ test("semantic review packet is fragment-bound and a Prompt Procedure cannot rou
     };
     for (const draft of [
       { name: "graph", kind: "graph", definition: graph },
+      { name: "standard-graph", kind: "graph", definition: { nodes: graph.nodes, edges: graph.edges } },
       { name: "composition", kind: "workflow", definition: composition },
     ]) {
       await t.test(`${draft.name} binds only allowed Evidence on submission and retry`, () => {
@@ -552,11 +553,15 @@ test("semantic review packet is fragment-bound and a Prompt Procedure cannot rou
           /evidence_ids may only select evidence inherited/u);
         const first = f.service.workflowEvolutionProposalSubmit(args);
         const firstProcedure = first.procedure as JsonObject;
-        assert.equal(first.workflow, null);
+        assert.equal(typeof firstProcedure.id, "string");
+        assert(Number.isSafeInteger(firstProcedure.version) && Number(firstProcedure.version) > 0);
+        assert.equal(first.workflow === null, draft.name !== "standard-graph");
+        if (draft.name === "standard-graph") assert.ok(first.workflow, "ordinary graphs still save through the Workflow DAG path");
         assertProcedureEvidence(firstProcedure);
         const retry = f.service.workflowEvolutionProposalSubmit({ ...args, evidence_ids: [evidence.id] });
         const retriedProcedure = retry.procedure as JsonObject;
         assert.equal(retry.idempotent, true);
+        if (draft.name === "standard-graph") assert.ok(retry.workflow, "ordinary graph retries restore the saved DAG");
         assert.equal(retriedProcedure.id, firstProcedure.id);
         assert.equal(retriedProcedure.version, firstProcedure.version);
         assertProcedureEvidence(retriedProcedure);
