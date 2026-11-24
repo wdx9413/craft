@@ -15,6 +15,9 @@ import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 import { discoverContextTools } from "../core/mcp/context-tools.ts";
 import { McpServer } from "../core/mcp.ts";
 import { TOOLS } from "../core/mcp/tool-catalog.ts";
+import { projectIdentityFromRoot } from "../core/scope-identity.ts";
+import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
+import { procedureTaskEffectFixture } from "./helpers/procedure-task-effect-fixture.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-context-readiness-"));
@@ -100,6 +103,11 @@ test("Readiness Doctor distinguishes model configuration from execution proof", 
   const previous = process.env.CRAFT_LEARNING_MODEL_HOST;
   try {
     delete process.env.CRAFT_LEARNING_MODEL_HOST;
+    const settingsFile = f.store.paths.settingsFile;
+    f.store.paths.settingsFile = "";
+    try { assert.deepEqual(contextReadinessDoctor(f.store).learning_model,
+      { status: "blocked", reason: "no_configured_model", execution: "unverified" }); }
+    finally { f.store.paths.settingsFile = settingsFile; }
     assert.deepEqual(contextReadinessDoctor(f.store).learning_model,
       { status: "blocked", reason: "no_configured_model", execution: "unverified" });
     await assert.rejects(access(f.store.paths.settingsFile), { code: "ENOENT" });
@@ -117,6 +125,11 @@ test("Readiness Doctor distinguishes model configuration from execution proof", 
     process.env.CRAFT_LEARNING_MODEL_HOST = "unsupported";
     assert.deepEqual(contextReadinessDoctor(f.store).learning_model,
       { status: "blocked", reason: "unsupported_learning_model_host", execution: "unverified" });
+    process.env.CRAFT_LEARNING_MODEL_HOST = "codex-cli";
+    Object.defineProperty(PROVIDER_CATALOG, "find", { configurable: true, value: () => undefined });
+    try { assert.deepEqual(contextReadinessDoctor(f.store).learning_model,
+      { status: "host_declared", host: "codex-cli", model: null, execution: "unverified" }); }
+    finally { Reflect.deleteProperty(PROVIDER_CATALOG, "find"); }
   } finally {
     if (previous === undefined) delete process.env.CRAFT_LEARNING_MODEL_HOST;
     else process.env.CRAFT_LEARNING_MODEL_HOST = previous;
@@ -226,8 +239,10 @@ function taskRecord(taskId: string, sessionId: string, outcome = "passed"): Json
 test("Capability iteration plan is dry-run, threshold-gated and never writes live assets", async () => {
   const f = await fixture();
   try {
+    for (const status of ["candidate", "stale", "reviewed", "archived"]) f.store.create("knowledge_claim", status, { scope: "global", status });
     const before = f.store.count("knowledge_claim") + f.store.count("memory_ledger") + f.store.count("experience_observation");
     const empty = buildCapabilityIterationPlan(f.store, { project_scope_id: "project:demo" });
+    assert.deepEqual((empty.readiness as JsonObject).knowledge_claim_statuses, { candidate: 1, stale: 1, reviewed: 1, other: 1 });
     assert.equal(empty.generated_without_writes, true);
     assert.equal(empty.automatic_apply_allowed, false);
     assert.equal((empty.learning_record as JsonObject).outcome, "inconclusive");
@@ -300,7 +315,7 @@ test("Gap audit classifies remaining work and says no new context member is miss
     assert.equal(((gaps.control_plane as JsonObject).missing_subcapabilities as unknown[]).length, 0);
     assert.match(String(gaps.capability_boundary), /No fifth Context member/u);
     const ids = (gaps.gaps as JsonObject[]).map(item => String(item.id));
-    for (const id of ["diagnostic_errors", "readiness_doctor", "codex_plugin_cache", "project_identity_migration", "context_usage", "controlled_task_effect", "hook_execution_proof"]) assert.ok(ids.includes(id));
+    for (const id of ["diagnostic_errors", "readiness_doctor", "context_usage", "controlled_task_effect", "hook_execution_proof"]) assert.ok(ids.includes(id));
     assert.equal((gaps.gaps as JsonObject[]).find(item => item.id === "business_data_migration"), undefined);
     const recurring = capabilityIterationGaps(f.store, { project_scope_id: "project:demo", records: [taskRecord("a", "session:A"), taskRecord("b", "session:B")] });
     const recurringGaps = recurring.gaps as JsonObject[];
@@ -309,13 +324,169 @@ test("Gap audit classifies remaining work and says no new context member is miss
       "verified use recurrence must not clear the independent effect-evidence gap");
     const projectRoot = join(f.root, "project");
     await mkdir(projectRoot, { recursive: true });
-    f.store.create("project_registry_migration", "observed", { project_root: projectRoot, state: "applied" });
-    f.store.create("context_emission", "emission", { status: "shown" });
-    f.store.create("context_feedback", "feedback", { outcome: "helpful", token_measurement: { injected_tokens: 10 } });
-    const withMigration = capabilityIterationGaps(f.store, { project_scope_id: "project:demo", project_root: projectRoot });
+    const scope = projectIdentityFromRoot(projectRoot).canonical_scope as JsonObject;
+    f.store.create("project_registry_migration", "observed", { project_root: projectIdentityFromRoot(projectRoot).local_path_alias, state: "applied" });
+    f.store.create("context_emission", "emission", { status: "shown", scope });
+    f.store.create("context_feedback", "feedback", { outcome: "helpful", scope, token_measurement: { injected_tokens: 10 } });
+    const withMigration = capabilityIterationGaps(f.store, { project_scope_id: scope.id, project_root: projectRoot });
     assert.ok((withMigration.gaps as JsonObject[]).some(item => item.id === "business_data_migration"));
     assert.ok(!(withMigration.gaps as JsonObject[]).some(item => item.id === "context_usage"));
   } finally { await dispose(f); }
+});
+
+function gapById(result: JsonObject, id: string): JsonObject | undefined {
+  return (result.gaps as JsonObject[]).find(item => item.id === id);
+}
+
+async function callGapTool(service: CraftService, args: JsonObject): Promise<JsonObject> {
+  const server = new McpServer(service, "component-context-agent");
+  const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {
+    name: "craft_capability_iteration_gaps", arguments: args } });
+  const result = response?.result as JsonObject;
+  assert.equal(result.isError, false, JSON.stringify(result));
+  return result.structuredContent as JsonObject;
+}
+
+test("Gap audit uses canonical workspace scope and excludes other projects' usage", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "workspace");
+    await mkdir(root);
+    const identity = projectIdentityFromRoot(root);
+    const scope = identity.canonical_scope as JsonObject;
+    f.store.create("project_identity", String(scope.id), identity);
+    f.store.create("context_emission", "other-emission", { scope: { kind: "project", id: "project:other" } });
+    f.store.create("context_feedback", "other-feedback", { scope: { kind: "project", id: "project:other" } });
+    const global = capabilityIterationGaps(f.store);
+    assert.equal(global.project_scope_id, "global");
+    assert.equal(gapById(global, "context_usage"), undefined);
+    const rootOnly = capabilityIterationGaps(f.store, { project_root: root });
+    assert.equal(rootOnly.project_scope_id, scope.id);
+    assert.equal(gapById(rootOnly, "project_identity_migration"), undefined);
+    assert.equal(gapById(rootOnly, "context_usage")?.status, "evidence_pending");
+    assert.deepEqual(capabilityIterationGaps(f.store, { project_root: root, project_scope_id: scope.id }), rootOnly);
+    assert.equal(f.store.count("project_registry_migration"), 0);
+    assert.equal(f.store.count("scope_alias"), 0);
+    assert.equal(f.store.count("project_identity"), 1);
+    assert.ok(!JSON.stringify(rootOnly).includes(root));
+  } finally { await dispose(f); }
+});
+
+test("Gap audit fails closed before querying on conflicting or unresolved project roots", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "workspace");
+    await mkdir(root);
+    const read = () => { assert.fail("A rejected identity must stop before querying diagnostics"); };
+    f.store.list = read;
+    f.store.count = read;
+    assert.equal(capabilityIterationGaps(f.store, { project_root: root, project_scope_id: "project:other" }).status, "identity_conflict");
+    const unresolved = capabilityIterationGaps(f.store, { project_root: join(root, "missing") });
+    assert.equal(unresolved.status, "identity_unresolved");
+    assert.equal(unresolved.project_scope_id, null);
+  } finally { await dispose(f); }
+});
+
+test("Gap audit reports required migration, ambiguity and unavailable identity owners", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "workspace");
+    await mkdir(root);
+    const scope = projectIdentityFromRoot(root).canonical_scope as JsonObject;
+    f.store.create("scope_alias", "legacy-alias", { status: "active", alias_kind: "path", alias: root,
+      scope: { kind: "project", id: "project:legacy" } });
+    const args = { project_root: root, project_scope_id: scope.id };
+    const legacy = capabilityIterationGaps(f.store, args);
+    assert.equal(legacy.status, "identity_unresolved");
+    assert.equal(gapById(legacy, "project_identity_migration")?.status, "authorization_pending");
+    f.store.create("project_identity", "project:another-legacy", { local_path_alias: root });
+    const ambiguous = capabilityIterationGaps(f.store, args);
+    assert.equal(ambiguous.status, "identity_unresolved");
+    assert.equal(ambiguous.project_scope_id, null);
+    assert.equal(gapById(ambiguous, "project_identity_migration"), undefined);
+    const unavailable = { stores: new Map() };
+    assert.equal(capabilityIterationGaps(f.store, args, unavailable).status, "owner_unavailable");
+    const global = capabilityIterationGaps(f.store, {}, unavailable);
+    for (const id of ["context_usage", "project_asset_recurrence", "controlled_task_effect", "hook_execution_proof"]) {
+      assert.equal(gapById(global, id)?.status, "owner_unavailable");
+    }
+    f.store.readSnapshot = () => { throw new Error("Registry is inaccessible"); };
+    assert.equal(capabilityIterationGaps(f.store, args).status, "owner_unavailable");
+  } finally { await dispose(f); }
+});
+
+test("Gap audit leaves inaccessible project usage unknown", async (context) => {
+  const f = await fixture();
+  try {
+    const list = f.store.list.bind(f.store);
+    context.mock.method(f.store, "list", (kind: string, ...args: Parameters<typeof list> extends [string, ...infer Rest] ? Rest : never) => {
+      if (kind === "context_emission" && args[0] === 1) throw new Error("Scoped emissions are inaccessible");
+      return list(kind, ...args);
+    });
+    const result = capabilityIterationGaps(f.store, { project_scope_id: "project:demo" });
+    assert.equal(gapById(result, "context_usage")?.status, "owner_unavailable");
+  } finally { await dispose(f); }
+});
+
+test("Gap audit reports observed runtime versions without a static plugin cache gap", async () => {
+  const f = await fixture();
+  try {
+    await mkdir(f.store.paths.runtimeDir, { recursive: true });
+    await writeFile(join(f.store.paths.runtimeDir, "learning-worker-knowledge.lock.json"),
+      JSON.stringify({ pid: process.pid, owner_id: "diagnostic-fixture", runtime_version: CRAFT_RELEASE_VERSION }));
+    const result = await callGapTool(new CraftService(f.store), {});
+    assert.equal(gapById(result, "codex_plugin_cache"), undefined);
+    const runtime = result.runtime as JsonObject;
+    assert.equal(runtime.version, CRAFT_RELEASE_VERSION);
+    assert.equal(runtime.source, "mcp_runtime");
+    const worker = (runtime.learning_workers as JsonObject).knowledge as JsonObject;
+    assert.equal(worker.owner_version, CRAFT_RELEASE_VERSION);
+    assert.equal(worker.liveness, "unverified");
+    assert.equal(worker.owner_pid, undefined);
+  } finally { await dispose(f); }
+});
+
+test("Gap audit clears task effect only for an eligible signed report from the Eval owner", async () => {
+  const f = await fixture();
+  const evalFixture = await fixture();
+  try {
+    const evalOwner = new CraftService(evalFixture.store);
+    const identity = evalOwner.scopeIdentityResolveProject({ project_root: evalFixture.root }).identity as JsonObject;
+    const scope = identity.canonical_scope as JsonObject;
+    const candidate = evalFixture.store.create("experience_procedure", "candidate", { scope, content_digest: "sha256:" + "a".repeat(64) });
+    const report = procedureTaskEffectFixture(evalOwner, candidate);
+    const candidateRef = evalOwner.evaluationContracts.artifactRef("experience_procedure", String(candidate.id), Number(candidate.version));
+    const ref = { contract_id: report.evaluation_contract_id, evaluation_id: report.evaluation_id, candidate_ref: candidateRef };
+    const service = await CraftService.open(f.store, undefined, { owner: "context", stores: new Map([["eval", evalFixture.store]]),
+      services: new Map([["eval", evalOwner]]), contributors: [] });
+    const args = { project_scope_id: scope.id, effect_evaluation_ref: ref };
+    const result = await callGapTool(service, args);
+    assert.equal(gapById(result, "controlled_task_effect"), undefined);
+    assert.ok(!JSON.stringify(result).includes(String(report.evaluation_id)));
+    for (const patched of [
+      { ...args, effect_evaluation_ref: { ...ref, candidate_ref: { ...candidateRef, version: candidateRef.version + 1 } } },
+      { ...args, effect_evaluation_ref: { ...ref, contract_id: "missing-contract" } },
+      { ...args, project_scope_id: "project:other" },
+    ]) assert.equal(gapById(await callGapTool(service, patched), "controlled_task_effect")?.status, "evidence_pending");
+    const absent = await CraftService.open(f.store, undefined, { owner: "context", stores: new Map(), contributors: [] });
+    assert.equal(gapById(await callGapTool(absent, args), "controlled_task_effect")?.status, "owner_unavailable");
+    const defaultOwner = await CraftService.open(f.store, undefined, { stores: new Map(), contributors: [] });
+    assert.equal(gapById(defaultOwner.contextCapabilityIterationGaps(args), "context_usage")?.status, "evidence_pending");
+
+    f.store.create("context_emission", "project-emission", { scope });
+    f.store.create("context_feedback", "project-feedback", { scope });
+    for (const component of ["knowledge", "memory", "experience"]) {
+      f.store.create("activation_proof_receipt", component, { component, session_id: "verified-hook",
+        plugin_release: CRAFT_RELEASE_VERSION, hook_trust_status: "trusted", mcp_reachable: true });
+    }
+    const resolved = service.contextCapabilityIterationGaps({ ...args, session_id: "verified-hook",
+      records: [taskRecord("first", "session:first"), taskRecord("second", "session:second")] });
+    assert.equal(resolved.status, "resolved");
+    assert.equal(resolved.unresolved_count, 0);
+  } finally {
+    await dispose(evalFixture);
+    await dispose(f);
+  }
 });
 
 test("Context usage status line prefers host measurement and exposes omissions", async () => {
@@ -422,6 +593,11 @@ test("owned Doctor leaves absent or inaccessible owners unknown and accepts only
     f.store.create("codex_hook_turn", "journal", { trace_id: "doctor-journal", session_id: "s", has_edit: true, signals: [] });
     const untrusted = contextReadinessDoctor(f.store, { session_id: "s" });
     assert.equal((untrusted.verification_gap as JsonObject).reason, "hook_untrusted");
+    f.store.create("context_correction_task", "legacy-lifecycle", { lifecycle: "confirmed" });
+    const port = contextReadinessDoctor(f.store, {}, { readiness: { authentication: "unavailable" } });
+    assert.equal(((port.context as JsonObject).corrections as JsonObject).confirmed, 1);
+    assert.equal((port.verification_gap as JsonObject).readiness_source, "observed_host_readiness_port");
+    assert.equal((port.verification_gap as JsonObject).reason, "host_auth_unavailable");
     const originalCount = f.store.count.bind(f.store), originalList = f.store.list.bind(f.store);
     f.store.count = (kind: string) => { if (kind === "knowledge_claim") throw new Error("OwnerReadUnavailable"); return originalCount(kind); };
     f.store.list = (kind, ...args) => { if (kind === "knowledge_claim") throw new Error("OwnerReadUnavailable"); return originalList(kind, ...args); };

@@ -9,8 +9,7 @@ test("all neutral action bindings use the supplied application and preserve call
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const target = new Proxy({}, { get: (_target, name) => {
     if (name === "trace" || name === "hookPlane") return undefined;
-    // Handlers that read the store directly (capability iteration plan/gaps,
-    // context doctor) need a store-shaped object, not a callable.
+    // Handlers that read the store directly need a store-shaped object.
     if (name === "store") return {
       list: () => [], count: () => 0, find: () => null,
       paths: { root: process.cwd(), databaseDir: process.cwd(), dataRoot: process.cwd(), configDir: process.cwd() },
@@ -23,8 +22,7 @@ test("all neutral action bindings use the supplied application and preserve call
   const supplied = { marker: "unchanged" };
   // These bindings read the store directly instead of delegating to a service
   // method, so "the service was called" is not the property under test for them.
-  const STORE_DIRECT = new Set(["craft_capability_iteration_plan", "craft_capability_iteration_gaps",
-    "craft_context_doctor", "craft_context_usage_statusline", "craft_lsp_readiness"]);
+  const STORE_DIRECT = new Set(["craft_capability_iteration_plan", "craft_context_usage_statusline", "craft_lsp_readiness"]);
   for (const [name, handler] of Object.entries(neutral)) {
     calls.length = 0;
     const args = name === "craft_memory_governance" ? { action: "tasks" } : supplied;
@@ -61,6 +59,13 @@ test("all neutral action bindings use the supplied application and preserve call
       assert.throws(() => memory[name]({ ...supplied, members }), /mounted component/);
       assert.equal(calls.length, 0, "invalid member selection must never reach the application");
     }
+  }
+  for (const [name, method] of [
+    ["craft_context_doctor", "contextReadinessDoctor"], ["craft_capability_iteration_gaps", "contextCapabilityIterationGaps"],
+  ]) {
+    calls.length = 0;
+    await neutral[name](supplied);
+    assert.deepEqual(calls, [{ method, args: [supplied] }]);
   }
   assert.ok(Object.keys(neutral).length > 900);
 });

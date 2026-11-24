@@ -1,4 +1,10 @@
+import { EFFECT_EVALUATION_REF_SCHEMA } from "../capability-iteration-gaps.ts";
+import type { JsonObject } from "../infrastructure/store.ts";
 import { CONTEXT_TOOL_INTENTS, type Tool, tool } from "./tool-schema.ts";
+
+const iterationGaps = tool("craft_capability_iteration_gaps", "Read canonical project identity, live runtime and owner evidence gaps. An optional exact Eval reference verifies candidate-bound task effect. This operation is read-only.",
+  [], true, ["project_scope_id", "project_root", "session_id", "surface"]);
+(iterationGaps.inputSchema.properties as JsonObject).effect_evaluation_ref = EFFECT_EVALUATION_REF_SCHEMA;
 
 const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_info", "Show the Craft version, data location, and non-zero record counts. Count types with zero records are omitted; set include_zero_counts=true for the full diagnostic map.", [], true, ["include_zero_counts"]),
@@ -8,7 +14,7 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_context_tools_discover", `Discover a small task-specific Context tool subset and its exact input schemas. intent must be one of ${CONTEXT_TOOL_INTENTS.join(", ")}; limit defaults to 3 and is bounded to 5. Existing registered tools remain compatible.`, [], true, ["intent", "limit"]),
   tool("craft_context_doctor", "Read one bounded, content-free readiness projection. Configuration or an installed plugin is not execution proof; use the activation and worker diagnostics to distinguish observed activity from stored state.", [], true, ["project_root", "session_id", "surface"]),
   tool("craft_capability_iteration_plan", "Build a read-only P0-P2 governed learning and minimal-sufficient-context iteration plan from sanitized task records. It never writes assets, promotes claims, applies migration, publishes workflows or grants execution authority.", ["project_scope_id"], true, ["project_root", "records", "asset_ids", "allowed_effects", "subject_id", "subject_version", "case_ids", "baseline_id", "candidate_id", "environment_digest", "budget_digest", "grader_version", "input"]),
-  tool("craft_capability_iteration_gaps", "Audit remaining P0-P2 gaps and missing subcapabilities. It separates resolved control-plane work from runtime cache, evidence and authorization blockers. Read-only; never applies changes or grants execution authority.", [], true, ["project_scope_id", "project_root", "session_id", "surface"]),
+  iterationGaps,
   tool("craft_context_usage_statusline", "Return a compact, content-free Context usage status line plus tokens, selected refs, omissions, feedback outcomes and recent measurements. It is a projection over existing receipts and never reads prompt bodies or grants authority.", [], true, ["session_id", "session_host"]),
   tool("craft_lsp_readiness", "Report read-only language-server readiness for the files or languages a task needs. A suggested command is only a server name and must be replaced with its absolute executable path. It never starts a server, installs anything, or lets repository files register executables.", [], true, ["files", "languages", "command"]),
   tool("craft_notes_context_resolve", "Read existing Craft Notes for directories from the shared local registry. Provide exactly one of description (promoted entries only) or absolute path (also observed entries). No filesystem scan, recording, promotion or access grant. Defaults: limit=3 (1..5), max_chars=1200 (1..4000, serialized entries only). Complete entries that do not fit are omitted with partial=true; descriptions are never truncated. Lookup uses the registry's bounded 1000-record scan. A cloud hint is not a verified remote identity. Resolve permissions before opening the selected project.", [], true, ["description", "path", "limit", "max_chars"]),
