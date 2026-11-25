@@ -1,12 +1,12 @@
 {
-  "version": "0.21.11",
+  "version": "0.21.12",
   "products": [
     {
       "name": "craft-context",
       "surface": "component-context-agent",
       "hook_member": "context",
       "category": "Developer Tools",
-      "version": "0.21.11"
+      "version": "0.21.12"
     },
     {
       "name": "craft-datasec",

@@ -1,6 +1,6 @@
 {
   "name": "craft",
-  "version": "0.21.11",
+  "version": "0.21.12",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
