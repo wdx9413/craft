@@ -264,7 +264,7 @@ test("Context SessionStart records a runtime receipt without opening SQLite", as
       .trim().split("\n").map(line => JSON.parse(line) as JsonObject);
     assert.deepEqual(records.map(record => record.phase), ["started", "finished"]);
     assert.equal(records[1]!.event, "SessionStart");
-    assert.equal(records[1]!.outcome, "skipped");
+    assert.equal(records[1]!.outcome, "completed");
     assert.equal(records[1]!.store_open_ms, 0);
     assert.equal(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='memory_ledger' AND id='legacy-invalid'")
       .get()?.payload_json, "{");
@@ -286,7 +286,7 @@ else if (action === "bootstrap") writeFileSync(${JSON.stringify(state)}, "loaded
 else if (action === "bootout") { try { unlinkSync(${JSON.stringify(state)}); } catch {} }
 `, { mode: 0o700 });
   await chmod(launchctl, 0o700);
-  const hook = join(root, "bin/craft-codex-hook.ts");
+  const hook = hookBundle;
   const run = () => new Promise<{ stdout: string; stderr: string; code: number | null }>((resolveResult, reject) => {
     const child = spawn(process.execPath, ["--experimental-strip-types", hook, "--member", "context"], { cwd: root,
       env: { ...process.env, HOME: home, CRAFT_DATA_DIR: data, PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`, NODE_NO_WARNINGS: "1" },
@@ -306,10 +306,11 @@ else if (action === "bootout") { try { unlinkSync(${JSON.stringify(state)}); } c
     assert.equal(await readFile(state, "utf8"), "loaded");
     const plist = await readFile(join(home, "Library", "LaunchAgents", "com.craft.learning-worker.plist"), "utf8");
     assert.match(plist, /CRAFT_LEARNING_COMPONENTS/u);
+    assert(plist.includes(join(resolve(hookBundle, ".."), "craft-experience-learning-worker.js")), "LaunchAgent must point into this packaged plugin");
     const second = await run();
     assert.equal(second.code, 0, second.stderr);
     const invocations = (await readFile(log, "utf8")).trim().split("\n");
-    assert.deepEqual(invocations.map(line => line.split(" ")[0]), ["print", "print", "bootstrap", "print", "print"]);
+    assert.deepEqual(invocations.map(line => line.split(" ")[0]), ["print", "print", "bootstrap", "print"]);
     await writeFile(join(home, "Library", "LaunchAgents", "com.craft.learning-worker.plist"), "foreign service", "utf8");
     const conflict = await run();
     assert.equal(conflict.code, 0, conflict.stderr);

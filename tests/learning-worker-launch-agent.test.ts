@@ -5,7 +5,23 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { LEARNING_WORKER_LAUNCH_AGENT_LABEL, installLearningWorkerLaunchAgent, learningWorkerLaunchAgentStatus,
   renderLearningWorkerLaunchAgent, startLearningWorkerLaunchAgent, stopLearningWorkerLaunchAgent,
-  ensureLearningWorkerLaunchAgent, uninstallLearningWorkerLaunchAgent, upgradeLearningWorkerLaunchAgent, type LaunchAgentDependencies } from "../core/learning-worker-launch-agent.ts";
+  ensureLearningWorkerLaunchAgent, uninstallLearningWorkerLaunchAgent, upgradeLearningWorkerLaunchAgent, launchAgentModulePath,
+  resolveLearningWorkerEntrypoint,
+  type LaunchAgentDependencies } from "../core/learning-worker-launch-agent.ts";
+
+test("bundled hook resolves its module path from the executable when import.meta.url is unavailable", () => {
+  assert.equal(launchAgentModulePath(undefined, "/plugins/craft-context/dist/plugin/craft-codex-hook.cjs"),
+    "/plugins/craft-context/dist/plugin/craft-codex-hook.cjs");
+  assert.equal(launchAgentModulePath("file:///plugins/craft-context/dist/core/cli.js", undefined), "/plugins/craft-context/dist/core/cli.js");
+  assert.throws(() => launchAgentModulePath(undefined, undefined), /learning_worker_launch_agent_worker_unavailable/u);
+  assert.equal(resolveLearningWorkerEntrypoint(undefined, "/plugins/craft-context/dist/plugin/craft-codex-hook.cjs",
+    path => path === "/plugins/craft-context/dist/plugin/craft-experience-learning-worker.js"),
+  "/plugins/craft-context/dist/plugin/craft-experience-learning-worker.js");
+  assert.equal(resolveLearningWorkerEntrypoint("file:///repo/core/learning-worker-launch-agent.ts", undefined,
+    path => path === "/repo/deploy/experience-learning/worker.ts"), "/repo/deploy/experience-learning/worker.ts");
+  assert.throws(() => resolveLearningWorkerEntrypoint(undefined, "/plugins/craft-context/dist/plugin/craft-codex-hook.cjs", () => false),
+    /learning_worker_launch_agent_worker_unavailable/u);
+});
 
 function fixture(options: { installed?: boolean; loaded?: boolean; contents?: string; platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv } = {}) {
   const files = new Map<string, string>();

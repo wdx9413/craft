@@ -36,15 +36,27 @@ function paths(deps: LaunchAgentDependencies) {
     directory: join(home, "Library", "LaunchAgents"), plist: join(home, "Library", "LaunchAgents", `${label}.plist`) };
 }
 
-function workerEntrypoint(deps: LaunchAgentDependencies): string {
-  if (deps.worker_entrypoint) return resolve(deps.worker_entrypoint);
-  const moduleDirectory = dirname(fileURLToPath(import.meta.url));
-  const packaged = resolve(moduleDirectory, "../plugin/craft-experience-learning-worker.js");
+export function launchAgentModulePath(moduleUrl: string | undefined, argvPath: string | undefined): string {
+  if (typeof moduleUrl === "string" && moduleUrl.startsWith("file:")) return fileURLToPath(moduleUrl);
+  if (argvPath) return resolve(argvPath);
+  throw new Error("learning_worker_launch_agent_worker_unavailable");
+}
+
+export function resolveLearningWorkerEntrypoint(moduleUrl: string | undefined, argvPath: string | undefined,
+  exists: (path: string) => boolean = existsSync): string {
+  const moduleDirectory = dirname(resolve(launchAgentModulePath(moduleUrl, argvPath)));
+  const packagedCandidates = [resolve(moduleDirectory, "craft-experience-learning-worker.js"),
+    resolve(moduleDirectory, "../plugin/craft-experience-learning-worker.js")];
+  const packaged = packagedCandidates.find(exists);
+  if (packaged) return packaged;
   const source = resolve(moduleDirectory, "../deploy/experience-learning/worker.ts");
-  const exists = deps.exists ?? existsSync;
-  if (exists(packaged)) return packaged;
   if (exists(source)) return source;
   throw new Error("learning_worker_launch_agent_worker_unavailable");
+}
+
+function workerEntrypoint(deps: LaunchAgentDependencies): string {
+  if (deps.worker_entrypoint) return resolve(deps.worker_entrypoint);
+  return resolveLearningWorkerEntrypoint(import.meta.url, process.argv[1], deps.exists ?? existsSync);
 }
 
 function workerMcpArgs(worker: string, exists: (path: string) => boolean): string[] {

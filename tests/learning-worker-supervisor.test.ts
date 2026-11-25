@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import { acquireLearningWorkerLocks, learningWorkerOwnerAlive, resolveLearningWorkerLaunch, startContextLearningWorker } from "../core/interfaces/learning-worker-supervisor.ts";
+import { acquireLearningWorkerLocks, learningWorkerOwnerAlive, resolveLearningWorkerLaunch, shouldStartEmbeddedLearningWorker,
+  startContextLearningWorker } from "../core/interfaces/learning-worker-supervisor.ts";
 
 async function fixture(worker = "setInterval(() => {}, 1000);\n") {
   const root = await mkdtemp(join(tmpdir(), "craft-learning-supervisor-"));
@@ -19,8 +20,20 @@ async function fixture(worker = "setInterval(() => {}, 1000);\n") {
 }
 
 function startWorker(f: Awaited<ReturnType<typeof fixture>>, options: Parameters<typeof startContextLearningWorker>[0]) {
-  return startContextLearningWorker({ ...options, env: { CRAFT_DATA_DIR: f.root, ...options.env } });
+  return startContextLearningWorker({ ...options, env: { CRAFT_DATA_DIR: f.root, CRAFT_LEARNING_WORKER_MODE: "embedded", ...options.env } });
 }
+
+test("macOS delegates the durable worker to LaunchAgent unless embedded mode is explicit", () => {
+  assert.equal(shouldStartEmbeddedLearningWorker("darwin", {}), false);
+  assert.equal(shouldStartEmbeddedLearningWorker("darwin", { CRAFT_LEARNING_WORKER_MODE: "embedded" }), true);
+  assert.equal(shouldStartEmbeddedLearningWorker("darwin", { CRAFT_LEARNING_WORKER_MODE: "embedded", CRAFT_CONTINUOUS_LEARNING: "0" }), false);
+  assert.equal(shouldStartEmbeddedLearningWorker("linux", {}), true);
+});
+
+test("macOS MCP defaults to external worker ownership when no environment was supplied", async () => {
+  const result = await startContextLearningWorker({ mode: "component-context-daily", platform: "darwin" });
+  assert.equal(result, undefined);
+});
 
 test("worker owner liveness distinguishes dead processes from permission-denied probes", () => {
   assert.equal(learningWorkerOwnerAlive(12, () => undefined), true);

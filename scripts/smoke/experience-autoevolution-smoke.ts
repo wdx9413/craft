@@ -222,7 +222,7 @@ try {
     assert.equal(profile.max_output_tokens, 2_048);
 
   child = spawn(process.execPath, [plugin, "--product", "context"], { env: { ...process.env, CRAFT_DATA_DIR: dataRoot,
-    CRAFT_CONTINUOUS_LEARNING: "1", CRAFT_LEARNING_E2E_API_KEY: "local-test-credential", CRAFT_EXPERIENCE_POLL_MS: "1000",
+    CRAFT_CONTINUOUS_LEARNING: "1", CRAFT_LEARNING_WORKER_MODE: "embedded", CRAFT_LEARNING_E2E_API_KEY: "local-test-credential", CRAFT_EXPERIENCE_POLL_MS: "1000",
     CRAFT_KNOWLEDGE_POLL_MS: "1000", CRAFT_LEARNING_E2E_PROVIDER_STATE: providerStatePath,
     CRAFT_LEARNING_E2E_WORKFLOWS: JSON.stringify([generatedWorkflow, revisedWorkflow]) }, stdio: ["pipe", "pipe", "pipe"] });
   child.stdout.setEncoding("utf8").on("data", chunk => { childOutput += chunk; });
