@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { LEARNING_WORKER_LAUNCH_AGENT_LABEL, installLearningWorkerLaunchAgent, learningWorkerLaunchAgentStatus,
   renderLearningWorkerLaunchAgent, startLearningWorkerLaunchAgent, stopLearningWorkerLaunchAgent,
   ensureLearningWorkerLaunchAgent, uninstallLearningWorkerLaunchAgent, upgradeLearningWorkerLaunchAgent, launchAgentModulePath,
-  resolveLearningWorkerEntrypoint,
+  resolveLearningWorkerEntrypoint, isTemporaryLearningDataRoot,
   type LaunchAgentDependencies } from "../core/learning-worker-launch-agent.ts";
 
 test("bundled hook resolves its module path from the executable when import.meta.url is unavailable", () => {
@@ -35,7 +35,7 @@ function fixture(options: { installed?: boolean; loaded?: boolean; contents?: st
   let loaded = options.loaded ?? false;
   const deps: LaunchAgentDependencies = {
     platform: options.platform ?? "darwin", home_dir: "/tmp/craft-test-home", uid: 501, exec_path: "/usr/bin/node",
-    worker_entrypoint: "/opt/craft/worker.js", env: { CRAFT_DATA_DIR: "/tmp/craft-test-data", PATH: process.env.PATH, ...options.env },
+    worker_entrypoint: "/opt/craft/worker.js", env: { CRAFT_DATA_DIR: "/opt/craft/test-data", PATH: process.env.PATH, ...options.env },
     exists: () => true,
     mkdir: path => { directories.push(path); },
     read_file: path => {
@@ -64,11 +64,51 @@ function fixture(options: { installed?: boolean; loaded?: boolean; contents?: st
   return { deps, files, calls, modes, chmodPaths, directories, unlinked, plistPath, loaded: () => loaded };
 }
 
-function installedPlist(worker: string, dataRoot = "/tmp/craft-test-data") {
+function installedPlist(worker: string, dataRoot = "/opt/craft/test-data") {
   return renderLearningWorkerLaunchAgent({ exec_path: "/usr/bin/node", worker_entrypoint: worker, data_root: dataRoot,
     environment: { PATH: process.env.PATH ?? "/usr/bin:/bin", CRAFT_EXPERIENCE_MCP_COMMAND: "/usr/bin/node",
       CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([join(worker, "..", "craft-mcp.cjs"), "--surface", "component-context-complete"]) } });
 }
+
+test("temporary data roots are detected by path boundary", () => {
+  assert.equal(isTemporaryLearningDataRoot("/tmp"), true);
+  assert.equal(isTemporaryLearningDataRoot("/tmp/craft-hook-test/data", ["/tmp"]), true);
+  assert.equal(isTemporaryLearningDataRoot("/tmp-other/craft-data", ["/tmp"]), false);
+  assert.equal(isTemporaryLearningDataRoot("/opt/craft/data", ["/tmp"]), false);
+  assert.equal(isTemporaryLearningDataRoot("/craft-data", ["/"]), true);
+});
+
+test("temporary data roots resolve symlink aliases and paths not created yet", () => {
+  const temporary = mkdtempSync(join(tmpdir(), "craft-temp-data-root-"));
+  const alias = join(temporary, "alias");
+  const loop = join(temporary, "loop");
+  const file = join(temporary, "not-a-directory");
+  const persistent = mkdtempSync(join(homedir(), ".craft-persistent-data-root-"));
+  const persistentAlias = join(temporary, "persistent-alias");
+  try {
+    symlinkSync(temporary, alias);
+    symlinkSync(loop, loop);
+    symlinkSync(persistent, persistentAlias);
+    writeFileSync(file, "file");
+    assert.equal(isTemporaryLearningDataRoot(join(alias, "future", "data"), [temporary]), true);
+    assert.equal(isTemporaryLearningDataRoot(join(persistentAlias, "future", "data"), [temporary]), false,
+      "a symlink under a temporary directory must follow its persistent target");
+    assert.throws(() => isTemporaryLearningDataRoot(loop, [temporary]), error => (error as NodeJS.ErrnoException).code === "ELOOP");
+    assert.throws(() => isTemporaryLearningDataRoot(join(temporary, "child"), [temporary, join(file, "child")]),
+      error => (error as NodeJS.ErrnoException).code === "ENOTDIR",
+      "every temporary root must be resolved even after an earlier root matched");
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+    rmSync(persistent, { recursive: true, force: true });
+  }
+});
+
+test("SessionStart does not install a persistent LaunchAgent for a system temporary data root", () => {
+  const f = fixture({ env: { CRAFT_DATA_DIR: "/tmp/craft-marketplace-hook-test/data" } });
+  assert.deepEqual(ensureLearningWorkerLaunchAgent(f.deps), { status: "ephemeral_data_root" });
+  assert.equal(f.files.size, 0);
+  assert.equal(f.calls.length, 0);
+});
 
 test("LaunchAgent plist pins the exact worker and scoped data root without credentials", () => {
   const plist = renderLearningWorkerLaunchAgent({ exec_path: "/usr/bin/node", worker_entrypoint: "/opt/Craft & Co/worker.js", data_root: "/tmp/data<&>" });
@@ -181,6 +221,7 @@ test("SessionStart ensure refuses an unowned or conflicting LaunchAgent and hono
 
 test("SessionStart ensure uses process defaults while keeping filesystem effects in the selected home", () => {
   const temporary = mkdtempSync(join(tmpdir(), "craft-launch-agent-ensure-"));
+  const data = mkdtempSync(join(homedir(), ".craft-launch-agent-data-"));
   const previous = process.env.CRAFT_CONTINUOUS_LEARNING;
   try {
     process.env.CRAFT_CONTINUOUS_LEARNING = "0";
@@ -188,7 +229,7 @@ test("SessionStart ensure uses process defaults while keeping filesystem effects
     delete process.env.CRAFT_CONTINUOUS_LEARNING;
     const calls: string[][] = [];
     const result = ensureLearningWorkerLaunchAgent({ platform: "darwin", home_dir: temporary, exec_path: "/usr/bin/node",
-      worker_entrypoint: "/opt/craft/worker.js", env: { CRAFT_DATA_DIR: join(temporary, "data") }, exists: () => true,
+      worker_entrypoint: "/opt/craft/worker.js", env: { CRAFT_DATA_DIR: data }, exists: () => true,
       launchctl(args) { calls.push(args); if (args[0] === "print") throw Object.assign(new Error("not loaded"), { status: 113 }); return ""; } });
     assert.equal(result.status, "installed");
     assert(existsSync(join(temporary, "Library", "LaunchAgents", `${LEARNING_WORKER_LAUNCH_AGENT_LABEL}.plist`)));
@@ -197,6 +238,7 @@ test("SessionStart ensure uses process defaults while keeping filesystem effects
     if (previous === undefined) delete process.env.CRAFT_CONTINUOUS_LEARNING;
     else process.env.CRAFT_CONTINUOUS_LEARNING = previous;
     rmSync(temporary, { recursive: true, force: true });
+    rmSync(data, { recursive: true, force: true });
   }
 });
 
@@ -210,7 +252,7 @@ test("install propagates LaunchAgents directory and file access failures", () =>
 });
 
 test("status, start, stop, resume, and uninstall preserve explicit lifecycle semantics", () => {
-  const f = fixture({ installed: true, contents: renderLearningWorkerLaunchAgent({ exec_path: "/usr/bin/node", worker_entrypoint: "/opt/craft/worker.js", data_root: "/tmp/craft-test-data" }) });
+  const f = fixture({ installed: true, contents: renderLearningWorkerLaunchAgent({ exec_path: "/usr/bin/node", worker_entrypoint: "/opt/craft/worker.js", data_root: "/opt/craft/test-data" }) });
   assert.deepEqual(learningWorkerLaunchAgentStatus(f.deps), { installed: true, loaded: false, plist_path: f.plistPath, reason: "not_loaded",
     held_out_adapter_configured: false, program_memory_designs_configured: false });
   assert.deepEqual(startLearningWorkerLaunchAgent(f.deps), { status: "started" });
@@ -292,7 +334,7 @@ test("upgrade creates its log directory and clears a stale temporary plist befor
   f.deps.worker_entrypoint = "/opt/new/worker.js";
   assert.equal(upgradeLearningWorkerLaunchAgent(f.deps).status, "upgraded");
   assert(f.directories.includes("/tmp/craft-test-home/Library/LaunchAgents"));
-  assert(f.directories.includes("/tmp/craft-test-data/runtime"));
+  assert(f.directories.includes("/opt/craft/test-data/runtime"));
   assert.equal(f.files.has(temporary), false);
 });
 

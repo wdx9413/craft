@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { CodexHookBridge } from "../core/codex-hook-bridge.ts";
@@ -273,7 +273,7 @@ test("Context SessionStart records a runtime receipt without opening SQLite", as
 
 test("Context SessionStart ensures and reloads the user LaunchAgent without opening SQLite", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "craft-hook-launch-agent-"));
-  const home = join(temporary, "home"), data = join(temporary, "data"), bin = join(temporary, "bin");
+  const home = join(temporary, "home"), data = await mkdtemp(join(homedir(), ".craft-hook-launch-agent-data-")), bin = join(temporary, "bin");
   const state = join(temporary, "launch-agent-loaded"), log = join(temporary, "launchctl.log");
   await Promise.all([mkdir(home, { recursive: true }), mkdir(bin, { recursive: true })]);
   const launchctl = join(bin, "launchctl");
@@ -324,7 +324,10 @@ else if (action === "bootout") { try { unlinkSync(${JSON.stringify(state)}); } c
     assert.equal(finished.length, 3);
     assert.equal(finished.filter(record => record.outcome === "completed" && record.store_open_ms === 0).length, 2);
     assert(finished.some(record => record.outcome === "failed" && record.error_code));
-  } finally { await rm(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }
+  } finally {
+    await rm(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    await rm(data, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  }
 });
 
 test("packaged Hook records event and phase timings without logging prompt content", async () => {

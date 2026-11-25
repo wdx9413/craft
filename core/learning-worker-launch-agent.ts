@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir, userInfo } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir, userInfo } from "node:os";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { craftPaths, dataRoot } from "./infrastructure/paths.ts";
 import { CRAFT_RELEASE_VERSION } from "./version.ts";
@@ -40,6 +40,35 @@ export function launchAgentModulePath(moduleUrl: string | undefined, argvPath: s
   if (typeof moduleUrl === "string" && moduleUrl.startsWith("file:")) return fileURLToPath(moduleUrl);
   if (argvPath) return resolve(argvPath);
   throw new Error("learning_worker_launch_agent_worker_unavailable");
+}
+
+export function isTemporaryLearningDataRoot(dataRootPath: string,
+  temporaryRoots: readonly string[] = [tmpdir(), "/tmp", "/private/tmp"]): boolean {
+  const root = canonicalizeExistingPathPrefix(dataRootPath);
+  const temporaryPaths = temporaryRoots.map(canonicalizeExistingPathPrefix);
+  return temporaryPaths.some(temporary => isPathWithin(root, temporary));
+}
+
+function isPathWithin(path: string, parent: string): boolean {
+  return path === parent || path.startsWith(parent === sep ? sep : `${parent}${sep}`);
+}
+
+function canonicalizeExistingPathPrefix(path: string): string {
+  const absolutePath = resolve(path);
+  let existingPath = absolutePath;
+  const missingSegments: string[] = [];
+  while (existingPath !== dirname(existingPath)) {
+    try {
+      return resolve(realpathSync.native(existingPath), ...missingSegments);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") throw error;
+      const parentPath = dirname(existingPath);
+      missingSegments.unshift(basename(existingPath));
+      existingPath = parentPath;
+    }
+  }
+  return absolutePath;
 }
 
 export function resolveLearningWorkerEntrypoint(moduleUrl: string | undefined, argvPath: string | undefined,
@@ -124,6 +153,7 @@ export function ensureLearningWorkerLaunchAgent(deps: LaunchAgentDependencies = 
   const env = deps.env ?? process.env;
   const platform = deps.platform ?? process.platform;
   if (env.CRAFT_CONTINUOUS_LEARNING === "0") return { status: "disabled" };
+  if (isTemporaryLearningDataRoot(dataRoot(env))) return { status: "ephemeral_data_root" };
   if (platform !== "darwin") return { status: "unsupported_platform" };
 
   const location = paths(deps);
