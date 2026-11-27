@@ -604,8 +604,9 @@ async function listSessionFiles(root: string): Promise<string[]> {
 }
 
 async function* zstdChunks(path: string, expected?: { readonly dev: number; readonly ino: number; readonly size: number; readonly mtimeMs: number },
-  expectedArchiveDigest?: string): AsyncGenerator<Buffer> {
+  expectedArchiveDigest?: string, maxDecompressedBytes = Infinity): AsyncGenerator<Buffer> {
   const decoder = createZstdDecompress(), archiveDigest = createHash("sha256");
+  let decompressedBytes = 0;
   let source: ReturnType<typeof createReadStream> | null = null, inputPipeline: Promise<void> | null = null;
   try {
     const before = await stat(path);
@@ -614,7 +615,11 @@ async function* zstdChunks(path: string, expected?: { readonly dev: number; read
     source = createReadStream(path);
     source.on("data", chunk => archiveDigest.update(chunk));
     inputPipeline = pipeline(source, decoder);
-    for await (const chunk of decoder) yield Buffer.from(chunk as Buffer);
+    for await (const chunk of decoder) {
+      decompressedBytes += (chunk as Buffer).length;
+      if (decompressedBytes > maxDecompressedBytes) throw new Error("Codex compressed session exceeds the configured replay limit");
+      yield Buffer.from(chunk as Buffer);
+    }
     await inputPipeline;
     if (expectedArchiveDigest && `sha256:${archiveDigest.digest("hex")}` !== expectedArchiveDigest)
       throw new Error("task_source_changed_during_read");
@@ -657,7 +662,7 @@ export async function readCodexSessionChunk(path: string, start: number, fileSiz
     await assertCurrentSource();
     const chunks: Buffer[] = [];
     let skipped = 0, collected = 0, complete = true, lastNewline = -1;
-    for await (const chunk of zstdChunks(path)) {
+    for await (const chunk of zstdChunks(path, undefined, undefined, maxDecompressedBytes)) {
       if (Math.max(start, skipped + chunk.length) > maxDecompressedBytes)
         throw new Error("Codex compressed session exceeds the configured replay limit");
       if (skipped + chunk.length <= start) { skipped += chunk.length; continue; }
@@ -1356,7 +1361,7 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
     async function* blocks(): AsyncGenerator<Buffer> {
       if (compressed) {
         let decompressedOffset = 0;
-        for await (const chunk of zstdChunks(sourcePath, { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs }, indexedSource.archive_digest)) {
+        for await (const chunk of zstdChunks(sourcePath, { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs }, indexedSource.archive_digest, MAX_ARCHIVE_SESSION_DECOMPRESSED_BYTES)) {
           const chunkStart = decompressedOffset, chunkEnd = chunkStart + chunk.length;
           decompressedOffset = chunkEnd;
           const from = Math.max(task.source_start_byte, chunkStart), to = Math.min(task.source_end_byte, chunkEnd);
@@ -1420,7 +1425,9 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
     if (payload.role === "assistant" && payload.phase === "final_answer") taskResult = sanitizedTaskProse(content, 1_000);
   }
   } catch (error) {
-    if (error instanceof Error && ["task_source_changed_during_read", "task_source_line_oversized", "Codex compressed session exceeds the configured replay limit"].includes(error.message))
+    if (error instanceof Error && error.message === "Codex compressed session exceeds the configured replay limit")
+      return { status: "ineligible", reason: "task_archive_replay_limit_exceeded", raw_content_stored: false };
+    if (error instanceof Error && ["task_source_changed_during_read", "task_source_line_oversized"].includes(error.message))
       return { status: "ineligible", reason: error.message, raw_content_stored: false };
     throw error;
   }

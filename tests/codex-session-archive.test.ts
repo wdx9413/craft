@@ -3,10 +3,11 @@ import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
-import { PassThrough } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
-import { zstdCompressSync } from "node:zlib";
+import { createZstdCompress, zstdCompressSync } from "node:zlib";
 import { appendFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { linkDirectory, supportsFileSymlinks } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
@@ -202,6 +203,24 @@ test("indexes archived zstd sessions and replays a verified excerpt without reac
     assert.equal(excerpt.status, "ready", JSON.stringify(excerpt));
     assert.equal(excerpt.task_goal, "检查归档会话是否可安全回放");
     assert.equal(excerpt.raw_content_stored, false);
+    // A small valid task may be followed by a highly compressible oversized
+    // tail; excerpt replay must bound all decompressed work, not only its span.
+    const stableIndex = await indexText(f.state);
+    const zeroChunk = Buffer.alloc(1024 * 1024);
+    async function* largeTail() { yield original.subarray(0, -1); for (let i = 0; i < 513; i++) yield zeroChunk; }
+    await pipeline(Readable.from(largeTail()), createZstdCompress(), fs.createWriteStream(archivedFile));
+    const largerInfo = await stat(archivedFile);
+    const largerState = JSON.parse(stableIndex) as { sources: Record<string, { size: number; mtime_ms: number; archive_digest: string }> };
+    const largerSource = Object.values(largerState.sources)[0]!;
+    largerSource.size = largerInfo.size; largerSource.mtime_ms = largerInfo.mtimeMs;
+    largerSource.archive_digest = `sha256:${createHash("sha256").update(await readFile(archivedFile)).digest("hex")}`;
+    await writeVolatileLearningState(f.state, largerState);
+    assert.equal((await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition })).reason, "task_archive_replay_limit_exceeded");
+    await writeFile(archivedFile, archivedBytes);
+    await utimes(archivedFile, archivedInfo.atime, archivedInfo.mtime);
+    const restoredState = JSON.parse(stableIndex) as { sources: Record<string, { mtime_ms: number }> };
+    Object.values(restoredState.sources)[0]!.mtime_ms = (await stat(archivedFile)).mtimeMs;
+    await writeVolatileLearningState(f.state, restoredState);
     const originalCreateReadStream = fs.createReadStream;
     let archiveStreams = 0;
     try {
@@ -209,7 +228,7 @@ test("indexes archived zstd sessions and replays a verified excerpt without reac
         if (String(args[0]) !== archivedFile || ++archiveStreams !== 2) return originalCreateReadStream(...args);
         const stream = new PassThrough();
         queueMicrotask(() => stream.end(zstdCompressSync(Buffer.concat([original.subarray(0, -1), Buffer.from("\n")] ))));
-        return stream as ReturnType<typeof originalCreateReadStream>;
+        return stream as unknown as ReturnType<typeof originalCreateReadStream>;
       }) as typeof originalCreateReadStream;
       syncBuiltinESMExports();
       const differentSnapshot = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
@@ -226,11 +245,11 @@ test("indexes archived zstd sessions and replays a verified excerpt without reac
     for (const mismatchAt of [1, 2] as const) {
       let calls = 0;
       try {
-        fsPromises.stat = async (...args: Parameters<typeof originalStat>) => {
-          const value = await originalStat(...args);
+        fsPromises.stat = (async (...args: Parameters<typeof originalStat>) => {
+          const value = await originalStat(args[0]);
           if (String(args[0]) !== archivedFile) return value;
           return ++calls === mismatchAt ? { ...value, mtimeMs: value.mtimeMs + 1 } : value;
-        };
+        }) as typeof fsPromises.stat;
         syncBuiltinESMExports();
         const changedDuringRead = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
         assert.equal(changedDuringRead.reason, "task_source_changed_during_read", JSON.stringify(changedDuringRead));
@@ -238,10 +257,10 @@ test("indexes archived zstd sessions and replays a verified excerpt without reac
     }
     let stats = 0;
     try {
-      fsPromises.stat = async (...args: Parameters<typeof originalStat>) => {
+      fsPromises.stat = (async (...args: Parameters<typeof originalStat>) => {
         if (String(args[0]) === archivedFile && ++stats === 2) throw Object.assign(new Error("source disappeared"), { code: "ENOENT" });
         return originalStat(...args);
-      };
+      }) as typeof fsPromises.stat;
       syncBuiltinESMExports();
       const missingDuringRead = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
       assert.equal(missingDuringRead.reason, "task_source_changed_during_read");
@@ -355,7 +374,7 @@ test("isolates archived source read failures so active sessions still index", as
         if (String(args[0]) !== archivedFile) return originalCreateReadStream(...args);
         const stream = new PassThrough();
         queueMicrotask(() => stream.destroy(new Error("injected archive read failure")));
-        return stream as ReturnType<typeof originalCreateReadStream>;
+        return stream as unknown as ReturnType<typeof originalCreateReadStream>;
       }) as typeof originalCreateReadStream;
       syncBuiltinESMExports();
       const result = await runCodexSessionCollectionOnce(options);
@@ -369,7 +388,7 @@ test("isolates archived source read failures so active sessions still index", as
         if (String(args[0]) !== archivedFile || ++archiveStreams !== 2) return originalCreateReadStream(...args);
         const stream = new PassThrough();
         queueMicrotask(() => stream.destroy(new Error("injected decompression input failure")));
-        return stream as ReturnType<typeof originalCreateReadStream>;
+        return stream as unknown as ReturnType<typeof originalCreateReadStream>;
       }) as typeof originalCreateReadStream;
       syncBuiltinESMExports();
       const result = await runCodexSessionCollectionOnce(options);
@@ -400,7 +419,7 @@ test("persists a failed compressed source as non-current and excludes its old ta
         if (String(args[0]) === archivedFile) {
           const stream = new PassThrough();
           queueMicrotask(() => stream.destroy(new Error("injected digest read failure")));
-          return stream as ReturnType<typeof originalCreateReadStream>;
+          return stream as unknown as ReturnType<typeof originalCreateReadStream>;
         }
         return originalCreateReadStream(...args);
       }) as typeof originalCreateReadStream;
