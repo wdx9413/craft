@@ -2,7 +2,8 @@
 import { lstatSync } from "node:fs";
 import type { CraftStore } from "../core/infrastructure/store.ts";
 import { presentStorageOwners } from "../core/infrastructure/owned-catalog.ts";
-import { craftPaths } from "../core/infrastructure/paths.ts";
+import { craftPaths, sessionStorageScopeId } from "../core/infrastructure/paths.ts";
+import { SupervisorClient } from "../core/infrastructure/supervisor-client.ts";
 import { HookSignalSanitizer } from "../core/interfaces/codex-hook-signal-sanitizer.ts";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -68,6 +69,13 @@ async function main(): Promise<void> {
     const handlerStarted = performance.now();
     let outcome: "completed" | "failed" = "completed";
     let errorCode: string | undefined;
+    let contextUnavailable = false;
+    if (typeof input.session_id === "string" && input.session_id.trim()
+      && lstatSync(join(paths.runtimeDir, "supervisor.json"), { throwIfNoEntry: false })) {
+      try {
+        await new SupervisorClient(paths).contextStart({ session_key: sessionStorageScopeId(input.session_host, input.session_id) });
+      } catch { contextUnavailable = true; }
+    }
     try {
       const { ensureLearningWorkerLaunchAgent } = await import("../core/learning-worker-launch-agent.ts");
       ensureLearningWorkerLaunchAgent();
@@ -76,7 +84,7 @@ async function main(): Promise<void> {
       errorCode = operationErrorCode(error);
       process.stderr.write(`[craft-context] Learning Worker ensure failed (${errorCode})\n`);
     }
-    process.stdout.write("{}\n");
+    process.stdout.write(`${JSON.stringify(contextUnavailable ? { systemMessage: "Craft Context 内存服务不可用，会话临时数据暂不可使用。" } : {})}\n`);
     diagnostic?.finish({ process_elapsed_ms: process.uptime() * 1_000, input_read_ms: inputReadMs,
       input_parse_ms: inputParseMs, store_open_ms: 0, handler_ms: performance.now() - handlerStarted,
       outcome, ...(errorCode ? { error_code: errorCode } : {}) });
