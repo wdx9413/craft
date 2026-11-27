@@ -180,10 +180,28 @@ test("discovery and Chinese code matching are bounded hints", () => {
   assert((discoverContextTools({ intent: "experience" }).tools as JsonObject[]).some(tool => tool.name === "craft_learning_cycle_finalize"));
   const experienceTools = discoverContextTools({ intent: "experience" }).tools as JsonObject[];
   for (const tool of ["craft_experience_procedure_submit", "craft_experience_procedure_get", "craft_experience_learning_request_get",
-    "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list",
+    "craft_experience_procedure_projection_get",
+    "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_next", "craft_experience_learning_evaluation_dispatch_list",
+    "craft_experience_learning_work_item_get", "craft_experience_learning_work_item_evaluation_contract_bind",
+    "craft_experience_learning_work_item_block", "craft_experience_learning_work_item_resume",
     "craft_experience_learning_evaluation_run", "craft_experience_learning_evaluation_result",
     "craft_evaluation_model_profile_get", "craft_evaluation_model_ticket_list"])
     assert(experienceTools.some(item => item.name === tool), `Experience discovery must include ${tool}`);
+  assert((discoverContextTools({ intent: "recall" }).tools as JsonObject[])
+    .some(tool => tool.name === "craft_experience_procedure_projection_get"),
+  "Context recall discovery must expose the current read-only Prompt projection");
+  const workItemDispatch = experienceTools.find(tool => tool.name === "craft_experience_learning_evaluation_dispatch_next")!;
+  assert.deepEqual((workItemDispatch.inputSchema as JsonObject).required, ["worker_id"]);
+  const dispatchProperties = (workItemDispatch.inputSchema as JsonObject).properties as JsonObject;
+  assert.equal((dispatchProperties.now as JsonObject).type, "string");
+  assert.equal((dispatchProperties.lease_ms as JsonObject).type, "integer");
+  const contractBind = experienceTools.find(tool => tool.name === "craft_experience_learning_work_item_evaluation_contract_bind")!;
+  assert.deepEqual((contractBind.inputSchema as JsonObject).required, ["work_item_id", "expected_version", "evaluation_contract_ref"]);
+  assert.equal((((contractBind.inputSchema as JsonObject).properties as JsonObject).evaluation_contract_ref as JsonObject).type, "object");
+  const workItemBlock = experienceTools.find(tool => tool.name === "craft_experience_learning_work_item_block")!;
+  assert.deepEqual((workItemBlock.inputSchema as JsonObject).required, ["work_item_id", "worker_id", "lease_token", "reason"]);
+  const workItemResume = experienceTools.find(tool => tool.name === "craft_experience_learning_work_item_resume")!;
+  assert.deepEqual((workItemResume.inputSchema as JsonObject).required, ["work_item_id", "expected_version"]);
   const knowledgeTools = discoverContextTools({ intent: "knowledge" }).tools as JsonObject[];
   for (const tool of ["craft_knowledge_bootstrap_install", "craft_knowledge_source_list", "craft_knowledge_source_register", "craft_knowledge_source_ingest",
     "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_claim_get", "craft_knowledge_claim_list",

@@ -88,17 +88,25 @@ test("Codex Bash verification uses the matched native completion status, even wh
   }
 });
 
-test("the native hook skips text-only verification without a trusted completion", () => {
+test("the native hook rejects unidentifiable text-only verification without a trusted completion", () => {
   const root = mkdtempSync(join(tmpdir(), "craft-command-hook-"));
   try {
     const output = execFileSync(process.execPath, ["--experimental-strip-types",
       fileURLToPath(new URL("../bin/craft-codex-hook.ts", import.meta.url)), "--member", "context"], {
       env: { ...process.env, CODEX_HOME: root, CRAFT_DATA_DIR: join(root, "craft-data") },
       input: JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Bash",
-        tool_input: { command }, tool_response: "test output without a trusted completion" }),
+        cwd: root, tool_input: { command }, tool_response: "test output without a trusted completion" }),
       encoding: "utf8",
     });
-    assert.deepEqual(JSON.parse(output), {});
+    assert.deepEqual(JSON.parse(output), { trace_capture: { status: "rejected", reason_code: "missing_task_identity" } });
+    const skipped = execFileSync(process.execPath, ["--experimental-strip-types",
+      fileURLToPath(new URL("../bin/craft-codex-hook.ts", import.meta.url)), "--member", "context"], {
+      env: { ...process.env, CODEX_HOME: root, CRAFT_DATA_DIR: join(root, "craft-data") },
+      input: JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "UnregisteredTool",
+        tool_input: { command }, tool_response: "tool output" }),
+      encoding: "utf8",
+    });
+    assert.deepEqual(JSON.parse(skipped), {});
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -37,6 +37,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
             : request.method === "tools/call" && request.params.name === "fixture_rpc_error" ? undefined
         : request.method === "tools/call" && request.params.name === "fixture_rpc_error_empty" ? undefined
         : request.method === "tools/call" && request.params.name === "fixture_child_exit" ? undefined
+              : request.method === "tools/call" && request.params.name === "craft_experience_learning_evaluation_dispatch_next" ? { isError: false, structuredContent: { status: "idle" }, content: [] }
               : request.method === "tools/call" && request.params.name === "craft_experience_learning_evaluation_dispatch_list" ? { isError: false, structuredContent: { dispatches: [], count: 0 }, content: [] }
                 : request.method === "tools/call" && request.params.name === "craft_knowledge_source_list" && failureMode === "knowledge_source_failure" ? { isError: false, structuredContent: { sources: [{ id: "fixture-source", status: "active", access: "read_only", trust: "verified" }] }, content: [] }
                 : request.method === "tools/call" && request.params.name === "craft_knowledge_storage_reconcile" ? { isError: false, structuredContent: { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null }, content: [] }

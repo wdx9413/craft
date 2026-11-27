@@ -39,8 +39,22 @@ test("all neutral action bindings use the supplied application and preserve call
   calls.length = 0;
   await neutral.craft_component_readiness_get(supplied);
   assert.deepEqual(calls[0], { method: "componentReadinessGet", args: [supplied, undefined] });
+  await neutral.craft_experience_learning_evaluation_dispatch_next({ worker_id: "worker-1" });
+  assert.deepEqual(calls[1], { method: "experienceLearningEvaluationDispatchNext", args: [{ worker_id: "worker-1" }] });
+  await neutral.craft_experience_learning_work_item_get({ work_item_id: "work-item-1" });
+  assert.deepEqual(calls[2], { method: "experienceLearningWorkItemGet", args: [{ work_item_id: "work-item-1" }] });
+  await neutral.craft_experience_learning_work_item_evaluation_contract_bind({ work_item_id: "work-item-1", expected_version: 1,
+    evaluation_contract_ref: { kind: "evaluation_contract", id: "contract-1", version: 1, digest: `sha256:${"a".repeat(64)}` } });
+  assert.deepEqual(calls[3]?.method, "experienceLearningWorkItemEvaluationContractBind");
+  await neutral.craft_experience_learning_work_item_block({ work_item_id: "work-item-1", worker_id: "worker-1",
+    lease_token: "lease-1", reason: "evaluation_adapter_unavailable" });
+  assert.deepEqual(calls[4], { method: "experienceLearningWorkItemBlock", args: [
+    { work_item_id: "work-item-1", worker_id: "worker-1", lease_token: "lease-1", reason: "evaluation_adapter_unavailable" },
+  ] });
+  await neutral.craft_experience_learning_work_item_resume({ work_item_id: "work-item-1", expected_version: 2 });
+  assert.deepEqual(calls[5], { method: "experienceLearningWorkItemResume", args: [{ work_item_id: "work-item-1", expected_version: 2 }] });
   await memory.craft_component_diagnose(supplied);
-  assert.deepEqual(calls[1], { method: "componentDiagnose", args: [supplied, "memory"] });
+  assert.deepEqual(calls[6], { method: "componentDiagnose", args: [supplied, "memory"] });
   calls.length = 0;
   await neutral.craft_memory_governance({ action: "topics" });
   await neutral.craft_memory_governance({ action: "confirm" });

@@ -7,6 +7,15 @@ const MAX_TRANSCRIPT_TAIL_BYTES = 512 * 1024;
 
 type HookInput = Record<string, unknown>;
 export const NATIVE_ASYNC_COMPLETION = Symbol("craft-native-async-completion");
+const verifiedCodexCompletions = new WeakSet<object>();
+
+export function isVerifiedCodexCommandCompletion(input: object): boolean {
+  return verifiedCodexCompletions.has(input);
+}
+
+export function carryVerifiedCodexCommandCompletion(source: object, target: object): void {
+  if (verifiedCodexCompletions.has(source)) verifiedCodexCompletions.add(target);
+}
 type CommandCompletion = {
   type?: string;
   payload?: {
@@ -68,7 +77,9 @@ export function withCodexCommandResult(input: HookInput, codexHome: string): Hoo
       const exit = item.exit_code;
       if (typeof exit !== "number" || !Number.isSafeInteger(exit) || exit < 0
         || item.status !== (exit === 0 ? "completed" : "failed")) return input;
-      return { ...input, tool_response: { exit_code: exit } };
+      const completed = { ...input, tool_response: { exit_code: exit } };
+      verifiedCodexCompletions.add(completed);
+      return completed;
     }
   } catch { /* Unavailable or incompatible Host evidence leaves verification unknown. */ }
   return input;

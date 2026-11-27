@@ -113,6 +113,7 @@ import { createActionHandlers } from "./actions/action-handlers.ts";
 import { executeSubagent, planSubagentExecution } from "../subagent-execution.ts";
 import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
 import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
+import { installTrustedExperienceEvaluationMethods } from "./use-cases/trusted-experience-evaluation.ts";
 import { array, boundedActor, finiteInteger, object, text } from "../validation.ts";
 import { canonicalJson, payload as recordPayload, stableDigest } from "../digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
@@ -8170,6 +8171,7 @@ export class CraftService extends ServiceFoundation {
 
 installAdapterRuntimeMethods(CraftService);
 installKernelDelegateMethods(CraftService);
+installTrustedExperienceEvaluationMethods(CraftService);
 
 function assertCraftNoteVersion(expected: unknown, current: JsonObject): void {
   if (!Number.isSafeInteger(expected) || Number(expected) < 1) throw new Error("expected_version must be a positive integer");

@@ -12,7 +12,16 @@ import { stableDigest } from "../../digest.ts";
 import { autoDemoteFromVerifiedHostFeedback } from "../host-feedback-procedure-demotion.ts";
 
 declare module "../craft-service.ts" {
-  interface CraftService { experienceLearningEvaluationRun(args: JsonObject): JsonObject; experienceRunbookCapture(args: JsonObject): JsonObject; experienceRunbookRevoke(args: JsonObject): JsonObject; }
+  interface CraftService {
+    experienceLearningEvaluationDispatchNext(args: JsonObject): JsonObject;
+    experienceLearningWorkItemGet(args: JsonObject): JsonObject;
+    experienceLearningWorkItemBlock(args: JsonObject): JsonObject;
+    experienceLearningWorkItemResume(args: JsonObject): JsonObject;
+    experienceLearningWorkItemEvaluationContractBind(args: JsonObject): JsonObject;
+    experienceLearningEvaluationRun(args: JsonObject): JsonObject;
+    experienceRunbookCapture(args: JsonObject): JsonObject;
+    experienceRunbookRevoke(args: JsonObject): JsonObject;
+  }
 }
 
 /** Narrow public delegates for durable long-task progress and diagnostic learning. */
@@ -51,8 +60,20 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
     const autoDemotions = autoDemoteFromVerifiedHostFeedback(feedback, this.store, this.experienceProcedures, this.evaluationContracts);
     return { ...result, auto_demotions: autoDemotions, procedure_release_changed: autoDemotions.length > 0 };
   };
+  const learningEvaluation = function (service: CraftService): ExperienceLearningEvaluation {
+    const evaluationOwner = service.ownerServices.get("eval");
+    if (!evaluationOwner) throw new Error("Experience Learning Work Items require the Eval owner");
+    const evaluation = new ExperienceLearningEvaluation(service.store);
+    evaluation.setEvaluationContractSource(evaluationOwner.store);
+    return evaluation;
+  };
   serviceClass.prototype.experienceLearningEvaluationList = function (args = {}) { return new ExperienceLearningEvaluation(this.store).listPending(args); };
   serviceClass.prototype.experienceLearningEvaluationDispatch = function (args) { return new ExperienceLearningEvaluation(this.store).dispatch(args); };
+  serviceClass.prototype.experienceLearningEvaluationDispatchNext = function (args) { return learningEvaluation(this).dispatchNext(args); };
+  serviceClass.prototype.experienceLearningWorkItemGet = function (args) { return learningEvaluation(this).workItems.get(args); };
+  serviceClass.prototype.experienceLearningWorkItemBlock = function (args) { return learningEvaluation(this).blockWorkItem(args); };
+  serviceClass.prototype.experienceLearningWorkItemResume = function (args) { return learningEvaluation(this).resumeWorkItem(args); };
+  serviceClass.prototype.experienceLearningWorkItemEvaluationContractBind = function (args) { return learningEvaluation(this).workItems.bindEvaluationContract(args); };
   serviceClass.prototype.experienceLearningEvaluationResult = function (args) {
     return this.store.transaction(() => {
       const dispatch = this.store.get("experience_evaluation_dispatch", String(args.dispatch_id ?? ""));
@@ -65,6 +86,16 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
         version: Number(procedure.candidate_version ?? procedure.version), digest: String(procedure.definition_digest ?? "") };
       const evaluationOwner = this.ownerServices.get("eval") ?? (this.capabilityOwned ? null : this);
       if (!evaluationOwner) throw new Error("Held-out evaluation owner is unavailable");
+      if (typeof dispatch.learning_work_item_id === "string") {
+        const workItem = this.store.get("experience_learning_work_item", dispatch.learning_work_item_id);
+        const pinned = workItem.evaluation_contract_ref as JsonObject | null;
+        if (!pinned || pinned.kind !== "evaluation_contract" || pinned.id !== contractId
+          || !Number.isSafeInteger(pinned.version) || !/^[0-9a-f]{64}$/u.test(String(pinned.digest ?? "").replace(/^sha256:/u, ""))) {
+          throw new Error("Held-out Evaluation Contract does not match the Learning Work Item pin");
+        }
+        const pinnedContract = evaluationOwner.store.get("evaluation_contract", String(pinned.id), Number(pinned.version));
+        if (pinnedContract.contract_digest !== pinned.digest) throw new Error("Held-out Evaluation Contract digest drifted from the Learning Work Item pin");
+      }
       const verified = evaluationOwner.evaluationContracts.verifyTaskEffectEvaluation({ contract_id: contractId, evaluation_id: evaluationId, candidate_ref: candidateRef });
       if (verified.valid !== true) throw new Error("Held-out Procedure report is not valid, trusted, and bound to this candidate");
       const report = evaluationOwner.store.get("task_effect_evaluation", evaluationId);

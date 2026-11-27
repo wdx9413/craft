@@ -119,7 +119,8 @@ function workerRevision(deps: LaunchAgentDependencies, worker: string): string {
 function launchEnvironment(env: NodeJS.ProcessEnv): Record<string, string> {
   const names = ["CODEX_HOME", "CRAFT_LEARNING_MODEL_HOST", "CRAFT_EXPERIENCE_POLL_MS", "CRAFT_KNOWLEDGE_POLL_MS",
     "CRAFT_MEMORY_POLL_MS", "CRAFT_NOTES_POLL_MS", "CRAFT_LEARNING_PROJECT_SCOPES", "CRAFT_PROGRAM_MEMORY_DESIGNS",
-    "CRAFT_HELD_OUT_ADAPTER_COMMAND", "CRAFT_HELD_OUT_ADAPTER_TIMEOUT_MS", "CRAFT_TRUSTED_EVALUATORS"];
+    "CRAFT_HELD_OUT_ADAPTER_COMMAND", "CRAFT_HELD_OUT_ADAPTER_TIMEOUT_MS", "CRAFT_EXPERIENCE_EVALUATOR_COMMAND",
+    "CRAFT_EXPERIENCE_EVALUATOR_TIMEOUT_MS", "CRAFT_TRUSTED_EVALUATORS"];
   return Object.fromEntries([["PATH", env.PATH ?? "/usr/bin:/bin"], ...names.filter(name => env[name]).map(name => [name, env[name]!] as const)]);
 }
 
@@ -203,7 +204,7 @@ export function installLearningWorkerLaunchAgent(deps: LaunchAgentDependencies =
 }
 
 export function learningWorkerLaunchAgentStatus(deps: LaunchAgentDependencies = {}): { installed: boolean; loaded: boolean; plist_path: string; reason: string | null;
-  held_out_adapter_configured: boolean; program_memory_designs_configured: boolean } {
+  held_out_adapter_configured: boolean; experience_evaluator_adapter_configured: boolean; program_memory_designs_configured: boolean } {
   ensureMac(deps);
   const location = paths(deps);
   let installed = false;
@@ -231,6 +232,7 @@ export function learningWorkerLaunchAgentStatus(deps: LaunchAgentDependencies = 
   else if (!loaded) reason = "not_loaded";
   return { installed, loaded, plist_path: location.plist, reason,
     held_out_adapter_configured: /<key>CRAFT_HELD_OUT_ADAPTER_COMMAND<\/key>\s*<string>[^<]+<\/string>/u.test(contents),
+    experience_evaluator_adapter_configured: /<key>CRAFT_EXPERIENCE_EVALUATOR_COMMAND<\/key>\s*<string>[^<]+<\/string>/u.test(contents),
     program_memory_designs_configured: /<key>CRAFT_PROGRAM_MEMORY_DESIGNS<\/key>\s*<string>[^<]+<\/string>/u.test(contents) };
 }
 

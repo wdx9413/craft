@@ -81,7 +81,15 @@ export class TraceKernel {
     const traceId = String(args.trace_id ?? `trace_${randomUUID().replaceAll("-", "")}`);
     return this.store.traceTransaction(traceId, () => {
       const taskId = text(args.task_id, "task_id");
-      const identity = { task_id: taskId, launch_id: optional(args.launch_id), run_id: optional(args.run_id), trial_id: optional(args.trial_id), attempt_id: optional(args.attempt_id), operation_id: optional(args.operation_id), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), capability_fingerprint: optional(args.capability_fingerprint), policy_fingerprint: optional(args.policy_fingerprint) };
+      const identity: JsonObject = { task_id: taskId, launch_id: optional(args.launch_id), run_id: optional(args.run_id), trial_id: optional(args.trial_id), attempt_id: optional(args.attempt_id), operation_id: optional(args.operation_id), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), capability_fingerprint: optional(args.capability_fingerprint), policy_fingerprint: optional(args.policy_fingerprint) };
+      if (args.host !== undefined) identity.host = text(args.host, "host");
+      if (args.project_scope !== undefined) {
+        const scope = object(args.project_scope, "project_scope");
+        if (scope.kind !== "project") throw new Error("project_scope kind must be project");
+        identity.project_scope = { kind: "project", id: text(scope.id, "project_scope.id") };
+      }
+      if (args.session_id !== undefined) identity.session_id = text(args.session_id, "session_id");
+      if (args.turn_id !== undefined) identity.turn_id = text(args.turn_id, "turn_id");
       const identityDigest = stableDigest(identity);
       const existing = this.store.find("trace", traceId);
       if (existing) {
@@ -195,7 +203,8 @@ export class TraceKernel {
       const bundle = this.archives.read(this.archivePointer(archive));
       return bundle.events.filter((event) => (eventKind === null || event.event_kind === eventKind) && (operationId === null || event.operation_id === operationId)).map((event) => ({ ...event, archived: true, archive_uri: archive.archive_uri }));
     });
-    const events = [...hot, ...archived].sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""))).slice(0, limit);
+    const events = [...hot, ...archived].sort((a, b) => String(a.trace_id).localeCompare(String(b.trace_id))
+      || Number(a.sequence) - Number(b.sequence)).slice(0, limit);
     return { schema: TRACE_SCHEMA_VERSION, count: events.length, events };
   }
 

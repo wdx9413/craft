@@ -17,11 +17,16 @@ test("packaged Codex Context MCP opts into the Codex CLI Host for learning", asy
 
 test("Codex Context Stop allows bounded completion of all three members", async () => {
   const manifest = JSON.parse(await readFile(join(root, "plugins/craft-context/hooks/codex-hooks.json"), "utf8")) as {
-    hooks: Record<string, Array<{ hooks: Array<{ timeout: number }> }>>;
+    hooks: Record<string, Array<{ matcher?: string; hooks: Array<{ timeout: number }> }>>;
   };
   assert.equal(manifest.hooks.Stop?.[0]?.hooks[0]?.timeout, 10);
   assert.equal(manifest.hooks.PostToolUse?.[0]?.hooks[0]?.timeout, 3);
+  assert.match(manifest.hooks.PostToolUse?.[0]?.matcher ?? "", /\^mcp__\.\*\$/u);
   assert.equal(manifest.hooks.UserPromptSubmit?.[0]?.hooks[0]?.timeout, 20);
+  const experience = JSON.parse(await readFile(join(root, "plugins/craft-experience/hooks/codex-hooks.json"), "utf8")) as {
+    hooks: Record<string, Array<{ matcher?: string; hooks: Array<{ timeout: number }> }>>;
+  };
+  assert.match(experience.hooks.PostToolUse?.[0]?.matcher ?? "", /\^mcp__\.\*\$/u);
 });
 
 test("packaged Claude Context MCP opts into Claude Code for learning", async () => {

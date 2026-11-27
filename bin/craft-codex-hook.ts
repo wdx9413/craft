@@ -4,6 +4,7 @@ import type { CraftStore } from "../core/infrastructure/store.ts";
 import { presentStorageOwners } from "../core/infrastructure/owned-catalog.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { HookSignalSanitizer } from "../core/interfaces/codex-hook-signal-sanitizer.ts";
+import { isCodexHostTraceToolEvent } from "../core/interfaces/codex-host-trace-capture.ts";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -84,7 +85,8 @@ async function main(): Promise<void> {
   // Codex sends every matching Bash call here, including commands that cannot
   // produce a learning signal. Classify these before opening SQLite so the
   // common no-op path pays only process startup and a content-free receipt.
-  if (event === "PostToolUse" && !new HookSignalSanitizer().signal(input) && !new HookSignalSanitizer().gap(input)) {
+  if (event === "PostToolUse" && !new HookSignalSanitizer().signal(input) && !new HookSignalSanitizer().gap(input)
+    && !isCodexHostTraceToolEvent(input)) {
     process.stdout.write("{}\n");
     diagnostic?.finish({ process_elapsed_ms: process.uptime() * 1_000, input_read_ms: inputReadMs,
       input_parse_ms: inputParseMs, store_open_ms: 0, handler_ms: 0, outcome: "skipped" });

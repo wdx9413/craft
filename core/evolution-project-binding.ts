@@ -87,6 +87,8 @@ export function bindEvolutionProjectArgs(store: CraftStore, args: JsonObject, op
   if (projectRoot !== undefined && projectRoot !== binding.project_root) throw denied();
   return {
     ...rest, scope, project_root: binding.project_root,
+    ...(operation === "craft_experience_trace_distill"
+      ? { host: binding.host, session_id: binding.session_id, turn_id: binding.turn_id } : {}),
     ...(PROGRAM_MEMORY_CAPTURE_TOOLS.has(operation) ? { source_refs: [evolutionHostTurnSource(binding)] } : {}),
   };
 }

@@ -15,7 +15,7 @@ test("configured held-out evaluator receives the exact dispatch and returns a re
   await runHeldOutAdapter({}, { ...env(script), CRAFT_HELD_OUT_ADAPTER_TIMEOUT_MS: undefined });
   assert.deepEqual(await runHeldOutAdapter({ id: "dispatch", procedure_version: 2 }, env(script)), { dispatch: { id: "dispatch", procedure_version: 2 } });
   for (const value of ["[]", '"shell"', '[""]', '[1]']) await assert.rejects(runHeldOutAdapter({}, { CRAFT_HELD_OUT_ADAPTER_COMMAND: value }), /ConfigurationError/);
-  await assert.rejects(runHeldOutAdapter({}, { CRAFT_HELD_OUT_ADAPTER_COMMAND: "invalid" }), SyntaxError);
+  await assert.rejects(runHeldOutAdapter({}, { CRAFT_HELD_OUT_ADAPTER_COMMAND: "invalid" }), /HeldOutAdapterConfigurationError/u);
   for (const timeout of ["0", "NaN", "3600001", "1.5"]) await assert.rejects(runHeldOutAdapter({}, env("process.stdout.write('{}')", timeout)), /ConfigurationError/);
   for (const output of ["null", "[]", "invalid"]) await assert.rejects(runHeldOutAdapter({}, env(`process.stdout.write(${JSON.stringify(output)})`)), /InvalidReport/);
   await assert.rejects(runHeldOutAdapter({}, env("process.exit(1)")), /Failed/);
@@ -29,6 +29,7 @@ test("worker records a signed report through the existing verifier before advanc
   const script = 'process.stdout.write(JSON.stringify({contract_id:"contract",evaluation_id:"evaluation",evaluator_signature:"fixture-signature"}))';
   const client = { async call(name: string) {
     calls.push(name);
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
     if (name.endsWith("dispatch_list")) return { dispatches: [{ id: "held-out", stage: "held_out" }] };
     if (name === "craft_evaluation_contract_task_effect_record") return { result: { eligible: true } };
     if (name === "craft_evaluation_contract_get") return { contract: {} };
@@ -37,7 +38,7 @@ test("worker records a signed report through the existing verifier before advanc
     throw new Error(name);
   } };
   assert.equal((await runEvaluationOnce(client, env(script))).processed, 1);
-  assert.deepEqual(calls, ["craft_experience_learning_evaluation_dispatch_list", "craft_evaluation_contract_task_effect_record", "craft_evaluation_contract_get", "craft_evaluation_contract_record", "craft_experience_learning_evaluation_result"]);
+  assert.deepEqual(calls, ["craft_experience_learning_evaluation_dispatch_next", "craft_experience_learning_evaluation_dispatch_list", "craft_evaluation_contract_task_effect_record", "craft_evaluation_contract_get", "craft_evaluation_contract_record", "craft_experience_learning_evaluation_result"]);
   calls.length = 0;
   const rejecting = { async call(name: string) { if (name === "craft_evaluation_contract_task_effect_record") throw new Error("SignatureRejected"); return client.call(name); } };
   const rejected = await runEvaluationOnce(rejecting, env(script));
