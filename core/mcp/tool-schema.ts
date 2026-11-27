@@ -81,11 +81,13 @@ const ENUMS_BY_TOOL: Readonly<Record<string, Readonly<Record<string, readonly st
   craft_context_tools_discover: { intent: CONTEXT_TOOL_INTENTS },
   craft_context_open: { response_detail: ["compact", "full"] },
   craft_context_correction_list: { status: ["pending_review", "confirmed", "dismissed", "resolved", "decided"] },
+  craft_experience_trace_distill: { decision: ["skip", "retry"] },
 };
 
 // Domain contracts override the legacy name heuristic. Keep ambiguous names local
 // to their tool so fixing one product cannot change unrelated admin operations.
 const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>>> = {
+  craft_experience_trace_distill: { candidate: "object", decision: "string", ticket_id: "string", trace_ids: "array", request_id: "string" },
   craft_evolution_artifact_lineage_record: { reliability: "number" },
   craft_evolution_creation_write: { reliability: "number" },
   craft_evolution_research_impact: { max_nodes: "integer" },
@@ -189,6 +191,11 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_experience_procedure_draft: { design_axes: "array", observation_ids: "array" },
   craft_experience_procedure_submit: { composition: "object", graph_control: "object", inputs: "array", steps: "array", nodes: "array", edges: "array", outputs: "object", checkpoint_policy: "object" },
   craft_experience_learning_evaluation_run: { dispatch_id: "string", worker_id: "string", lease_token: "string" },
+  craft_experience_learning_evaluation_dispatch_next: { worker_id: "string", now: "string", lease_ms: "integer" },
+  craft_experience_learning_work_item_get: { work_item_id: "string" },
+  craft_experience_learning_work_item_block: { work_item_id: "string", worker_id: "string", lease_token: "string", reason: "string", now: "string" },
+  craft_experience_learning_work_item_resume: { work_item_id: "string", expected_version: "integer", now: "string" },
+  craft_experience_learning_work_item_evaluation_contract_bind: { work_item_id: "string", expected_version: "integer", evaluation_contract_ref: "object", now: "string" },
   craft_procedure_create: { trigger: "string", scenario_signature: "object", preconditions: "array", scope_envelope: "object" },
   craft_host_session_open: { environment_fingerprint: "string", policy_fingerprint: "string", capability_fingerprint: "string", model_fingerprint: "string", budget_fingerprint: "string" },
   craft_outcome_observer_observe: { environment_fingerprint: "string" },
@@ -207,7 +214,7 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_experience_procedure_gate: { passed: "boolean" },
   craft_experience_learning_evaluation_dispatch: {},
   craft_experience_learning_evaluation_dispatch_list: { limit: "integer" },
-  craft_experience_learning_evaluation_result: { evidence_ids: "array", evaluation_contract_id: "string", evaluation_id: "string", worker_id: "string", lease_token: "string" },
+  craft_experience_learning_evaluation_result: { evidence_ids: "array", evaluation_contract_id: "string", evaluation_id: "string", worker_id: "string", lease_token: "string", evaluator_request_id: "string", receipt: "object", signature: "string" },
   craft_experience_learning_request_get: {},
   craft_evaluation_model_ticket_list: {},
   craft_evaluation_model_ticket_complete: {},

@@ -19,6 +19,7 @@ import { installDecisionContextGateMethods } from "./decision-context-gate.ts";
 import { installQualityProfileMethods } from "./quality-profile.ts";
 import { installCodebaseMethods } from "./codebase.ts";
 import { installContextExtensionsMethods } from "./context-extensions.ts";
+import { installTraceDistillationMethods } from "./trace-distillation.ts";
 
 /** Thin application use cases that delegate to one owned domain kernel. */
 declare module "../craft-service.ts" {
@@ -234,6 +235,7 @@ export function installKernelDelegateMethods(serviceClass: typeof CraftService):
   installTurnCognitiveMethods(serviceClass);
   installHostSessionMethods(serviceClass);
   installDurableExperienceMethods(serviceClass);
+  installTraceDistillationMethods(serviceClass);
   installLegacyKnowledgeMigrationMethods(serviceClass);
   installRuntimeLearningMethods(serviceClass);
   installKnowledgeAutoReviewMethods(serviceClass);

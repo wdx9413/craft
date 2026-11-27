@@ -1,5 +1,6 @@
 /** Context tools requiring a project binding issued by the Host hook. */
 export const PROJECT_EVOLUTION_TOOLS = [
+  "craft_experience_trace_distill",
   "craft_evolution_program_memory_capture", "craft_evolution_program_memory_list", "craft_evolution_program_memory_get",
   "craft_evolution_domain_capture", "craft_evolution_failure_capture",
   "craft_evolution_program_memory_submit", "craft_evolution_program_memory_submission_due", "craft_evolution_program_memory_promote", "craft_evolution_program_memory_feedback",
@@ -22,6 +23,9 @@ export const PROJECT_BOUND_EXPERIENCE_TOOLS = [
   "craft_experience_procedure_projection_get", "craft_experience_procedure_projection_list", "craft_experience_procedure_projection_draft",
   "craft_experience_procedure_gate", "craft_experience_procedure_skill_export",
   "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list",
+  "craft_experience_learning_evaluation_dispatch_next", "craft_experience_learning_work_item_get",
+  "craft_experience_learning_work_item_block", "craft_experience_learning_work_item_resume",
+  "craft_experience_learning_work_item_evaluation_contract_bind",
   "craft_experience_learning_evaluation_run", "craft_experience_learning_evaluation_result",
   "craft_experience_asset_inspect", "craft_experience_asset_restore", "craft_experience_graph_edit", "craft_experience_graph_inspect",
   "craft_procedure_plan", "craft_procedure_configuration_save", "craft_procedure_create", "craft_procedure_get", "craft_procedure_list",

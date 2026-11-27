@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { withoutOperationPersistence } from 'craft-common-log/operation';
-import { craftPaths } from "../core/infrastructure/paths.ts";
+import { craftPaths, sessionStorageScopeId } from "../core/infrastructure/paths.ts";
+import { LocalSupervisor, SupervisorClient } from "../core/supervisor.ts";
 import { CraftService } from "../core/service.ts";
 import { contextAssetRef, contextAssetKey, contextAssetMatches, requiredContextRef } from 'craft-common-base/context-assets';
 import { ContextWorkingSetKernel } from "../core/context-working-set.ts";
@@ -180,10 +181,28 @@ test("discovery and Chinese code matching are bounded hints", () => {
   assert((discoverContextTools({ intent: "experience" }).tools as JsonObject[]).some(tool => tool.name === "craft_learning_cycle_finalize"));
   const experienceTools = discoverContextTools({ intent: "experience" }).tools as JsonObject[];
   for (const tool of ["craft_experience_procedure_submit", "craft_experience_procedure_get", "craft_experience_learning_request_get",
-    "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list",
+    "craft_experience_procedure_projection_get",
+    "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_next", "craft_experience_learning_evaluation_dispatch_list",
+    "craft_experience_learning_work_item_get", "craft_experience_learning_work_item_evaluation_contract_bind",
+    "craft_experience_learning_work_item_block", "craft_experience_learning_work_item_resume",
     "craft_experience_learning_evaluation_run", "craft_experience_learning_evaluation_result",
     "craft_evaluation_model_profile_get", "craft_evaluation_model_ticket_list"])
     assert(experienceTools.some(item => item.name === tool), `Experience discovery must include ${tool}`);
+  assert((discoverContextTools({ intent: "recall" }).tools as JsonObject[])
+    .some(tool => tool.name === "craft_experience_procedure_projection_get"),
+  "Context recall discovery must expose the current read-only Prompt projection");
+  const workItemDispatch = experienceTools.find(tool => tool.name === "craft_experience_learning_evaluation_dispatch_next")!;
+  assert.deepEqual((workItemDispatch.inputSchema as JsonObject).required, ["worker_id"]);
+  const dispatchProperties = (workItemDispatch.inputSchema as JsonObject).properties as JsonObject;
+  assert.equal((dispatchProperties.now as JsonObject).type, "string");
+  assert.equal((dispatchProperties.lease_ms as JsonObject).type, "integer");
+  const contractBind = experienceTools.find(tool => tool.name === "craft_experience_learning_work_item_evaluation_contract_bind")!;
+  assert.deepEqual((contractBind.inputSchema as JsonObject).required, ["work_item_id", "expected_version", "evaluation_contract_ref"]);
+  assert.equal((((contractBind.inputSchema as JsonObject).properties as JsonObject).evaluation_contract_ref as JsonObject).type, "object");
+  const workItemBlock = experienceTools.find(tool => tool.name === "craft_experience_learning_work_item_block")!;
+  assert.deepEqual((workItemBlock.inputSchema as JsonObject).required, ["work_item_id", "worker_id", "lease_token", "reason"]);
+  const workItemResume = experienceTools.find(tool => tool.name === "craft_experience_learning_work_item_resume")!;
+  assert.deepEqual((workItemResume.inputSchema as JsonObject).required, ["work_item_id", "expected_version"]);
   const knowledgeTools = discoverContextTools({ intent: "knowledge" }).tools as JsonObject[];
   for (const tool of ["craft_knowledge_bootstrap_install", "craft_knowledge_source_list", "craft_knowledge_source_register", "craft_knowledge_source_ingest",
     "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_claim_get", "craft_knowledge_claim_list",
@@ -557,6 +576,7 @@ test("legacy receipts, direct required validation and code query truncation rema
 test("Hook emissions reuse matching turn material, upgrade code and invalidate after correction", async () => {
   const { CodexHookBridge } = await import("../core/interfaces/codex-hook-bridge.ts");
   const f = await fixture();
+  const supervisor = new LocalSupervisor(f.service, f.store.paths); await supervisor.start();
   try {
     const memory = f.service.memoryLedgerRemember({ memory_id: "memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: f.scope.kind, scope_id: f.scope.id, content: "loginUser review preference" }).memory as JsonObject;
     const bridge = new CodexHookBridge(f.service), args = { session_id: "session", turn_id: "turn", project_root: f.repo, query: "loginUser review" };
@@ -587,7 +607,7 @@ test("Hook emissions reuse matching turn material, upgrade code and invalidate a
     f.service.contextWorkingSets.claimEmission(otherArgs, { asset_refs: [thirdRef], receipt: null });
     const reused = f.store.list("context_emission", 20).find(item => item.session_id === "claim-session" && item.turn_id === "prior-receipt");
     assert.equal(reused?.source_receipt_id, "pinned-receipt");
-  } finally { f.close(); }
+  } finally { await supervisor.close(); f.close(); }
 });
 
 test("empty and previously emitted Context refs do not wait for the primary writer", async () => {
@@ -699,13 +719,14 @@ test("scoped Knowledge/Memory corrections and active Experience releases appear 
 test("Hook capture reports held preferences instead of falsely claiming a durable write", async () => {
   const { CodexHookBridge } = await import("../core/interfaces/codex-hook-bridge.ts");
   const f = await fixture();
+  const supervisor = new LocalSupervisor(f.service, f.store.paths); await supervisor.start();
   try {
     const bridge = new CodexHookBridge(f.service), base = { hook_event_name: "UserPromptSubmit", cwd: f.repo, session_id: "session" };
     await bridge.handle("context", { ...base, turn_id: "one", prompt: "记住：以后默认用 Python" });
     const response = await bridge.handle("context", { ...base, turn_id: "two", prompt: "记住：以后默认用 Java" }); const payload = JSON.parse(String(response.additionalContext));
     assert.equal(payload.memory_capture.memory_written, false); assert.equal(payload.memory_capture.next_action, "confirm_topic_or_explicit_replacement"); assert.equal(f.store.count("memory_ledger"), 1);
     f.service.memoryGovernance.policySave({ mode: "off" }); const disabled = await bridge.handle("memory", { ...base, turn_id: "off", prompt: "记住：no match" }); assert.equal(JSON.parse(String(disabled.additionalContext)).memory_capture.memory_written, false);
-  } finally { f.close(); }
+  } finally { await supervisor.close(); f.close(); }
 });
 
 test("optional code yields character budget to mandatory Context and Host refs count against the total", async () => {
@@ -741,12 +762,14 @@ test("deactivation after discovery is rechecked before publishing the repository
 test("Hosts without native turn IDs receive fresh local turns and can reuse their emitted Context", async () => {
   const { CodexHookBridge } = await import("../core/interfaces/codex-hook-bridge.ts");
   const f = await fixture();
+  const supervisor = new LocalSupervisor(f.service, f.store.paths); await supervisor.start();
   try {
     f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "preference", memory_id: "m", scope_kind: f.scope.kind, scope_id: f.scope.id, content: "login review" });
     const bridge = new CodexHookBridge(f.service), input = { hook_event_name: "UserPromptSubmit", cwd: f.repo, session_id: "session", prompt: "login review" };
     await bridge.handle("context", input);
-    const first = f.store.list("context_hook_session", 1)[0]!; const turnId = String(first.last_turn_id);
+    const readSession = async () => (await new SupervisorClient(f.store.paths).contextGet({ session_key: sessionStorageScopeId("codex", input.session_id), key: `hook:session:${stableDigest({ scope: f.scope }).slice(-24)}` })).value as JsonObject;
+    const first = await readSession(); const turnId = String((first.pending_turn_ids as string[])[0]);
     assert(turnId.startsWith("hook_turn_")); assert.equal((await f.service.contextOpen({ project_root: f.repo, query: input.prompt, session_id: input.session_id, turn_id: turnId })).hook_reused, true);
-    await bridge.handle("context", input); const next = f.store.list("context_hook_session", 1)[0]!; assert.notEqual(next.last_turn_id, turnId);
-  } finally { f.close(); }
+    await bridge.handle("context", input); const next = await readSession(); assert.notEqual((next.pending_turn_ids as string[])[1], turnId);
+  } finally { await supervisor.close(); f.close(); }
 });

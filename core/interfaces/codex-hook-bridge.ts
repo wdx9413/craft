@@ -1,5 +1,5 @@
 import { hookVerificationGap } from "../hook-verification-gap.ts";
-import { NATIVE_ASYNC_COMPLETION } from "./codex-hook-command-result.ts";
+import { carryVerifiedCodexCommandCompletion, NATIVE_ASYNC_COMPLETION } from "./codex-hook-command-result.ts";
 import { ComponentTraceKernel } from "../component-trace.ts";
 import { operationErrorCode } from 'craft-common-log/operation';
 import { randomUUID as hookRequestId } from "node:crypto";
@@ -35,6 +35,8 @@ import { codexHookLearningStageDiagnostic } from "./codex-hook-learning-diagnost
 import { queueHookMaintenance } from "./memory-archive-worker.ts";
 import { evolutionHostTurnSource, expireEvolutionProjectBinding, mintEvolutionProjectBinding } from "../evolution-project-binding.ts";
 import { extractDurableStatements } from "../domains/durable-statements.ts";
+import { CodexHostTraceCapture } from "./codex-host-trace-capture.ts";
+import { CodexExperienceProcedureUsageCapture } from "./codex-experience-procedure-usage.ts";
 export { extractDurableStatements } from "../domains/durable-statements.ts";
 export { HookSignalSanitizer } from "./codex-hook-signal-sanitizer.ts";
 
@@ -450,13 +452,15 @@ function memoryOwnerForProject(service: CraftService, scope: HookProjectScope, p
 export class CodexHookBridge {
   readonly service: CraftService;
   readonly signals: HookSignalSanitizer;
+  readonly traceCapture: CodexHostTraceCapture;
+  readonly procedureUsageCapture: CodexExperienceProcedureUsageCapture;
   readonly journal: HookTurnJournal;
   readonly learning: HookLearningCoordinator;
   readonly launchArchiveWorker?: () => void;
   private readonly issueEvolutionBinding: boolean;
   private readonly launchSessionCleanup?: (sessionKey: string, ownerId: string) => void;
   constructor(service: CraftService, launchArchiveWorker?: () => void, issueEvolutionBinding = process.env.CRAFT_HOOK_MODE === "1", launchSessionCleanup?: (sessionKey: string, ownerId: string) => void) {
-    this.service = service; this.signals = new HookSignalSanitizer(); this.journal = new HookTurnJournal(service); this.learning = new HookLearningCoordinator(service, this.journal);
+    this.service = service; this.signals = new HookSignalSanitizer(); this.traceCapture = new CodexHostTraceCapture(service); this.procedureUsageCapture = new CodexExperienceProcedureUsageCapture(service); this.journal = new HookTurnJournal(service); this.learning = new HookLearningCoordinator(service, this.journal);
     this.launchArchiveWorker = launchArchiveWorker;
     this.launchSessionCleanup = launchSessionCleanup;
     this.issueEvolutionBinding = issueEvolutionBinding;
@@ -600,7 +604,10 @@ export class CodexHookBridge {
       if (!turnId && !ambiguous && pending.length === 1) turnId = pending[0]!;
       return null;
     });
-    return turnId ? { ...input, turn_id: turnId } : input;
+    if (!turnId) return input;
+    const correlated = { ...input, turn_id: turnId };
+    carryVerifiedCodexCommandCompletion(input, correlated);
+    return correlated;
   }
 
   private async completeCorrelatedTurn(input: HookInput, scope: HookProjectScope | null): Promise<void> {
@@ -812,7 +819,8 @@ export class CodexHookBridge {
       : null;
     const receipt = resolved.receipt as JsonObject | null;
     if (receipt) await this.journal.bindContextReceipt(input, receipt, scope);
-    return this.service.store.transaction(() => {
+    let presentedProcedureRefs: JsonObject[] = [];
+    const response = this.service.store.transaction(() => {
       assertContextReadCurrent(this.service.store, receipt, this.service.contextResolution.ownerStores);
       const projectBinding = member === "context" && this.issueEvolutionBinding && sessionId && turnId && input.cwd
         ? mintEvolutionProjectBinding(this.service.store, { host: hookHost(input), session_id: sessionId, turn_id: turnId, project_root: input.cwd, scope,
@@ -858,17 +866,42 @@ export class CodexHookBridge {
         turn_id: text(input.turn_id), context_receipt_id: receipt?.id ?? undefined, memory_written: component === "memory" && memoryWritten, observation_written: false,
         plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
       if (!selected.length && !captureSummary && !modContextAdditions.length && !projectBinding) return {};
+      if (receipt && input.session_host === "codex") {
+        presentedProcedureRefs = available
+          .filter(entry => entry.candidate.member === "experience" && entry.ref?.member === "experience")
+          .map(entry => entry.ref!);
+      }
       return { additionalContext };
     });
+    if (receipt && typeof receipt.id === "string" && input.session_host === "codex" && presentedProcedureRefs.length) {
+      const trace = this.traceCapture.ensureTurnTrace(input, scope);
+      if (trace.status === "captured") {
+        for (const procedureRef of presentedProcedureRefs) {
+          this.procedureUsageCapture.record({
+            host: "codex",
+            trace_id: trace.trace_id,
+            session_id: text(input.session_id),
+            turn_id: text(input.turn_id),
+            project_scope: scope,
+            context_receipt_id: receipt.id,
+            procedure_ref: procedureRef,
+            usage_state: "presented",
+          });
+        }
+      }
+    }
+    return response;
   }
 
   private async tool(input: HookInput, projectScope: HookProjectScope | null): Promise<JsonObject> {
-    const rawSignal = this.signals.signal(input) ?? this.signals.gap(input); if (!rawSignal) return {};
+    const traceCapture = input.session_host === "codex" ? this.traceCapture.captureTool(input, projectScope) : null;
+    const rawSignal = this.signals.signal(input) ?? this.signals.gap(input);
+    if (!rawSignal) return traceCapture ? { trace_capture: traceCapture } : {};
     const captured = { ...rawSignal, id: `codex_hook_signal_${stableDigest({ host: hookHost(input), scope: projectScope, session_id: text(input.session_id), turn_id: text(input.turn_id), signal_id: rawSignal.id }).slice(-20)}` };
     const scenario = projectScope ? projectScenarioKey(input, captured, this.service, projectScope) : null;
     await this.journal.record(input, scenario ? { ...captured, scenario_key: scenario.scenario_key,
       ...(scenario.coarse_scenario_key ? { coarse_scenario_key: scenario.coarse_scenario_key } : {}) } : captured, projectScope);
-    return {};
+    return traceCapture ? { trace_capture: traceCapture } : {};
   }
 
   /** Persist a bounded resume snapshot before the Host compacts. Best-effort. */
@@ -914,8 +947,10 @@ export class CodexHookBridge {
       }
     }
     if (goalUnavailable) return { systemMessage: "Craft Context 内存服务不可用，经验观察尚未完成，可在服务恢复后重试。" };
+    let terminalCapture: JsonObject | null = null;
     const finalized = member === "experience" ? this.service.store.transaction(() => {
       const result = this.learning.finalize(input, projectScope, taskGoal, journal);
+      if (input.session_host === "codex") terminalCapture = this.traceCapture.recordTerminalVerification(input, projectScope, result);
       this.recordObservedContextUse(input, journal);
       return result;
     }) : null;
@@ -938,7 +973,27 @@ export class CodexHookBridge {
       this.verificationGapGuidance(input, journal),
       this.runbookCaptureGuidance(input, journal, finalized) ?? this.unverifiedLearningGuidance(input, journal, projectScope),
     ].filter(Boolean).join("\n");
-    return guidance ? { systemMessage: guidance } : {};
+    const automaticCandidate = member === "experience" && input.session_host === "codex"
+      ? this.traceCapture.captureAutomaticRecoveryCandidate(input, projectScope, terminalCapture) : null;
+    if (automaticCandidate && typeof automaticCandidate.status === "string") {
+      try { this.service.store.appendEvent("codex-hook", "codex_hook.trace_distillation_ticket", {
+        status: automaticCandidate.status,
+        ...(typeof automaticCandidate.ticket_id === "string" ? { ticket_id: automaticCandidate.ticket_id } : {}),
+        ...(typeof automaticCandidate.reason_code === "string" ? { reason_code: automaticCandidate.reason_code } : {}),
+        content_free: true,
+      }); } catch { /* Ticket diagnostics must never change Hook completion. */ }
+    }
+    if (automaticCandidate?.status === "retryable" && typeof automaticCandidate.ticket_id === "string" && input.stop_hook_active !== true) {
+      return { decision: "block", reason: `Craft Experience recovery ticket ${automaticCandidate.ticket_id} was not completed by its prior continuation and is preserved as retryable. Continue once using the active project_binding and call craft_experience_trace_distill with ticket_id and decision=retry; submit a sanitized candidate or decision=skip. Source Trace and project scope are pinned.`,
+        trace_capture: terminalCapture, automatic_candidate: automaticCandidate };
+    }
+    if (automaticCandidate?.status === "candidate_request" && automaticCandidate.idempotent !== true
+      && typeof automaticCandidate.ticket_id === "string") {
+      return { decision: "block", reason: `Craft Experience has one verified recovery ticket (${automaticCandidate.ticket_id}) bound to the preceding Codex task Trace. Continue once in this same project. Read the exact source with craft_experience_trace_distill using this ticket_id and the active project_binding, then either submit a sanitized candidate using only cited Trace fields (mark any inferred steps as inferred and unverified) or close the ticket with decision=skip. Do not claim an exact retry relation or invent observed steps.`,
+        trace_capture: terminalCapture, automatic_candidate: automaticCandidate };
+    }
+    return { ...(guidance ? { systemMessage: guidance } : {}), ...(terminalCapture ? { trace_capture: terminalCapture } : {}),
+      ...(automaticCandidate ? { automatic_candidate: automaticCandidate } : {}) };
     } finally {
       if (claim) await client.contextRelease({ session_key: sessionKey, token: claim }).catch(() => undefined);
     }

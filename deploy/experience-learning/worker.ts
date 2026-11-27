@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { runHeldOutAdapter } from "./held-out-adapter.ts";
+import { runHeldOutAdapter, runTrustedExperienceEvaluatorAdapter } from "./held-out-adapter.ts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -69,19 +69,78 @@ export function learningTaskCandidateResult(ingestion: JsonObject, taskCandidate
 }
 
 export async function runEvaluationOnce(client: ExperienceLearningClient, env: NodeJS.ProcessEnv = process.env): Promise<JsonObject> {
+  let workItemStatus: "idle" | "blocked" | "dispatched" = "blocked";
+  let workItemBlockReason: string | undefined;
+  let workItemRef: JsonObject | undefined;
+  let intakeDispatch: JsonObject | undefined;
+  let workItemLeaseToken: string | undefined;
+  const workerId = "craft-experience-learning-worker";
+  try {
+    const intake = await client.call("craft_experience_learning_evaluation_dispatch_next", {
+      worker_id: workerId,
+    });
+    if (intake.status !== "idle" && intake.status !== "blocked" && intake.status !== "dispatched") {
+      throw new Error("LearningWorkItemDispatchStatusInvalid");
+    }
+    workItemStatus = intake.status;
+    const item = intake.work_item && typeof intake.work_item === "object" && !Array.isArray(intake.work_item)
+      ? intake.work_item as JsonObject : undefined;
+    if (intake.status === "blocked") {
+      const reason = intake.blocked_reason ?? item?.blocked_reason;
+      workItemBlockReason = typeof reason === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(reason)
+        ? reason : "learning_work_item_blocked";
+    }
+    if (intake.status === "dispatched") {
+      if (!item) throw new Error("LearningWorkItemReferenceInvalid");
+      if (typeof item.id !== "string" || typeof item.stage !== "string") throw new Error("LearningWorkItemReferenceInvalid");
+      if (typeof intake.lease_token !== "string" || !intake.lease_token.trim()) throw new Error("LearningWorkItemLeaseInvalid");
+      const dispatch = object(intake.dispatch, "new evaluation dispatch");
+      string(dispatch.id, "dispatch.id", 200);
+      intakeDispatch = dispatch;
+      workItemRef = { work_item_id: item.id, stage: item.stage };
+      workItemLeaseToken = intake.lease_token;
+    }
+  } catch (error) {
+    workItemStatus = "blocked";
+    workItemBlockReason = safeWorkerErrorClass(error, "LearningWorkItemDispatchError");
+  }
   const queued = await client.call("craft_experience_learning_evaluation_dispatch_list", { limit: 100 });
-  const pending = array(queued.dispatches, "evaluation dispatches") as JsonObject[];
+  const pending = [
+    ...(intakeDispatch ? [intakeDispatch] : []),
+    ...array(queued.dispatches, "evaluation dispatches") as JsonObject[],
+  ];
+  const persistAdapterWait = async (dispatchId: string): Promise<void> => {
+    if (!intakeDispatch || intakeDispatch.id !== dispatchId || !workItemRef || !workItemLeaseToken) return;
+    const blocked = await client.call("craft_experience_learning_work_item_block", {
+      work_item_id: workItemRef.work_item_id,
+      worker_id: workerId,
+      lease_token: workItemLeaseToken,
+      reason: "evaluation_adapter_unavailable",
+    });
+    const savedItem = object(blocked.work_item, "blocked Learning Work Item");
+    if (savedItem.status !== "blocked" || savedItem.blocked_reason !== "evaluation_adapter_unavailable") {
+      throw new Error("LearningWorkItemBlockUnconfirmed");
+    }
+    workItemStatus = "blocked";
+    workItemBlockReason = "evaluation_adapter_unavailable";
+  };
   const outcomes: JsonObject[] = [], seen = new Set<string>();
   while (pending.length && outcomes.length < 100) {
     const dispatch = pending.shift()!;
     const dispatchId = string(dispatch.id, "dispatch.id", 200);
     if (seen.has(dispatchId)) continue;
     seen.add(dispatchId);
+    const leaseArgs = intakeDispatch?.id === dispatchId && workItemLeaseToken ? { worker_id: workerId, lease_token: workItemLeaseToken } : {};
+    if (dispatch.learning_work_item_id && !leaseArgs.lease_token) continue;
     if (dispatch.stage === "held_out") {
       try {
         const report = await runHeldOutAdapter(dispatch, env);
-        if (!report) { outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: "awaiting_adapter",
-          reason: "trusted_task_effect_evaluation_required" }); continue; }
+        if (!report) {
+          await persistAdapterWait(dispatchId);
+          outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: "awaiting_adapter",
+            reason: "trusted_task_effect_evaluation_required" });
+          continue;
+        }
         if (typeof report.contract_id !== "string" || typeof report.evaluation_id !== "string") throw new Error("HeldOutAdapterInvalidReport");
         const recorded = await client.call("craft_evaluation_contract_task_effect_record", report);
         if ((recorded.result as JsonObject | undefined)?.eligible === true) {
@@ -94,7 +153,7 @@ export async function runEvaluationOnce(client: ExperienceLearningClient, env: N
           }
         }
         const result = await client.call("craft_experience_learning_evaluation_result", { dispatch_id: dispatchId,
-          evaluation_contract_id: report.contract_id, evaluation_id: report.evaluation_id });
+          evaluation_contract_id: report.contract_id, evaluation_id: report.evaluation_id, ...leaseArgs });
         const resolved = object(result.dispatch, "evaluation result dispatch");
         outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: resolved.status ?? "unknown" });
         if (result.next_dispatch && typeof result.next_dispatch === "object") pending.push(object(result.next_dispatch, "next evaluation dispatch"));
@@ -102,14 +161,47 @@ export async function runEvaluationOnce(client: ExperienceLearningClient, env: N
         reason: safeWorkerErrorClass(error, "HeldOutAdapterError") }); }
       continue;
     }
-    const result = await client.call("craft_experience_learning_evaluation_run", { dispatch_id: dispatchId });
-    const resolved = object(result.dispatch, "evaluation result dispatch");
-    outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: resolved.status ?? result.status ?? "unknown",
-      ...(typeof result.reason === "string" ? { reason: result.reason } : {}),
-      ...(typeof result.current === "object" && result.current ? { current_procedure_id: (result.current as JsonObject).id ?? null } : {}) });
-    if (result.next_dispatch && typeof result.next_dispatch === "object") pending.push(object(result.next_dispatch, "next evaluation dispatch"));
+    try {
+      const result = await client.call("craft_experience_learning_evaluation_run", { dispatch_id: dispatchId, ...leaseArgs });
+      const request = result.evaluation_request && typeof result.evaluation_request === "object"
+        ? object(result.evaluation_request, "trusted Experience evaluation request") : null;
+      if (request) {
+        const report = await runTrustedExperienceEvaluatorAdapter(request, env);
+        if (!report) {
+          await persistAdapterWait(dispatchId);
+          outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: "awaiting_adapter",
+            reason: "trusted_experience_evaluator_adapter_unavailable" });
+          continue;
+        }
+        if (typeof report.request_id !== "string" || !report.receipt || typeof report.receipt !== "object" || typeof report.signature !== "string") {
+          throw new Error("ExperienceEvaluatorAdapterInvalidReport");
+        }
+        const verified = await client.call("craft_experience_learning_evaluation_result", { dispatch_id: dispatchId,
+          evaluator_request_id: report.request_id, receipt: report.receipt as JsonObject, signature: report.signature, ...leaseArgs });
+        const resolved = object(verified.result && typeof verified.result === "object" ? verified.result : verified.dispatch
+          ? verified : {}, "trusted Experience evaluation result");
+        const resultDispatch = resolved.dispatch && typeof resolved.dispatch === "object"
+          ? object(resolved.dispatch, "trusted Experience dispatch") : null;
+        if (!resultDispatch) throw new Error("ExperienceEvaluatorAdapterResultInvalid");
+        outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: resultDispatch.status ?? "unknown",
+          ...(typeof resolved.current === "object" && resolved.current ? { current_procedure_id: (resolved.current as JsonObject).id ?? null } : {}) });
+        if (resolved.next_dispatch && typeof resolved.next_dispatch === "object") pending.push(object(resolved.next_dispatch, "next evaluation dispatch"));
+        continue;
+      }
+      const resolved = object(result.dispatch, "evaluation result dispatch");
+      const status = resolved.status ?? result.status ?? "unknown";
+      if (status === "awaiting_adapter") await persistAdapterWait(dispatchId);
+      outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status,
+        ...(typeof result.reason === "string" ? { reason: result.reason } : {}),
+        ...(typeof result.current === "object" && result.current ? { current_procedure_id: (result.current as JsonObject).id ?? null } : {}) });
+      if (result.next_dispatch && typeof result.next_dispatch === "object") pending.push(object(result.next_dispatch, "next evaluation dispatch"));
+    } catch (error) {
+      outcomes.push({ dispatch_id: dispatchId, stage: dispatch.stage, status: "retryable",
+        reason: safeWorkerErrorClass(error, "ExperienceEvaluationRunError") });
+    }
   }
-  return { processed: outcomes.length, outcomes };
+  return { work_item_status: workItemStatus, ...(workItemBlockReason ? { work_item_block_reason: workItemBlockReason } : {}),
+    ...(workItemRef ? workItemRef : {}), processed: outcomes.length, outcomes };
 }
 
 export interface ProgramMemorySubmissionPort {

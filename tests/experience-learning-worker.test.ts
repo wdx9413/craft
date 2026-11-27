@@ -70,6 +70,7 @@ function fixture(modelText = JSON.stringify({ name: "Verified flow", description
   let queued = true;
   const client: ExperienceLearningClient = { async call(name, args = {}) {
     calls.push({ name, args });
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
     if (name === "craft_evaluation_model_ticket_list") return { tickets: queued ? [{ id: "ticket-1", purpose: "workflow_evolution", profile_id: "profile-1", profile_version: 1,
       target: { kind: "workflow_evolution_request", id: "request-1", version: 1 }, readiness: { status: "ready_for_adapter" } }] : [] };
     if (name === "craft_evaluation_model_profile_get") return { profile: { provider: "test", model: "test-model", version: 1, max_attempts: 1, max_output_tokens: 512, temperature: 0 }, readiness: { status: "ready_for_adapter" } };
@@ -196,6 +197,7 @@ test("evaluation worker runs automatic gates and waits for an independent held-o
   const calls: string[] = [];
   const client: ExperienceLearningClient = { async call(name, args = {}) {
     calls.push(name);
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [{ id: "shadow", stage: "shadow" }] };
     if (name === "craft_experience_learning_evaluation_run" && args.dispatch_id === "shadow") return {
       dispatch: { id: "shadow", status: "passed" }, next_dispatch: { id: "heldout", stage: "held_out" },
@@ -204,36 +206,411 @@ test("evaluation worker runs automatic gates and waits for an independent held-o
     throw new Error(`unexpected tool ${name}`);
   } };
   const result = await runEvaluationOnce(client);
-  assert.deepEqual(result, { processed: 2, outcomes: [
+  assert.deepEqual(result, { work_item_status: "idle", processed: 2, outcomes: [
     { dispatch_id: "shadow", stage: "shadow", status: "passed" },
     { dispatch_id: "heldout", stage: "held_out", status: "awaiting_adapter", reason: "trusted_task_effect_evaluation_required" },
   ] });
-  assert.deepEqual(calls, ["craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run"]);
+  assert.deepEqual(calls, ["craft_experience_learning_evaluation_dispatch_next", "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run"]);
 });
 
 test("evaluation worker ignores duplicate dispatches and uses safe result fallbacks", async () => {
   const seenCalls: string[] = [];
   const client: ExperienceLearningClient = { async call(name) {
     seenCalls.push(name);
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [{ id: "same", stage: "shadow" }] };
     return { dispatch: {}, current: {}, next_dispatch: { id: "same", stage: "shadow" } };
   } };
-  assert.deepEqual(await runEvaluationOnce(client), { processed: 1, outcomes: [
+  assert.deepEqual(await runEvaluationOnce(client), { work_item_status: "idle", processed: 1, outcomes: [
     { dispatch_id: "same", stage: "shadow", status: "unknown", current_procedure_id: null },
   ] });
-  assert.deepEqual(seenCalls, ["craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run"]);
-  assert.deepEqual(await runEvaluationOnce({ async call() { return { dispatches: [] }; } }), { processed: 0, outcomes: [] });
+  assert.deepEqual(seenCalls, ["craft_experience_learning_evaluation_dispatch_next", "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run"]);
+  assert.deepEqual(await runEvaluationOnce({ async call(name) { return name === "craft_experience_learning_evaluation_dispatch_next"
+    ? { status: "idle" } : { dispatches: [] }; } }), { work_item_status: "idle", processed: 0, outcomes: [] });
   await assert.rejects(runEvaluationOnce({ async call() { return { dispatches: [{ id: " " }] }; } }), /dispatch\.id/u);
   await assert.rejects(runEvaluationOnce({ async call() { return { dispatches: null }; } }), /must be an array/u);
 });
 
 test("evaluation worker reports adapter reasons without copying arbitrary result fields", async () => {
   const result = await runEvaluationOnce({ async call(name) {
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [{ id: "shadow-reason", stage: "shadow" }] };
     return { dispatch: { id: "shadow-reason", status: "awaiting_adapter" }, reason: "project_scenario_evaluator_not_configured" };
   } });
-  assert.deepEqual(result, { processed: 1, outcomes: [{ dispatch_id: "shadow-reason", stage: "shadow", status: "awaiting_adapter",
+  assert.deepEqual(result, { work_item_status: "idle", processed: 1, outcomes: [{ dispatch_id: "shadow-reason", stage: "shadow", status: "awaiting_adapter",
     reason: "project_scenario_evaluator_not_configured" }] });
+});
+
+test("evaluation worker releases a claimed Work Item lease when a Prompt Shadow needs an adapter", async () => {
+  const calls: Array<{ name: string; args: JsonObject }> = [];
+  const result = await runEvaluationOnce({ async call(name, args = {}) {
+    calls.push({ name, args });
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return {
+      status: "dispatched", lease_token: "lease-shadow",
+      work_item: { id: "work-shadow", stage: "shadow" },
+      dispatch: { id: "dispatch-shadow", stage: "shadow" },
+    };
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    if (name === "craft_experience_learning_evaluation_run") return {
+      dispatch: { id: "dispatch-shadow", status: "awaiting_adapter" },
+      reason: "project_scenario_evaluator_not_configured",
+    };
+    if (name === "craft_experience_learning_work_item_block") return {
+      work_item: { id: "work-shadow", status: "blocked", blocked_reason: "evaluation_adapter_unavailable" },
+    };
+    throw new Error(`unexpected tool ${name}`);
+  } }, {});
+
+  assert.deepEqual(result, {
+    work_item_status: "blocked", work_item_id: "work-shadow", stage: "shadow",
+    work_item_block_reason: "evaluation_adapter_unavailable", processed: 1,
+    outcomes: [{ dispatch_id: "dispatch-shadow", stage: "shadow", status: "awaiting_adapter",
+      reason: "project_scenario_evaluator_not_configured" }],
+  });
+  assert.deepEqual(calls.at(-1), {
+    name: "craft_experience_learning_work_item_block",
+    args: { work_item_id: "work-shadow", worker_id: "craft-experience-learning-worker",
+      lease_token: "lease-shadow", reason: "evaluation_adapter_unavailable" },
+  });
+  assert.equal(calls.some(call => call.name === "craft_experience_learning_evaluation_result"), false);
+});
+
+test("evaluation worker sends a frozen signed Prompt request to the adapter and advances the Work Item", async () => {
+  const calls: Array<{ name: string; args: JsonObject }> = [];
+  const request = { id: "signed-request", nonce: "nonce-1", dispatch_id: "dispatch-shadow", definition_digest: "sha256:prompt" };
+  const report = { request_id: request.id, receipt: { schema: "craft.experience-evaluation-receipt.v1", nonce: request.nonce }, signature: "signed" };
+  const script = `process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(${JSON.stringify(JSON.stringify(report))}))`;
+  let workItemStage = "shadow";
+  const result = await runEvaluationOnce({ async call(name, args = {}) {
+    calls.push({ name, args });
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "dispatched", lease_token: "lease-shadow",
+      work_item: { id: "work-shadow", stage: "shadow" }, dispatch: { id: "dispatch-shadow", stage: "shadow" } };
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    if (name === "craft_experience_learning_evaluation_run") return { dispatch: { id: "dispatch-shadow", status: "awaiting_adapter" }, evaluation_request: request };
+    if (name === "craft_experience_learning_evaluation_result") {
+      assert.equal(args.dispatch_id, request.dispatch_id);
+      assert.equal(args.evaluator_request_id, report.request_id);
+      assert.deepEqual(args.receipt, report.receipt);
+      assert.equal(args.signature, report.signature);
+      workItemStage = "held_out";
+      return { result: { dispatch: { id: "dispatch-shadow", status: "passed" }, learning_work_item: { id: "work-shadow", stage: workItemStage } } };
+    }
+    throw new Error(`unexpected tool ${name}`);
+  } }, { CRAFT_EXPERIENCE_EVALUATOR_COMMAND: JSON.stringify([process.execPath, "-e", script]) });
+  assert.equal(workItemStage, "held_out");
+  assert.deepEqual(result, { work_item_status: "dispatched", work_item_id: "work-shadow", stage: "shadow", processed: 1,
+    outcomes: [{ dispatch_id: "dispatch-shadow", stage: "shadow", status: "passed" }] });
+  const resultCall = calls.find(call => call.name === "craft_experience_learning_evaluation_result");
+  assert.ok(resultCall);
+  assert.equal(calls.some(call => call.name === "craft_experience_learning_work_item_block"), false);
+});
+
+test("evaluation worker blocks its leased item when a signed request has no configured adapter", async () => {
+  const calls: Array<{ name: string; args: JsonObject }> = [];
+  const result = await runEvaluationOnce({ async call(name, args = {}) {
+    calls.push({ name, args });
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "dispatched", lease_token: "lease-shadow",
+      work_item: { id: "work-shadow", stage: "shadow" }, dispatch: { id: "dispatch-shadow", stage: "shadow" } };
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    if (name === "craft_experience_learning_evaluation_run") return { dispatch: { id: "dispatch-shadow", status: "awaiting_adapter" },
+      evaluation_request: { id: "signed-request" } };
+    if (name === "craft_experience_learning_work_item_block") return { work_item: { id: "work-shadow", status: "blocked", blocked_reason: "evaluation_adapter_unavailable" } };
+    throw new Error(`unexpected tool ${name}`);
+  } }, {});
+  assert.equal(result.work_item_status, "blocked");
+  assert.deepEqual(result.outcomes, [{ dispatch_id: "dispatch-shadow", stage: "shadow", status: "awaiting_adapter",
+    reason: "trusted_experience_evaluator_adapter_unavailable" }]);
+  assert.equal(calls.some(call => call.name === "craft_experience_learning_evaluation_result"), false);
+  assert.equal(calls.at(-1)?.args.lease_token, "lease-shadow");
+});
+
+test("evaluation worker rejects malformed signed evaluator reports without recording a gate", async () => {
+  for (const report of [{}, { request_id: "r", receipt: null, signature: "s" }, { request_id: "r", receipt: {}, signature: 1 }]) {
+    const calls: string[] = [];
+    const script = `process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(${JSON.stringify(JSON.stringify(report))}))`;
+    const result = await runEvaluationOnce({ async call(name) {
+      calls.push(name);
+      if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "dispatched", lease_token: "lease-shadow",
+        work_item: { id: "work-shadow", stage: "shadow" }, dispatch: { id: "dispatch-shadow", stage: "shadow", learning_work_item_id: "work-shadow" } };
+      if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+      if (name === "craft_experience_learning_evaluation_run") return { dispatch: { id: "dispatch-shadow", status: "awaiting_adapter" }, evaluation_request: { id: "r" } };
+      throw new Error(`unexpected tool ${name}`);
+    } }, { CRAFT_EXPERIENCE_EVALUATOR_COMMAND: JSON.stringify([process.execPath, "-e", script]) });
+    assert.equal((result.outcomes as JsonObject[])[0]!.status, "retryable");
+    assert.equal(calls.includes("craft_experience_learning_evaluation_result"), false);
+  }
+});
+
+test("evaluation worker skips another worker's leased dispatch", async () => {
+  const calls: string[] = [];
+  const result = await runEvaluationOnce({ async call(name) {
+    calls.push(name);
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [{ id: "foreign", stage: "shadow", learning_work_item_id: "other-item" }] };
+    throw new Error(`unexpected tool ${name}`);
+  } }, {});
+  assert.equal(result.processed, 0);
+  assert.equal(calls.includes("craft_experience_learning_evaluation_run"), false);
+});
+
+test("signed evaluator results expose current candidate, follow next dispatch, and reject malformed results", async () => {
+  const report = { request_id: "request-1", receipt: { schema: "test" }, signature: "signed" };
+  const script = `process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(${JSON.stringify(JSON.stringify(report))}))`;
+  for (const mode of ["nested", "direct", "malformed", "empty", "missing-status"] as const) {
+    const calls: string[] = [];
+    const output = await runEvaluationOnce({ async call(name, args = {}) {
+      calls.push(name);
+      if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
+      if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [{ id: "first", stage: "shadow" }] };
+      if (name === "craft_experience_learning_evaluation_run") return args.dispatch_id === "first"
+        ? { dispatch: { id: "first", status: "awaiting_adapter" }, evaluation_request: { id: "request-1" } }
+        : { dispatch: { id: "second", status: "passed" } };
+      if (name === "craft_experience_learning_evaluation_result") return mode === "empty" ? {} : mode === "malformed" ? { result: {} }
+        : mode === "missing-status" ? { result: { dispatch: { id: "first" }, current: {} } }
+        : mode === "direct" ? { dispatch: { id: "first", status: "passed" } }
+        : { result: { dispatch: { id: "first", status: "passed" }, current: { id: "active-prompt" }, next_dispatch: { id: "second", stage: "shadow" } } };
+      throw new Error(`unexpected tool ${name}`);
+    } }, { CRAFT_EXPERIENCE_EVALUATOR_COMMAND: JSON.stringify([process.execPath, "-e", script]) });
+    const outcomes = output.outcomes as JsonObject[];
+    assert.equal(outcomes[0]!.status, mode === "malformed" || mode === "empty" ? "retryable" : mode === "missing-status" ? "unknown" : "passed");
+    if (mode === "missing-status") assert.equal(outcomes[0]!.current_procedure_id, null);
+    if (mode !== "nested") assert.equal(output.processed, 1);
+    else {
+      assert.equal(outcomes[0]!.current_procedure_id, "active-prompt");
+      assert.equal(outcomes[1]!.dispatch_id, "second");
+      assert.equal(output.processed, 2);
+    }
+  }
+});
+
+test("evaluation worker releases a claimed Held-out Work Item lease without recording local evidence", async () => {
+  const calls: Array<{ name: string; args: JsonObject }> = [];
+  const result = await runEvaluationOnce({ async call(name, args = {}) {
+    calls.push({ name, args });
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return {
+      status: "dispatched", lease_token: "lease-held-out",
+      work_item: { id: "work-held-out", stage: "held_out" },
+      dispatch: { id: "dispatch-held-out", stage: "held_out" },
+    };
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    if (name === "craft_experience_learning_work_item_block") return {
+      work_item: { id: "work-held-out", status: "blocked", blocked_reason: "evaluation_adapter_unavailable" },
+    };
+    throw new Error(`unexpected tool ${name}`);
+  } }, {});
+
+  assert.deepEqual(result, {
+    work_item_status: "blocked", work_item_id: "work-held-out", stage: "held_out",
+    work_item_block_reason: "evaluation_adapter_unavailable", processed: 1,
+    outcomes: [{ dispatch_id: "dispatch-held-out", stage: "held_out", status: "awaiting_adapter",
+      reason: "trusted_task_effect_evaluation_required" }],
+  });
+  assert.equal(calls.some(call => call.name === "craft_evaluation_contract_task_effect_record"), false);
+  assert.equal(calls.some(call => call.name === "craft_experience_learning_evaluation_result"), false);
+  assert.equal(calls.at(-1)?.name, "craft_experience_learning_work_item_block");
+});
+
+test("evaluation worker does not report a persistent wait when lease release is unconfirmed", async () => {
+  const result = await runEvaluationOnce({ async call(name) {
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return {
+      status: "dispatched", lease_token: "lease-unconfirmed",
+      work_item: { id: "work-unconfirmed", stage: "shadow" },
+      dispatch: { id: "dispatch-unconfirmed", stage: "shadow" },
+    };
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    if (name === "craft_experience_learning_evaluation_run") return {
+      dispatch: { id: "dispatch-unconfirmed", status: "awaiting_adapter" },
+    };
+    if (name === "craft_experience_learning_work_item_block") return {
+      work_item: { id: "work-unconfirmed", status: "processing", blocked_reason: null },
+    };
+    throw new Error(`unexpected tool ${name}`);
+  } }, {});
+
+  assert.deepEqual(result, {
+    work_item_status: "dispatched", work_item_id: "work-unconfirmed", stage: "shadow",
+    processed: 1, outcomes: [{ dispatch_id: "dispatch-unconfirmed", stage: "shadow",
+      status: "retryable", reason: "Error" }],
+  });
+});
+
+test("evaluation worker stops polling a blocked dispatch and executes that same dispatch after resume", async () => {
+  let pass = 0;
+  const evaluationRuns: string[] = [];
+  const result = async () => runEvaluationOnce({ async call(name, args = {}) {
+    if (name === "craft_experience_learning_evaluation_dispatch_next") {
+      pass += 1;
+      if (pass === 1 || pass === 3) return {
+        status: "dispatched", lease_token: `lease-${pass}`,
+        work_item: { id: "work-resume", stage: "shadow" },
+        dispatch: { id: "same-dispatch", stage: "shadow" },
+      };
+      return { status: "blocked", blocked_reason: "evaluation_adapter_unavailable",
+        work_item: { id: "work-resume", stage: "shadow", status: "blocked" } };
+    }
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    if (name === "craft_experience_learning_evaluation_run") {
+      evaluationRuns.push(String(args.dispatch_id));
+      return pass === 1
+        ? { dispatch: { id: "same-dispatch", status: "awaiting_adapter" }, reason: "project_scenario_evaluator_not_configured" }
+        : { dispatch: { id: "same-dispatch", status: "passed" } };
+    }
+    if (name === "craft_experience_learning_work_item_block") {
+      return { work_item: { id: "work-resume", status: "blocked", blocked_reason: "evaluation_adapter_unavailable" } };
+    }
+    throw new Error(`unexpected tool ${name}`);
+  } }, {});
+
+  const initial = await result();
+  assert.equal(initial.work_item_status, "blocked");
+  assert.equal(initial.outcomes && (initial.outcomes as JsonObject[])[0]?.status, "awaiting_adapter");
+  const waiting = await result();
+  assert.deepEqual(waiting, {
+    work_item_status: "blocked", work_item_block_reason: "evaluation_adapter_unavailable",
+    processed: 0, outcomes: [],
+  });
+  const resumed = await result();
+  assert.deepEqual(resumed, {
+    work_item_status: "dispatched", work_item_id: "work-resume", stage: "shadow",
+    processed: 1, outcomes: [{ dispatch_id: "same-dispatch", stage: "shadow", status: "passed" }],
+  });
+  assert.deepEqual(evaluationRuns, ["same-dispatch", "same-dispatch"]);
+});
+
+test("evaluation worker claims a durable Work Item before polling and runs the created stage dispatch", async () => {
+  const calls: Array<{ name: string; args: JsonObject }> = [];
+  const client: ExperienceLearningClient = { async call(name, args = {}) {
+    calls.push({ name, args });
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return {
+      status: "dispatched", lease_token: "lease-1", work_item: { id: "work-item-1", stage: "shadow" },
+      dispatch: { id: "dispatch-1", stage: "shadow" },
+    };
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    if (name === "craft_experience_learning_evaluation_run") return { dispatch: { id: "dispatch-1", status: "passed" } };
+    throw new Error(`unexpected tool ${name}`);
+  } };
+  assert.deepEqual(await runEvaluationOnce(client), { work_item_status: "dispatched", work_item_id: "work-item-1",
+    stage: "shadow", processed: 1, outcomes: [{ dispatch_id: "dispatch-1", stage: "shadow", status: "passed" }] });
+  assert.deepEqual(calls.map(call => call.name), ["craft_experience_learning_evaluation_dispatch_next",
+    "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run"]);
+  assert.deepEqual(calls[0]?.args, { worker_id: "craft-experience-learning-worker" });
+});
+
+test("evaluation worker prioritizes a newly claimed dispatch ahead of a full legacy queue", async () => {
+  const runIds: string[] = [];
+  const client: ExperienceLearningClient = { async call(name, args = {}) {
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return {
+      status: "dispatched", lease_token: "lease-new", work_item: { id: "new-work-item", stage: "shadow" },
+      dispatch: { id: "new-dispatch", stage: "shadow" },
+    };
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return {
+      dispatches: Array.from({ length: 100 }, (_, index) => ({ id: `old-${index}`, stage: "shadow" })),
+    };
+    if (name === "craft_experience_learning_evaluation_run") {
+      runIds.push(String(args.dispatch_id));
+      return { dispatch: { id: args.dispatch_id, status: "passed" } };
+    }
+    throw new Error(`unexpected tool ${name}`);
+  } };
+
+  const result = await runEvaluationOnce(client);
+  assert.equal(result.processed, 100);
+  assert.equal(runIds[0], "new-dispatch");
+  assert(runIds.includes("new-dispatch"));
+  assert.equal(runIds.includes("old-99"), false);
+});
+
+test("evaluation dispatch failures remain retryable and a later worker pass resumes the same pending dispatch", async () => {
+  let failOnce = true;
+  const calls: string[] = [];
+  const client: ExperienceLearningClient = { async call(name, args = {}) {
+    calls.push(name);
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return failOnce
+      ? { status: "dispatched", lease_token: "lease-retry", work_item: { id: "retry-work-item", stage: "shadow" },
+        dispatch: { id: "retry-dispatch", stage: "shadow" } }
+      : { status: "idle" };
+    if (name === "craft_experience_learning_evaluation_dispatch_list") {
+      return { dispatches: [{ id: "retry-dispatch", stage: "shadow" }] };
+    }
+    if (name === "craft_experience_learning_evaluation_run" && args.dispatch_id === "retry-dispatch") {
+      if (failOnce) { failOnce = false; throw Object.assign(new Error("private response"), { name: "EvaluationTimeout" }); }
+      return { dispatch: { id: "retry-dispatch", status: "passed" } };
+    }
+    throw new Error(`unexpected tool ${name}`);
+  } };
+
+  assert.deepEqual(await runEvaluationOnce(client), {
+    work_item_status: "dispatched", work_item_id: "retry-work-item", stage: "shadow",
+    processed: 1, outcomes: [{ dispatch_id: "retry-dispatch", stage: "shadow", status: "retryable", reason: "EvaluationTimeout" }],
+  });
+  assert.deepEqual(await runEvaluationOnce(client), {
+    work_item_status: "idle", processed: 1,
+    outcomes: [{ dispatch_id: "retry-dispatch", stage: "shadow", status: "passed" }],
+  });
+  assert.equal(calls.filter(name => name === "craft_experience_learning_evaluation_run").length, 2);
+});
+
+test("evaluation worker reports blocked Work Items safely while continuing existing dispatches", async () => {
+  const calls: string[] = [];
+  const result = await runEvaluationOnce({ async call(name) {
+    calls.push(name);
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return {
+      status: "blocked", work_item: { id: "work-item-blocked", stage: "evaluation_contract", blocked_reason: "evaluation_contract_unavailable" },
+    };
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    throw new Error(`unexpected tool ${name}`);
+  } });
+  assert.deepEqual(result, { work_item_status: "blocked", work_item_block_reason: "evaluation_contract_unavailable", processed: 0, outcomes: [] });
+  assert.deepEqual(calls, ["craft_experience_learning_evaluation_dispatch_next", "craft_experience_learning_evaluation_dispatch_list"]);
+  const topLevelReason = await runEvaluationOnce({ async call(name) {
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "blocked", blocked_reason: "worker_unavailable" };
+    return { dispatches: [] };
+  } });
+  assert.equal(topLevelReason.work_item_block_reason, "worker_unavailable");
+  const unsafeReason = await runEvaluationOnce({ async call(name) {
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "blocked", blocked_reason: "private/path" };
+    return { dispatches: [] };
+  } });
+  assert.equal(unsafeReason.work_item_block_reason, "learning_work_item_blocked");
+});
+
+test("evaluation worker treats dispatcher errors and malformed states as blocked and keeps polling", async () => {
+  const rejected = await runEvaluationOnce({ async call(name) {
+    if (name === "craft_experience_learning_evaluation_dispatch_next") throw Object.assign(new Error("private"), { name: "TransportError" });
+    return { dispatches: [] };
+  } });
+  assert.deepEqual(rejected, { work_item_status: "blocked", work_item_block_reason: "TransportError", processed: 0, outcomes: [] });
+  const malformed = await runEvaluationOnce({ async call(name) {
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "unexpected" };
+    return { dispatches: [] };
+  } });
+  assert.deepEqual(malformed, { work_item_status: "blocked", work_item_block_reason: "Error", processed: 0, outcomes: [] });
+  const dispatchedWithoutItem = await runEvaluationOnce({ async call(name) {
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "dispatched", work_item: null };
+    return { dispatches: [] };
+  } });
+  assert.deepEqual(dispatchedWithoutItem, { work_item_status: "blocked", work_item_block_reason: "Error", processed: 0, outcomes: [] });
+  for (const leaseToken of [undefined, " "]) {
+    const invalidLease = await runEvaluationOnce({ async call(name) {
+      if (name === "craft_experience_learning_evaluation_dispatch_next") return {
+        status: "dispatched", ...(leaseToken === undefined ? {} : { lease_token: leaseToken }),
+        work_item: { id: "work-item", stage: "shadow" }, dispatch: { id: "dispatch" },
+      };
+      return { dispatches: [] };
+    } });
+    assert.equal(invalidLease.work_item_status, "blocked");
+    assert.equal(invalidLease.work_item_block_reason, "Error");
+  }
+  for (const item of [{ id: 1, stage: "shadow" }, { id: "work-item", stage: null }]) {
+    const invalidReference = await runEvaluationOnce({ async call(name) {
+      if (name === "craft_experience_learning_evaluation_dispatch_next") return {
+        status: "dispatched", work_item: item, dispatch: { id: "dispatch" },
+      };
+      return { dispatches: [] };
+    } });
+    assert.equal(invalidReference.work_item_status, "blocked");
+    assert.equal(invalidReference.work_item_block_reason, "Error");
+  }
 });
 
 test("Knowledge candidate summaries omit idle and reconciled skips but retain blocked and failed outcomes", () => {
@@ -350,6 +727,7 @@ test("continuous learning tick contains transient Experience and Knowledge failu
       if (ticketAttempts === 1) throw new TypeError("provider credential and response body must stay private");
       return { tickets: [], has_more: false, next_cursor: null };
     }
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
     if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_source_list") {
@@ -363,12 +741,12 @@ test("continuous learning tick contains transient Experience and Knowledge failu
   const deps = { client, providers: [provider], transport: fixture().transport, env: directWorkerEnv };
   const first = await runLearningTick(deps, true);
   assert.deepEqual(first, { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, scenario_classification: { status: "failed", failure_kind: "TypeError" },
-    failure_kind: "TypeError", evaluation: { processed: 0, outcomes: [] }, knowledge: { status: "failed", failure_kind: "Error" } });
+    failure_kind: "TypeError", evaluation: { work_item_status: "idle", processed: 0, outcomes: [] }, knowledge: { status: "failed", failure_kind: "Error" } });
   assert.deepEqual(learningTickStatus(first, true), { diagnostics: "Craft Experience learning pass failed (TypeError).\nCraft Knowledge learning pass failed (Error).\n", exit_code: 1 });
   assert.equal(JSON.stringify(first).includes("credential"), false);
   assert.equal(JSON.stringify(first).includes("locator"), false);
   const second = await runLearningTick(deps, true);
-  assert.deepEqual(second, { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
+  assert.deepEqual(second, { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { work_item_status: "idle", processed: 0, outcomes: [] }, knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   assert.deepEqual(learningTickStatus(second, true), { diagnostics: "", exit_code: null });
   assert.equal(ticketAttempts, 4);
   assert.equal(sourceListAttempts, 2);
@@ -425,6 +803,7 @@ test("learning failure diagnostics expose only safe error names", () => {
 
 test("Knowledge classification failures remain visible without dropping completed source sync", async () => {
   const client: ExperienceLearningClient = { async call(name) {
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
     if (name === "craft_experience_learning_evaluation_dispatch_list" || name === "craft_evaluation_model_ticket_list") return { dispatches: [], tickets: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_source_list") return { sources: [] };
@@ -473,6 +852,7 @@ test("standalone learning modes call only their mounted Knowledge or Experience 
   const client: ExperienceLearningClient = { async call(name) {
     calls.push(name);
     if (name === "craft_evaluation_model_ticket_list") return { tickets: [], has_more: false, next_cursor: null };
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
     if (name === "craft_knowledge_storage_reconcile") return { status: "completed", examined: 0, migrated: 0, skipped: 0, blocked: [], has_more: false, next_cursor: null };
     if (name === "craft_knowledge_source_list") return { sources: [] };
@@ -481,8 +861,8 @@ test("standalone learning modes call only their mounted Knowledge or Experience 
   } };
   const deps = { client, providers: [provider], transport: fixture().transport, env: directWorkerEnv };
   const experience = await runLearningTick(deps, true, ["experience"]);
-  assert.deepEqual(experience, { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, knowledge: null });
-  assert.deepEqual(calls, ["craft_evaluation_model_ticket_list", "craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list"]);
+  assert.deepEqual(experience, { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { work_item_status: "idle", processed: 0, outcomes: [] }, knowledge: null });
+  assert.deepEqual(calls, ["craft_evaluation_model_ticket_list", "craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_next", "craft_experience_learning_evaluation_dispatch_list"]);
   calls.length = 0;
   const knowledge = await runLearningTick(deps, true, ["knowledge"]);
   assert.deepEqual(knowledge, { processed: 0, outcomes: [], skipped: true,
@@ -700,7 +1080,7 @@ test("worker CLI negotiates real newline MCP stdio and completes one empty poll"
     child.once("close", code => resolve(code ?? -1));
   });
   assert.equal(exitCode, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { work_item_status: "idle", processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true });
 });
@@ -722,7 +1102,7 @@ test("worker selects the Codex Host transport for an empty poll without starting
     child.once("close", code => resolve(code ?? -1));
   });
   assert.equal(exitCode, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { work_item_status: "idle", processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true });
 });
@@ -1279,7 +1659,7 @@ test("polling worker exits cleanly after a termination signal", async (t) => {
     child.once("close", code => resolve(code ?? -1));
   });
   assert.equal(exitCode, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { work_item_status: "idle", processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true });
 });
@@ -1290,6 +1670,7 @@ test("runOnce contains scenario-classification queue failures and continues eval
       target: { kind: "experience_scenario_classification_request", id: "request-1", version: 1, scope: "project:craft" },
       readiness: { status: "ready_for_adapter" } }] };
     if (name === "craft_evaluation_model_profile_get") throw new Error("profile unavailable");
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
     throw new Error(`unexpected tool ${name}`);
   } };
@@ -1380,6 +1761,7 @@ test("runOnce classifies a verified task before distillation while using one mod
       scenario_catalog: { scenario_key: "validation.repair", status: "candidate", catalog_version: 1 } };
     if (name === "craft_experience_scenario_classification_request_complete") return { request: { version: 2 } };
     if (name === "craft_evaluation_model_ticket_complete") { pending = false; return {}; }
+    if (name === "craft_experience_learning_evaluation_dispatch_next") return { status: "idle" };
     if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
     if (name.startsWith("craft_trace_")) return {};
     throw new Error(`unexpected tool ${name}`);

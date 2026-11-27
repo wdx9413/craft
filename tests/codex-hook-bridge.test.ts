@@ -1159,10 +1159,42 @@ test("Knowledge, Memory and Experience hooks resolve only their named Context me
     assert.equal((f.service.memoryLedgerList({ scope_kind: "project", scope_id: canonicalScope.id, include_history: true }).memories as JsonObject[]).length, 2);
     const procedureRef = f.store.contentStore.writeSync({ kind: "experience", folder: "prompts", record_id: "hook-procedure", version: 1, scope: `project:${canonicalScope.id}`, status: "routeable", sensitivity: "internal", source_id: "fixture", title: "终态验证", body: "# 终态验证\n\n先运行验证。" });
     f.store.create("experience_procedure", "hook-procedure", { scope: `project:${canonicalScope.id}`, lifecycle: "routeable", routeable: true, procedure_kind: "prompt", trigger: "verification", title: "终态验证", acceptance_ref: "acceptance:fixture", scenario_signature: { project: canonicalScope.id }, content_ref: procedureRef, content_digest: procedureRef.digest });
-    const experience = await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd: scope, prompt: "Which verification command should I use?" });
+    const experienceInput = { hook_event_name: "UserPromptSubmit", session_host: "codex", cwd: scope,
+      session_id: "procedure-usage-session", turn_id: "procedure-usage-turn", prompt: "Which verification command should I use?" };
+    const recordUsage = bridge.procedureUsageCapture.record.bind(bridge.procedureUsageCapture);
+    let usageCaptureCalls = 0;
+    bridge.procedureUsageCapture.record = args => {
+      usageCaptureCalls++;
+      return recordUsage(args);
+    };
+    const experience = await bridge.handle("experience", experienceInput);
     assert.match(String(experience.additionalContext), /content_digest/u);
     assert.doesNotMatch(String(experience.additionalContext), /先运行验证/u);
     assert.doesNotMatch(String(experience.additionalContext), /focused verification|short feedback/u);
+    const injectedExperience = JSON.parse(String(experience.additionalContext)) as JsonObject;
+    const injectedProcedure = (injectedExperience.selected as JsonObject[]).find(item => item.procedure_id === "hook-procedure")!;
+    assert.equal(injectedProcedure.procedure_version, 1);
+    const procedureUsageTraceId = `codex_host_trace_${stableDigest({
+      host: "codex", project_scope: canonicalScope, session_id: "procedure-usage-session", turn_id: "procedure-usage-turn",
+    }).slice(-32)}`;
+    const procedureUsageTrace = f.service.traceGet({ trace_id: procedureUsageTraceId });
+    const presented = (procedureUsageTrace.events as JsonObject[]).filter(item => item.event_kind === "experience.procedure.usage");
+    assert.equal(presented.length, 1);
+    assert.deepEqual(presented[0]!.action_contract, {
+      kind: "experience_procedure_usage",
+      context_receipt_id: injectedExperience.receipt_id,
+      procedure_ref: { member: "experience", id: "hook-procedure", version: 1, digest: procedureRef.digest },
+      usage_state: "presented",
+      usage: false,
+      effect_evidence: "not_established",
+      source_event_refs: [],
+    });
+    assert.equal(usageCaptureCalls, 1);
+    const duplicatePrompt = await bridge.handle("experience", experienceInput);
+    assert.equal(duplicatePrompt.additionalContext, undefined);
+    assert.equal(usageCaptureCalls, 1, "a retrieved Procedure already claimed for this turn is not recorded as newly presented");
+    assert.equal((f.service.traceGet({ trace_id: procedureUsageTraceId }).events as JsonObject[])
+      .filter(item => item.event_kind === "experience.procedure.usage").length, 1);
     const proof = f.service.activationProofDoctor({});
     const components = proof.components as JsonObject[];
     assert.equal(components.find((item) => item.component === "knowledge")!.status, "executed");

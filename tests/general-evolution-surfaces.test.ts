@@ -50,6 +50,17 @@ test("split component surfaces never own independent self-evolution state", () =
   }
 });
 
+test("Experience surfaces expose durable Work Item intake, wait, resume, inspection and contract binding", () => {
+  for (const surface of ["component-experience", "component-experience-daily", "component-experience-worker"]) {
+    const projected = new Set(surfaceToolNames(surface));
+    for (const name of ["craft_experience_learning_evaluation_dispatch_next",
+      "craft_experience_learning_work_item_get", "craft_experience_learning_work_item_evaluation_contract_bind",
+      "craft_experience_learning_work_item_block", "craft_experience_learning_work_item_resume"]) {
+      assert.ok(projected.has(name), `${surface} must expose ${name}`);
+    }
+  }
+});
+
 test("no old file-dir-desc naming leaks through any surface projection", () => {
   for (const surface of ["full", "component-context-agent", "component-knowledge", "component-memory", "component-experience", "component-codebase"]) {
     for (const name of surfaceToolNames(surface)) {

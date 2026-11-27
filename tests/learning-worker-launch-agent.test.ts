@@ -126,6 +126,7 @@ test("LaunchAgent plist pins the exact worker and scoped data root without crede
 test("LaunchAgent preserves held-out evaluator configuration without copying credentials", () => {
   const f = fixture({ env: { CRAFT_LEARNING_PROJECT_SCOPES: '[{"kind":"project","id":"project:fixture"}]', CRAFT_PROGRAM_MEMORY_DESIGNS: "{}",
     CRAFT_HELD_OUT_ADAPTER_COMMAND: '["/opt/craft/evaluator","--stdio"]', CRAFT_HELD_OUT_ADAPTER_TIMEOUT_MS: "120000",
+    CRAFT_EXPERIENCE_EVALUATOR_COMMAND: '["/opt/craft/prompt-evaluator","--stdio"]', CRAFT_EXPERIENCE_EVALUATOR_TIMEOUT_MS: "60000",
     CRAFT_TRUSTED_EVALUATORS: '[{"id":"fixture-evaluator","version":"1"}]',
     OPENAI_API_KEY: "must-not-be-copied" } });
   installLearningWorkerLaunchAgent(f.deps);
@@ -136,9 +137,12 @@ test("LaunchAgent preserves held-out evaluator configuration without copying cre
   assert.match(plist, /\[&quot;\/opt\/craft\/evaluator&quot;,&quot;--stdio&quot;\]/u);
   assert.match(plist, /CRAFT_HELD_OUT_ADAPTER_TIMEOUT_MS/u);
   assert.match(plist, /CRAFT_TRUSTED_EVALUATORS/u);
+  assert.match(plist, /CRAFT_EXPERIENCE_EVALUATOR_COMMAND/u);
+  assert.match(plist, /CRAFT_EXPERIENCE_EVALUATOR_TIMEOUT_MS/u);
   assert.doesNotMatch(plist, /OPENAI_API_KEY|TOKEN|SECRET/u);
   const readiness = learningWorkerLaunchAgentStatus(f.deps);
   assert.equal(readiness.held_out_adapter_configured, true);
+  assert.equal(readiness.experience_evaluator_adapter_configured, true);
   assert.equal(readiness.program_memory_designs_configured, true);
 });
 
@@ -254,7 +258,7 @@ test("install propagates LaunchAgents directory and file access failures", () =>
 test("status, start, stop, resume, and uninstall preserve explicit lifecycle semantics", () => {
   const f = fixture({ installed: true, contents: renderLearningWorkerLaunchAgent({ exec_path: "/usr/bin/node", worker_entrypoint: "/opt/craft/worker.js", data_root: "/opt/craft/test-data" }) });
   assert.deepEqual(learningWorkerLaunchAgentStatus(f.deps), { installed: true, loaded: false, plist_path: f.plistPath, reason: "not_loaded",
-    held_out_adapter_configured: false, program_memory_designs_configured: false });
+    held_out_adapter_configured: false, experience_evaluator_adapter_configured: false, program_memory_designs_configured: false });
   assert.deepEqual(startLearningWorkerLaunchAgent(f.deps), { status: "started" });
   assert.deepEqual(startLearningWorkerLaunchAgent(f.deps), { status: "already_running" });
   assert.deepEqual(stopLearningWorkerLaunchAgent(f.deps), { status: "stopped" });
@@ -270,7 +274,7 @@ test("lifecycle commands fail closed for unsupported platforms and missing insta
   assert.throws(() => learningWorkerLaunchAgentStatus(unsupported.deps), /requires_macos/u);
   const missing = fixture();
   assert.deepEqual(learningWorkerLaunchAgentStatus(missing.deps), { installed: false, loaded: false, plist_path: missing.plistPath, reason: "not_installed",
-    held_out_adapter_configured: false, program_memory_designs_configured: false });
+    held_out_adapter_configured: false, experience_evaluator_adapter_configured: false, program_memory_designs_configured: false });
   assert.throws(() => startLearningWorkerLaunchAgent(missing.deps), /not_installed/u);
   assert.deepEqual(stopLearningWorkerLaunchAgent(missing.deps), { status: "not_installed" });
   assert.deepEqual(uninstallLearningWorkerLaunchAgent(missing.deps), { status: "already_uninstalled" });
