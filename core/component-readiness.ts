@@ -1,7 +1,7 @@
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { CRAFT_RELEASE_VERSION } from "./version.ts";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { learningWorkerDiagnostic } from "./learning-worker-diagnostic.ts";
 import { knowledgeClaimPromotionProofVerified } from "@craft/capability-knowledge/knowledge-evaluation-provenance";
 
@@ -57,28 +57,29 @@ function readDiagnosticState(directory: string, name: string): JsonObject {
   } finally { closeSync(fd); }
 }
 
-/** Summarize persisted recovery state without returning task identifiers. */
+function currentSupervisorDiagnostic(directory: string, value: JsonObject): boolean {
+  const supervisor = readDiagnosticState(join(dirname(directory), "runtime"), "supervisor.json");
+  return supervisor.status === "running" && typeof supervisor.started_at === "string"
+    && typeof value.updated_at === "string" && Number.isFinite(Date.parse(value.updated_at))
+    && Date.parse(value.updated_at) >= Date.parse(supervisor.started_at);
+}
+
+/** Read content-free counters only when they belong to the current supervisor. */
 function knowledgeCandidateDiagnostic(directory: string): JsonObject {
   try {
-    const value = readDiagnosticState(directory, "session-candidate-state.json");
-    if (!value || value.schema !== "craft.knowledge-session-candidate-state.v1") return { status: "unavailable" };
-    const plain = (input: unknown) => Boolean(input && typeof input === "object" && !Array.isArray(input));
-    const skips = value.terminal_skips === undefined ? {} : value.terminal_skips;
-    const traces = value.trace_ids_by_task === undefined ? {} : value.trace_ids_by_task;
-    const uncertain = value.uncertain_calls === undefined ? {} : value.uncertain_calls;
-    if (![skips, traces, uncertain].every(plain) || [skips, traces, uncertain].some(item => Object.keys(item as object).length > 50_000)) return { status: "unavailable" };
-    const skipMap = skips as JsonObject, traceMap = traces as JsonObject, uncertainMap = uncertain as JsonObject;
-    return { status: "last_recorded", measurement_scope: "persisted_candidate_state",
-      uncertain_calls: Object.keys(uncertainMap).length,
-      conflicting_skips: Object.keys(skipMap).filter(id => Object.hasOwn(traceMap, id) || Object.hasOwn(uncertainMap, id)).length };
+    const value = readDiagnosticState(directory, "session-candidate-diagnostic.json");
+    if (!value || value.schema !== "craft.knowledge-candidate-diagnostic.v1" || !currentSupervisorDiagnostic(directory, value)) return { status: "not_observed" };
+    if (![value.uncertain_calls, value.conflicting_skips].every(item => Number.isSafeInteger(item) && Number(item) >= 0 && Number(item) <= 50_000)) return { status: "unavailable" };
+    return { status: "last_recorded", measurement_scope: "current_supervisor",
+      uncertain_calls: value.uncertain_calls, conflicting_skips: value.conflicting_skips };
   } catch (error) { return { status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "not_observed" : "unavailable" }; }
 }
 
 /** Read only the bounded, content-free projection of the last evaluation state. */
 function knowledgeEvaluationDiagnostic(directory: string): JsonObject {
   try {
-    const value = readDiagnosticState(directory, "session-evaluation-state.json");
-    if (!value || value.schema !== "craft.knowledge-session-evaluation-state.v1" || value.legacy_unknown_outcomes === undefined)
+    const value = readDiagnosticState(directory, "session-evaluation-diagnostic.json");
+    if (!value || value.schema !== "craft.knowledge-evaluation-diagnostic.v1" || !currentSupervisorDiagnostic(directory, value))
       return { status: "not_observed" };
     if (!Number.isSafeInteger(value.legacy_unknown_outcomes) || Number(value.legacy_unknown_outcomes) < 0
       || Number(value.legacy_unknown_outcomes) > 50_000 || typeof value.updated_at !== "string"

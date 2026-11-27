@@ -75,6 +75,15 @@ export async function openOwnedLearningClients(env: NodeJS.ProcessEnv = process.
       }
       if (experience && (name === "craft_experience_learning_evaluation_run" || name === "craft_experience_learning_evaluation_result")) {
         const dispatch = experience.store.find("experience_evaluation_dispatch", String(args.dispatch_id));
+        if (typeof dispatch?.learning_work_item_id === "string") {
+          const item = experience.store.find("experience_learning_work_item", dispatch.learning_work_item_id);
+          if (!item) throw new Error("LearningWorkItemLeaseUnavailable");
+          const active = item.active_dispatch_ref as JsonObject | null | undefined;
+          if (!projectScopes.some(project => project.id === item.scope)) throw new Error("LearningProjectScopeForbidden");
+          if (item.status !== "processing" || active?.id !== dispatch.id || typeof item.lease_owner !== "string" || typeof item.lease_token !== "string") throw new Error("LearningWorkItemLeaseUnavailable");
+          const bound = { ...args, worker_id: item.lease_owner, lease_token: item.lease_token };
+          return name.endsWith("_run") ? experience.experienceLearningEvaluationRun(bound) : experience.experienceLearningEvaluationResult(bound);
+        }
         const procedure = dispatch ? experience.store.find("experience_procedure", String(dispatch.procedure_id)) : null;
         const binding = procedure ? experience.store.find("program_memory_procedure_binding", String(procedure.request_id)) : null;
         if (binding) {

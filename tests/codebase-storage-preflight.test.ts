@@ -5,7 +5,7 @@ import { linkDirectorySync } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory } from 'craft-common-store-local/paths';
+import { craftPaths, ensureProjectStorageDirectory, projectStorageDirectory, projectStorageIdentity } from 'craft-common-store-local/paths';
 import { CraftStore } from 'craft-common-store-local/store';
 import { WorkspaceState } from "../core/workspace.ts";
 import { DatabaseSync } from "node:sqlite";
@@ -100,7 +100,7 @@ test("Codebase preflight pages current, old project and missing Workspace revisi
     workspace.checkpoint({ workspace_id: "repo", checkpoint_id: "old", label: "old" });
     workspace.checkpoint({ workspace_id: "repo", checkpoint_id: "current", label: "current" });
     workspace.checkpoint({ workspace_id: "repo", checkpoint_id: "steady", label: "steady" });
-    const old = join(project, ".craft_data", "codebase", "snapshots", "repo", "old");
+    const old = join(paths.root, "projects", projectStorageIdentity(project).directory_name, "codebase", "snapshots", "repo", "old");
     mkdirSync(dirname(old), { recursive: true });
     renameSync(join(projectStorageDirectory(paths, project), "codebase", "snapshots", "repo", "old"), old);
     const row = store.database.prepare("SELECT payload_json FROM records WHERE kind='workspace_checkpoint' AND id='old'").get() as { payload_json: string };
@@ -363,7 +363,7 @@ test("Codebase migration recovers a corrupt snapshot only from a digest-matching
     const workspace = new WorkspaceState(store, paths);
     workspace.open({ workspace_id: "repo", name: "repo", root_path: project, include_paths: ["a.ts"] });
     workspace.checkpoint({ workspace_id: "repo", checkpoint_id: "git-old", label: "git-old" });
-    const old = join(project, ".craft_data", "codebase", "snapshots", "repo", "git-old");
+    const old = join(paths.root, "projects", projectStorageIdentity(project).directory_name, "codebase", "snapshots", "repo", "git-old");
     mkdirSync(dirname(old), { recursive: true });
     renameSync(join(projectStorageDirectory(paths, project), "codebase", "snapshots", "repo", "git-old"), old);
     const row = store.database.prepare("SELECT payload_json FROM records WHERE kind='workspace_checkpoint' AND id='git-old'").get() as { payload_json: string };

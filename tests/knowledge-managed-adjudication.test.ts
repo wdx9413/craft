@@ -475,3 +475,13 @@ test("managed adjudication rejects transcript-only and mixed evidence before inv
     assert.equal(f.calls.length, 0);
   } finally { await f.close(); }
 });
+
+test("managed adjudication does not repeat a model call after an unknown result", async () => {
+  const f = await fixture(undefined, undefined, { fail: new Error("response lost") });
+  try {
+    const args = { case_id: f.case_.id, expected_version: f.case_.version };
+    await assert.rejects(f.service.knowledgeEvaluationCaseAdjudicateManaged(args), /response lost/u);
+    await assert.rejects(f.service.knowledgeEvaluationCaseAdjudicateManaged(args), /requires reconciliation/u);
+    assert.equal(f.calls.length, 1);
+  } finally { await f.close(); }
+});

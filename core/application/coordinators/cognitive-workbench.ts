@@ -36,9 +36,9 @@ export class CognitiveWorkbenchCoordinator {
   }
   saveMemory(args: JsonObject): JsonObject {
     const sourceId = String(args.source_id ?? "studio-local-source");
-    if (!this.ports.store.find("knowledge_source", sourceId)) this.ports.registerSource({ source_id: sourceId, kind: "custom", label: "Studio local memory", scope_kind: "user", scope_id: "local", locator: "studio://memory", content_digest: digestJson(sourceId), trust: "bounded", access: "proposal_only" });
+    if (!this.ports.store.find("knowledge_source", sourceId)) this.ports.registerSource({ source_id: sourceId, kind: "custom", label: "Studio local memory", scope_kind: "global", scope_id: "global", locator: "studio://memory", content_digest: digestJson(sourceId), trust: "bounded", access: "proposal_only" });
     const kind = ["working", "episodic", "preference", "procedural"].includes(String(args.kind)) ? args.kind : "episodic";
-    return this.ports.proposeMemory({ ...args, kind, source_id: sourceId, scope_kind: args.scope_kind ?? args.scope ?? "user", scope_id: args.scope_id ?? "local" });
+    return this.ports.proposeMemory({ ...args, kind, source_id: sourceId, scope_kind: args.scope_kind ?? args.scope ?? "global", scope_id: args.scope_id ?? "global" });
   }
   saveClaim(args: JsonObject): JsonObject {
     const scope = typeof args.scope === "string" ? args.scope : "";

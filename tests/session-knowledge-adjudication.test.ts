@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,32 @@ import type { JsonObject } from "../core/infrastructure/store.ts";
 import { readKnowledgeAdjudicationCursor, readKnowledgeAdjudicationRetries, recordKnowledgeAdjudicationFailure, writeKnowledgeAdjudicationCursor } from "../deploy/experience-learning/session-knowledge-adjudication-state.ts";
 import { runSessionKnowledgeAdjudicationOnce } from "../deploy/experience-learning/session-knowledge-adjudication.ts";
 import type { ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
+
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { LocalSupervisor } from "../core/supervisor.ts";
+import { readVolatileLearningState } from "../core/codex-session-archive.ts";
+
+let volatileRoot: string;
+let volatileStore: CraftStore;
+let volatileSupervisor: LocalSupervisor;
+let priorDataRoot: string | undefined;
+test.before(async () => {
+  priorDataRoot = process.env.CRAFT_DATA_DIR;
+  volatileRoot = mkdtempSync(join(tmpdir(), "craft-adjudication-memory-"));
+  process.env.CRAFT_DATA_DIR = volatileRoot;
+  volatileStore = await new CraftStore(craftPaths(volatileRoot)).open();
+  volatileSupervisor = new LocalSupervisor(new CraftService(volatileStore), volatileStore.paths);
+  await volatileSupervisor.start();
+});
+test.after(async () => {
+  await volatileSupervisor.close();
+  volatileStore.close();
+  if (priorDataRoot === undefined) delete process.env.CRAFT_DATA_DIR;
+  else process.env.CRAFT_DATA_DIR = priorDataRoot;
+  rmSync(volatileRoot, { recursive: true, force: true });
+});
 
 const provider: ModelProviderSpec = { provider: "codex-cli", label: "Codex CLI Host", protocol: "openai-compatible",
   base_url: "https://codex-cli-host.invalid", api_key_env: "CODEX_CLI_AUTH_STORE", chat_path: "/host/exec", models: { small: "gpt-6-luna" },
@@ -117,11 +143,11 @@ test("adjudication cursor advances over empty pages and resets after the final p
   try {
     const first = fixture({ caseListResult: { cases: [], has_more: true, next_cursor: "page-last-id" } });
     await runSessionKnowledgeAdjudicationOnce({ client: first.client, knowledge_adjudication_cursor_file: cursorFile });
-    assert.equal(readKnowledgeAdjudicationCursor(cursorFile), "page-last-id");
+    assert.equal((await readKnowledgeAdjudicationCursor(cursorFile)), "page-last-id");
     const last = fixture({ caseListResult: { cases: [], has_more: false, next_cursor: null } });
     await runSessionKnowledgeAdjudicationOnce({ client: last.client, knowledge_adjudication_cursor_file: cursorFile });
     assert.equal(last.calls.find(call => call.name === "craft_knowledge_evaluation_case_list")?.args.after_id, "page-last-id");
-    assert.equal(readKnowledgeAdjudicationCursor(cursorFile), null);
+    assert.equal((await readKnowledgeAdjudicationCursor(cursorFile)), null);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -148,7 +174,7 @@ test("failed cases back off, expose bounded page metrics, and retry after the de
     const start = "2026-10-23T00:00:00.000Z";
     await assert.rejects(runSessionKnowledgeAdjudicationOnce({ client: f.client, transport: f.transport, providers: [provider],
       knowledge_adjudication_cursor_file: cursorFile }, start));
-    const retry = readKnowledgeAdjudicationRetries(cursorFile)["held-case"];
+    const retry = (await readKnowledgeAdjudicationRetries(cursorFile))["held-case"];
     assert.equal(retry?.attempts, 1);
     assert.equal(retry?.next_attempt_at, "2026-10-23T00:00:30.000Z");
 
@@ -164,7 +190,7 @@ test("failed cases back off, expose bounded page metrics, and retry after the de
     const recovered = await runSessionKnowledgeAdjudicationOnce({ client: f.client, transport: f.transport, providers: [provider],
       knowledge_adjudication_cursor_file: cursorFile }, "2026-10-23T00:00:30.000Z");
     assert.equal(recovered.status, "adjudicated");
-    assert.deepEqual(readKnowledgeAdjudicationRetries(cursorFile), {});
+    assert.deepEqual((await readKnowledgeAdjudicationRetries(cursorFile)), {});
     assert.equal((recovered.queue_metrics as JsonObject).page_ready_count, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -240,7 +266,7 @@ test("previously adjudicated cases create exactly one shadow run without a secon
     await writeKnowledgeAdjudicationCursor(cursorFile, null);
     const result = await runSessionKnowledgeAdjudicationOnce({ client: scoped.client, knowledge_adjudication_cursor_file: cursorFile });
     assert.equal(result.status, "shadow_evaluation_created");
-    assert.deepEqual(readKnowledgeAdjudicationRetries(cursorFile), {});
+    assert.deepEqual((await readKnowledgeAdjudicationRetries(cursorFile)), {});
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -334,15 +360,15 @@ test("retry cursor keeps only a validated structured MCP error code", async () =
     const f = fixture({ throwOn: "craft_knowledge_evaluation_case_adjudicate", throwCode: "ERR_MCP_INTERNAL_ERROR" });
     await assert.rejects(runSessionKnowledgeAdjudicationOnce({ client: f.client, transport: f.transport, providers: [provider],
       knowledge_adjudication_cursor_file: cursor }));
-    const saved = readKnowledgeAdjudicationRetries(cursor)["held-case"];
+    const saved = (await readKnowledgeAdjudicationRetries(cursor))["held-case"];
     assert.equal(saved?.failure_kind, "TypeError");
     assert.equal(saved?.failure_code, "ERR_MCP_INTERNAL_ERROR");
-    assert.equal(readFileSync(cursor, "utf8").includes("controlled failure"), false);
+    assert.equal(JSON.stringify(await readVolatileLearningState(cursor)).includes("controlled failure"), false);
 
     const unsafe = fixture({ throwOn: "craft_knowledge_evaluation_case_adjudicate", throwCode: "private/path" });
     await assert.rejects(runSessionKnowledgeAdjudicationOnce({ client: unsafe.client, transport: unsafe.transport, providers: [provider],
       knowledge_adjudication_cursor_file: join(root, "knowledge", "unsafe.json") }));
-    assert.equal(readKnowledgeAdjudicationRetries(join(root, "knowledge", "unsafe.json"))["held-case"]?.failure_code, undefined);
+    assert.equal((await readKnowledgeAdjudicationRetries(join(root, "knowledge", "unsafe.json")))["held-case"]?.failure_code, undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -363,7 +389,7 @@ test("malformed MCP replies and raw failures retain safe retry state", async () 
       const failed = fixture(options);
       await assert.rejects(runSessionKnowledgeAdjudicationOnce({ client: failed.client,
         knowledge_adjudication_cursor_file: cursor }, "2026-10-23T00:00:00.000Z"));
-      assert.equal(readKnowledgeAdjudicationRetries(cursor)["held-case"]?.failure_kind, "Error");
+      assert.equal((await readKnowledgeAdjudicationRetries(cursor))["held-case"]?.failure_kind, "Error");
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -378,9 +404,9 @@ test("test-only held-out evidence waits without asking the model and remains pen
       knowledge_adjudication_cursor_file: cursor });
     assert.equal(result.status, "waiting_for_outcome_evidence");
     assert.equal(result.model_calls, 0);
-    assert.equal(readKnowledgeAdjudicationCursor(cursor), "held-case");
+    assert.equal((await readKnowledgeAdjudicationCursor(cursor)), "held-case");
     assert.equal(f.calls.some(call => call.name === "craft_knowledge_evaluation_case_adjudicate"), false);
     assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_profile_ensure_single"), false);
-    assert.deepEqual(readKnowledgeAdjudicationRetries(cursor), {});
+    assert.deepEqual((await readKnowledgeAdjudicationRetries(cursor)), {});
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

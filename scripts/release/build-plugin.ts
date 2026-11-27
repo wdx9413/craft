@@ -19,6 +19,7 @@ for (const [entry, file, format] of [
   const capture = captureBuildInputs(root);
   const result = await build({ absWorkingDir: root, entryPoints: [entry], outfile: resolve(output, file), bundle: true,
     platform: "node", target: "node23", format, metafile: true, plugins: [capture.plugin],
+    ...(file === "craft-experience-learning-worker.js" ? { banner: { js: 'import { createRequire as __craftCreateRequire } from "node:module"; const require = __craftCreateRequire(import.meta.url);' } } : {}),
     define: { CRAFT_TYPESCRIPT_BUNDLE: "true", ...(format === "cjs" ? { "import.meta.url": "undefined" } : {}) } });
   await writeFile(resolve(output, `${file}.inputs.json`), JSON.stringify(capture.seal(result.metafile!)));
   process.stdout.write(`Built ${file}: ${Object.keys(result.metafile!.inputs).length} captured inputs\n`);

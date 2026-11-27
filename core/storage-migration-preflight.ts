@@ -3,7 +3,7 @@ import { lstatSync, realpathSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { isAbsolute, join } from "node:path";
 import { stableDigest } from 'craft-common-base/digest';
-import { canonicalCandidatePath, parseSessionStorageScopeId, projectStorageDirectory, sessionStorageDirectory, sessionStorageScopeId, type CraftPaths } from 'craft-common-store-local/paths';
+import { canonicalCandidatePath, parseSessionStorageScopeId, projectStorageDirectory, projectStorageIdentity, sessionStorageDirectory, sessionStorageScopeId, type CraftPaths } from 'craft-common-store-local/paths';
 
 type Scope = { kind: string; id: string };
 type Partition = { file: string; scope: Scope };
@@ -164,7 +164,7 @@ export class StorageMigrationPreflightReader {
             const pathHash = createHash("sha256").update(root).digest("hex");
             projectIdentityStatus = scope.id === pathHash || scope.id === `project:${pathHash}` ? "current" : "migration_required";
             target = join(projectStorageDirectory(paths, root), domain, `${domain}.db`);
-            const legacy = join(root, ".craft_data", domain, `${domain}.db`);
+            const legacy = join(paths.root, "projects", projectStorageIdentity(root).directory_name, domain, `${domain}.db`);
             if (canonicalCandidatePath(source) === canonicalCandidatePath(target)) status = "current";
             else if (canonicalCandidatePath(source) === canonicalCandidatePath(legacy)) status = "legacy_ready";
           }

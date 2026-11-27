@@ -1,7 +1,7 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { canonicalCandidatePath, projectStorageDirectory, type CraftPaths } from 'craft-common-store-local/paths';
+import { canonicalCandidatePath, projectStorageDirectory, projectStorageIdentity, type CraftPaths } from 'craft-common-store-local/paths';
 
 export type CodebaseMigrationStatus = "current" | "legacy_ready" | "missing_root" | "ambiguous_root"
   | "missing_workspace" | "invalid_checkpoint" | "source_out_of_scope" | "missing_snapshot";
@@ -90,6 +90,7 @@ export function codebaseStoragePreflight(paths: CraftPaths, args: { max_records?
       const root = existing[0]!;
       const target = join(projectStorageDirectory(paths, root), "codebase", "snapshots", workspaceId, row.id);
       const candidates = [target, join(root, ".craft_data", "codebase", "snapshots", workspaceId, row.id),
+        join(paths.root, "projects", projectStorageIdentity(root).directory_name, "codebase", "snapshots", workspaceId, row.id),
         join(root, ".craft_data", "codebase", "runtime", "workspaces", workspaceId, "snapshots", row.id),
         join(paths.runtimeDir, "workspaces", workspaceId, "snapshots", row.id)];
       let position: number;

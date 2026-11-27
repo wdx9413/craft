@@ -1,6 +1,7 @@
-import { lstatSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { hasUnresolvedTaskCall } from "./session-knowledge-call-reconciliation.ts";
+import { join, resolve } from "node:path";
 import { atomicPrivateJson, craftPaths, dataRoot } from 'craft-common-store-local/paths';
+import { readVolatileLearningState, registerVolatileLearningState, writeVolatileLearningState } from "../../core/codex-session-archive.ts";
 import { stableDigest } from "../../core/digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
@@ -19,6 +20,7 @@ const OUTPUT_SCHEMA = { type: "object", properties: {
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
 interface EvaluationState { processed_task_ids: string[]; trace_ids_by_task: Record<string, string>; last_attempted_task_id?: string; legacy_unknown_outcomes?: number; legacy_untraced_tasks?: number;
   uncertain_calls: Record<string, { trace_id: string; input_digest: string }> }
+const evaluationDiagnosticDirs = new Map<string, string>();
 export interface SessionKnowledgeEvaluationDependencies {
   client: ExperienceLearningClient;
   providers?: readonly ModelProviderSpec[];
@@ -35,13 +37,15 @@ function object(value: unknown, name: string): JsonObject {
   return value as JsonObject;
 }
 function evaluationStatePath(deps: SessionKnowledgeEvaluationDependencies): string {
-  return resolve(deps.state_file ?? join(craftPaths(dataRoot(deps.env)).knowledgeDir, "session-evaluation-state.json"));
+  const path = resolve(deps.state_file ?? join(craftPaths(dataRoot(deps.env)).knowledgeDir, "session-evaluation-state.json"));
+  registerVolatileLearningState(path, deps.env);
+  evaluationDiagnosticDirs.set(path, craftPaths(dataRoot(deps.env)).knowledgeDir);
+  return path;
 }
-function readState(path: string): EvaluationState {
+async function readState(path: string): Promise<EvaluationState> {
   try {
-    const stat = lstatSync(path);
-    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error("Knowledge evaluation state file is invalid");
-    const value = JSON.parse(readFileSync(path, "utf8")) as JsonObject;
+    const value = await readVolatileLearningState(path);
+    if (value === null) throw Object.assign(new Error("Learning state is empty"), { code: "ENOENT" });
     const traces = value.trace_ids_by_task === undefined ? {} : value.trace_ids_by_task;
     const uncertain = value.uncertain_calls === undefined ? {} : value.uncertain_calls;
     if (value.schema !== SCHEMA || !Array.isArray(value.processed_task_ids) || value.processed_task_ids.length > 50_000
@@ -67,12 +71,21 @@ function readState(path: string): EvaluationState {
   }
 }
 async function writeState(path: string, state: EvaluationState): Promise<void> {
-  try { if (lstatSync(dirname(path)).isSymbolicLink()) throw new Error("Knowledge evaluation state directory must not be a symbolic link"); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  await atomicPrivateJson(path, { schema: SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000),
+  await writeVolatileLearningState(path, { schema: SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000),
     trace_ids_by_task: Object.fromEntries(Object.entries(state.trace_ids_by_task).slice(-50_000)),
     last_attempted_task_id: state.last_attempted_task_id, legacy_unknown_outcomes: state.legacy_unknown_outcomes, legacy_untraced_tasks: state.legacy_untraced_tasks,
     uncertain_calls: state.uncertain_calls, updated_at: new Date().toISOString() });
+  try {
+    const directory = evaluationDiagnosticDirs.get(path)!;
+    try { if (lstatSync(directory).isSymbolicLink()) throw new Error("Knowledge diagnostic directory must not be a symbolic link"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    await atomicPrivateJson(join(directory, "session-evaluation-diagnostic.json"), {
+      schema: "craft.knowledge-evaluation-diagnostic.v1", updated_at: new Date().toISOString(),
+      legacy_unknown_outcomes: state.legacy_unknown_outcomes ?? 0, legacy_untraced_tasks: state.legacy_untraced_tasks ?? 0,
+    });
+  } catch (error) {
+    console.warn("Knowledge evaluation diagnostic update failed", error instanceof Error ? error.name : "unknown");
+  }
 }
 function parseOutput(value: string): JsonObject {
   let parsed: unknown;
@@ -130,7 +143,7 @@ async function completedEvaluation(client: ExperienceLearningClient, task: JsonO
 
 /** Create at most one model-labeled, held-out candidate-shadow case; provenance gates still decide eligibility. */
 export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEvaluationDependencies): Promise<JsonObject> {
-  const path = evaluationStatePath(deps), state = readState(path);
+  const path = evaluationStatePath(deps), state = await readState(path);
   const batch = await codexSessionTaskBatch("held_out", deps.archive_options, deps.env);
   const processed = new Set(state.processed_task_ids);
   const legacyUnknown = (batch.tasks as JsonObject[]).filter(item => typeof item.task_id === "string"
@@ -234,13 +247,35 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
   const system = `为独立留出会话生成待审标签。只从给定的当前候选 Claim 中选择直接回答任务目标的 Claim，不得改写 Claim 或臆造标签；没有充分匹配时返回 skip。返回 JSON：decision 为 labeled 或 skip，expected_claim_ids 为所选 Claim ID 数组。该标签是模型候选，不是人工真值；来源证据资格由 Craft 后续独立判断。${generatedTextLanguageInstruction(deps.contentLanguage ?? "zh-CN")}`;
   const messages: ChatMessage[] = [{ role: "system", content: system }, { role: "user", content: JSON.stringify(packet) }];
   if (!deps.transport) return { status: "waiting_for_model", processed: 0, reason: "model_transport_unavailable", raw_content_stored: false };
+  if (await hasUnresolvedTaskCall(deps.client, String(task.task_id), "knowledge-session-evaluation-worker", call => completedEvaluation(deps.client, task, call)))
+    return { status: "waiting_for_call_reconciliation", processed: 0, reason: "model_result_unknown", raw_content_stored: false };
   if (deps.transport.acquireCall && !deps.transport.acquireCall(provider.provider)) return { status: "waiting_for_budget", processed: 0, reason: "model_call_budget_exhausted", raw_content_stored: false };
-  const started = object(await deps.client.call("craft_trace_start", { task_id: `knowledge:${task.task_id}`, operation_id: String(task.task_id),
+  const traceKey = `trace_${stableDigest({ purpose: "knowledge_held_out_label", task_id: task.task_id, input_digest: inputDigest }).slice(-32)}`;
+  const started = object(await deps.client.call("craft_trace_start", { trace_id: traceKey, task_id: `knowledge:${task.task_id}`, operation_id: String(task.task_id), project_scope_id: task.project_scope_id,
     model_fingerprint: fingerprint, capability_fingerprint: `craft-knowledge:${CRAFT_RELEASE_VERSION}`,
     metadata: { purpose: "knowledge_held_out_label", input_digest: inputDigest, dataset_partition: "held_out", label_source: "model_candidate", content_stored: false } }), "Knowledge evaluation Trace start");
   const traceId = String(object(started.trace, "Knowledge evaluation Trace").id ?? "");
   if (!traceId) throw new Error("Knowledge evaluation Trace has no id");
   if (!/^trace[-_][A-Za-z0-9_-]{1,160}$/u.test(traceId)) throw new Error("Knowledge evaluation Trace id is invalid");
+  if (started.idempotent === true) {
+    state.uncertain_calls[String(task.task_id)] = { trace_id: traceId, input_digest: inputDigest };
+    await writeState(path, state);
+    const decision = await completedEvaluation(deps.client, task, { trace_id: traceId, input_digest: inputDigest });
+    if (!decision) return { status: "waiting_for_call_reconciliation", processed: 0, reason: "model_result_unknown", raw_content_stored: false };
+    let current: JsonObject;
+    try { current = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(String(task.task_id), { ...deps.archive_options, expected_partition: "held_out" }, deps.env); }
+    catch { return { status: "waiting_for_source_revalidation", processed: 0, reason: "archive_unavailable", raw_content_stored: false }; }
+    if (current.status !== "ready" || current.source_ref !== task.source_ref || current.session_id !== task.session_id
+      || current.turn_id !== task.turn_id || current.project_scope_id !== task.project_scope_id
+      || (current.verification_outcome ?? null) !== (task.verification_outcome ?? null)
+      || JSON.stringify(current.evidence_ids) !== JSON.stringify(task.verification_evidence_ids))
+      return { status: "waiting_for_source_revalidation", processed: 0, reason: "archive_changed", raw_content_stored: false };
+    state.processed_task_ids.push(String(task.task_id));
+    state.trace_ids_by_task[String(task.task_id)] = traceId;
+    delete state.uncertain_calls[String(task.task_id)];
+    await writeState(path, state);
+    return { status: "completed_call_reconciled", processed: 1, decision, trace_id: traceId, raw_content_stored: false };
+  }
   let archiveRejected = false;
   try {
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.request", actor: "knowledge-session-evaluation-worker",
@@ -327,3 +362,4 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
     throw error;
   }
 }
+import { lstatSync } from "node:fs";

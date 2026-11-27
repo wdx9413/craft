@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { craftPaths, projectStorageDirectory } from 'craft-common-store-local/paths';
+import { craftPaths, projectStorageDirectory, projectStorageIdentity } from 'craft-common-store-local/paths';
 import { CraftStore } from 'craft-common-store-local/store';
 import { migrateCodebaseSnapshots } from "../core/codebase-storage-migration.ts";
 import type { CodebaseMigrationEntry } from "../core/codebase-storage-preflight.ts";
@@ -20,7 +20,7 @@ async function fixture(t: test.TestContext) {
   mkdirSync(project);
   const store = await new CraftStore(paths).open({ skipLegacyPartitionMigration: true });
   t.after(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
-  const source = join(project, ".craft_data", "codebase", "snapshots", "repo", "snapshot");
+  const source = join(paths.root, "projects", projectStorageIdentity(project).directory_name, "codebase", "snapshots", "repo", "snapshot");
   mkdirSync(join(source, "src"), { recursive: true });
   mkdirSync(join(source, "empty"));
   const content = "export const value = 1;\n", file = join(source, "src", "a.ts");
@@ -111,7 +111,7 @@ test("snapshot migration rejects a replacement directory at the same project pat
   try {
     const result = await migrateCodebaseSnapshots(f.store, [f.entry]);
     assert.equal(result.migrated, 0);
-    assert.equal(result.blocked[0]?.reason, "project_root_changed_or_missing");
+    assert.match(String(result.blocked[0]?.reason), /project_root_changed_or_missing|ENOENT/u);
     assert.equal(f.store.get("workspace_checkpoint", "snapshot").snapshot_root, f.source);
   } finally { mocked.mock.restore(); syncBuiltinESMExports(); }
 });

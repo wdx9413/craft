@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,8 +10,8 @@ import { payload, stableDigest } from "../../core/digest.ts";
 import { ProcedureDefinitionStore } from '@craft/capability-experience/procedure-definition';
 import { projectIdentityFromRoot } from "../../core/scope-identity.ts";
 
-const projectRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-export const scope = String((projectIdentityFromRoot(projectRoot).canonical_scope as JsonObject).id);
+const fixtureSourceRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+export const scope = String((projectIdentityFromRoot(fixtureSourceRoot).canonical_scope as JsonObject).id);
 export const spec = (preconditions: string[] = []): JsonObject => ({
   steps: [{ id: "review", type: "instruction", side_effect: "read_only", requires: ["diff"], provides: ["report"], instruction: "Review diff" }],
   composition: { entries: [{ id: "review", title: "Review", required_inputs: ["diff"], preconditions, routes: [{ exit_id: "reviewed", step_ids: ["review"] }] }],
@@ -19,9 +19,11 @@ export const spec = (preconditions: string[] = []): JsonObject => ({
 });
 export async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-invocation-"));
+  const projectRoot = join(root, "project");
+  await mkdir(projectRoot);
   const store = await new CraftStore(craftPaths(root)).open();
   let service = new CraftService(store), n = 0;
-  service.scopeIdentityResolveProject({ project_root: projectRoot });
+  service.scopeAliasBind({ scope_kind: "project", scope_id: scope, alias_kind: "path", alias: projectRoot });
   store.create("task", "task", { status: "active" });
   store.create("task_control_contract", "contract", { task_id: "task", allowed_effects: ["read_only", "local_write"] });
   store.create("task_run", "run", { contract_id: "contract" });

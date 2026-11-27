@@ -1,3 +1,4 @@
+import { LocalSupervisor, SupervisorClient } from "../core/supervisor.ts";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -25,6 +26,39 @@ async function openStore(): Promise<{ store: CraftStore; root: string }> {
   const root = await mkdtemp(join(tmpdir(), "craft-context-ext-"));
   const store = await new CraftStore(craftPaths(root)).open();
   return { store, root };
+}
+
+/** Construct records written by the former SQLite-backed Context implementation. */
+class LegacyContextFixture {
+  readonly store: CraftStore;
+  constructor(store: CraftStore) { this.store = store; }
+  recordEphemeral(args: JsonObject): JsonObject {
+    const session = String(args.session_id), host = String(args.session_host), source = String(args.source ?? "default");
+    const scope = sessionStorageScopeId(host, session);
+    if (new MemoryFileStore(this.store).isSessionArchived(scope)) throw new Error("SESSION_ARCHIVED");
+    const id = String(args.index_id ?? `context_ephemeral_${stableDigest({ session_scope_id: scope, source }).slice(-32)}`);
+    const items = (args.items as JsonObject[]).map((item, i) => ({ id: String(item.id ?? `${source}:${i}`), text: item.text ?? item.content,
+      title: item.title ?? null, source: item.source ?? source }));
+    const now = String(args.now ?? new Date().toISOString());
+    const data = { session_id: session, session_host: host, session_scope_id: scope, source, items,
+      item_count: items.length, total_chars: items.reduce((sum, item) => sum + String(item.text).length, 0),
+      expires_at: new Date(Date.parse(now) + Number(args.ttl_seconds ?? 3600) * 1000).toISOString(),
+      identity_digest: stableDigest({ session_scope_id: scope, source, items }), content_free: false, ephemeral: true };
+    if (this.store.find("context_ephemeral_index", id, undefined, false)) this.store.save("context_ephemeral_index", id, data);
+    else this.store.create("context_ephemeral_index", id, data);
+    return { index_id: id };
+  }
+  checkpointResume(args: JsonObject): JsonObject {
+    const session = String(args.session_id), host = String(args.session_host), scope = sessionStorageScopeId(host, session);
+    if (new MemoryFileStore(this.store).isSessionArchived(scope)) throw new Error("SESSION_ARCHIVED");
+    const id = `context_resume_${stableDigest({ session_scope_id: scope }).slice(-32)}`;
+    const data = { session_id: session, session_host: host, session_scope_id: scope, scope: args.scope ?? null,
+      captured_at: args.now ?? new Date().toISOString(), files_touched: args.files_touched ?? [], tasks: args.tasks ?? [],
+      errors: args.errors ?? [], decisions: args.decisions ?? [], open_questions: args.open_questions ?? [], content_free: false };
+    if (this.store.find("context_resume_snapshot", id, undefined, false)) this.store.save("context_resume_snapshot", id, data);
+    else this.store.create("context_resume_snapshot", id, data);
+    return { resume_id: id };
+  }
 }
 
 test("routing render names the compute/capture/search tools", async () => {
@@ -62,116 +96,128 @@ test("computeEnv keeps only the allowlisted environment keys", () => {
 
 test("ephemeral index records, deduplicates, updates and bounds input", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
     const kernel = new ContextExtensionsKernel(store);
-    const first = kernel.recordEphemeral({ session_host: "codex", session_id: "s1", source: "logs",
-      items: [{ id: "a", text: "alpha beta", title: "A" }, { id: "a", text: "alpha beta updated" }] });
+    const first = (await kernel.recordEphemeral({ session_host: "codex", session_id: "s1", source: "logs",
+      items: [{ id: "a", text: "alpha beta", title: "A" }, { id: "a", text: "alpha beta updated" }] }));
     assert.equal(first.item_count, 1);
-    const second = kernel.recordEphemeral({ session_host: "codex", session_id: "s1", source: "logs", items: [{ id: "b", text: "gamma" }] });
+    const second = (await kernel.recordEphemeral({ session_host: "codex", session_id: "s1", source: "logs", items: [{ id: "b", text: "gamma" }] }));
     assert.equal(second.item_count, 1);
-    const contentOnly = kernel.recordEphemeral({ session_host: "codex", session_id: "s1", source: "logs", items: [{ content: "delta", source: "inline" }] });
+    const contentOnly = (await kernel.recordEphemeral({ session_host: "codex", session_id: "s1", source: "logs", items: [{ content: "delta", source: "inline" }] }));
     assert.equal(contentOnly.item_count, 1);
-    assert.throws(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [] }), /non-empty array/u);
-    assert.throws(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: Array.from({ length: 501 }, (_, index) => ({ id: String(index), text: "x" })) }), /item limit/u);
-    assert.throws(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [1] }), /object/u);
-    assert.throws(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [{ id: "a", text: " " }] }), /items\.text/u);
-    assert.throws(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [{ id: "a", text: "x".repeat(400_001) }] }), /character limit/u);
-    assert.throws(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [{ id: "a", text: "x" }], ttl_seconds: 0 }), /ttl_seconds/u);
-    assert.throws(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [{ id: "a", text: "x" }], now: "nope" }), /ISO timestamp/u);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    await assert.rejects(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [] }), /non-empty array/u);
+    await assert.rejects(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: Array.from({ length: 501 }, (_, index) => ({ id: String(index), text: "x" })) }), /item limit/u);
+    await assert.rejects(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [1] }), /object/u);
+    await assert.rejects(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [{ id: "a", text: " " }] }), /items\.text/u);
+    await assert.rejects(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [{ id: "a", text: "x".repeat(400_001) }] }), /character limit/u);
+    await assert.rejects(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [{ id: "a", text: "x" }], ttl_seconds: 0 }), /ttl_seconds/u);
+    await assert.rejects(() => kernel.recordEphemeral({ session_host: "codex", session_id: "s1", items: [{ id: "a", text: "x" }], now: "nope" }), /ISO timestamp/u);
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("ephemeral search reports missing, expired, matched and unmatched indexes", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
     const kernel = new ContextExtensionsKernel(store);
-    assert.equal(kernel.searchEphemeral({ session_host: "codex", session_id: "none", query: "alpha" }).reason, "index_missing");
-    kernel.recordEphemeral({ session_host: "codex", session_id: "s2", source: "docs", ttl_seconds: 1, now: "2020-01-01T00:00:00.000Z",
-      items: [{ id: "a", text: "alpha beta" }] });
-    assert.equal(kernel.searchEphemeral({ session_host: "codex", session_id: "s2", source: "docs", query: "alpha", now: "2020-01-02T00:00:00.000Z" }).reason, "index_expired");
-    kernel.recordEphemeral({ session_host: "codex", session_id: "s3", source: "docs", items: [{ id: "a", text: "alpha beta" }, { id: "b", text: "gamma" }] });
-    const matched = kernel.searchEphemeral({ session_host: "codex", session_id: "s3", source: "docs", query: "alpha" });
+    assert.equal((await kernel.searchEphemeral({ session_host: "codex", session_id: "none", query: "alpha" })).reason, "index_unavailable");
+    (await kernel.recordEphemeral({ session_host: "codex", session_id: "s2", source: "docs", ttl_seconds: 1, now: "2020-01-01T00:00:00.000Z",
+      items: [{ id: "a", text: "alpha beta" }] }));
+    assert.equal((await kernel.searchEphemeral({ session_host: "codex", session_id: "s2", source: "docs", query: "alpha", now: "2020-01-02T00:00:00.000Z" })).reason, "index_expired");
+    (await kernel.recordEphemeral({ session_host: "codex", session_id: "s3", source: "docs", items: [{ id: "a", text: "alpha beta" }, { id: "b", text: "gamma" }] }));
+    const matched = (await kernel.searchEphemeral({ session_host: "codex", session_id: "s3", source: "docs", query: "alpha" }));
     assert.equal(matched.reason, "matched");
     assert.equal((matched.hits as unknown[]).length, 1);
-    assert.equal(kernel.searchEphemeral({ session_host: "codex", session_id: "s3", source: "docs", query: "zzz" }).reason, "no_match");
-    assert.equal(kernel.searchEphemeral({ session_host: "codex", session_id: "s4", query: "alpha" }).reason, "index_missing");
-    assert.throws(() => kernel.searchEphemeral({ session_host: "codex", session_id: "s3", query: "alpha", limit: 0 }), /limit/u);
-    assert.throws(() => kernel.searchEphemeral({ session_host: "codex", session_id: "s3", query: "" }), /query/u);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    assert.equal((await kernel.searchEphemeral({ session_host: "codex", session_id: "s3", source: "docs", query: "zzz" })).reason, "no_match");
+    assert.equal((await kernel.searchEphemeral({ session_host: "codex", session_id: "s4", query: "alpha" })).reason, "index_unavailable");
+    await assert.rejects(() => kernel.searchEphemeral({ session_host: "codex", session_id: "s3", query: "alpha", limit: 0 }), /limit/u);
+    await assert.rejects(() => kernel.searchEphemeral({ session_host: "codex", session_id: "s3", query: "" }), /query/u);
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("ephemeral search requires expansion rather than cutting an oversized constraint", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
     const kernel = new ContextExtensionsKernel(store);
     const sentence = `不要执行危险操作${"并检查条件".repeat(100)}除非获得明确授权。`;
-    kernel.recordEphemeral({ session_host: "codex", session_id: "s", source: "docs", items: [{ id: "rule", text: sentence }] });
-    const search = kernel.searchEphemeral({ session_host: "codex", session_id: "s", source: "docs", query: "危险操作" });
+    (await kernel.recordEphemeral({ session_host: "codex", session_id: "s", source: "docs", items: [{ id: "rule", text: sentence }] }));
+    const search = (await kernel.searchEphemeral({ session_host: "codex", session_id: "s", source: "docs", query: "危险操作" }));
     const hit = (search.hits as Array<Record<string, unknown>>)[0]!;
     assert.equal(hit.preview, "");
     assert.equal(hit.excerpt_reason, "requires_expansion");
     assert.equal(hit.source_start, 0);
     assert.equal(hit.source_end, sentence.length);
     const read = { session_host: "codex", session_id: "s", source: "docs", query: "危险操作", read_item_id: "rule", read_start: hit.source_start, read_end: hit.source_end, identity_digest: search.identity_digest };
-    assert.equal(kernel.searchEphemeral(read).content, sentence);
-    assert.equal(kernel.searchEphemeral({ ...read, max_chars: 8_000 }).content, sentence);
-    assert.throws(() => kernel.searchEphemeral({ ...read, max_chars: 100 }), /exceeds max_chars/u);
-    assert.throws(() => kernel.searchEphemeral({ ...read, read_start: 1 }), /must match/u);
-    assert.throws(() => kernel.searchEphemeral({ ...read, read_item_id: "missing" }), /not found/u);
-    assert.throws(() => kernel.searchEphemeral({ ...read, identity_digest: "old" }), /changed/u);
-    assert.throws(() => kernel.searchEphemeral({ ...read, identity_digest: undefined }), /identity_digest/u);
-    assert.throws(() => kernel.searchEphemeral({ ...read, session_id: "other", index_id: search.index_id }), /scope mismatch/u);
-    assert.throws(() => kernel.searchEphemeral({ ...read, read_end: sentence.length + 1 }), /read_end/u);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    assert.equal((await kernel.searchEphemeral(read)).content, sentence);
+    assert.equal((await kernel.searchEphemeral({ ...read, max_chars: 8_000 })).content, sentence);
+    await assert.rejects(() => kernel.searchEphemeral({ ...read, max_chars: 100 }), /exceeds max_chars/u);
+    await assert.rejects(() => kernel.searchEphemeral({ ...read, read_start: 1 }), /must match/u);
+    await assert.rejects(() => kernel.searchEphemeral({ ...read, read_item_id: "missing" }), /not found/u);
+    await assert.rejects(() => kernel.searchEphemeral({ ...read, identity_digest: "old" }), /changed/u);
+    await assert.rejects(() => kernel.searchEphemeral({ ...read, identity_digest: undefined }), /identity_digest/u);
+    await assert.rejects(() => kernel.searchEphemeral({ ...read, session_id: "other", index_id: search.index_id }), /scope mismatch/u);
+    await assert.rejects(() => kernel.searchEphemeral({ ...read, read_end: sentence.length + 1 }), /read_end/u);
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("ephemeral purge removes one source or a whole session", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
     const kernel = new ContextExtensionsKernel(store);
-    kernel.recordEphemeral({ session_host: "codex", session_id: "s", source: "one", items: [{ id: "a", text: "alpha" }] });
-    kernel.recordEphemeral({ session_host: "codex", session_id: "s", source: "two", items: [{ id: "b", text: "beta" }] });
-    assert.equal(kernel.purgeEphemeral({ session_host: "codex", session_id: "s", source: "one" }).removed, 1);
-    assert.equal(kernel.purgeEphemeral({ session_host: "codex", session_id: "s" }).removed, 1);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    (await kernel.recordEphemeral({ session_host: "codex", session_id: "s", source: "one", items: [{ id: "a", text: "alpha" }] }));
+    (await kernel.recordEphemeral({ session_host: "codex", session_id: "s", source: "two", items: [{ id: "b", text: "beta" }] }));
+    assert.equal((await kernel.purgeEphemeral({ session_host: "codex", session_id: "s", source: "one" })).removed, 1);
+    assert.equal((await kernel.purgeEphemeral({ session_host: "codex", session_id: "s" })).removed, 1);
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("explicit ephemeral index IDs cannot cross session or source boundaries", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
     const kernel = new ContextExtensionsKernel(store);
-    kernel.recordEphemeral({ session_host: "codex", session_id: "owner", source: "docs", index_id: "shared-id", items: [{ text: "private evidence" }] });
+    (await kernel.recordEphemeral({ session_host: "codex", session_id: "owner", source: "docs", index_id: "shared-id", items: [{ text: "private evidence" }] }));
     for (const scope of [{ session_id: "other", source: "docs" }, { session_id: "owner", source: "other" }]) {
-      assert.throws(() => kernel.searchEphemeral({ session_host: "codex", ...scope, index_id: "shared-id", query: "private" }), /scope mismatch/u);
-      assert.throws(() => kernel.recordEphemeral({ session_host: "codex", ...scope, index_id: "shared-id", items: [{ text: "replacement" }] }), /scope mismatch/u);
-      assert.throws(() => kernel.purgeEphemeral({ session_host: "codex", ...scope, index_id: "shared-id" }), /scope mismatch/u);
+      await assert.rejects(() => kernel.searchEphemeral({ session_host: "codex", ...scope, index_id: "shared-id", query: "private" }), /scope mismatch/u);
+      await assert.rejects(() => kernel.recordEphemeral({ session_host: "codex", ...scope, index_id: "shared-id", items: [{ text: "replacement" }] }), /scope mismatch/u);
+      await assert.rejects(() => kernel.purgeEphemeral({ session_host: "codex", ...scope, index_id: "shared-id" }), /scope mismatch/u);
     }
-    assert.equal(kernel.searchEphemeral({ session_host: "codex", session_id: "owner", source: "docs", index_id: "shared-id", query: "private" }).reason, "matched");
-    assert.equal(kernel.purgeEphemeral({ session_host: "codex", session_id: "owner", source: "docs", index_id: "shared-id" }).removed, 1);
-    assert.equal(kernel.purgeEphemeral({ session_host: "codex", session_id: "owner", source: "docs", index_id: "shared-id" }).removed, 0);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    assert.equal((await kernel.searchEphemeral({ session_host: "codex", session_id: "owner", source: "docs", index_id: "shared-id", query: "private" })).reason, "matched");
+    assert.equal((await kernel.purgeEphemeral({ session_host: "codex", session_id: "owner", source: "docs", index_id: "shared-id" })).removed, 1);
+    assert.equal((await kernel.purgeEphemeral({ session_host: "codex", session_id: "owner", source: "docs", index_id: "shared-id" })).removed, 0);
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("ephemeral indexes isolate equal session IDs across Hosts", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
     const kernel = new ContextExtensionsKernel(store);
-    const first = kernel.recordEphemeral({ session_id: "same", session_host: "codex", source: "docs", items: [{ text: "alpha codex" }] });
-    const second = kernel.recordEphemeral({ session_id: "same", session_host: "claude", source: "docs", items: [{ text: "alpha claude" }] });
+    const first = (await kernel.recordEphemeral({ session_id: "same", session_host: "codex", source: "docs", items: [{ text: "alpha codex" }] }));
+    const second = (await kernel.recordEphemeral({ session_id: "same", session_host: "claude", source: "docs", items: [{ text: "alpha claude" }] }));
     assert.notEqual(first.index_id, second.index_id);
-    assert.throws(() => kernel.searchEphemeral({ session_id: "same", session_host: "claude", source: "docs", index_id: first.index_id, query: "alpha" }), /scope mismatch/u);
-    assert.throws(() => kernel.recordEphemeral({ session_id: "same", session_host: "claude", source: "docs", index_id: first.index_id, items: [{ text: "overwrite" }] }), /scope mismatch/u);
-    assert.throws(() => kernel.purgeEphemeral({ session_id: "same", session_host: "claude", source: "docs", index_id: first.index_id }), /scope mismatch/u);
-    assert.equal(kernel.purgeEphemeral({ session_id: "same", session_host: "codex" }).removed, 1);
-    assert.equal(kernel.searchEphemeral({ session_id: "same", session_host: "claude", source: "docs", query: "alpha" }).reason, "matched");
-    assert.throws(() => kernel.recordEphemeral({ session_id: "same", items: [{ text: "missing host" }] }), /session_host/u);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    await assert.rejects(() => kernel.searchEphemeral({ session_id: "same", session_host: "claude", source: "docs", index_id: first.index_id, query: "alpha" }), /scope mismatch/u);
+    await assert.rejects(() => kernel.recordEphemeral({ session_id: "same", session_host: "claude", source: "docs", index_id: first.index_id, items: [{ text: "overwrite" }] }), /scope mismatch/u);
+    await assert.rejects(() => kernel.purgeEphemeral({ session_id: "same", session_host: "claude", source: "docs", index_id: first.index_id }), /scope mismatch/u);
+    assert.equal((await kernel.purgeEphemeral({ session_id: "same", session_host: "codex" })).removed, 1);
+    assert.equal((await kernel.searchEphemeral({ session_id: "same", session_host: "claude", source: "docs", query: "alpha" })).reason, "matched");
+    await assert.rejects(() => kernel.recordEphemeral({ session_id: "same", items: [{ text: "missing host" }] }), /session_host/u);
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("new Context session bodies are partitioned under their Host session directory", async () => {
+test("legacy Context session bodies are partitioned under their Host session directory", async () => {
   const { store, root } = await openStore();
   try {
-    const kernel = new ContextExtensionsKernel(store);
+    const kernel = new LegacyContextFixture(store);
     const session = { session_id: "partitioned", session_host: "codex" };
     const index = kernel.recordEphemeral({ ...session, source: "docs", items: [{ text: "private context body" }] });
     const snapshot = kernel.checkpointResume({ ...session, tasks: ["private resume body"] });
@@ -192,7 +238,7 @@ test("Context reads reject partition content changed after publication", async (
   const { store, root } = await openStore();
   try {
     const scope = sessionStorageScopeId("codex", "digest-check");
-    const kernel = new ContextExtensionsKernel(store);
+    const kernel = new LegacyContextFixture(store);
     const record = kernel.recordEphemeral({ session_id: "digest-check", session_host: "codex", source: "docs", items: [{ text: "original" }] });
     const file = join(root, "sessions", scope, "context", "context.db");
     const partition = new DatabaseSync(file);
@@ -200,7 +246,7 @@ test("Context reads reject partition content changed after publication", async (
       const row = partition.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=1").get("context_ephemeral_index", String(record.index_id)) as { payload_json: string };
       partition.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=1").run(row.payload_json.replace("original", "tampered"), "context_ephemeral_index", String(record.index_id));
     } finally { partition.close(); }
-    assert.throws(() => kernel.searchEphemeral({ session_id: "digest-check", session_host: "codex", source: "docs", query: "tampered" }), /digest mismatch/u);
+    assert.throws(() => store.find("context_ephemeral_index", String(record.index_id), undefined, false), /digest mismatch/u);
     assert.throws(() => store.list("context_ephemeral_index", 100, undefined, false), /digest mismatch/u);
     assert.equal(contextStoragePreflight(craftPaths(root)).records[0]?.status, "partition_digest_mismatch");
     const files = new MemoryFileStore(store);
@@ -222,7 +268,7 @@ test("session archive stops for reconciliation when a Context partition record i
   const { store, root } = await openStore();
   try {
     const scope = sessionStorageScopeId("codex", "missing-context");
-    const record = new ContextExtensionsKernel(store).checkpointResume({ session_id: "missing-context", session_host: "codex", tasks: ["task"] });
+    const record = new LegacyContextFixture(store).checkpointResume({ session_id: "missing-context", session_host: "codex", tasks: ["task"] });
     const file = join(root, "sessions", scope, "context", "context.db");
     const partition = new DatabaseSync(file);
     try { partition.prepare("DELETE FROM records WHERE kind=? AND id=? AND version=1").run("context_resume_snapshot", String(record.resume_id)); }
@@ -244,7 +290,7 @@ test("session archive reports a missing Context database without retrying", asyn
   const { store, root } = await openStore();
   try {
     const scope = sessionStorageScopeId("codex", "missing-db");
-    new ContextExtensionsKernel(store).checkpointResume({ session_id: "missing-db", session_host: "codex", tasks: ["task"] });
+    new LegacyContextFixture(store).checkpointResume({ session_id: "missing-db", session_host: "codex", tasks: ["task"] });
     store.closeContextScope({ kind: "session", id: scope });
     await rm(join(root, "sessions", scope, "context", "context.db"));
     const files = new MemoryFileStore(store), queued = files.queueSessionArchive("missing-db", "codex");
@@ -276,7 +322,7 @@ test("Context storage preflight pages exact versions and classifies without expo
     put("g", { session_id: "inventory", session_host: "codex", session_scope_id: scope, _context_partition: { file: join(root, "sessions", scope, "context", "context.db"), scope: { kind: "session", id: scope } } });
     const missingScope = sessionStorageScopeId("codex", "missing");
     put("h", { session_id: "missing", session_host: "codex", session_scope_id: missingScope, _context_partition: { file: join(root, "sessions", missingScope, "context", "context.db"), scope: { kind: "session", id: missingScope } } });
-    const saved = new ContextExtensionsKernel(store).checkpointResume({ session_id: "inventory", session_host: "codex", tasks: ["private resume"] });
+    const saved = new LegacyContextFixture(store).checkpointResume({ session_id: "inventory", session_host: "codex", tasks: ["private resume"] });
     const pages = []; let cursor: [string, string, number] | null = ["", "", 0];
     while (cursor) { const page = contextStoragePreflight(craftPaths(root), cursor, 2); pages.push(...page.records); cursor = page.next_cursor; }
     assert.deepEqual(pages.map(item => item.status), ["central_ready", "unbound", "identity_mismatch", "pointer_mismatch", "pointer_mismatch", "invalid", "partition_row_missing", "partition_missing", "partition_digest_verified"]);
@@ -311,7 +357,7 @@ test("Context storage preflight fails closed on changed partition identity and u
   const { store, root } = await openStore();
   try {
     const scope = sessionStorageScopeId("codex", "audit-partition");
-    const record = new ContextExtensionsKernel(store).checkpointResume({ session_id: "audit-partition", session_host: "codex", tasks: ["test"] });
+    const record = new LegacyContextFixture(store).checkpointResume({ session_id: "audit-partition", session_host: "codex", tasks: ["test"] });
     const file = join(root, "sessions", scope, "context", "context.db");
     const partition = new DatabaseSync(file);
     try {
@@ -380,7 +426,7 @@ test("Context migration rejects malformed pages, wrong owners, and unverifiable 
       .run(entry.kind, "wrong-owner", 1, JSON.stringify(wrongOwner), "2020-01-01", "2020-01-01");
     assert.throws(() => store.migrateLegacyContextVersions([{ ...entry, id: "wrong-owner" }]), /wrong owner/u);
 
-    const current = new ContextExtensionsKernel(store).checkpointResume({ session_id: "bad-current", session_host: "codex" });
+    const current = new LegacyContextFixture(store).checkpointResume({ session_id: "bad-current", session_host: "codex" });
     const currentId = String(current.resume_id);
     const row = store.database.prepare("SELECT payload_json FROM records WHERE kind=? AND id=? AND version=1")
       .get("context_resume_snapshot", currentId) as { payload_json: string };
@@ -463,7 +509,7 @@ test("Context migration preserves central data when a staged version conflicts",
   const { store, root } = await openStore();
   try {
     const scope = sessionStorageScopeId("codex", "conflict");
-    new ContextExtensionsKernel(store).checkpointResume({ session_id: "conflict", session_host: "codex" });
+    new LegacyContextFixture(store).checkpointResume({ session_id: "conflict", session_host: "codex" });
     const body = { session_id: "conflict", session_host: "codex", session_scope_id: scope, source: "docs", items: [{ text: "original" }] };
     const entry = { kind: "context_ephemeral_index", id: "staged", version: 1 };
     store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
@@ -718,7 +764,7 @@ test("Context migration resumes a batch after a committed version and process de
   const fixture = await openStore();
   let store = fixture.store;
   const scope = sessionStorageScopeId("codex", "batch-crash");
-  new ContextExtensionsKernel(store).checkpointResume({ session_id: "batch-crash", session_host: "codex" });
+  new LegacyContextFixture(store).checkpointResume({ session_id: "batch-crash", session_host: "codex" });
   const entries = ["first", "second"].map(id => ({ kind: "context_ephemeral_index", id, version: 1 }));
   const insert = store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)");
   for (const entry of entries) insert.run(entry.kind, entry.id, entry.version, JSON.stringify({ session_id: "batch-crash", session_host: "codex", session_scope_id: scope, source: entry.id, items: [{ text: entry.id }] }), "2020-01-01", "2020-01-01");
@@ -746,41 +792,60 @@ test("Context migration resumes a batch after a committed version and process de
   }
 });
 
-test("expired ephemeral reads recheck removal and renewal inside the write transaction", async () => {
+test("expired ephemeral deletion preserves a concurrent renewal", async () => {
   const { store, root } = await openStore();
-  const originalFind = store.find.bind(store);
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
     const kernel = new ContextExtensionsKernel(store);
-    const created = kernel.recordEphemeral({ session_host: "codex", session_id: "s", source: "docs", now: "2020-01-01T00:00:00.000Z", ttl_seconds: 1, items: [{ text: "alpha" }] });
-    const id = String(created.index_id);
-    const original = originalFind("context_ephemeral_index", id, undefined, false)!;
-    for (const replacement of [null, { ...original, expires_at: "2099-01-01T00:00:00.000Z" }]) {
-      let calls = 0;
-      store.find = ((...args: Parameters<typeof store.find>) => {
-        if (args[0] === "context_ephemeral_index" && args[1] === id && ++calls === 2) return replacement;
-        return originalFind(...args);
-      }) as typeof store.find;
-      const result = kernel.searchEphemeral({ session_host: "codex", session_id: "s", source: "docs", query: "alpha", now: "2021-01-01T00:00:00.000Z" });
-      assert.equal(result.reason, replacement ? "matched" : "index_expired");
-      store.find = originalFind;
-    }
-    assert.ok(originalFind("context_ephemeral_index", id, undefined, false));
-  } finally { store.find = originalFind; store.close(); await rm(root, { recursive: true, force: true }); }
+    const args = { session_host: "codex", session_id: "s", source: "docs" };
+    await kernel.recordEphemeral({ ...args, now: "2020-01-01T00:00:00.000Z", ttl_seconds: 60, items: [{ text: "alpha" }] });
+    const original = SupervisorClient.prototype.contextPurge;
+    let renewed = false;
+    try {
+      SupervisorClient.prototype.contextPurge = async function(input) {
+        if (!renewed) {
+          renewed = true;
+          await kernel.recordEphemeral({ ...args, now: "2099-01-01T00:00:00.000Z", ttl_seconds: 60, items: [{ text: "alpha updated" }] });
+        }
+        return original.call(this, input);
+      };
+      const result = await kernel.searchEphemeral({ ...args, query: "alpha", now: "2021-01-01T00:00:00.000Z" });
+      assert.equal(result.reason, "matched");
+      assert.equal(renewed, true);
+    } finally { SupervisorClient.prototype.contextPurge = original; }
+    const originalGet = SupervisorClient.prototype.contextGet;
+    try {
+      SupervisorClient.prototype.contextGet = async () => ({ status: "available", value: { session_id: "s", session_host: "codex", session_scope_id: sessionStorageScopeId("codex", "s"), source: "docs", expires_at: "2020-01-01T00:00:00.000Z", identity_digest: "changing" } });
+      SupervisorClient.prototype.contextPurge = async () => ({ changed: true });
+      await assert.rejects(() => kernel.searchEphemeral({ ...args, query: "alpha", now: "2021-01-01T00:00:00.000Z" }), /changed repeatedly/u);
+    } finally { SupervisorClient.prototype.contextGet = originalGet; SupervisorClient.prototype.contextPurge = original; }
+    try {
+      SupervisorClient.prototype.contextPurge = async function(input) {
+        await kernel.recordEphemeral({ ...args, now: "2099-01-01T00:00:00.000Z", ttl_seconds: 120, items: [{ text: "renewed for purge" }] });
+        return original.call(this, input);
+      };
+      assert.equal((await kernel.purgeEphemeral(args)).removed, 0);
+      assert.equal((await kernel.searchEphemeral({ ...args, query: "renewed", now: "2021-01-01T00:00:00.000Z" })).reason, "matched");
+    } finally { SupervisorClient.prototype.contextPurge = original; }
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("output capture passes small results and indexes large ones", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
     const kernel = new ContextExtensionsKernel(store);
-    assert.equal(kernel.captureOutput({ session_host: "codex", tool_name: "Read", content: "small" }).action, "pass");
-    assert.throws(() => kernel.captureOutput({ session_host: "codex", tool_name: "Read", content: "x".repeat(9_000) }), /session_id/u);
-    const indexed = kernel.captureOutput({ session_host: "codex", tool_name: "Read", content: "x".repeat(9_000), session_id: "s" });
+    assert.equal((await kernel.captureOutput({ session_host: "codex", tool_name: "Read", content: "small" })).action, "pass");
+    await assert.rejects(() => kernel.captureOutput({ session_host: "codex", tool_name: "Read", content: "x".repeat(9_000) }), /session_id/u);
+    const indexed = (await kernel.captureOutput({ session_host: "codex", tool_name: "Read", content: "x".repeat(9_000), session_id: "s" }));
     assert.equal(indexed.action, "indexed");
     assert.equal(indexed.preview, "");
-    const withTtl = kernel.captureOutput({ session_host: "codex", tool_name: "Read", content: "x".repeat(9_000), session_id: "s", ttl_seconds: 60 });
+    const withTtl = (await kernel.captureOutput({ session_host: "codex", tool_name: "Read", content: "x".repeat(9_000), session_id: "s", ttl_seconds: 60 }));
     assert.equal(withTtl.action, "indexed");
-    assert.equal(kernel.captureOutput({ session_host: "codex", session_id: "s", content: "x".repeat(9_000) }).action, "indexed");
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    assert.equal((await kernel.captureOutput({ session_host: "codex", session_id: "s", content: "x".repeat(9_000) })).action, "indexed");
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("compute refuses without consent and bounds its inputs", async () => {
@@ -814,98 +879,107 @@ test("compute returns bounded stdout, truncates floods and reports timeouts", as
 
 test("resume snapshot checkpoints, reads and projects bounded content", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
     const kernel = new ContextExtensionsKernel(store);
-    assert.equal(kernel.getResume({ session_host: "codex", session_id: "r" }).resume_available, false);
-    assert.equal(kernel.resolveResume({ session_host: "codex", session_id: "r" }).resume_available, false);
-    const created = kernel.checkpointResume({ session_host: "codex", session_id: "r", scope: "project:p", files_touched: ["a.ts"], tasks: ["finish"], errors: ["boom"], decisions: ["use X"], open_questions: ["next?"] });
+    assert.equal((await kernel.getResume({ session_host: "codex", session_id: "r" })).resume_available, false);
+    assert.equal((await kernel.resolveResume({ session_host: "codex", session_id: "r" })).resume_available, false);
+    const created = (await kernel.checkpointResume({ session_host: "codex", session_id: "r", scope: "project:p", files_touched: ["a.ts"], tasks: ["finish"], errors: ["boom"], decisions: ["use X"], open_questions: ["next?"] }));
     assert.equal(created.content_free, false);
     assert.equal((created.snapshot as Record<string, unknown>).content_free, false);
-    const updated = kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: ["again"] });
+    const updated = (await kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: ["again"] }));
     assert.equal(updated.snapshot !== null, true);
-    const projected = kernel.resolveResume({ session_host: "codex", session_id: "r", max_chars: 5 });
+    const projected = (await kernel.resolveResume({ session_host: "codex", session_id: "r", max_chars: 5 }));
     assert.equal(projected.truncated, true);
     assert.equal(projected.content, "");
     assert.equal(projected.reason, "requires_expansion");
-    const complete = kernel.resolveResume({ session_host: "codex", session_id: "r", max_chars: 8_000 });
+    const complete = (await kernel.resolveResume({ session_host: "codex", session_id: "r", max_chars: 8_000 }));
     assert.equal(complete.truncated, false);
     assert.equal(complete.content_free, false);
-    assert.equal(kernel.getResume({ session_host: "codex", session_id: "r" }).resume_available, true);
-    assert.throws(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", now: "nope" }), /ISO timestamp/u);
-    assert.throws(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: "nope" }), /tasks/u);
-    assert.throws(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: Array(101).fill("task") }), /item limit/u);
-    assert.throws(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: ["x".repeat(2001)] }), /character limit/u);
-    assert.throws(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: Array(5).fill("x".repeat(2000)) }), /character limit/u);
-    assert.equal(kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: [] }).content_free, false);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    assert.equal((await kernel.getResume({ session_host: "codex", session_id: "r" })).resume_available, true);
+    await assert.rejects(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", now: "nope" }), /ISO timestamp/u);
+    await assert.rejects(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: "nope" }), /tasks/u);
+    await assert.rejects(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: Array(101).fill("task") }), /item limit/u);
+    await assert.rejects(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: ["x".repeat(2001)] }), /character limit/u);
+    await assert.rejects(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: Array(5).fill("x".repeat(2000)) }), /character limit/u);
+    await assert.rejects(() => kernel.checkpointResume({ session_host: "codex", session_id: "r", scope: "x".repeat(1_000_001) }), /byte size limit/u);
+    assert.equal((await kernel.checkpointResume({ session_host: "codex", session_id: "r", tasks: [] })).content_free, false);
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("sparse raw records fall back without fabricating content", async () => {
+test("sparse memory records fall back without fabricating content", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
-    const kernel = new ContextExtensionsKernel(store);
-    const future = new Date(Date.now() + 60_000).toISOString();
-    store.create("context_ephemeral_index", "raw-items", { session_id: "s", session_host: "codex", session_scope_id: sessionStorageScopeId("codex", "s"), source: "raw", expires_at: future,
-      items: [{ id: "x", title: "alpha" }, { id: "y", text: "alpha" }] });
-    const sparse = kernel.searchEphemeral({ session_host: "codex", session_id: "s", source: "raw", index_id: "raw-items", query: "alpha" });
+    const kernel = new ContextExtensionsKernel(store), client = new SupervisorClient(store.paths);
+    const scope = sessionStorageScopeId("codex", "s");
+    const data = { session_id: "s", session_host: "codex", session_scope_id: scope, source: "raw", expires_at: new Date(Date.now() + 60000).toISOString() };
+    await client.contextPut({ session_key: scope, key: "index:raw-items", value: { ...data, items: [{ id: "x", title: "alpha" }, { id: "y", text: "alpha" }] }, ttl_ms: 60000 });
+    const sparse = await kernel.searchEphemeral({ session_host: "codex", session_id: "s", source: "raw", index_id: "raw-items", query: "alpha" });
     assert.equal(sparse.reason, "matched");
     assert.equal((sparse.hits as unknown[]).length, 2);
-    store.create("context_ephemeral_index", "raw-no-items", { session_id: "s", session_host: "codex", session_scope_id: sessionStorageScopeId("codex", "s"), source: "none", expires_at: future, items: "not-an-array" });
-    assert.equal(kernel.searchEphemeral({ session_host: "codex", session_id: "s", source: "none", index_id: "raw-no-items", query: "alpha" }).reason, "no_match");
-    const createdResume = kernel.checkpointResume({ session_host: "codex", session_id: "sparse" });
-    store.save("context_resume_snapshot", String(createdResume.resume_id), { ...(createdResume.snapshot as Record<string, unknown>), files_touched: "not-an-array" });
-    const projected = kernel.resolveResume({ session_host: "codex", session_id: "sparse" });
-    assert.equal(projected.content, "");
+    await client.contextPut({ session_key: scope, key: "index:raw-empty", value: { ...data, source: "none", items: "not-an-array" }, ttl_ms: 60000 });
+    assert.equal((await kernel.searchEphemeral({ session_host: "codex", session_id: "s", source: "none", index_id: "raw-empty", query: "alpha" })).reason, "no_match");
+    const created = await kernel.checkpointResume({ session_host: "codex", session_id: "sparse" });
+    const resumeScope = sessionStorageScopeId("codex", "sparse");
+    await client.contextPut({ session_key: resumeScope, key: `resume:${created.resume_id}`, value: { ...(created.snapshot as JsonObject), files_touched: "not-an-array" }, ttl_ms: 60000 });
+    assert.equal((await kernel.resolveResume({ session_host: "codex", session_id: "sparse" })).content, "");
     store.create("context_resolution_receipt", "empty-receipt", {});
     assert.equal(kernel.stats({}).estimated_tokens, 0);
-    store.create("retrieval_adapter", "eligible-adapter", { status: "eligible" });
-    store.create("retrieval_adapter", "configured-adapter", { status: "configured" });
     assert.equal(kernel.health({}).ok, true);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("resume snapshots isolate equal session IDs between Hosts and reject mismatched records", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
     const kernel = new ContextExtensionsKernel(store);
-    const codex = kernel.checkpointResume({ session_id: "same", session_host: "codex", tasks: ["codex task"] });
-    const claude = kernel.checkpointResume({ session_id: "same", session_host: "claude", tasks: ["claude task"] });
+    const codex = (await kernel.checkpointResume({ session_id: "same", session_host: "codex", tasks: ["codex task"] }));
+    const claude = (await kernel.checkpointResume({ session_id: "same", session_host: "claude", tasks: ["claude task"] }));
     assert.notEqual(codex.resume_id, claude.resume_id);
-    assert.match(String(kernel.resolveResume({ session_id: "same", session_host: "codex" }).content), /codex task/u);
-    assert.match(String(kernel.resolveResume({ session_id: "same", session_host: "claude" }).content), /claude task/u);
-    assert.throws(() => kernel.getResume({ session_id: "same" }), /session_host/u);
+    assert.match(String((await kernel.resolveResume({ session_id: "same", session_host: "codex" })).content), /codex task/u);
+    assert.match(String((await kernel.resolveResume({ session_id: "same", session_host: "claude" })).content), /claude task/u);
+    await assert.rejects(() => kernel.getResume({ session_id: "same" }), /session_host/u);
     assert.throws(() => store.save("context_resume_snapshot", String(codex.resume_id), { ...(codex.snapshot as Record<string, unknown>), session_host: "claude" }), /identity is invalid/u);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("resume rejects mismatched identity and tolerates missing captured time", async () => {
   const { store, root } = await openStore();
-  const original = store.find.bind(store);
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
-    const kernel = new ContextExtensionsKernel(store), args = { session_id: "read-guard", session_host: "codex" };
-    const created = kernel.checkpointResume({ ...args, tasks: ["task"] });
-    const record = created.snapshot as JsonObject;
-    store.find = ((...params: Parameters<typeof store.find>) => params[0] === "context_resume_snapshot"
-      ? { ...record, session_host: "claude" } : original(...params)) as typeof store.find;
-    assert.throws(() => kernel.checkpointResume(args), /scope mismatch/u);
-    assert.throws(() => kernel.getResume(args), /scope mismatch/u);
-    assert.throws(() => kernel.resolveResume(args), /scope mismatch/u);
-    store.find = ((...params: Parameters<typeof store.find>) => params[0] === "context_resume_snapshot"
-      ? { ...record, captured_at: undefined } : original(...params)) as typeof store.find;
-    assert.equal(kernel.resolveResume(args).captured_at, null);
-  } finally { store.find = original; store.close(); await rm(root, { recursive: true, force: true }); }
+    const kernel = new ContextExtensionsKernel(store), client = new SupervisorClient(store.paths);
+    const args = { session_id: "read-guard", session_host: "codex" };
+    const created = await kernel.checkpointResume({ ...args, tasks: ["task"] });
+    const scope = sessionStorageScopeId("codex", "read-guard"), key = `resume:${created.resume_id}`, record = created.snapshot as JsonObject;
+    await client.contextPut({ session_key: scope, key, value: { ...record, session_host: "claude" }, ttl_ms: 60000 });
+    await assert.rejects(() => kernel.checkpointResume(args), /scope mismatch/u);
+    await assert.rejects(() => kernel.getResume(args), /scope mismatch/u);
+    await assert.rejects(() => kernel.resolveResume(args), /scope mismatch/u);
+    await client.contextPut({ session_key: scope, key, value: { ...record, captured_at: null }, ttl_ms: 60000 });
+    assert.equal((await kernel.resolveResume(args)).captured_at, null);
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("ephemeral expansion handles a sparse item without inventing a body", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
-    const kernel = new ContextExtensionsKernel(store), args = { session_id: "sparse-expand", session_host: "codex", source: "docs" };
-    const saved = kernel.recordEphemeral({ ...args, items: [{ id: "item", text: "body" }] });
-    const record = store.find("context_ephemeral_index", String(saved.index_id), undefined, false)!;
-    store.save("context_ephemeral_index", String(saved.index_id), { ...record, items: [{ id: "item" }] });
-    const result = kernel.searchEphemeral({ ...args, query: "body", read_item_id: "item", read_start: 0, read_end: 0, identity_digest: saved.identity_digest });
+    const kernel = new ContextExtensionsKernel(store), client = new SupervisorClient(store.paths);
+    const args = { session_id: "sparse-expand", session_host: "codex", source: "docs" };
+    const saved = await kernel.recordEphemeral({ ...args, items: [{ id: "item", text: "body" }] });
+    const scope = sessionStorageScopeId("codex", args.session_id), key = `index:${saved.index_id}`;
+    const current = await client.contextGet({ session_key: scope, key });
+    await client.contextPut({ session_key: scope, key, value: { ...(current.value as JsonObject), items: [{ id: "item" }] }, ttl_ms: 60000 });
+    const result = await kernel.searchEphemeral({ ...args, query: "body", read_item_id: "item", read_start: 0, read_end: 0, identity_digest: saved.identity_digest });
     assert.equal(result.content, "");
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("compute handles a failed spawn with absent output streams", async () => {
@@ -925,8 +999,10 @@ test("compute handles a failed spawn with absent output streams", async () => {
 
 test("queued session archive fences and removes only its Host Context records", async () => {
   const { store, root } = await openStore();
+  const supervisor = new LocalSupervisor(new CraftService(store), store.paths);
+  await supervisor.start();
   try {
-    const kernel = new ContextExtensionsKernel(store), files = new MemoryFileStore(store);
+    const kernel = new LegacyContextFixture(store), current = new ContextExtensionsKernel(store), files = new MemoryFileStore(store);
     const codex = { session_id: "same", session_host: "codex" }, claude = { session_id: "same", session_host: "claude" };
     const one = kernel.recordEphemeral({ ...codex, source: "docs", items: [{ text: "alpha" }] });
     const two = kernel.recordEphemeral({ ...claude, source: "docs", items: [{ text: "alpha" }] });
@@ -934,11 +1010,11 @@ test("queued session archive fences and removes only its Host Context records", 
     const otherResume = kernel.checkpointResume({ ...claude, tasks: ["other task"] });
     store.create("context_ephemeral_index", "legacy-without-host", { session_id: "same", source: "docs" });
     files.queueSessionArchive("same", "codex");
-    assert.throws(() => kernel.recordEphemeral({ ...codex, items: [{ text: "late" }] }), /SESSION_ARCHIVED/u);
-    assert.throws(() => kernel.checkpointResume({ ...codex, tasks: ["late"] }), /SESSION_ARCHIVED/u);
-    assert.throws(() => kernel.searchEphemeral({ ...codex, source: "docs", query: "alpha" }), /SESSION_ARCHIVED/u);
-    assert.throws(() => kernel.getResume(codex), /SESSION_ARCHIVED/u);
-    assert.throws(() => kernel.resolveResume(codex), /SESSION_ARCHIVED/u);
+    await assert.rejects(() => current.recordEphemeral({ ...codex, items: [{ text: "late" }] }), /SESSION_ARCHIVED/u);
+    await assert.rejects(() => current.checkpointResume({ ...codex, tasks: ["late"] }), /SESSION_ARCHIVED/u);
+    await assert.rejects(() => current.searchEphemeral({ ...codex, source: "docs", query: "alpha" }), /SESSION_ARCHIVED/u);
+    await assert.rejects(() => current.getResume(codex), /SESSION_ARCHIVED/u);
+    await assert.rejects(() => current.resolveResume(codex), /SESSION_ARCHIVED/u);
     let result: JsonObject = {};
     for (let i = 0; i < 20 && result.status !== "archived"; i++) result = files.archiveSessionStep("same", "codex", 1);
     assert.equal(result.status, "archived");
@@ -947,8 +1023,8 @@ test("queued session archive fences and removes only its Host Context records", 
     assert.ok(store.find("context_ephemeral_index", String(two.index_id), undefined, false));
     assert.ok(store.find("context_resume_snapshot", String(otherResume.resume_id), undefined, false));
     assert.ok(store.find("context_ephemeral_index", "legacy-without-host", undefined, false));
-    assert.equal(kernel.searchEphemeral({ ...claude, source: "docs", query: "alpha" }).reason, "matched");
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    assert.ok(store.find("context_ephemeral_index", String(two.index_id), undefined, false));
+  } finally { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("invalid Context archive checkpoint stops for reconciliation", async () => {
@@ -973,7 +1049,7 @@ test("Context archive resumes a paginated cleanup after reopening its store", as
   const fixture = await openStore();
   let store = fixture.store;
   try {
-    const kernel = new ContextExtensionsKernel(store);
+    const kernel = new LegacyContextFixture(store);
     for (let i = 0; i < 215; i++) kernel.recordEphemeral({ session_id: "page", session_host: "codex", source: `source-${i}`, items: [{ text: "alpha" }] });
     const other = kernel.recordEphemeral({ session_id: "page", session_host: "claude", source: "other", items: [{ text: "alpha" }] });
     let files = new MemoryFileStore(store);
@@ -998,7 +1074,7 @@ test("Context archive resumes a paginated cleanup after reopening its store", as
 test("Context archive pages only the exact Host session", async () => {
   const { store, root } = await openStore();
   try {
-    const kernel = new ContextExtensionsKernel(store);
+    const kernel = new LegacyContextFixture(store);
     for (const source of ["a", "b", "c"]) kernel.recordEphemeral({ session_id: "s", session_host: "codex", source, items: [{ text: "x" }] });
     kernel.recordEphemeral({ session_id: "s", session_host: "claude", source: "a", items: [{ text: "x" }] });
     const first = store.listSessionContextPage("context_ephemeral_index", "s", "codex", "", 2);
@@ -1072,14 +1148,14 @@ test("service delegates the context extension tools", async () => {
     assert.equal(service.contextExtensionsStats({}).receipts, 0);
     assert.equal(service.contextExtensionsHealth({}).ok, true);
     assert.equal(service.contextExtensionsRenderRouting({}).client, "codex");
-    const surface = service as unknown as Record<string, (args: JsonObject) => JsonObject>;
+    const surface = service as unknown as Record<string, (args: JsonObject) => JsonObject | Promise<JsonObject>>;
     for (const name of ["contextExtensionsRenderRouting", "contextExtensionsRecordEphemeral", "contextExtensionsSearchEphemeral",
       "contextExtensionsPurgeEphemeral", "contextExtensionsCaptureOutput", "contextExtensionsCompute",
       "contextExtensionsCheckpointResume", "contextExtensionsGetResume", "contextExtensionsResolveResume",
       "contextExtensionsStats", "contextExtensionsHealth", "contextExtensionsListCorrections",
       "contextExtensionsDecideCorrection", "contextExtensionsRecordCodebaseUsage", "contextExtensionsGetCodebaseUsage"]) {
       assert.equal(typeof surface[name], "function", `${name} must be installed`);
-      try { surface[name]!({}); }
+      try { await surface[name]!({}); }
       catch (error) { assert.ok(error instanceof Error, `${name} must fail with a real error when arguments are missing`); }
     }
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }

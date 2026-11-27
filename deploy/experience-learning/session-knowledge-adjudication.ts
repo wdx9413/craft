@@ -1,3 +1,4 @@
+import { registerVolatileLearningState } from "../../core/codex-session-archive.ts";
 import { stableDigest } from "../../core/digest.ts";
 import { defineProvider, PROVIDER_CATALOG, type ModelProviderSpec } from "../../core/model-gateway.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
@@ -30,8 +31,9 @@ function runRefs(run: JsonObject): string[] {
 export async function runSessionKnowledgeAdjudicationOnce(deps: DistillationDependencies, now = new Date().toISOString()): Promise<JsonObject> {
   const nowMs = Date.parse(now);
   if (!Number.isFinite(nowMs)) throw new Error("Knowledge adjudication now must be an ISO timestamp");
-  const afterId = deps.knowledge_adjudication_cursor_file ? readKnowledgeAdjudicationCursor(deps.knowledge_adjudication_cursor_file) : undefined;
-  const retries = deps.knowledge_adjudication_cursor_file ? readKnowledgeAdjudicationRetries(deps.knowledge_adjudication_cursor_file) : {};
+  if (deps.knowledge_adjudication_cursor_file) registerVolatileLearningState(deps.knowledge_adjudication_cursor_file, deps.env);
+  const afterId = deps.knowledge_adjudication_cursor_file ? await readKnowledgeAdjudicationCursor(deps.knowledge_adjudication_cursor_file) : undefined;
+  const retries = deps.knowledge_adjudication_cursor_file ? await readKnowledgeAdjudicationRetries(deps.knowledge_adjudication_cursor_file) : {};
   const caseResult = await deps.client.call("craft_knowledge_evaluation_case_list", { limit: 1_000,
     ...(deps.knowledge_adjudication_cursor_file ? { after_id: afterId ?? "" } : {}) });
   const cases = Array.isArray(caseResult.cases) ? caseResult.cases as JsonObject[] : [];

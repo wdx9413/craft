@@ -1,5 +1,5 @@
 import { reconcileProgramMemory } from "./coordinators/program-memory-reconciliation.ts";
-import { bindEvolutionProjectBindingSource } from "../evolution-project-binding.ts";
+import { bindEvolutionProjectArgs, bindEvolutionProjectBindingSource } from "../evolution-project-binding.ts";
 import { bindKnowledgeTaskEffectEvaluationReader } from "@craft/capability-knowledge/knowledge-task-effect-proof";
 import { ProgramMemorySubmissionCoordinator } from "./coordinators/program-memory-submission.ts";
 import { validateReadOnlyEvaluationSteps } from "@craft/capability-experience/scenario-evaluation";
@@ -346,9 +346,15 @@ export class CraftService extends ServiceFoundation {
     this.capabilityOwned = contextSources !== undefined;
     this.storageOwner = contextSources?.owner;
     if (contextSources && this.storageOwner !== "context") bindEvolutionProjectBindingSource(store, contextSources.stores.get("context") ?? { find: () => null });
+    this.experienceProcedures.setUnverifiedAuthorization((scope, source) => {
+      try {
+        bindEvolutionProjectArgs(store, { ...source, scope: { kind: "project", id: scope } }, "craft_experience_runbook_capture");
+        return true;
+      } catch { return false; }
+    });
     if (contextSources && this.storageOwner === "eval") {
       const references = new Map<string, Pick<CraftStore, "get" | "list">>();
-      for (const [kind, owner] of [["experience_procedure", "experience"], ["task", "context"], ["host_session", "context"],
+      for (const [kind, owner] of [["experience_procedure", "experience"], ["memory_candidate", "memory"], ["task", "context"], ["host_session", "context"],
         ["host_session_event", "context"], ["trace_event", "context"]]) {
         const source = owner === "context" ? contextSources.stores.get("runtime") ?? contextSources.stores.get("context") : contextSources.stores.get(owner!);
         if (source) references.set(kind!, source);
@@ -362,6 +368,11 @@ export class CraftService extends ServiceFoundation {
         if (!owner) throw new Error("Program Memory Context owner is unavailable");
         return owner.store.get(...args);
       } });
+      this.experienceProcedures.setContextSource({ get: (...args) => {
+        const owner = this.storageOwner === "context" ? this : this.ownerServices.get("context");
+        if (!owner) throw new Error("Context owner is unavailable");
+        return owner.store.get(...args);
+      } });
       const evaluationOwner = () => {
         const owner = this.storageOwner === "eval" ? this : this.ownerServices.get("eval");
         if (!owner) throw new Error("Evaluation owner is unavailable");
@@ -369,6 +380,8 @@ export class CraftService extends ServiceFoundation {
       };
       this.experienceProcedures.setEvaluationContractSource({ get: (...args) => evaluationOwner().store.get(...args) });
       this.experienceProcedures.setEvaluationVerifier({ verifyTaskEffectEvaluation: input => evaluationOwner().evaluationContracts.verifyTaskEffectEvaluation(input as never) });
+      (this.memoryGovernance as unknown as { setEvaluationVerifier?: (verifier: { verifyTaskEffectEvaluation(input: JsonObject): JsonObject }) => void })
+        .setEvaluationVerifier?.({ verifyTaskEffectEvaluation: input => evaluationOwner().evaluationContracts.verifyTaskEffectEvaluation(input as never) as unknown as JsonObject });
     }
     if (contextSources) this.selfEvolution.configureProgramMemorySources({
       observations: contextSources.stores.get("experience") ?? { find: () => null },
@@ -5866,10 +5879,13 @@ export class CraftService extends ServiceFoundation {
     const transport = this.knowledgeAdjudicationTransportFactory();
     if (transport.acquireCall && !transport.acquireCall(provider.provider)) throw new Error("Knowledge adjudication model call budget exhausted");
     const fingerprint = stableDigest({ provider: provider.provider, model: profile.model });
-    const traceId = String(object(this.traceStart({ task_id: `knowledge:adjudication:${caseId}`, operation_id: caseId,
+    const traceKey = `trace_${stableDigest({ purpose: "knowledge_held_out_adjudication", case_id: caseId, binding, input_digest: inputDigest }).slice(-32)}`;
+    const started = this.traceStart({ trace_id: traceKey, task_id: `knowledge:adjudication:${caseId}`, operation_id: caseId,
       model_fingerprint: fingerprint, capability_fingerprint: `craft-knowledge:${CRAFT_RELEASE_VERSION}`,
       metadata: { purpose: "knowledge_held_out_adjudication", case_binding_digest: binding, input_digest: inputDigest,
-        content_stored: false } }).trace, "Knowledge adjudication Trace").id);
+        content_stored: false } });
+    const traceId = String(object(started.trace, "Knowledge adjudication Trace").id);
+    if (started.idempotent === true) throw new Error("Knowledge adjudication model result is unknown and requires reconciliation");
     let resultPersisted = false;
     try {
       this.traceAppend({ trace_id: traceId, event_kind: "model.request", actor: "knowledge-session-adjudication-worker",

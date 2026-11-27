@@ -47,7 +47,7 @@ test("project storage isolates equal names and canonicalizes symlink aliases", (
     assert.deepEqual(mapping, { schema_version: 1, ...projectStorageIdentity(first) });
     assert.equal(mapping.path_sha256.length, 64);
     assert.match(mapping.directory_name, /^same--[a-f0-9]{64}$/u);
-    assert.equal(firstDirectory.startsWith(join(data, "projects")), true);
+    assert.equal(firstDirectory, join(realpathSync(first), ".craft_data"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -73,8 +73,8 @@ test("project storage refuses unsafe directories and changed identity mappings",
       writeFileSync(mappingPath, `${JSON.stringify(altered)}\n`);
       assert.throws(() => existingProjectStorageDirectory(paths, project), /mapping does not match/);
     }
-    rmSync(join(data, "projects"), { recursive: true });
-    linkDirectorySync(project, join(data, "projects"));
+    rmSync(directory, { recursive: true });
+    linkDirectorySync(project, directory);
     assert.throws(() => ensureProjectStorageDirectory(paths, project), /regular directories/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -122,7 +122,7 @@ test("project mapping and read paths reject malformed files and links", () => {
     assert.throws(() => ensureProjectStorageDirectory(paths, project), /mapping must be a regular file/);
     rmSync(mapping, { recursive: true }); linkDirectorySync(project, mapping);
     assert.throws(() => existingProjectStorageDirectory(paths, project), /mapping must be a regular file/);
-    rmSync(join(data, "projects"), { recursive: true }); linkDirectorySync(project, join(data, "projects"));
+    rmSync(directory, { recursive: true }); linkDirectorySync(project, directory);
     assert.throws(() => existingProjectStorageDirectory(paths, project), /regular directories/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -132,8 +132,8 @@ test("project storage rejects an unsafe data root", () => {
   try {
     const project = join(root, "project"), target = join(root, "target"), link = join(root, "link"), file = join(root, "file");
     mkdirSync(project); mkdirSync(target); linkDirectorySync(target, link); writeFileSync(file, "x");
-    assert.throws(() => ensureProjectStorageDirectory(craftPaths(link), project), /data root must be a regular directory/);
-    assert.throws(() => ensureProjectStorageDirectory(craftPaths(file), project), /data root must be a regular directory/);
+    assert.equal(ensureProjectStorageDirectory(craftPaths(link), project), join(realpathSync(project), ".craft_data"));
+    assert.equal(ensureProjectStorageDirectory(craftPaths(file), project), join(realpathSync(project), ".craft_data"));
     assert.throws(() => ensureSessionStorageDirectory(craftPaths(link), "codex", "session"), /data root must be a regular directory/);
     assert.throws(() => ensureSessionStorageDirectory(craftPaths(file), "codex", "session"), /data root must be a regular directory/);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -145,7 +145,7 @@ test("project storage propagates unexpected creation and publication errors", ()
   try {
     const data = join(root, "data"), project = join(root, "project");
     mkdirSync(data); mkdirSync(project);
-    const paths = craftPaths(data), projects = join(data, "projects");
+    const paths = craftPaths(data), projects = join(realpathSync(project), ".craft_data");
     fs.mkdirSync = ((path: Parameters<typeof fs.mkdirSync>[0], options?: Parameters<typeof fs.mkdirSync>[1]) => {
       if (String(path) === projects) throw Object.assign(new Error("injected mkdir error"), { code: "EIO" });
       return originalMkdir(path, options);
@@ -157,7 +157,7 @@ test("project storage propagates unexpected creation and publication errors", ()
     syncBuiltinESMExports();
     assert.throws(() => ensureProjectStorageDirectory(paths, project), /injected link error/);
     const directory = projectStorageDirectory(paths, project);
-    assert.deepEqual(fs.readdirSync(directory), []);
+    assert.deepEqual(fs.readdirSync(directory), [".gitignore"]);
   } finally {
     fs.mkdirSync = originalMkdir; fs.linkSync = originalLink; syncBuiltinESMExports();
     rmSync(root, { recursive: true, force: true });
@@ -180,7 +180,7 @@ test("project mapping publication accepts an identical concurrent creator", () =
   } finally { fs.linkSync = originalLink; syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("project capability records write only below the shared Craft data root", async () => {
+test("project capability records write below the project data root", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-project-storage-"));
   const project = join(root, "project");
   mkdirSync(project);
@@ -206,7 +206,7 @@ test("project capability records write only below the shared Craft data root", a
     assert.deepEqual((store as any).projectRoots("project:demo"), [realpathSync(project)]);
     const projectDirectory = projectStorageDirectory(paths, project);
     for (const capability of ["knowledge", "memory", "experience"]) assert.equal(existsSync(join(projectDirectory, capability, `${capability}.db`)), true);
-    assert.equal(existsSync(join(project, ".craft_data")), false);
+    assert.equal(existsSync(join(project, ".craft_data")), true);
     assert.equal(store.get("knowledge_claim", "knowledge").content, "project-only knowledge");
     assert.equal(store.get("memory_ledger", "memory").content, "project-only memory");
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
@@ -240,13 +240,13 @@ test("session identity is the Host and session ID pair and survives store reopen
     const generic = store.sessionStorageRoot("session-2");
     assert.equal(generic, sessionStorageDirectory(paths, "craft-mcp", "session-2"));
     assert.notEqual(store.bindSessionStorageHost("session-2", "codex"), generic);
-    assert.throws(() => store.sessionStorageRoot("session-2"), /ambiguous/u);
+    assert.equal(store.sessionStorageRoot("session-2"), generic);
     store.close();
     store = await new CraftStore(paths).open();
     assert.equal(store.sessionStorageRoot(sessionStorageScopeId("codex", "session-1")), codex);
     assert.equal(store.sessionStorageRoot(sessionStorageScopeId("claude", "session-1")), claude);
-    assert.throws(() => store.sessionStorageRoot("session-1"), /ambiguous/u);
-    assert.throws(() => store.sessionStorageRoot("session-2"), /ambiguous/u);
+    assert.equal(store.sessionStorageRoot("session-1"), sessionStorageDirectory(paths, "craft-mcp", "session-1"));
+    assert.equal(store.sessionStorageRoot("session-2"), generic);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -259,7 +259,7 @@ test("session storage creation records explicit and encoded Host scopes", async 
     assert.equal(store.sessionStorageRoot(explicit, true), sessionStorageDirectory(paths, "codex", "encoded-session"));
     assert.equal(store.bindSessionStorageHost("encoded-session", "codex"), sessionStorageDirectory(paths, "codex", "encoded-session"));
     assert.equal(store.sessionStorageRoot("requested-session", true, "claude"), sessionStorageDirectory(paths, "claude", "requested-session"));
-    assert.equal(store.resolveSessionStorageScopeId("requested-session"), sessionStorageScopeId("claude", "requested-session"));
+    assert.equal(store.resolveSessionStorageScopeId("requested-session"), "requested-session");
     assert.equal(store.resolveSessionStorageScopeId("requested-session", "claude"), sessionStorageScopeId("claude", "requested-session"));
     assert.equal(store.sessionStorageRoot("requested-session", false, "claude"), sessionStorageDirectory(paths, "claude", "requested-session"));
     assert.throws(() => sessionStorageDirectoryForScopeId(paths, "not-a-scope"), /malformed/u);
@@ -271,8 +271,10 @@ test("session storage creation records explicit and encoded Host scopes", async 
       session_digest: createHash("sha256").update(missingScopeId).digest("hex") });
     assert.equal(store.resolveSessionStorageScopeId(missingScopeId), missingScopeId);
 
-    store.bindSessionStorageHost("multi-host-session", "codex");
-    store.bindSessionStorageHost("multi-host-session", "claude");
+    for (const host of ["codex", "claude"]) {
+      const session = "multi-host-session", scope = sessionStorageScopeId(host, session);
+      store.create("session_storage_identity", `legacy-${host}`, { host, session_id: session, session_digest: createHash("sha256").update(session).digest("hex"), scope_id: scope });
+    }
     assert.throws(() => store.resolveSessionStorageScopeId("multi-host-session"), /ambiguous/u);
 
     const legacyId = "legacy-identity-session";
@@ -299,37 +301,18 @@ test("session storage creation records explicit and encoded Host scopes", async 
     const conflictIdentityId = `session_storage_${createHash("sha256").update(conflictScope).digest("hex")}`;
     store.create("session_storage_identity", conflictIdentityId, { host: "codex", session_id: "other-session",
       session_digest: createHash("sha256").update(conflictSession).digest("hex"), scope_id: conflictScope, content_free: true });
-    assert.throws(() => store.bindSessionStorageHost(conflictSession, "codex"), /conflicts with an existing session/u);
+    assert.equal(store.bindSessionStorageHost(conflictSession, "codex"), sessionStorageDirectory(paths, "codex", conflictSession));
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("session Host binding resolves identical create races and rejects conflicting races", async () => {
-  const root = mkdtempSync(join(tmpdir(), "craft-session-storage-race-"));
+test("new session Host binding is deterministic and does not write identities", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-session-storage-binding-"));
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
-  const create = store.create.bind(store);
   try {
-    const sameSession = "session-identical-race";
-    store.create = ((kind: string, id: string, payload: Record<string, unknown>) => {
-      if (kind === "session_storage_identity") {
-        create(kind, id, payload);
-        throw new Error("raced identical create");
-      }
-      return create(kind, id, payload);
-    }) as typeof store.create;
-    assert.equal(store.bindSessionStorageHost(sameSession, "codex"), sessionStorageDirectory(store.paths, "codex", sameSession));
-
-    const conflictSession = "session-conflicting-race";
-    store.create = ((kind: string, id: string, payload: Record<string, unknown>) => {
-      if (kind === "session_storage_identity") {
-        create(kind, id, { ...payload, host: "claude" });
-        throw new Error("raced conflicting create");
-      }
-      return create(kind, id, payload);
-    }) as typeof store.create;
-    assert.throws(() => store.bindSessionStorageHost(conflictSession, "codex"), /raced conflicting create/u);
-  } finally {
-    store.create = create as typeof store.create;
-    store.close();
-    rmSync(root, { recursive: true, force: true });
-  }
+    const codex = store.bindSessionStorageHost("same-session", "codex");
+    assert.equal(codex, sessionStorageDirectory(store.paths, "codex", "same-session"));
+    assert.equal(store.bindSessionStorageHost("same-session", "codex"), codex);
+    assert.notEqual(store.bindSessionStorageHost("same-session", "claude"), codex);
+    assert.deepEqual(store.list("session_storage_identity", 10), []);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });

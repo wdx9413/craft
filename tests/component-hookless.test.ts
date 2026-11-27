@@ -6,6 +6,7 @@ import test from "node:test";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
+import { LocalSupervisor } from "../core/supervisor.ts";
 import { McpServer } from "../core/mcp.ts";
 import { CodexHookBridge, HookSignalSanitizer } from "../core/codex-hook-bridge.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
@@ -18,6 +19,8 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-hookless-"));
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
   const service = new CraftService(store);
+  const supervisor = new LocalSupervisor(service, store.paths);
+  await supervisor.start();
   for (const scopeId of ["demo", "recovery", "cas", "fixture", "a", "b"]) {
     const projectRoot = join(root, "projects", scopeId);
     await mkdir(projectRoot, { recursive: true });
@@ -28,7 +31,7 @@ async function fixture() {
     ["experience", "component-experience-daily"], ["codebase", "component-codebase"],
   ].map(([product, surface]) => [product!, new McpServer(service, surface!)]));
   const experienceAdvanced = new McpServer(service, "component-experience");
-  return { root, store, service, servers, experienceAdvanced, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
+  return { root, store, service, servers, experienceAdvanced, close: async () => { await supervisor.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
 async function call(server: McpServer, name: string, args: JsonObject = {}, failure?: RegExp): Promise<JsonObject> {
@@ -56,7 +59,7 @@ test("strict MCP: each standalone resolves its own member, scope, gate and aggre
     }
     const saved = await call(f.servers.memory!, "craft_memory_capture_user_statement", { content: "先运行单元测试", session_id: "hookless-session", project_scope_id: scope.id });
     assert(saved);
-    const memories = (await call(f.servers.memory!, "craft_memory_ledger_list", { scope_kind: "session", scope_id: "hookless-session" })).memories as JsonObject[];
+    const memories = (await call(f.servers.memory!, "craft_memory_ledger_list", { scope_kind: "project", scope_id: scope.id })).memories as JsonObject[];
     assert.equal(memories.length, 1);
     const rule = f.store.create("knowledge_claim", "rule", { status: "candidate", source_id: "builtin.evidence-wiki", scope: `${scope.kind}:${scope.id}`, content: "运行测试", evidence_ids: [] });
     attachVerifiedPromotionFixture(f.store, rule);
@@ -159,15 +162,15 @@ test("Hook observations never mistake command success, old edits or session iden
     await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
     assert.equal(f.store.list("workflow_evolution_observation", 10)[0]!.outcome, "failed");
     await event("Bash", "npm test", 0);
-    assert.equal(bridge.journal.find(base)!.verification_outcome, "failed");
+    assert.equal((await bridge.journal.find(base))!.verification_outcome, "failed");
     base = { ...base, turn_id: "next-turn" };
     await event("Edit", "", 0);
-    assert.equal(bridge.journal.find(base)!.verification_outcome, null);
+    assert.equal((await bridge.journal.find(base))!.verification_outcome, null);
     await event("Bash", "npm test", 0);
-    assert.equal(bridge.journal.find(base)!.verification_outcome, "passed");
+    assert.equal((await bridge.journal.find(base))!.verification_outcome, "passed");
     await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
     assert(f.store.list("evidence", 10).every((record) => record.confidence === "bounded"));
-    assert.equal(bridge.journal.find({ cwd: f.root, session_id: "session" }), null);
+    assert.equal(await bridge.journal.find({ cwd: f.root, session_id: "session" }), null);
   } finally { await f.close(); }
 });
 
@@ -300,7 +303,7 @@ test("Hook verification before any edit is observable but cannot establish a ver
   try {
     const bridge = new CodexHookBridge(f.service);
     await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd: f.root, session_id: "s", turn_id: "no-edit", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
-    const journal = f.store.list("codex_hook_turn", 10)[0]!;
+    const journal = (await bridge.journal.find({ cwd: f.root, session_id: "s", turn_id: "no-edit" }))!;
     assert.equal(journal.has_edit, false); assert.equal(journal.edit_revision, null);
     assert.equal((journal.verification_receipts as JsonObject[])[0]!.edit_revision, null);
   } finally { await f.close(); }

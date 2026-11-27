@@ -9,6 +9,7 @@ import { CodexHookBridge } from "../core/codex-hook-bridge.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
+import { LocalSupervisor } from "../core/supervisor.ts";
 
 interface HookCommand { command: string; timeout: number }
 interface HookManifest { hooks: Record<string, Array<{ hooks: HookCommand[] }>> }
@@ -24,7 +25,10 @@ async function replayFixture(host: "codex" | "claude") {
   const git = spawnSync("git", ["init", "-q", repository], { encoding: "utf8" });
   assert.equal(git.status, 0, git.stderr);
   const store = await new CraftStore(craftPaths(data)).open();
-  const bridge = new CodexHookBridge(await CraftService.open(store));
+  const service = await CraftService.open(store);
+  const supervisor = new LocalSupervisor(service, store.paths);
+  await supervisor.start();
+  const bridge = new CodexHookBridge(service);
   const base = { cwd: repository, session_id: `${host}-process`, source: host };
   const execute = (event: JsonObject): Promise<JsonObject> => new Promise((resolveResult, reject) => {
     const eventName = String(event.hook_event_name);
@@ -56,7 +60,7 @@ async function replayFixture(host: "codex" | "claude") {
     });
     child.stdin.end(JSON.stringify({ ...base, ...event }));
   });
-  return { store, bridge, execute, repository, async close() { store.close(); await rm(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); } };
+  return { store, bridge, execute, repository, async close() { await supervisor.close(); store.close(); await rm(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); } };
 }
 
 for (const host of ["codex", "claude"] as const) {
@@ -69,7 +73,7 @@ for (const host of ["codex", "claude"] as const) {
       await Promise.all(["npm test", "pytest"].map((command, index) => f.execute({ hook_event_name: "PostToolUse", tool_use_id: `verify-${index}`,
         tool_name: "Bash", tool_input: { command }, tool_response: { exit_code: 0 } })));
       const turn = f.store.list("context_hook_session", 10)[0]!;
-      const journal = f.bridge.journal.find({ cwd: f.repository, session_host: host, session_id: `${host}-process`, turn_id: String(turn.last_turn_id) }, true)!;
+      const journal = (await f.bridge.journal.find({ cwd: f.repository, session_host: host, session_id: `${host}-process`, turn_id: String(turn.last_turn_id) }, true))!;
       assert.equal((journal.signals as JsonObject[]).length, 3);
       assert.equal((journal.verification_receipts as JsonObject[]).length, 2,
         JSON.stringify((journal.signals as JsonObject[]).map(signal => ({ kind: signal.kind, outcome: signal.outcome, verifier: signal.verifier }))));
@@ -120,7 +124,7 @@ test("concurrent packaged prompts reject ambiguous signals and session boundarie
     const turns = f.store.list("codex_hook_turn", 10);
     assert.equal(turns.length, 3);
     const currentTurnId = String(f.store.list("context_hook_session", 10)[0]!.last_turn_id);
-    const edited = f.bridge.journal.find({ cwd: f.repository, session_id: "codex-process", turn_id: currentTurnId }, true)!;
+    const edited = (await f.bridge.journal.find({ cwd: f.repository, session_id: "codex-process", turn_id: currentTurnId }, true))!;
     assert.equal(edited.has_edit, true);
     assert(!ambiguousIds.has(String(edited.id)));
   } finally { await f.close(); }
@@ -247,7 +251,7 @@ test("packaged Hook skips SQLite for PostToolUse events that cannot produce a si
   } finally { await f.close(); }
 });
 
-test("Context SessionStart records a runtime receipt without opening SQLite", async () => {
+test("Context SessionStart records its completed runtime receipt", async () => {
   const f = await replayFixture("codex");
   try {
     const now = new Date().toISOString();
@@ -264,14 +268,14 @@ test("Context SessionStart records a runtime receipt without opening SQLite", as
       .trim().split("\n").map(line => JSON.parse(line) as JsonObject);
     assert.deepEqual(records.map(record => record.phase), ["started", "finished"]);
     assert.equal(records[1]!.event, "SessionStart");
-    assert.equal(records[1]!.outcome, "skipped");
-    assert.equal(records[1]!.store_open_ms, 0);
+    assert.equal(records[1]!.outcome, "completed");
+    assert.equal(typeof records[1]!.store_open_ms, "number");
     assert.equal(f.store.database.prepare("SELECT payload_json FROM records WHERE kind='memory_ledger' AND id='legacy-invalid'")
       .get()?.payload_json, "{");
   } finally { await f.close(); }
 });
 
-test("Context SessionStart ensures and reloads the user LaunchAgent without opening SQLite", async () => {
+test("Context SessionStart ensures and reloads the user LaunchAgent", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "craft-hook-launch-agent-"));
   const home = join(temporary, "home"), data = join(temporary, "data"), bin = join(temporary, "bin");
   const state = join(temporary, "launch-agent-loaded"), log = join(temporary, "launchctl.log");
@@ -309,7 +313,7 @@ else if (action === "bootout") { try { unlinkSync(${JSON.stringify(state)}); } c
     const second = await run();
     assert.equal(second.code, 0, second.stderr);
     const invocations = (await readFile(log, "utf8")).trim().split("\n");
-    assert.deepEqual(invocations.map(line => line.split(" ")[0]), ["print", "print", "bootstrap", "print", "print"]);
+    assert.deepEqual(invocations.map(line => line.split(" ")[0]), ["print", "print", "bootstrap", "print"]);
     await writeFile(join(home, "Library", "LaunchAgents", "com.craft.learning-worker.plist"), "foreign service", "utf8");
     const conflict = await run();
     assert.equal(conflict.code, 0, conflict.stderr);

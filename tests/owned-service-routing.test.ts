@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,6 +11,8 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftOperationError } from "../core/operation-error.ts";
 import { learningOwnerFailureKind, openOwnedLearningClients } from "../deploy/experience-learning/owned-client.ts";
+import { stableDigest } from "../core/digest.ts";
+import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
 
 test("learning owner diagnostics retain only safe error class names", () => {
   assert.equal(learningOwnerFailureKind(new TypeError("private path")), "TypeError");
@@ -35,6 +37,36 @@ test("owned learning clients report a safe reason when one owner cannot open", a
     process.stderr.write = originalWrite;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("trusted owned learning client supplies only the registered project's current Work Item lease", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-owner-work-item-lease-"));
+  const env = { CRAFT_DATA_DIR: root, CRAFT_LEARNING_PROJECT_SCOPES: JSON.stringify([{ kind: "project", id: "project:lease" }]) };
+  const experience = await openCapabilityService("experience", env);
+  try {
+    for (const id of ["lease", "other"]) {
+      const project = join(root, `project-${id}`); mkdirSync(project);
+      experience.store.create("scope_alias", `lease-alias-${id}`, { status: "active", alias_kind: "path", alias: project,
+        alias_digest: stableDigest(project), scope: { kind: "project", id: `project:${id}` } });
+    }
+    experience.store.create("experience_procedure", "lease-procedure", { lifecycle: "candidate", definition_digest: "digest", procedure_kind: "workflow" });
+    const dispatch = experience.store.create("experience_evaluation_dispatch", "lease-dispatch", { status: "awaiting_adapter", stage: "held_out",
+      procedure_id: "lease-procedure", procedure_version: 1, definition_digest: "digest", learning_work_item_id: "lease-item", lease_token_digest: stableDigest("lease-secret") });
+    const client = await openOwnedLearningClients(env);
+    try {
+      await assert.rejects(client.experience.call("craft_experience_learning_evaluation_run", { dispatch_id: dispatch.id }), /LearningWorkItemLeaseUnavailable/u);
+      experience.store.create("experience_learning_work_item", "lease-item", { scope: "project:other", status: "processing", lease_owner: "worker",
+        lease_token: "lease-secret", lease_expires_at: new Date(Date.now() + 60_000).toISOString(), active_dispatch_ref: { id: dispatch.id } });
+      await assert.rejects(client.experience.call("craft_experience_learning_evaluation_run", { dispatch_id: dispatch.id }), /LearningProjectScopeForbidden/u);
+      experience.store.create("experience_learning_work_item", "lease-item-good", { scope: "project:lease", status: "processing", lease_owner: "worker",
+        lease_token: "lease-secret", lease_expires_at: new Date(Date.now() + 60_000).toISOString(), active_dispatch_ref: { id: dispatch.id } });
+      const current = experience.store.get("experience_evaluation_dispatch", String(dispatch.id));
+      experience.store.save("experience_evaluation_dispatch", String(dispatch.id), { ...current, learning_work_item_id: "lease-item-good" });
+      const result = await client.experience.call("craft_experience_learning_evaluation_run", { dispatch_id: dispatch.id });
+      assert.equal(result.status, "awaiting_adapter");
+      assert.doesNotMatch(JSON.stringify(result), /lease-secret/u);
+    } finally { client.close(); }
+  } finally { experience.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
 test("owned learning clients discover Notes owners created after the worker starts", async () => {
@@ -76,12 +108,12 @@ test("Context public MCP composes its members and Runtime SDK and Workbench dele
     runtime = await openCapabilityService("runtime", env);
     assert.equal(routeOwnedService(runtime.service), runtime.service);
     const memory = runtime.service.memoryCaptureUserStatement({ memory_id: "routed-memory", content: "I prefer short fixture explanations.",
-      session_id: "facade-session", session_host: "codex", kind: "preference", topic: "explanations" });
+      scope_kind: "global", scope_id: "global", kind: "preference", topic: "explanations" });
     assert.equal(memory.auto_committed, true);
     assert.equal(runtime.store.find("memory_ledger", "routed-memory"), null);
     assert.equal(runtime.service.ownerServices.get("memory")!.store.get("memory_ledger", "routed-memory").status, "active");
     const open = await context.server.handle({ jsonrpc: "2.0", id: "open", method: "tools/call", params: { name: "craft_context_open", arguments: {
-      project_root: project, query: "short fixture explanations", include_codebase: false, members: ["memory"], session_scope_id: "facade-session", session_id: "facade-session", session_host: "codex", response_detail: "full", max_tokens: 5000,
+      project_root: project, query: "short fixture explanations", include_codebase: false, include_global: true, members: ["memory"], session_scope_id: "facade-session", session_id: "facade-session", session_host: "codex", response_detail: "full", max_tokens: 5000,
     } } });
     assert.equal(open?.error, undefined, JSON.stringify(open));
     assert.equal((open?.result as JsonObject).isError, false, JSON.stringify(open));
@@ -120,6 +152,30 @@ test("Context routes Evaluation Model profiles to the Experience owner", async (
     assert.equal(service.store.find("evaluation_model_profile", "owned-workflow-profile"), null);
     assert.equal((service.evaluationModelProfileGet({ profile_id: String(profile.id) }).profile as JsonObject).id, profile.id);
   } finally { context.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Experience resolves receipt references through its Context owner and fails closed if absent", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-experience-receipt-owner-"));
+  const runtime = await openMcpRuntime("component-context-complete", { CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "0" });
+  try {
+    const context = runtime.server.service!, experience = context.ownerServices.get("experience")!;
+    const project = join(root, "project"); mkdirSync(project);
+    const identity = context.scopeIdentityResolveProject({ project_root: project }).identity as JsonObject;
+    const projectScope = String((identity.canonical_scope as JsonObject).id);
+    const decision = experience.store.create("experience_runbook_decision", "owned-decision", { scope: projectScope, reason: "no_reusable_learning" });
+    assert.equal(experience.store.get("experience_runbook_decision", String(decision.id)).reason, "no_reusable_learning");
+    assert.equal(projectExperienceDirectory(experience.store, projectScope, undefined, true), join(realpathSync(project), ".craft_data", "experience"));
+    context.store.create("context_resolution_receipt", "receipt-owner-route", { scope: { kind: "project", id: "project:p" } });
+    const source = (experience.experienceProcedures as unknown as { contextSource: Pick<CraftStore, "get"> }).contextSource;
+    assert.equal(source.get("context_resolution_receipt", "receipt-owner-route").id, "receipt-owner-route");
+    const contextOwner = await CraftService.open(context.store, undefined, { contributors: [], stores: new Map(), services: new Map(), owner: "context" });
+    const local = (contextOwner.experienceProcedures as unknown as { contextSource: Pick<CraftStore, "get"> }).contextSource;
+    assert.equal(local.get("context_resolution_receipt", "receipt-owner-route").id, "receipt-owner-route");
+    const owners = experience.ownerServices as Map<string, CraftService>, original = owners.get("context");
+    owners.delete("context");
+    try { assert.throws(() => source.get("context_resolution_receipt", "receipt-owner-route"), /Context owner is unavailable/u); }
+    finally { if (original) owners.set("context", original); }
+  } finally { runtime.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
 test("Context reports Knowledge-owned project identity migration errors without losing their code", async () => {
@@ -253,22 +309,24 @@ test("owned non-Notes MCP rejects Notes operations when its Notes owner is absen
 
 test("owner authorization precedes prose access and metadata history survives a missing body", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-owner-preauth-"));
+  const project = mkdtempSync(join(tmpdir(), "craft-owner-project-"));
   const runtime = await openCapabilityService("memory", { CRAFT_DATA_DIR: root });
   const { unlinkSync } = await import("node:fs");
   try {
+    runtime.service.scopeAliasBind({ scope_kind: "project", scope_id: "first-project", alias_kind: "path", alias: project });
     runtime.service.memoryCaptureUserStatement({ memory_id: "private-body", content: "I prefer brief fixture notes.",
-      scope_kind: "user", scope_id: "first-user", kind: "preference" });
-    const args = { asset_id: "private-body", scope_kind: "user", scope_id: "first-user" };
+      scope_kind: "project", scope_id: "first-project", kind: "preference" });
+    const args = { asset_id: "private-body", scope_kind: "project", scope_id: "first-project" };
     const reference = runtime.service.componentAssetInspect("memory", { ...args, action: "reference", version: 1 }).reference;
     const record = runtime.store.get("memory_ledger", "private-body");
     unlinkSync((record.content_ref as JsonObject).path as string);
-    assert.throws(() => runtime.service.componentAssetInspect("memory", { ...args, scope_id: "other-user", action: "read", version: 1 }), /scope or audience denied/u);
+    assert.throws(() => runtime.service.componentAssetInspect("memory", { ...args, scope_id: "other-project", action: "read", version: 1 }), /scope or audience denied/u);
     const history = runtime.service.componentAssetInspect("memory", args);
     assert.equal((history.versions as unknown[]).length, 1);
     assert.equal(runtime.service.componentAssetInspect("memory", { ...args, action: "resolve", reference }).status, "unavailable");
-    assert.throws(() => runtime.service.memoryLedgerTransition({ memory_id: "private-body", scope_kind: "user", scope_id: "other-user", status: "revoked", reason: "Wrong scope." }), /scope or audience denied/u);
+    assert.throws(() => runtime.service.memoryLedgerTransition({ memory_id: "private-body", scope_kind: "project", scope_id: "other-project", status: "revoked", reason: "Wrong scope." }), /scope or audience denied/u);
     assert.equal(runtime.store.findMetadata("memory_ledger", "private-body")?.status, "active");
-  } finally { runtime.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally { runtime.close(); rmSync(root, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
 });
 
 test("a standalone Context without members reports unavailable without creating foreign assets", async () => {

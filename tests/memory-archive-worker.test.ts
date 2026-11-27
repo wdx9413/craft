@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
@@ -91,17 +90,12 @@ test("the Claude Hook uses its explicit Host even when source is an event reason
     hook.stdin.end(JSON.stringify({ hook_event_name: "SessionEnd", source: "clear", cwd: process.cwd(), session_id: "same-session" }));
     assert.equal(await new Promise<number | null>((resolveExit, reject) => { hook.once("error", reject); hook.once("exit", resolveExit); }), 0);
     service = await openCapabilityService("memory", { CRAFT_DATA_DIR: root });
-    const deadline = Date.now() + 15_000;
-    while (!service.store.list("memory_session_archive", 1).some(row => row.status === "archived") && Date.now() < deadline) await delay(100);
-    const archive = service.store.list("memory_session_archive", 1)[0];
-    assert.equal(archive?.session_digest, createHash("sha256").update(sessionStorageScopeId("claude", "same-session")).digest("hex"));
-    const lock = join(craftPaths(root).runtimeDir, "learning-worker-memory-session-archive.lock.json");
-    while (existsSync(lock) && Date.now() < deadline) await delay(50);
-    assert.equal(existsSync(lock), false);
+    assert.deepEqual(service.store.list("memory_session_archive", 10), []);
+    assert.deepEqual(service.store.list("session_storage_identity", 10), []);
   } finally { service?.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("SessionEnd Hook returns while its detached worker completes the durable archive", { timeout: 30_000 }, async t => {
+test("SessionEnd Hook resumes an existing durable archive without adding another", { timeout: 30_000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), "craft-hook-archive-worker-"));
   const sessionId = "background-session", scope = sessionStorageScopeId("codex", sessionId);
   let store: CraftStore | undefined;
@@ -110,6 +104,8 @@ test("SessionEnd Hook returns while its detached worker completes the durable ar
     store.bindSessionStorageHost(sessionId, "codex");
     for (let i = 0; i < 501; i++) store.create("memory_candidate", `worker-${String(i).padStart(4, "0")}`,
       { scope: { kind: "session", id: scope }, status: "candidate" });
+    new MemoryFileStore(store).queueSessionArchive(sessionId, "codex");
+    assert.equal(store.list("memory_session_archive", 10).length, 1);
     store.close(); store = undefined;
     const started = performance.now();
     const hook = spawn(process.execPath, ["--experimental-strip-types", resolve("bin/craft-codex-hook.ts"), "--member", "memory"],
@@ -130,6 +126,7 @@ test("SessionEnd Hook returns while its detached worker completes the durable ar
       if (!archived) await delay(100);
     } while (!archived && Date.now() < deadline);
     assert.equal(archived, true);
+    assert.equal(store.list("memory_session_archive", 10).length, 1);
     assert.equal(store.listSessionMemoryPage("memory_candidate", scope).records.length, 0);
     const lock = join(craftPaths(root).runtimeDir, "learning-worker-memory-session-archive.lock.json");
     while (existsSync(lock) && Date.now() < deadline) await delay(50);

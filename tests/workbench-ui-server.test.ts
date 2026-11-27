@@ -130,11 +130,12 @@ test("Craft Workbench projects model, project, connector and source reads over t
   assert.deepEqual(plugins.find((item) => item.name === "Cross-host helper")?.target_hosts, ["claude"]);
   assert.equal(post("/api/workbench/skills", { name: "release-note", description: "Write release notes", content: "---\nname: release-note\n---\nWrite release notes." }).status, 201);
   assert.equal((JSON.parse(get("/api/workbench/resources?kind=skills").body) as { items: unknown[] }).items.length, 1);
-  assert.equal(post("/api/workbench/memory", { kind: "fact", scope: "user", content: "Keep the work local" }).status, 201);
-  assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory").body) as { items: unknown[] }).items.length, 1);
+  assert.equal(post("/api/workbench/memory", { kind: "fact", scope: "user", content: "Keep the work local" }).status, 422);
+  assert.equal(post("/api/workbench/memory", { kind: "fact", scope: "global", content: "Keep the work local" }).status, 201);
+  assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory").body) as { items: unknown[] }).items.length, 0);
   assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory&task_id=studio-task").body) as { items: unknown[] }).items.length, 1);
   assert.equal(post("/api/workbench/memory/studio-memory/retire", {}).status, 200);
-  assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory").body) as { items: unknown[] }).items.length, 1);
+  assert.equal((JSON.parse(get("/api/workbench/resources?kind=memory").body) as { items: unknown[] }).items.length, 0);
   assert.equal(post("/api/workbench/knowledge/claims", { kind: "rule", content: "Review external plugins before use", scope: "global" }).status, 201);
   assert.equal(post("/api/workbench/workflows", { name: "Local review", description: "Review a local change", inputs: [], steps: [] }).status, 201);
 
@@ -271,7 +272,7 @@ test("Studio compatibility facades still route every write through governed kern
   const f = await fixture();
   try {
     const service = f.service;
-    const proposed = service.workbenchMemorySave({ memory_id: "studio-ledger-memory", kind: "preference", scope: "user", content: "Prefer concise reports" });
+    const proposed = service.workbenchMemorySave({ memory_id: "studio-ledger-memory", kind: "preference", scope: "global", content: "Prefer concise reports" });
     const candidate = proposed.candidate as Record<string, unknown>;
     assert.equal(candidate.status, "candidate");
     const reviewed = service.workbenchMemoryReview({ candidate_id: candidate.id, decision: "reject", reviewer: "studio-reviewer", reason: "awaiting explicit preference confirmation" });

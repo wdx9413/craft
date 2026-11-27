@@ -37,7 +37,7 @@ test("different Hook tasks converge only through their classified scene and froz
       await bridge.handle("context", { ...input, hook_event_name: "PostToolUse", tool_name: "Write", tool_use_id: `edit-${id}`, tool_input: { file_path: join(project, file) }, tool_response: { success: true } });
       await bridge.handle("context", { ...input, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: `verify-${id}`, tool_input: { command: "node --test fixture.test.mjs" }, tool_response: { exit_code: 0 } });
       await bridge.handle("context", { ...input, hook_event_name: "Stop" });
-      const journal = bridge.journal.find(input)!;
+      const journal = (await bridge.journal.find(input))!;
       const observation = experience.store.list("workflow_evolution_observation", 100).find(item => (item.source as JsonObject).id === journal.id)!;
       assert.ok(observation);
       const classified = service.learningCycleFinalize({ host: "codex", session_id: input.session_id, task_id: journal.id, turn_id: input.turn_id,

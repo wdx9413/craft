@@ -21,6 +21,8 @@
 - [Managed Host Bridge](technical/modules/managed-host-bridge.md)：先验证 Manifest 再启动本地 Host，并把终态回流为状态再观察。
 - [Agent IR](technical/modules/agent-ir.md)
 - [Experience / Eval Kernel](technical/modules/experience-eval.md)
+- [经验沉淀与存储跨电脑交接](context-learning-cross-machine-handover.zh-CN.md)：三仓装配、迁移预检、数据回读与 Host 验收的交接事项。
+- [Craft Experience 任务轨迹提炼设计](superpowers/specs/2026-11-26-experience-task-trace-distillation-design.md)：从脱敏任务轨迹和用户纠错生成项目范围候选，再由 Experience Worker 异步评测晋升并记录后续使用。
 - [可信外部评测器设计草案](superpowers/specs/2026-11-10-trusted-external-evaluator-design.md)：评测器信任根、签名回执、事务化门禁及尚待实现的验收条件。
 - [生命周期、弱参考与领域隔离](technical/modules/lifecycle-domain-isolation.md)：Knowledge/Memory/Experience 的过期、降权、冲突裁决、复活留痕、跨域路由隔离，以及 `lifecycle` / `domain_isolation` 确定性评测轴。对应 [ADR 0027](adr/0027-expiry-advisory-revival-domain-boundary.md)。
 - [Workflow / Verification / Signoff](technical/modules/workflow-signoff.md)

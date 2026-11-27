@@ -10,8 +10,40 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths, projectStorageDirectory, sessionStorageScopeId } from "../core/infrastructure/paths.ts";
 import { MemoryCapture } from '@craft/capability-memory/memory-capture';
+import { seedLegacySession } from "./helpers/legacy-session-fixture.ts";
 import { MemoryContribution } from '@craft/capability-memory/contribution';
 import { openCapabilityService } from "../core/interfaces/mcp/runtime.ts";
+
+/** Reconstruct pre-migration session observations for archive compatibility checks. */
+function captureLegacySession(service: CraftService, args: JsonObject, explicit = false): JsonObject {
+  const capture = new MemoryCapture(service.memoryGovernance, () => service.knowledgeMemoryInstallBuiltins(), value => service.evidenceRecord(value));
+  const internal = capture as unknown as {
+    capture(args: JsonObject, source: string): JsonObject;
+    promoteRepeatedFact(input: JsonObject): JsonObject[];
+  };
+  const result = seedLegacySession(capture, args);
+  const candidate = result.candidate as JsonObject | null;
+  if (!candidate || candidate.status !== "approved" || typeof args.project_scope_id !== "string") return result;
+  const promotions = internal.promoteRepeatedFact({ sessionId: (candidate.scope as JsonObject).id,
+    projectId: args.project_scope_id, projectRoot: args.project_root, candidate, evidence: result.evidence });
+  return { ...result, promotions };
+}
+
+function commitEvaluatedGlobal(service: CraftService, result: JsonObject): void {
+  const promotion = (result.promotions as JsonObject[] | undefined)?.find(item => item.tier === "global");
+  const candidate = promotion?.candidate as JsonObject | undefined;
+  if (!candidate || promotion?.evaluation_status !== "pending") return;
+  const candidateRef = { kind: "memory_candidate", id: candidate.id, version: candidate.version, digest: candidate.content_digest };
+  const governance = service.memoryGovernance as unknown as {
+    setEvaluationVerifier(verifier: { verifyTaskEffectEvaluation(input: JsonObject): JsonObject }): void;
+    review(input: JsonObject): JsonObject;
+    remember(input: JsonObject): JsonObject;
+  };
+  governance.setEvaluationVerifier({ verifyTaskEffectEvaluation: () => ({ valid: true, eligible: true, routeable: true, candidate_ref: candidateRef }) });
+  governance.review({ candidate_id: candidate.id, decision: "approve", reviewer: "historical-fixture",
+    reason: "Simulate previously evaluated historical Memory.", evaluation_binding: { contract_id: "fixture", evaluation_id: "fixture", candidate_ref: candidateRef } });
+  governance.remember({ candidate_id: candidate.id });
+}
 
 test("Memory capture preserves evidence on retry and rejects reuse or alteration", async t => {
   const root = mkdtempSync(join(tmpdir(), "craft-memory-evidence-"));
@@ -21,7 +53,7 @@ test("Memory capture preserves evidence on retry and rejects reuse or alteration
     const project = join(root, "project"); mkdirSync(project);
     store.create("scope_alias", "evidence-project-alias", { scope: { kind: "project", id: "evidence-project" }, alias_kind: "path", alias: project, status: "active" });
     const args = { session_id: "evidence-session-1", project_scope_id: "evidence-project", content: "Prefer small diffs", topic: "style", evidence_id: "fixed-evidence" };
-    service.memoryCaptureObservedFact(args);
+    captureLegacySession(service, args);
     const original = store.get("evidence", "fixed-evidence");
     const observation = store.list("memory_observation", 10)[0]!;
     const valid = (value: JsonObject) => service.memoryGovernance.ledger.observationEvidenceCurrent(value);
@@ -53,12 +85,12 @@ test("Memory capture preserves evidence on retry and rejects reuse or alteration
       { evidence_ids: ["fixed-evidence", "other"], evidence_refs: [{ id: "fixed-evidence", version: 1 }, { id: "fixed-evidence", version: 1 }] },
       { evidence_ids: ["missing"], evidence_refs: [{ id: "missing", version: 1 }] },
     ]) assert.equal(valid({ ...observation, ...invalid }), false);
-    service.memoryCaptureObservedFact(args);
+    captureLegacySession(service, args);
     assert.equal(store.get("evidence", "fixed-evidence").version, original.version);
-    assert.throws(() => service.memoryCaptureObservedFact({ ...args, session_id: "evidence-session-2" }), /evidence idempotency conflict/u);
+    assert.throws(() => captureLegacySession(service, { ...args, session_id: "evidence-session-2" }), /evidence idempotency conflict/u);
     assert.equal(store.get("evidence", "fixed-evidence").version, original.version);
     store.save("evidence", "fixed-evidence", { ...original, confidence: "rejected" });
-    assert.throws(() => service.memoryCaptureObservedFact(args), /evidence idempotency conflict/u);
+    assert.throws(() => captureLegacySession(service, args), /evidence idempotency conflict/u);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -73,16 +105,16 @@ test("concurrent Memory captures cannot overwrite the same evidence id", async (
     const competing = new MemoryCapture(second.memoryGovernance, () => {}, args => second.evidenceRecord(args));
     let collision: unknown;
     const writer = new MemoryCapture(first.memoryGovernance, () => {}, args => {
-      try { competing.captureUserStatement({ content: "Different fact", scope_kind: "user", evidence_id: "race-evidence" }); }
+      try { competing.captureUserStatement({ content: "Different fact", scope_kind: "global", evidence_id: "race-evidence" }); }
       catch (error) { collision = error; }
       return first.evidenceRecord(args);
     });
-    writer.captureUserStatement({ content: "Original fact", scope_kind: "user", evidence_id: "race-evidence" });
+    writer.captureUserStatement({ content: "Original fact", scope_kind: "global", evidence_id: "race-evidence" });
     assert.ok(collision instanceof Error);
     assert.match(String(collision), /busy|locked/iu);
     const saved = firstStore.get("evidence", "race-evidence");
     assert.equal(saved.version, 1);
-    assert.throws(() => competing.captureUserStatement({ content: "Different fact", scope_kind: "user", evidence_id: "race-evidence" }), /evidence idempotency conflict/u);
+    assert.throws(() => competing.captureUserStatement({ content: "Different fact", scope_kind: "global", evidence_id: "race-evidence" }), /evidence idempotency conflict/u);
     assert.equal(firstStore.get("evidence", "race-evidence").version, 1);
   } finally { secondStore.close(); firstStore.close(); rmSync(root, { recursive: true, force: true }); }
 });
@@ -96,18 +128,18 @@ test("legacy observation intents without evidence versions remain retryable", as
     const service = new CraftService(store);
     store.create("scope_alias", "legacy-project", { scope: { kind: "project", id: "legacy-project" }, alias_kind: "path", alias: project, status: "active" });
     const args = { session_id: "legacy-session", project_scope_id: "legacy-project", project_root: project, topic: "legacy", content: "保留旧会话" };
-    service.memoryCaptureObservedFact(args);
+    captureLegacySession(service, args);
     const intent = store.list("memory_observation_intent", 10)[0]!;
     const { evidence_version: _version, ...legacy } = intent;
     if (mode === "removed") {
       store.save("memory_observation_intent", String(intent.id), legacy);
-      assert.throws(() => service.memoryCaptureObservedFact(args), /evidence version was removed/u);
+      assert.throws(() => captureLegacySession(service, args), /evidence version was removed/u);
       assert.throws(() => service.memorySessionArchive({ session_id: args.session_id }), /evidence version was removed/u);
       assert.equal(store.list("memory_observation_intent", 10).length, 1);
     } else {
       store.remove("memory_observation_intent", String(intent.id));
       store.create("memory_observation_intent", String(intent.id), legacy);
-      assert.equal(service.memoryCaptureObservedFact(args).already_retained, true);
+      assert.equal(captureLegacySession(service, args).already_retained, true);
       assert.doesNotThrow(() => service.memorySessionArchive({ session_id: args.session_id }));
     }
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
@@ -121,7 +153,7 @@ test("changed observation evidence stops an automatic project Memory from being 
   try {
     const service = new CraftService(store);
     store.create("scope_alias", "version-project", { scope: { kind: "project", id: "version-project" }, alias_kind: "path", alias: project, status: "active" });
-    const capture = (session_id: string) => service.memoryCaptureObservedFact({ session_id, project_scope_id: "version-project", project_root: project, topic: "version", content: "保留已验证的约定" });
+    const capture = (session_id: string) => captureLegacySession(service, { session_id, project_scope_id: "version-project", project_root: project, topic: "version", content: "保留已验证的约定" });
     const first = capture("version-session-1");
     capture("version-session-2");
     assert.equal((service.memoryLedgerList({ scope_kind: "project", scope_id: "version-project" }).memories as JsonObject[]).length, 1);
@@ -148,16 +180,17 @@ test("idempotent Memory capture restores a project observation after an interrup
       if (kind === "memory_observation") throw new Error("injected observation failure");
       return create(kind, id, payload);
     });
-    assert.throws(() => service.memoryCaptureObservedFact(args), /injected observation failure/u);
+    assert.throws(() => captureLegacySession(service, args), /injected observation failure/u);
     injected.mock.restore();
     assert.equal(store.list("memory_observation", 100).length, 0);
-    const retried = service.memoryCaptureObservedFact(args);
+    const retried = captureLegacySession(service, args);
     assert.equal(retried.already_retained, true);
     assert.deepEqual(retried.promotions, []);
     assert.equal(store.list("memory_observation", 100).length, 1);
-    service.memoryCaptureObservedFact(args);
+    captureLegacySession(service, args);
     assert.equal(store.list("memory_observation", 100).length, 1);
-    assert.throws(() => service.memoryCaptureObservedFact({ ...args, candidate_id: "different-candidate" }), /observation intent idempotency conflict/u);
+    assert.throws(() => captureLegacySession(service, { ...args, candidate_id: "different-candidate" }), /observation intent idempotency conflict/u);
+    service.memoryPromotionRun({ project_scope_id: args.project_scope_id });
     const remove = store.remove.bind(store);
     const interrupted = t.mock.method(store, "remove", (kind: string, id: string) => {
       if (kind === "memory_candidate") throw new Error("injected cleanup interruption");
@@ -169,11 +202,11 @@ test("idempotent Memory capture restores a project observation after an interrup
     service.memorySessionArchive({ session_id: args.session_id });
     assert.equal(store.list("memory_observation", 100).length, 1);
     const withoutRoot = { ...args, session_id: "without-root", project_root: undefined, topic: "other-fact", content: "另一个约定" };
-    service.memoryCaptureObservedFact(withoutRoot);
-    assert.equal(service.memoryCaptureObservedFact(withoutRoot).already_retained, true);
+    captureLegacySession(service, withoutRoot);
+    assert.equal(captureLegacySession(service, withoutRoot).already_retained, true);
     const withoutProject = { session_id: "without-project", topic: "temporary", content: "会话临时约定" };
-    service.memoryCaptureUserStatement(withoutProject);
-    assert.equal(service.memoryCaptureUserStatement(withoutProject).already_retained, true);
+    captureLegacySession(service, withoutProject, true);
+    assert.equal(captureLegacySession(service, withoutProject, true).already_retained, true);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -192,7 +225,7 @@ test("session archive restores a committed project observation after capture int
       if (kind === "memory_observation") throw new Error("injected observation failure");
       return create(kind, id, payload);
     });
-    assert.throws(() => service.memoryCaptureObservedFact(args), /injected observation failure/u);
+    assert.throws(() => captureLegacySession(service, args), /injected observation failure/u);
     injected.mock.restore();
     assert.equal(store.list("memory_observation", 100).length, 0);
     const displaced = join(root, "project-unavailable");
@@ -207,7 +240,9 @@ test("session archive restores a committed project observation after capture int
     assert.equal(observations.length, 1);
     assert.equal(observations[0]!.project_id, args.project_scope_id);
     assert.equal(observations[0]!.valid_until, args.valid_until);
-    assert.equal(store.list("memory_observation_intent", 100).length, 0);
+    assert.equal(store.list("memory_observation_intent", 100).length, 1);
+    service.memoryPromotionRun({ project_scope_id: args.project_scope_id });
+    assert.equal(service.memorySessionArchive({ session_id: args.session_id }).promotion_content_retained, false);
     assert.equal(service.memorySessionArchive({ session_id: args.session_id }).idempotent, true);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
@@ -225,7 +260,7 @@ test("session archive recovers an observation without a topic", async t => {
       if (kind === "memory_observation") throw new Error("interrupted");
       return create(kind, id, payload);
     });
-    assert.throws(() => service.memoryCaptureObservedFact({ session_id: "no-topic-session", project_scope_id: "no-topic-project", project_root: project,
+    assert.throws(() => captureLegacySession(service, { session_id: "no-topic-session", project_scope_id: "no-topic-project", project_root: project,
       content: "不带主题的会话事实" }), /interrupted/u);
     fault.mock.restore();
     assert.equal(service.memorySessionArchive({ session_id: "no-topic-session" }).status, "archived");
@@ -241,7 +276,7 @@ test("session archive does not restore an observation from revoked session Memor
     const service = new CraftService(store);
     service.knowledgeMemoryInstallBuiltins();
     store.create("scope_alias", "project", { scope: { kind: "project", id: "revoked-project" }, alias_kind: "path", alias: project, status: "active" });
-    service.memoryCaptureObservedFact({ session_id: "revoked-session", project_scope_id: "revoked-project", project_root: project, content: "已经撤销的事实" });
+    captureLegacySession(service, { session_id: "revoked-session", project_scope_id: "revoked-project", project_root: project, content: "已经撤销的事实" });
     const intent = store.list("memory_observation_intent", 10)[0]!;
     const candidate = store.get("memory_candidate", String(intent.candidate_id));
     const memory = store.get("memory_ledger", String(candidate.ledger_memory_id));
@@ -262,7 +297,7 @@ test("session archive refuses mismatched observation intents without deleting se
       const service = new CraftService(store);
       service.knowledgeMemoryInstallBuiltins();
       store.create("scope_alias", "project", { scope: { kind: "project", id: "intent-project" }, alias_kind: "path", alias: project, status: "active" });
-      service.memoryCaptureObservedFact({ session_id: "intent-session", project_scope_id: "intent-project", project_root: project,
+      captureLegacySession(service, { session_id: "intent-session", project_scope_id: "intent-project", project_root: project,
         topic: "intent-fact", kind: "preference", content: "归档验证项目观察" });
       const intent = store.list("memory_observation_intent", 10)[0]!;
       store.save("memory_observation_intent", String(intent.id), { ...intent, [field]: value });
@@ -281,7 +316,7 @@ test("session archive rejects an altered existing observation", async () => {
     const service = new CraftService(store);
     service.knowledgeMemoryInstallBuiltins();
     store.create("scope_alias", "project", { scope: { kind: "project", id: "observation-project" }, alias_kind: "path", alias: project, status: "active" });
-    service.memoryCaptureObservedFact({ session_id: "observation-session", project_scope_id: "observation-project", project_root: project,
+    captureLegacySession(service, { session_id: "observation-session", project_scope_id: "observation-project", project_root: project,
       topic: "observation-fact", content: "归档前核对既有观察" });
     const observation = store.list("memory_observation", 10)[0]!;
     store.save("memory_observation", String(observation.id), { ...observation, content_digest: "tampered" });
@@ -300,12 +335,12 @@ test("session archive retains the intent when existing observation evidence refe
       const service = new CraftService(store);
       store.create("scope_alias", "project", { scope: { kind: "project", id: "refs-project" }, alias_kind: "path", alias: project, status: "active" });
       const args = { session_id: "refs-session", project_scope_id: "refs-project", project_root: project, topic: "refs", content: "归档保留证据版本" };
-      service.memoryCaptureObservedFact(args);
+      captureLegacySession(service, args);
       const observation = store.list("memory_observation", 10)[0]!;
       const ref = (observation.evidence_refs as JsonObject[])[0]!;
       const evidence_refs = change === "missing" ? undefined : change === "empty" ? [] : [{ ...ref, ...(change === "id" ? { id: "other" } : { version: Number(ref.version) + 1 }) }];
       store.save("memory_observation", String(observation.id), { ...observation, evidence_refs });
-      assert.throws(() => service.memoryCaptureObservedFact(args), /observation evidence binding changed/u);
+      assert.throws(() => captureLegacySession(service, args), /observation evidence binding changed/u);
       assert.throws(() => service.memorySessionArchive({ session_id: "refs-session" }), /existing observation identity changed/u);
       assert.equal(store.list("memory_observation_intent", 10).length, 1);
       assert.equal(store.list("memory_ledger", 10, row => (row.scope as JsonObject)?.kind === "session").length, 1);
@@ -322,7 +357,7 @@ test("session archive fails closed when committed Memory or its capture Evidence
       const service = new CraftService(store);
       service.knowledgeMemoryInstallBuiltins();
       store.create("scope_alias", "project", { scope: { kind: "project", id: "missing-project" }, alias_kind: "path", alias: project, status: "active" });
-      service.memoryCaptureObservedFact({ session_id: "missing-session", project_scope_id: "missing-project", project_root: project,
+      captureLegacySession(service, { session_id: "missing-session", project_scope_id: "missing-project", project_root: project,
         topic: "missing-fact", content: "归档前核验支持证据" });
       const intent = store.list("memory_observation_intent", 10)[0]!;
       const candidate = store.get("memory_candidate", String(intent.candidate_id));
@@ -353,7 +388,7 @@ test("session archive fails closed when the capture intent has no project identi
     const service = new CraftService(store);
     service.knowledgeMemoryInstallBuiltins();
     store.create("scope_alias", "project", { scope: { kind: "project", id: "projectless" }, alias_kind: "path", alias: project, status: "active" });
-    service.memoryCaptureObservedFact({ session_id: "projectless-session", project_scope_id: "projectless", project_root: project,
+    captureLegacySession(service, { session_id: "projectless-session", project_scope_id: "projectless", project_root: project,
       topic: "projectless", content: "归档需要项目身份" });
     const intent = store.list("memory_observation_intent", 10)[0]!;
     // The capture intent lost its project identity while its digests stay
@@ -387,8 +422,8 @@ test("session archive refuses candidate and Memory references from another sessi
       service.knowledgeMemoryInstallBuiltins();
       store.create("scope_alias", "project", { scope: { kind: "project", id: "foreign-project" }, alias_kind: "path", alias: project, status: "active" });
       const base = { project_scope_id: "foreign-project", project_root: project, topic: "foreign-fact", content: "按会话验证来源" };
-      service.memoryCaptureObservedFact({ ...base, session_id: "first-session" });
-      service.memoryCaptureObservedFact({ ...base, session_id: "second-session" });
+      captureLegacySession(service, { ...base, session_id: "first-session" });
+      captureLegacySession(service, { ...base, session_id: "second-session" });
       const intents = store.list("memory_observation_intent", 10);
       const first = intents.find(item => (item.scope as JsonObject).id === "first-session")!;
       const second = intents.find(item => (item.scope as JsonObject).id === "second-session")!;
@@ -413,11 +448,12 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
   const ledgerFiles = service.memoryGovernance.ledger.files;
   try {
     service.knowledgeMemoryInstallBuiltins();
-    assert.throws(() => service.memoryCaptureObservedFact({ content: "Invalid scope kind", session_id: "scope-kind-mismatch", project_scope_id: "project-1", scope_kind: "user" }), /must start in session scope/u);
-    assert.throws(() => service.memoryCaptureObservedFact({ content: "Invalid scope id", session_id: "scope-id-mismatch", project_scope_id: "project-1", scope_id: "another-session" }), /scope_id must match session_id/u);
+    assert.throws(() => service.memoryCaptureObservedFact({ content: "Invalid scope kind", session_id: "scope-kind-mismatch", project_scope_id: "project-1", scope_kind: "user" }), /require project scope/u);
+    assert.throws(() => service.memoryCaptureObservedFact({ content: "Invalid scope id", session_id: "scope-id-mismatch", project_scope_id: "project-1", scope_id: "another-session" }), /scope_id does not match/u);
     assert.throws(() => ledgerFiles.isSessionArchived(" "), /session_id must not be empty/u);
     const implicitSessionId = sessionKey("implicit-session-scope");
-    const implicitSession = service.memoryCaptureUserStatement({ content: "Implicit session scope", session_id: implicitSessionId, session_host: "codex", topic: "implicit-session" });
+    assert.throws(() => service.memoryCaptureUserStatement({ content: "Implicit session scope", session_id: implicitSessionId, session_host: "codex", topic: "implicit-session" }), /project or global scope/u);
+    const implicitSession = captureLegacySession(service, { content: "Implicit session scope", session_id: implicitSessionId, session_host: "codex", topic: "implicit-session" }, true);
     const implicitScopeId = sessionStorageScopeId("codex", implicitSessionId);
     assert.deepEqual((implicitSession.candidate as JsonObject).scope, { kind: "session", id: implicitScopeId });
     assert.equal(existsSync(ledgerFiles.pathFor({ kind: "session", id: implicitScopeId })!), true);
@@ -427,10 +463,10 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
       service.scopeAliasBind({ scope_kind: "project", scope_id: projectId, alias_kind: "path", alias: root });
     });
 
-    const capture = (inputSessionId: string, projectId: string) => { const sessionId = sessionKey(inputSessionId); return service.memoryCaptureUserStatement({
+    const capture = (inputSessionId: string, projectId: string) => { const sessionId = sessionKey(inputSessionId); return captureLegacySession(service, {
       content: "Prefer small diffs", kind: "preference", topic: "work-style", scope_kind: "session", scope_id: sessionId,
       session_id: sessionId, session_host: "codex", project_scope_id: projectId, project_root: projectRoots[Number(projectId.at(-1)) - 1], valid_until: "2999-01-01T00:00:00.000Z",
-    }); };
+    }, true); };
     assert.equal(ledgerFiles.pathFor({ kind: "global", id: "global" }), join(dataRoot, "memory", "memory.md"));
     assert.equal(ledgerFiles.pathFor({ kind: "user", id: "local" }), join(dataRoot, "memory", "memory.md"));
     assert.equal(ledgerFiles.pathFor({ kind: "project", id: "missing-project" }), null);
@@ -457,6 +493,7 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     capture("session-c1", "project-3");
     const thirdProject = capture("session-c2", "project-3");
     assert.deepEqual((thirdProject.promotions as Array<Record<string, unknown>>).map(item => item.tier), ["project", "global"]);
+    commitEvaluatedGlobal(service, thirdProject);
     assert.equal((capture("session-c3", "project-3").promotions as unknown[]).length, 0);
     const retainedProject = store.list("memory_ledger", 100, row => row.status === "active" && row.content_digest === digestJson("Prefer small diffs")
       && (row.scope as JsonObject | undefined)?.kind === "project" && (row.scope as JsonObject | undefined)?.id === "project-1")[0];
@@ -472,16 +509,16 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     });
     assert.deepEqual(retainedBodies, ["Prefer small diffs", "Prefer small diffs"]);
 
-    const expiredCapture = (inputSessionId: string) => { const sessionId = sessionKey(inputSessionId); return service.memoryCaptureUserStatement({ content: "Expired transient fact", kind: "preference", topic: "expired-fact",
+    const expiredCapture = (inputSessionId: string) => { const sessionId = sessionKey(inputSessionId); return captureLegacySession(service, { content: "Expired transient fact", kind: "preference", topic: "expired-fact",
       scope_kind: "session", scope_id: sessionId, session_id: sessionId, session_host: "codex", project_scope_id: "project-1", project_root: projectRoots[0],
-      valid_until: "2000-01-01T00:00:00.000Z" }); };
+      valid_until: "2000-01-01T00:00:00.000Z" }, true); };
     assert.equal((expiredCapture("expired-session-1").promotions as unknown[]).length, 0);
     assert.equal((expiredCapture("expired-session-2").promotions as unknown[]).length, 0);
     const expiredObservations = store.list("memory_observation", 100, row => row.content_digest === digestJson("Expired transient fact"));
     assert.equal(expiredObservations.length, 2);
     assert.ok(expiredObservations.every(row => row.valid_until === "2000-01-01T00:00:00.000Z"));
 
-    const captureAnotherFact = (inputSessionId: string, projectId: string) => { const sessionId = sessionKey(inputSessionId); return service.memoryCaptureObservedFact({ content: "Quartz fruit is locally preferred",
+    const captureAnotherFact = (inputSessionId: string, projectId: string) => { const sessionId = sessionKey(inputSessionId); return captureLegacySession(service, { content: "Quartz fruit is locally preferred",
       kind: "preference", topic: "fruit-preference", scope_kind: "session", scope_id: sessionId, session_id: sessionId, session_host: "codex", project_scope_id: projectId,
       project_root: projectRoots[Number(projectId.at(-1)) - 1] }); };
     captureAnotherFact("session-na1", "project-1");
@@ -489,7 +526,9 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     captureAnotherFact("session-nb1", "project-2");
     assert.equal((captureAnotherFact("session-nb2", "project-2").promotions as Array<Record<string, unknown>>)[0]?.tier, "project");
     captureAnotherFact("session-nc1", "project-3");
-    assert.deepEqual((captureAnotherFact("session-nc2", "project-3").promotions as Array<Record<string, unknown>>).map(item => item.tier), ["project", "global"]);
+    const fruitPromotion = captureAnotherFact("session-nc2", "project-3");
+    assert.deepEqual((fruitPromotion.promotions as Array<Record<string, unknown>>).map(item => item.tier), ["project", "global"]);
+    commitEvaluatedGlobal(service, fruitPromotion);
 
     const projectFile = join(projectStorageDirectory(store.paths, projectRoots[0]!), "memory", "memory.md");
     const globalFile = join(dataRoot, "memory", "memory.md");
@@ -498,6 +537,7 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
 
     const archivedId = sessionKey("session-a1");
     const archivedScopeId = sessionStorageScopeId("codex", archivedId);
+    service.memoryPromotionRun({ limit: 500 });
     const archived = service.memorySessionArchive({ session_id: archivedId, session_host: "codex" });
     assert.equal(archived.content_deleted, true);
     assert.equal(service.memorySessionArchive({ session_id: archivedId, session_host: "codex" }).idempotent, true);
@@ -510,7 +550,7 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
       return store.contentStore.readCompatSync(reference as never).body;
     }), retainedBodies);
     const beforeArchivedReplay = { evidence: store.count("evidence"), candidates: store.count("memory_candidate"), ledger: store.count("memory_ledger") };
-    const replayed = service.memoryCaptureObservedFact({ content: "Late event after archive", kind: "preference", topic: "late-event",
+    const replayed = captureLegacySession(service, { content: "Late event after archive", kind: "preference", topic: "late-event",
       scope_kind: "session", scope_id: archivedId, session_id: archivedId, session_host: "codex", project_scope_id: "project-1", project_root: projectRoots[0] });
     assert.equal(replayed.status, "archived");
     assert.equal(replayed.next_action, "session_archive_is_terminal");
@@ -555,15 +595,15 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
       proposePromotion(args: JsonObject): JsonObject;
     };
     assert.throws(() => captureKernel.proposePromotion({}), /kind must not be empty/u);
-    captureKernel.captureUserStatement({ content: "Local fallback scope", kind: "episodic", scope_kind: "user", topic: "local-fallback" });
+    assert.throws(() => captureKernel.captureUserStatement({ content: "Local fallback scope", kind: "episodic", scope_kind: "user", topic: "local-fallback" }), /project or global scope/u);
     const globalFallback = captureKernel.captureUserStatement({ content: "Global fallback scope", kind: "episodic", scope_kind: "global", topic: "global-fallback" });
     assert.deepEqual((globalFallback.candidate as JsonObject).scope, { kind: "global", id: "global" });
     const standaloneSessionId = sessionKey("session-without-project");
-    const standaloneSession = captureKernel.captureUserStatement({ content: "Session without a project", kind: "episodic", scope_kind: "session", scope_id: standaloneSessionId, topic: "standalone-session" });
+    const standaloneSession = captureLegacySession(service, { content: "Session without a project", kind: "episodic", scope_kind: "session", scope_id: standaloneSessionId, session_id: standaloneSessionId, topic: "standalone-session" }, true);
     assert.equal((standaloneSession.promotions as unknown[]).length, 0);
     const noRootSessionId = sessionKey("project-session-without-root");
-    const projectWithoutRoot = captureKernel.captureUserStatement({ content: "Project session without explicit root", kind: "episodic", scope_kind: "session", scope_id: noRootSessionId,
-      project_scope_id: "project-2", topic: "project-session-without-root" });
+    const projectWithoutRoot = captureLegacySession(service, { content: "Project session without explicit root", kind: "episodic", scope_kind: "session", scope_id: noRootSessionId,
+      session_id: noRootSessionId, project_scope_id: "project-2", topic: "project-session-without-root" }, true);
     assert.equal((projectWithoutRoot.promotions as unknown[]).length, 0);
     assert.deepEqual(captureKernel.promoteRepeatedFact({ sessionId: "invalid", projectId: "project-1", candidate: {} }), []);
     assert.deepEqual(captureKernel.promoteRepeatedFact({ sessionId: "invalid", projectId: "project-1", candidate: { content_digest: "sha256:bad", scope: { kind: "global" } } }), []);
@@ -578,7 +618,8 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
       const promoted = directCandidate("sha256:no-topic", projectId, `${prefix}2`);
       if (projectId === "project-3") {
         assert.deepEqual(promoted.map(item => item.tier), ["project", "global"]);
-        assert.equal(promoted[1]?.auto_committed, true, JSON.stringify(promoted[1]));
+        assert.equal(promoted[1]?.auto_committed, false, JSON.stringify(promoted[1]));
+        assert.equal(promoted[1]?.reason_code, "independent_project_lineage_unverified");
       }
     }
     store.create("memory_ledger", "project-conflict", { source_id: "builtin.evidence-wiki", scope: { kind: "project", id: "project-1" }, status: "active", kind: "preference",
@@ -621,8 +662,8 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     directCandidate(aggregationContent, "project-1", "aggregation-trigger1", "aggregation-topic");
     const aggregationResult = directCandidate(aggregationContent, "project-1", "aggregation-trigger2", "aggregation-topic");
     assert.equal(aggregationResult[0]?.tier, "global");
-    assert.equal(aggregationResult[0]?.status, "rejected");
-    assert.equal(aggregationResult[0]?.reason_code, "shared_evidence");
+    assert.equal(aggregationResult[0]?.status, "waiting");
+    assert.equal(aggregationResult[0]?.reason_code, "independent_project_lineage_unverified");
 
     const observationContent = "observation with legacy evidence gap";
     const observationDigest = digestJson(observationContent);
@@ -633,9 +674,11 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     const globalConflictContent = "blocked cross-project promotion";
     const globalConflictDigest = digestJson(globalConflictContent);
     for (const [projectId, index] of aggregationProjects) {
-      const projectEvidence = service.evidenceRecord({ evidence_id: `evidence-global-conflict-${index}`, source_type: "human", confidence: "bounded", claim: "Independent project support", locator: `test:global-conflict-${index}` });
+      const projectEvidence = service.evidenceRecord({ evidence_id: `evidence-global-conflict-${index}`, source_type: "host_observed_fact", confidence: "bounded", claim: "Independent project support", locator: `test:global-conflict-${index}` });
       store.create("memory_ledger", `global-conflict-project-${index}`, { scope: { kind: "project", id: projectId }, status: "active", kind: "preference", topic: "global-conflict",
-        content: globalConflictContent, content_digest: globalConflictDigest, confidence: "bounded", evidence_ids: [projectEvidence.id] });
+        content: globalConflictContent, content_digest: globalConflictDigest, confidence: "bounded", evidence_ids: [projectEvidence.id],
+        source_lineage: [{ origin: "live_hook", session_id: `global-conflict-${index}`, project_scope_id: `project:${projectId}`,
+          source_ref: { kind: "fixture", id: `global-conflict-${index}` }, evidence_refs: [{ kind: "evidence", id: projectEvidence.id, version: projectEvidence.version }] }] });
     }
     const globalConflictEvidence = service.evidenceRecord({ evidence_id: "evidence-global-conflict-baseline", source_type: "human", confidence: "bounded", claim: "Existing global support", locator: "test:global-conflict-baseline" });
     store.create("memory_ledger", "global-conflicting-preference", { source_id: "builtin.evidence-wiki", scope: { kind: "global", id: "global" }, status: "active", kind: "preference", topic: "global-conflict",
@@ -643,11 +686,14 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     directCandidate(globalConflictContent, "project-1", "global-conflict-trigger1", "global-conflict");
     const globalResolution = directCandidate(globalConflictContent, "project-1", "global-conflict-trigger2", "global-conflict");
     assert.equal(globalResolution[0]?.tier, "global");
-    assert.equal(globalResolution[0]?.auto_committed, true);
-    assert.equal((globalResolution[0]?.candidate as JsonObject).status, "approved");
-    assert.equal((globalResolution[0]?.memory_file as JsonObject).status, "written");
+    assert.equal(globalResolution[0]?.auto_committed, false);
+    assert.equal((globalResolution[0]?.candidate as JsonObject).status, "conflict_pending");
+    assert.equal(store.get("memory_ledger", "global-conflicting-preference").status, "active");
+    const selected = service.memoryGovernance.resolveConflict({ candidate_id: (globalResolution[0]!.candidate as JsonObject).id,
+      resolution: "supersede", actor: "historical-fixture", reason: "Select evaluated replacement." });
+    assert.equal(selected.auto_committed, false);
+    commitEvaluatedGlobal(service, { promotions: [{ tier: "global", evaluation_status: "pending", candidate: selected.candidate }] });
     assert.equal(store.get("memory_ledger", "global-conflicting-preference").status, "superseded");
-    assert.equal(store.get("memory_ledger", "global-conflicting-preference").replacement_id, (globalResolution[0]?.memory as JsonObject).id);
 
     service.memoryPolicySave({ mode: "propose", updated_by: "test" });
     store.create("memory_ledger", "policy-blocked-conflict", { scope: { kind: "project", id: "project-2" }, status: "active", kind: "preference",
@@ -661,9 +707,11 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     const policyBlockedGlobalContent = "global candidate remains reviewable";
     const policyBlockedGlobalDigest = digestJson(policyBlockedGlobalContent);
     for (const [projectId, index] of aggregationProjects) {
-      const projectEvidence = service.evidenceRecord({ evidence_id: `evidence-policy-global-${index}`, source_type: "human", confidence: "bounded", claim: "Project support", locator: `test:policy-global-${index}` });
+      const projectEvidence = service.evidenceRecord({ evidence_id: `evidence-policy-global-${index}`, source_type: "host_observed_fact", confidence: "bounded", claim: "Project support", locator: `test:policy-global-${index}` });
       store.create("memory_ledger", `policy-global-project-${index}`, { scope: { kind: "project", id: projectId }, status: "active", kind: "preference", topic: "policy-global",
-        content: policyBlockedGlobalContent, content_digest: policyBlockedGlobalDigest, confidence: "bounded", evidence_ids: [projectEvidence.id] });
+        content: policyBlockedGlobalContent, content_digest: policyBlockedGlobalDigest, confidence: "bounded", evidence_ids: [projectEvidence.id],
+        source_lineage: [{ origin: "live_hook", session_id: `policy-global-${index}`, project_scope_id: `project:${projectId}`,
+          source_ref: { kind: "fixture", id: `policy-global-${index}` }, evidence_refs: [{ kind: "evidence", id: projectEvidence.id, version: projectEvidence.version }] }] });
     }
     store.create("memory_ledger", "policy-global-conflict", { scope: { kind: "global", id: "global" }, status: "active", kind: "preference", topic: "policy-global",
       content: "Previous global candidate", content_digest: "sha256:policy-global-old", confidence: "bounded", evidence_ids: [] });
@@ -713,8 +761,11 @@ test("Memory active reads, topic hints and file projections exclude expired, fut
     assert.doesNotMatch(projection, /expired preference|future preference|alpha preference|beta preference/u);
     const suggestions = service.memoryGovernance.topicSuggestions({ scope_kind: "global", scope_id: "global", content: "coding preference" });
     assert.deepEqual((suggestions.suggestions as JsonObject[]).map(item => item.memory_id), ["current-pref"]);
-    remember("user-pref-a", "shared-user-topic", "coding user scope alpha", {}, "user", "user-a");
-    remember("user-pref-b", "shared-user-topic", "coding user scope beta", {}, "user", "user-b");
+    for (const [id, user, content] of [["user-pref-a", "user-a", "coding user scope alpha"], ["user-pref-b", "user-b", "coding user scope beta"]]) {
+      store.create("memory_ledger", id, { scope: { kind: "user", id: user }, source_id: "builtin.evidence-wiki", kind: "preference",
+        topic: "shared-user-topic", content, content_digest: digestJson(content), confidence: "bounded", sensitivity: "internal", status: "active" });
+    }
+    service.memoryGovernance.ledger.files.sync({ kind: "global", id: "global" });
     const combinedProjection = readFileSync(join(dataRoot, "memory", "memory.md"), "utf8");
     assert.match(combinedProjection, /coding user scope alpha/u);
     assert.match(combinedProjection, /coding user scope beta/u);
@@ -741,7 +792,7 @@ test("revoking one project supporter retires global Memory and old observations 
     const capture = (projectIndex: number) => {
       const sessionId = `support-session-${randomUUID()}`;
       sessions.push(sessionId);
-      return service.memoryCaptureObservedFact({ session_id: sessionId, project_scope_id: `support-${projectIndex}`,
+      return captureLegacySession(service, { session_id: sessionId, project_scope_id: `support-${projectIndex}`,
         project_root: projectRoots[projectIndex], kind: "preference", topic: "promotion-exit", content: "Keep the verified dependency" });
     };
     const factDigest = digestJson("Keep the verified dependency");
@@ -749,7 +800,7 @@ test("revoking one project supporter retires global Memory and old observations 
       content_digest: factDigest, kind: "working", topic: "other-topic", status: "active" });
     store.create("memory_ledger", "unrelated-global-ledger", { scope: { kind: "global", id: "global" },
       content_digest: factDigest, kind: "working", topic: "other-topic", status: "active" });
-    for (let projectIndex = 0; projectIndex < 3; projectIndex += 1) { capture(projectIndex); capture(projectIndex); }
+    for (let projectIndex = 0; projectIndex < 3; projectIndex += 1) { capture(projectIndex); commitEvaluatedGlobal(service, capture(projectIndex)); }
     const promotedFact = (item: JsonObject) => item.kind === "preference" && item.topic === "promotion-exit";
     const project = store.list("memory_ledger", 100, item => item.status === "active" && promotedFact(item) && (item.scope as JsonObject | undefined)?.id === "support-0")[0]!;
     const global = store.list("memory_ledger", 100, item => item.status === "active" && promotedFact(item) && (item.scope as JsonObject | undefined)?.kind === "global")[0]!;
@@ -774,8 +825,10 @@ test("revoking one project supporter retires global Memory and old observations 
     assert.deepEqual(store.list("memory_observation", 100, item => item.project_id === "support-0" && item.status === "active").map(item => item.id).sort(),
       [unrelatedKind.id, unrelatedTopic.id].sort());
     assert.equal((capture(0).promotions as JsonObject[]).length, 0);
-    const renewed = capture(0).promotions as JsonObject[];
+    const renewal = capture(0);
+    const renewed = renewal.promotions as JsonObject[];
     assert.deepEqual(renewed.map(item => item.tier), ["project", "global"]);
+    commitEvaluatedGlobal(service, renewal);
     assert.equal(store.list("memory_ledger", 100, item => item.status === "active" && promotedFact(item) && (item.scope as JsonObject | undefined)?.kind === "global").length, 1);
     // A legacy or out-of-band status write must not leave a stale promoted fact readable.
     const renewedProject = store.list("memory_ledger", 100, item => item.status === "active" && promotedFact(item) && (item.scope as JsonObject | undefined)?.id === "support-0")[0]!;
@@ -804,7 +857,7 @@ test("revoking a session supporter retires its project promotion and preserves t
   try {
     service.knowledgeMemoryInstallBuiltins();
     store.create("scope_alias", "session-support-project", { scope: { kind: "project", id: "session-support" }, alias_kind: "path", alias: projectRoot, status: "active" });
-    const capture = (sessionId: string) => service.memoryCaptureObservedFact({ session_id: sessionId, project_scope_id: "session-support", project_root: projectRoot,
+    const capture = (sessionId: string) => captureLegacySession(service, { session_id: sessionId, project_scope_id: "session-support", project_root: projectRoot,
       kind: "preference", topic: "session-support-topic", content: "Verify a session source before promotion" });
     capture(sessions[0]!);
     assert.equal((capture(sessions[1]!).promotions as JsonObject[])[0]?.tier, "project");

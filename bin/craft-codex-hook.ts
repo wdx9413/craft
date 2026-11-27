@@ -12,6 +12,7 @@ import { beginHookRuntimeDiagnostic, hookStorageFailureDetails } from "../core/i
 import { formatCodexHookOutput } from "../core/interfaces/codex-hook-output.ts";
 import { operationErrorCode } from 'craft-common-log/index';
 import { launchMemoryArchiveWorker, MEMORY_ARCHIVE_WORKER_FLAG } from "../core/interfaces/memory-archive-launcher.ts";
+import { CONTEXT_CLEANUP_WORKER_FLAG, launchContextCleanupWorker, runContextCleanupWorker } from "../core/interfaces/context-cleanup-worker.ts";
 
 type CodexHookMember = "context" | "knowledge" | "memory" | "experience";
 
@@ -135,7 +136,8 @@ async function main(): Promise<void> {
     const handlerStarted = performance.now();
     let output;
     try {
-      const bridge = new CodexHookBridge(service, () => { if (process.argv[1]) launchMemoryArchiveWorker(process.argv[1], store.paths.root); });
+      const bridge = new CodexHookBridge(service, () => { if (process.argv[1]) launchMemoryArchiveWorker(process.argv[1], store.paths.root); }, undefined,
+        (sessionKey, ownerId) => { if (process.argv[1]) launchContextCleanupWorker(process.argv[1], store.paths.root, sessionKey, ownerId); });
       if (event === "Stop" && (component === "context" || component === "experience")) {
         const home = input.session_host === "claude" ? process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude") : process.env.CODEX_HOME || join(homedir(), ".codex");
         const completions = nativeAsyncVerificationResults(input, home);
@@ -170,7 +172,9 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[2] === MEMORY_ARCHIVE_WORKER_FLAG) {
+if (process.argv[2] === CONTEXT_CLEANUP_WORKER_FLAG) {
+  runContextCleanupWorker().catch(() => { process.exitCode = 1; });
+} else if (process.argv[2] === MEMORY_ARCHIVE_WORKER_FLAG) {
   process.env.CRAFT_HOOK_MODE = "0";
   import("../core/interfaces/memory-archive-worker.ts").then(module => module.runMemoryArchiveWorker()).catch(() => { process.exitCode = 1; });
 } else main().catch(() => { process.stdout.write("{}\n"); process.exitCode = 0; });

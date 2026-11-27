@@ -39,6 +39,7 @@ test("Readiness Doctor reports bounded state without claiming execution", async 
     assert.equal(result.surface, "component-context-agent");
     assert.equal(result.config_is_not_execution_proof, true);
     assert.equal(result.execution_context, false);
+    assert.equal((result.context as JsonObject).resume_snapshots, null);
     assert.ok((result.activation as JsonObject).components);
     assert.match(String(result.data_space_id), /^sha256:/u);
     assert.equal(((result.learning_state as JsonObject).knowledge as JsonObject).status, "observed");

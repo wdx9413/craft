@@ -455,9 +455,10 @@ test("project brain and work session cover default projection and reference bran
     assert.equal(sessions.refresh({ session_id: "s" }).next_action, "review_context_drift");
     f.store.create("work_session", "orphan-session", { task_id: "missing", brain_id: "missing", task_version: 1, brain_version: 1, status: "running", next_action: "observe_execution" });
     assert.equal(sessions.refresh({ session_id: "orphan-session" }).next_action, "review_context_drift");
-    f.store.create("work_session", "clean-session", { task_id: "t", brain_id: String((brain.open({ project_id: "p" }).brain as JsonObject).id), task_version: 1, brain_version: 999, status: "prepared" });
+    const currentBrainVersion = (brain.open({ project_id: "p" }).brain as JsonObject).version;
+    f.store.create("work_session", "clean-session", { project_id: "p", task_id: "t", brain_id: String((brain.open({ project_id: "p" }).brain as JsonObject).id), task_version: 1, brain_version: currentBrainVersion, status: "prepared" });
     assert.equal(sessions.refresh({ session_id: "clean-session" }).next_action, "bind_work_launch");
-    f.store.create("work_session", "launched-session", { task_id: "t", brain_id: String((brain.open({ project_id: "p" }).brain as JsonObject).id), task_version: 1, brain_version: 999, status: "prepared", launch_id: "launch" });
+    f.store.create("work_session", "launched-session", { project_id: "p", task_id: "t", brain_id: String((brain.open({ project_id: "p" }).brain as JsonObject).id), task_version: 1, brain_version: currentBrainVersion, status: "prepared", launch_id: "launch" });
     assert.equal(sessions.refresh({ session_id: "launched-session" }).next_action, "observe_execution");
     f.store.create("internal_dispatch", "dispatch", { task_id: "t", session_id: "other" });
     assert.throws(() => sessions.bindDispatch({ session_id: "s", dispatch_id: "dispatch" }), /another session/);
@@ -472,8 +473,8 @@ test("memory governance covers conflict resolution, expiry and consolidation ide
   try {
     f.store.create("knowledge_source", "source", { scope: "global", status: "active" }); f.store.create("evidence", "ev", { confidence: "confirmed" });
     const memory = new MemoryGovernanceKernel(f.store, new MemoryLedgerKernel(f.store));
-    const base = { source_id: "source", kind: "episodic", scope_kind: "task", scope_id: "t", topic: "topic", evidence_ids: ["ev"] };
-    f.store.create("memory_candidate", "legacy-no-conflict-ids", { source_id: "source", kind: "episodic", scope: { kind: "task", id: "t" }, topic: "topic", content_digest: digest("legacy"), status: "candidate" });
+    const base = { source_id: "source", kind: "episodic", scope_kind: "global", scope_id: "global", topic: "topic", evidence_ids: ["ev"] };
+    f.store.create("memory_candidate", "legacy-no-conflict-ids", { source_id: "source", kind: "episodic", scope: { kind: "global", id: "global" }, topic: "topic", content_digest: digest("legacy"), status: "candidate" });
     const first = memory.propose({ ...base, candidate_id: "c1", content: "one", valid_until: "2020-01-01T00:00:00Z" });
     const second = memory.propose({ ...base, candidate_id: "c2", content: "two", valid_until: "2030-01-01T00:00:00Z" });
     assert.equal((second.candidate as JsonObject).status, "conflict_pending");
@@ -486,10 +487,10 @@ test("memory governance covers conflict resolution, expiry and consolidation ide
     assert.equal(memory.consolidate({ candidate_ids: ["c1", "c2"], consolidation_id: "cons", summary: "summary" }).idempotent, true);
     assert.equal(Number(memory.expirySweep({ now: "2030-02-01T00:00:00Z" }).count) >= 1, true);
     assert.equal(Number(memory.expirySweep().count) >= 0, true);
-    f.store.create("memory_candidate", "orphan", { status: "conflict_pending", conflict_ids: ["missing"], scope: { kind: "task", id: "t" }, topic: "topic" });
+    f.store.create("memory_candidate", "orphan", { status: "conflict_pending", conflict_ids: ["missing"], scope: { kind: "global", id: "global" }, topic: "topic" });
     assert.equal(memory.resolveConflict({ candidate_id: "orphan", resolution: "dismiss", actor: "r", reason: "dismiss" }).candidate !== undefined, true);
-    f.store.create("memory_candidate", "orphan-no-ids", { status: "conflict_pending", scope: { kind: "task", id: "t" }, topic: "topic" });
-    f.store.create("memory_candidate", "resolver", { status: "conflict_pending", conflict_ids: ["orphan-no-ids"], scope: { kind: "task", id: "t" }, topic: "topic" });
+    f.store.create("memory_candidate", "orphan-no-ids", { status: "conflict_pending", scope: { kind: "global", id: "global" }, topic: "topic" });
+    f.store.create("memory_candidate", "resolver", { status: "conflict_pending", conflict_ids: ["orphan-no-ids"], scope: { kind: "global", id: "global" }, topic: "topic" });
     assert.equal(memory.resolveConflict({ candidate_id: "resolver", resolution: "keep", actor: "r", reason: "keep" }).candidate !== undefined, true);
     const solo = memory.propose({ ...base, candidate_id: "c3", topic: "solo", content: "three", evidence_ids: ["ev"] });
     const solo2 = memory.propose({ ...base, candidate_id: "c4", topic: "solo2", content: "four", evidence_ids: ["ev"] });

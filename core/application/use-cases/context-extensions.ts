@@ -6,14 +6,14 @@ import { contextReadinessDoctor } from "../../context-readiness-doctor.ts";
 declare module "../craft-service.ts" {
   interface CraftService {
     contextExtensionsRenderRouting(args: JsonObject): JsonObject;
-    contextExtensionsRecordEphemeral(args: JsonObject): JsonObject;
-    contextExtensionsSearchEphemeral(args: JsonObject): JsonObject;
-    contextExtensionsPurgeEphemeral(args: JsonObject): JsonObject;
-    contextExtensionsCaptureOutput(args: JsonObject): JsonObject;
+    contextExtensionsRecordEphemeral(args: JsonObject): Promise<JsonObject>;
+    contextExtensionsSearchEphemeral(args: JsonObject): Promise<JsonObject>;
+    contextExtensionsPurgeEphemeral(args: JsonObject): Promise<JsonObject>;
+    contextExtensionsCaptureOutput(args: JsonObject): Promise<JsonObject>;
     contextExtensionsCompute(args: JsonObject): JsonObject;
-    contextExtensionsCheckpointResume(args: JsonObject): JsonObject;
-    contextExtensionsGetResume(args: JsonObject): JsonObject;
-    contextExtensionsResolveResume(args: JsonObject): JsonObject;
+    contextExtensionsCheckpointResume(args: JsonObject): Promise<JsonObject>;
+    contextExtensionsGetResume(args: JsonObject): Promise<JsonObject>;
+    contextExtensionsResolveResume(args: JsonObject): Promise<JsonObject>;
     contextExtensionsStats(args: JsonObject): JsonObject;
     contextReadinessDoctor(args: JsonObject): JsonObject;
     contextExtensionsHealth(args: JsonObject): JsonObject;

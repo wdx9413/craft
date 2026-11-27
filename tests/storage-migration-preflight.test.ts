@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { stableDigest } from 'craft-common-base/digest';
-import { craftPaths, projectStorageDirectory, sessionStorageDirectory, sessionStorageScopeId } from 'craft-common-store-local/paths';
+import { craftPaths, projectStorageDirectory, projectStorageIdentity, sessionStorageDirectory, sessionStorageScopeId } from 'craft-common-store-local/paths';
 import { CraftStore } from 'craft-common-store-local/store';
 import { projectAliases, StorageMigrationPreflightReader, storageMigrationPreflight } from "../core/storage-migration-preflight.ts";
 
@@ -197,12 +197,12 @@ test("storage preflight pages current, legacy, blocked and missing pointers with
     const canonicalFile = join(projectStorageDirectory(paths, project), "memory", "memory.db");
     addPointer("canonical-project", { kind: "project", id: canonicalId }, canonicalFile);
     addPointer("canonical-project-unprefixed", { kind: "project", id: canonicalId.slice("project:".length) }, canonicalFile);
-    const missingLegacy = join(other, ".craft_data", "memory", "memory.db");
+    const missingLegacy = join(paths.root, "projects", projectStorageIdentity(other).directory_name, "memory", "memory.db");
     alias("other", "project:other", other);
     addPointer("missing-file", { kind: "project", id: "project:other" }, missingLegacy);
     store.close();
     const currentFile = join(projectStorageDirectory(paths, project), "memory", "memory.db");
-    const legacyFile = join(project, ".craft_data", "memory", "memory.db");
+    const legacyFile = join(paths.root, "projects", projectStorageIdentity(project).directory_name, "memory", "memory.db");
     mkdirSync(dirname(legacyFile), { recursive: true }); renameSync(currentFile, legacyFile);
     const database = new (await import("node:sqlite")).DatabaseSync(paths.databaseFile);
     try {

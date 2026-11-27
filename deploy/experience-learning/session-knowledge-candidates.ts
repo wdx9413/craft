@@ -1,6 +1,7 @@
-import { lstatSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { hasUnresolvedTaskCall } from "./session-knowledge-call-reconciliation.ts";
+import { join, resolve } from "node:path";
 import { atomicPrivateJson, craftPaths, dataRoot } from 'craft-common-store-local/paths';
+import { readVolatileLearningState, registerVolatileLearningState, writeVolatileLearningState } from "../../core/codex-session-archive.ts";
 import { stableDigest } from "../../core/digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
@@ -22,6 +23,7 @@ type CandidateSkipReason = "verified_project_evidence_incomplete" | "verified_ta
 interface CandidateSkip { source_ref_digest: string; reason_code: CandidateSkipReason; recorded_at: string }
 interface CandidateState { processed_task_ids: string[]; terminal_skips: Record<string, CandidateSkip>; trace_ids_by_task: Record<string, string>; last_unavailable_task_id?: string;
   uncertain_calls: Record<string, { trace_id: string; input_digest: string }> }
+const candidateDiagnosticDirs = new Map<string, string>();
 export interface SessionKnowledgeCandidateDependencies {
   client: ExperienceLearningClient;
   providers?: readonly ModelProviderSpec[];
@@ -39,13 +41,15 @@ function object(value: unknown, name: string): JsonObject {
   return value as JsonObject;
 }
 function candidateStatePath(options: SessionKnowledgeCandidateDependencies): string {
-  return resolve(options.state_file ?? join(craftPaths(dataRoot(options.env)).knowledgeDir, "session-candidate-state.json"));
+  const path = resolve(options.state_file ?? join(craftPaths(dataRoot(options.env)).knowledgeDir, "session-candidate-state.json"));
+  registerVolatileLearningState(path, options.env);
+  candidateDiagnosticDirs.set(path, craftPaths(dataRoot(options.env)).knowledgeDir);
+  return path;
 }
-function readCandidateState(path: string): CandidateState {
+async function readCandidateState(path: string): Promise<CandidateState> {
   try {
-    const stat = lstatSync(path);
-    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error("Knowledge session candidate state file is invalid");
-    const value = JSON.parse(readFileSync(path, "utf8")) as JsonObject;
+    const value = await readVolatileLearningState(path);
+    if (value === null) throw Object.assign(new Error("Learning state is empty"), { code: "ENOENT" });
     const skips = value.terminal_skips === undefined ? {} : value.terminal_skips;
     const traces = value.trace_ids_by_task === undefined ? {} : value.trace_ids_by_task;
     const uncertain = value.uncertain_calls === undefined ? {} : value.uncertain_calls;
@@ -81,14 +85,23 @@ function readCandidateState(path: string): CandidateState {
   }
 }
 async function writeCandidateState(path: string, state: CandidateState): Promise<void> {
-  const parent = dirname(path);
-  try { if (lstatSync(parent).isSymbolicLink()) throw new Error("Knowledge session candidate state directory must not be a symbolic link"); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  await atomicPrivateJson(path, { schema: STATE_SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000),
+  await writeVolatileLearningState(path, { schema: STATE_SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000),
     terminal_skips: Object.fromEntries(Object.entries(state.terminal_skips).slice(-50_000)),
     trace_ids_by_task: Object.fromEntries(Object.entries(state.trace_ids_by_task).slice(-50_000)), last_unavailable_task_id: state.last_unavailable_task_id,
     uncertain_calls: state.uncertain_calls,
     updated_at: new Date().toISOString() });
+  try {
+    const directory = candidateDiagnosticDirs.get(path)!;
+    try { if (lstatSync(directory).isSymbolicLink()) throw new Error("Knowledge diagnostic directory must not be a symbolic link"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    await atomicPrivateJson(join(directory, "session-candidate-diagnostic.json"), {
+      schema: "craft.knowledge-candidate-diagnostic.v1", updated_at: new Date().toISOString(),
+      uncertain_calls: Object.keys(state.uncertain_calls).length,
+      conflicting_skips: Object.keys(state.terminal_skips).filter(id => Object.hasOwn(state.trace_ids_by_task, id) || Object.hasOwn(state.uncertain_calls, id)).length,
+    });
+  } catch (error) {
+    console.warn("Knowledge candidate diagnostic update failed", error instanceof Error ? error.name : "unknown");
+  }
 }
 async function recordTerminalSkip(path: string, state: CandidateState, task: JsonObject, reason: CandidateSkipReason): Promise<void> {
   const taskId = String(task.task_id);
@@ -162,7 +175,7 @@ async function completedCandidateCall(client: ExperienceLearningClient, task: Js
 
 /** Generate at most one candidate from an exact task with observed test evidence. */
 export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCandidateDependencies): Promise<JsonObject> {
-  const path = candidateStatePath(deps), state = readCandidateState(path);
+  const path = candidateStatePath(deps), state = await readCandidateState(path);
   const batch = await codexSessionTaskBatch("candidate_generation", deps.archive_options, deps.env);
   const tasks = batch.tasks as JsonObject[];
   const recovered = new Set<string>();
@@ -268,14 +281,36 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   const messages: ChatMessage[] = [{ role: "system", content: system }, { role: "user", content: JSON.stringify(packet) }];
   if (!deps.transport) return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_model", processed: 0, reason: "model_transport_unavailable", raw_content_stored: false };
   const transport = deps.transport;
+  if (await hasUnresolvedTaskCall(deps.client, String(task.task_id), "knowledge-session-candidate-worker", call => completedCandidateCall(deps.client, task, call)))
+    return { status: "waiting_for_call_reconciliation", processed: 0, reason: "model_result_unknown", raw_content_stored: false };
   if (transport.acquireCall && !transport.acquireCall(provider.provider)) return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: "waiting_for_budget", processed: 0, reason: "model_call_budget_exhausted", raw_content_stored: false };
-  const traceStart = object(await deps.client.call("craft_trace_start", { task_id: `knowledge:${task.task_id}`, operation_id: String(task.task_id),
+  const traceKey = `trace_${stableDigest({ purpose: "knowledge_session_candidate_generation", task_id: task.task_id, input_digest: inputDigest }).slice(-32)}`;
+  const traceStart = object(await deps.client.call("craft_trace_start", { trace_id: traceKey, task_id: `knowledge:${task.task_id}`, operation_id: String(task.task_id), project_scope_id: task.project_scope_id,
     model_fingerprint: modelFingerprint, capability_fingerprint: `craft-knowledge:${CRAFT_RELEASE_VERSION}`,
     metadata: { purpose: "knowledge_session_candidate_generation", input_digest: inputDigest, content_stored: false } }), "Knowledge generation Trace start");
   const trace = object(traceStart.trace, "Knowledge generation Trace");
   const traceId = String(trace.id ?? "");
   if (!traceId) throw new Error("Knowledge generation Trace has no id");
   if (!/^trace[-_][A-Za-z0-9_-]{1,160}$/u.test(traceId)) throw new Error("Knowledge generation Trace id is invalid");
+  if (traceStart.idempotent === true) {
+    state.uncertain_calls[String(task.task_id)] = { trace_id: traceId, input_digest: inputDigest };
+    await writeCandidateState(path, state);
+    const decision = await completedCandidateCall(deps.client, task, { trace_id: traceId, input_digest: inputDigest });
+    if (!decision) return { status: "waiting_for_call_reconciliation", processed: 0, reason: "model_result_unknown", raw_content_stored: false };
+    let current: JsonObject;
+    try { current = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(String(task.task_id), { ...deps.archive_options, expected_partition: "candidate_generation" }, deps.env); }
+    catch { return { status: "waiting_for_source_revalidation", processed: 0, reason: "archive_unavailable", raw_content_stored: false }; }
+    if (current.status !== "ready" || current.source_ref !== task.source_ref || current.session_id !== task.session_id
+      || current.turn_id !== task.turn_id || current.project_scope_id !== task.project_scope_id
+      || (current.verification_outcome ?? null) !== (task.verification_outcome ?? null)
+      || JSON.stringify(current.evidence_ids) !== JSON.stringify(task.verification_evidence_ids))
+      return { status: "waiting_for_source_revalidation", processed: 0, reason: "archive_changed", raw_content_stored: false };
+    state.processed_task_ids.push(String(task.task_id));
+    state.trace_ids_by_task[String(task.task_id)] = traceId;
+    delete state.uncertain_calls[String(task.task_id)];
+    await writeCandidateState(path, state);
+    return { status: "completed_call_reconciled", processed: 1, decision, trace_id: traceId, raw_content_stored: false };
+  }
   await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.request", actor: "knowledge-session-candidate-worker",
     source: "codex-cli-learning-transport", trust: "observed", operation_id: String(task.task_id), input_refs: [inputDigest], model_fingerprint: modelFingerprint,
     data: { purpose: "knowledge_session_candidate_generation", input_digest: inputDigest, source_ref: task.source_ref, content_stored: false },
@@ -350,3 +385,4 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   return { ...(blockedSkips ? { blocked_skips: blockedSkips } : {}), status: candidate ? "candidate_created" : "candidate_skipped", processed: 1, task_id: task.task_id,
     claim_id: claimId, trace_id: traceId, independent_review_required: Boolean(candidate), raw_content_stored: false };
 }
+import { lstatSync } from "node:fs";

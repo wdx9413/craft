@@ -12,6 +12,11 @@ import { craftPaths, sessionStorageDirectory } from 'craft-common-store-local/pa
 import { CraftStore } from 'craft-common-store-local/store';
 import { legacySessionMemoryInventory, legacySessionMemoryPreflight } from "../core/legacy-session-memory-preflight.ts";
 
+function putLegacyBinding(store: CraftStore, sessionId: string, host: string): void {
+  store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,1,?,?,?)")
+    .run("session_storage_identity", `${host}-${sessionId}`, JSON.stringify({ host, session_id: sessionId }), "now", "now");
+}
+
 function putScopeDatabase(path: string, scopes: unknown[]): void {
   const database = new DatabaseSync(path);
   try {
@@ -71,7 +76,7 @@ test("legacy session Memory inventory pages read-only artifacts and resolves onl
     mkdirSync(readyDirectory);
     putScopeDatabase(join(readyDirectory, "memory.db"), [{ kind: "session", id: readyId }]);
     mkdirSync(join(readyDirectory, "nested")); writeFileSync(join(readyDirectory, "nested", "note.txt"), "metadata scan fixture");
-    store.bindSessionStorageHost(readyId, "codex");
+    putLegacyBinding(store, readyId, "codex");
 
     const unboundId = "legacy-unbound-session", unboundDirectory = join(legacy, unboundId);
     mkdirSync(unboundDirectory);
@@ -80,8 +85,8 @@ test("legacy session Memory inventory pages read-only artifacts and resolves onl
     const ambiguousId = "legacy-ambiguous-host", ambiguousDirectory = join(legacy, ambiguousId);
     mkdirSync(ambiguousDirectory);
     putScopeDatabase(join(ambiguousDirectory, "memory.db"), [{ kind: "session", id: ambiguousId }]);
-    store.bindSessionStorageHost(ambiguousId, "codex");
-    store.bindSessionStorageHost(ambiguousId, "claude");
+    putLegacyBinding(store, ambiguousId, "codex");
+    putLegacyBinding(store, ambiguousId, "claude");
 
     const oldBindingId = "legacy-binding-without-modern-fields", oldBindingDirectory = join(legacy, oldBindingId);
     mkdirSync(oldBindingDirectory);
@@ -110,7 +115,7 @@ test("legacy session Memory inventory pages read-only artifacts and resolves onl
     const jsonScopeId = "legacy-json-scope", jsonScopeDirectory = join(legacy, jsonScopeId);
     mkdirSync(jsonScopeDirectory);
     putScopeDatabase(join(jsonScopeDirectory, "memory.db"), [JSON.stringify({ kind: "session", id: jsonScopeId })]);
-    store.bindSessionStorageHost(jsonScopeId, "codex");
+    putLegacyBinding(store, jsonScopeId, "codex");
     const emptyScopeDirectory = join(legacy, "empty-scope"); mkdirSync(emptyScopeDirectory);
     putScopeDatabase(join(emptyScopeDirectory, "memory.db"), [{ kind: "session", id: " " }, "{", ["not-a-scope"]]);
     // A regular session directory whose tree contains a linked entry: the whole
@@ -174,7 +179,7 @@ test("legacy session Memory inventory fails closed on missing, linked, malformed
     const inaccessibleId = "target-stat-error", inaccessibleDirectory = join(legacy, inaccessibleId);
     mkdirSync(inaccessibleDirectory);
     putScopeDatabase(join(inaccessibleDirectory, "memory.db"), [{ kind: "session", id: inaccessibleId }]);
-    store.bindSessionStorageHost(inaccessibleId, "codex");
+    putLegacyBinding(store, inaccessibleId, "codex");
     const result = legacySessionMemoryPreflight(paths, { legacy_root: legacy });
     assert.equal(result.root_status, "ready");
     assert(result.entries.some(item => item.status === "unsafe_path"));

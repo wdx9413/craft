@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs, { createReadStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { linkDirectorySync, linkFileSync, supportsFileSymlinks } from "./symlink-support.ts";
 
@@ -58,6 +59,183 @@ test("legacy repository migration copies verified files by capability and resume
     writeFileSync(join(project, "context", "legacy-import", result.migration_id, "payload", "unexpected.txt"), "extra");
     await assert.rejects(migrateLegacyRepositoryStorage(f.paths, f.entry), /migration_target_tree_conflict/u);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place legacy migration retries after interrupted copy without changing the source", async () => {
+  const f = fixture(), original = fs.copyFileSync;
+  try {
+    Object.defineProperty(fs, "copyFileSync", { configurable: true, value: () => { throw new Error("injected interruption"); } });
+    syncBuiltinESMExports();
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, f.entry), /injected interruption/u);
+    Object.defineProperty(fs, "copyFileSync", { configurable: true, value: original }); syncBuiltinESMExports();
+    const resumed = await migrateLegacyRepositoryStorage(f.paths, f.entry);
+    assert.equal(resumed.status, "migrated");
+    assert.equal(readFileSync(join(f.project, ".craft_data", "knowledge", "claim.md"), "utf8"), "claim");
+    assert.equal(readFileSync(join(f.entry.project_directory!, "knowledge", "legacy-import", resumed.migration_id, "payload", "claim.md"), "utf8"), "claim");
+    writeFileSync(join(f.project, ".craft_data", "knowledge", "claim.md"), "other");
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, f.entry), /legacy_source_changed_since_preflight/u);
+  } finally { Object.defineProperty(fs, "copyFileSync", { configurable: true, value: original }); syncBuiltinESMExports(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration refuses altered generated project metadata", async () => {
+  const f = fixture();
+  try {
+    await migrateLegacyRepositoryStorage(f.paths, f.entry);
+    writeFileSync(join(f.project, ".craft_data", ".gitignore"), "user data");
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, f.entry), /legacy_source_changed_since_preflight/u);
+    assert.equal(readFileSync(join(f.project, ".craft_data", ".gitignore"), "utf8"), "user data");
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration can retry with an empty original ignore file", async () => {
+  const f = fixture();
+  try {
+    writeFileSync(join(f.project, ".craft_data", ".gitignore"), "");
+    const entry = legacyRepositoryStoragePreflight([f.project], f.paths).entries[0]!;
+    await migrateLegacyRepositoryStorage(f.paths, entry);
+    assert.equal((await migrateLegacyRepositoryStorage(f.paths, entry)).status, "already_migrated");
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration accepts a concurrent identical ignore backup", async () => {
+  const f = fixture(), original = fs.linkSync;
+  try {
+    writeFileSync(join(f.project, ".craft_data", ".gitignore"), "custom\n");
+    const entry = legacyRepositoryStoragePreflight([f.project], f.paths).entries[0]!;
+    Object.defineProperty(fs, "linkSync", { configurable: true, value: (source: string, target: string) => {
+      const result = original(source, target);
+      if (target.endsWith(".gitignore")) throw Object.assign(new Error("concurrent"), { code: "EEXIST" });
+      return result;
+    } }); syncBuiltinESMExports();
+    assert.equal((await migrateLegacyRepositoryStorage(f.paths, entry)).status, "migrated");
+  } finally { Object.defineProperty(fs, "linkSync", { configurable: true, value: original }); syncBuiltinESMExports(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration accepts a concurrently published identical completion marker", async () => {
+  const f = fixture(), original = fs.linkSync;
+  try {
+    Object.defineProperty(fs, "linkSync", { configurable: true, value: (source: string, target: string) => {
+      const result = original(source, target);
+      if (target.endsWith(".complete")) throw Object.assign(new Error("concurrent"), { code: "EEXIST" });
+      return result;
+    } }); syncBuiltinESMExports();
+    assert.equal((await migrateLegacyRepositoryStorage(f.paths, f.entry)).status, "migrated");
+  } finally { Object.defineProperty(fs, "linkSync", { configurable: true, value: original }); syncBuiltinESMExports(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration rejects ambiguous prior manifests", async () => {
+  const f = fixture();
+  try {
+    const saved = await migrateLegacyRepositoryStorage(f.paths, f.entry);
+    const second = JSON.parse(readFileSync(saved.manifest_path, "utf8")) as Record<string, unknown>;
+    ((second.files as Array<Record<string, unknown>>)[0]!).digest = "b".repeat(64);
+    const otherId = crypto.createHash("sha256").update(JSON.stringify({ directories: second.directories, files: second.files })).digest("hex");
+    second.migration_id = otherId;
+    writeFileSync(join(f.paths.backupsDir, "legacy-repository-storage", "v1", String(second.project_path_sha256), `${otherId}.json`), JSON.stringify(second));
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, f.entry), /migration_manifest_conflict/u);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration rejects a manifest with a changed count", async () => {
+  const f = fixture();
+  try {
+    const saved = await migrateLegacyRepositoryStorage(f.paths, f.entry);
+    const manifest = JSON.parse(readFileSync(saved.manifest_path, "utf8")) as Record<string, unknown>;
+    manifest.file_count = 999;
+    writeFileSync(saved.manifest_path, JSON.stringify(manifest));
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, f.entry), /migration_manifest_conflict/u);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration rejects a tampered completion marker", async () => {
+  const f = fixture();
+  try {
+    const saved = await migrateLegacyRepositoryStorage(f.paths, f.entry);
+    writeFileSync(saved.manifest_path.replace(/\.json$/u, ".complete"), "tampered");
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, f.entry), /migration_manifest_conflict/u);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration rejects unexpected entries in a manifest-only context archive", async () => {
+  const f = fixture();
+  try {
+    const data = join(f.project, ".craft_data");
+    rmSync(join(data, "codebase"), { recursive: true }); rmSync(join(data, "custom"), { recursive: true }); rmSync(join(data, "root.txt"));
+    const entry = legacyRepositoryStoragePreflight([f.project], f.paths).entries[0]!;
+    const saved = await migrateLegacyRepositoryStorage(f.paths, entry);
+    const extra = join(data, "context", "legacy-import", saved.migration_id, "extra");
+    writeFileSync(extra, "preserve");
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, entry), /migration_target_tree_conflict/u);
+    assert.equal(readFileSync(extra, "utf8"), "preserve");
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration rejects unexpected archive entries and source changes during copying", async () => {
+  const f = fixture(), originalLink = fs.linkSync;
+  try {
+    Object.defineProperty(fs, "linkSync", { configurable: true, value: (source: string, target: string) => {
+      const result = originalLink(source, target);
+      if (asPosix(target).endsWith("/root-files/root.txt")) writeFileSync(join(f.project, ".craft_data", "root.txt"), "other");
+      return result;
+    } }); syncBuiltinESMExports();
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, f.entry), /legacy_source_changed_since_preflight/u);
+    Object.defineProperty(fs, "linkSync", { configurable: true, value: originalLink }); syncBuiltinESMExports();
+    writeFileSync(join(f.project, ".craft_data", "root.txt"), "root");
+    const done = await migrateLegacyRepositoryStorage(f.paths, f.entry);
+    const extra = join(f.project, ".craft_data", "knowledge", "legacy-import", done.migration_id, "user-data");
+    writeFileSync(extra, "must preserve");
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, f.entry), /migration_target_tree_conflict/u);
+    assert.equal(readFileSync(extra, "utf8"), "must preserve");
+  } finally { Object.defineProperty(fs, "linkSync", { configurable: true, value: originalLink }); syncBuiltinESMExports(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration refuses a pre-existing generated target collision", async () => {
+  const f = fixture(), originalHash = crypto.createHash;
+  try {
+    mkdirSync(join(f.project, ".craft_data", "knowledge", "legacy-import", "a".repeat(64)), { recursive: true });
+    const entry = legacyRepositoryStoragePreflight([f.project], f.paths).entries[0]!;
+    Object.defineProperty(crypto, "createHash", { configurable: true, value: () => {
+      const hash = { update: () => hash, digest: () => "a".repeat(64) }; return hash;
+    } }); syncBuiltinESMExports();
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, entry), /migration_target_conflict/u);
+  } finally { Object.defineProperty(crypto, "createHash", { configurable: true, value: originalHash }); syncBuiltinESMExports(); rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration archives the original ignore rules before adding the project protection", async () => {
+  const f = fixture();
+  try {
+    const ignore = join(f.project, ".craft_data", ".gitignore");
+    writeFileSync(ignore, "# existing\n!keep");
+    const entry = legacyRepositoryStoragePreflight([f.project], f.paths).entries[0]!;
+    const result = await migrateLegacyRepositoryStorage(f.paths, entry);
+    assert.equal(readFileSync(ignore, "utf8"), "# existing\n!keep\n*\n");
+    assert.equal(readFileSync(join(f.entry.project_directory!, "context", "legacy-import", result.migration_id, "payload", "root-files", ".gitignore"), "utf8"), "# existing\n!keep");
+    assert.equal((await migrateLegacyRepositoryStorage(f.paths, entry)).status, "already_migrated");
+    writeFileSync(ignore, "unexpected");
+    await assert.rejects(migrateLegacyRepositoryStorage(f.paths, entry), /legacy_source_changed_since_preflight/u);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("in-place migration rejects interrupted ignore backup and manifest publication", async () => {
+  for (const mode of ["backup-copy", "backup-link", "backup-corrupt", "manifest-link", "completion-link"] as const) {
+    const f = fixture(), originalCopy = fs.copyFileSync, originalLink = fs.linkSync;
+    try {
+      if (mode !== "manifest-link") writeFileSync(join(f.project, ".craft_data", ".gitignore"), "preserve\n");
+      const entry = legacyRepositoryStoragePreflight([f.project], f.paths).entries[0]!;
+      Object.defineProperty(fs, "copyFileSync", { configurable: true, value: (source: string, target: string, ...args: unknown[]) => {
+        originalCopy(source, target, ...(args as Parameters<typeof fs.copyFileSync> extends [unknown, unknown, ...infer R] ? R : never));
+        if (mode === "backup-copy" && asPosix(target).endsWith(".ignore.tmp")) writeFileSync(target, "tampered");
+      } });
+      Object.defineProperty(fs, "linkSync", { configurable: true, value: (source: string, target: string) => {
+        if (mode === "backup-link" && target.endsWith(".gitignore") || mode === "manifest-link" && /[a-f0-9]{64}\.json$/u.test(target) || mode === "completion-link" && target.endsWith(".complete")) throw Object.assign(new Error("injected"), { code: "EIO" });
+        const result = originalLink(source, target);
+        if (mode === "backup-corrupt" && target.endsWith(".gitignore")) writeFileSync(target, "tampered");
+        return result;
+      } });
+      syncBuiltinESMExports();
+      await assert.rejects(migrateLegacyRepositoryStorage(f.paths, entry), mode === "backup-copy" ? /migration_source_changed_during_copy/u : mode === "manifest-link" || mode === "completion-link" ? /migration_manifest_conflict/u : /migration_target_conflict/u);
+    } finally { Object.defineProperty(fs, "copyFileSync", { configurable: true, value: originalCopy }); Object.defineProperty(fs, "linkSync", { configurable: true, value: originalLink }); syncBuiltinESMExports(); rmSync(f.root, { recursive: true, force: true }); }
+  }
 });
 
 test("legacy repository migration refuses unbound, changed, linked, and conflicting sources", async () => {

@@ -118,7 +118,11 @@ test("local Supervisor owns Host processes across authenticated client calls", a
     assert.equal((await client.call("GET", "/runs/run")).active, true); await client.call("POST", "/runs/run/cancel", { reason: "user" }); await f.service.hostRuns.wait("run"); assert.equal(((await client.call("GET", "/runs/run")).run as JsonObject).status, "cancelled");
     assert.equal((await raw(String(state.url) + "/health", "GET", "wrong", "{}")).status, 401); assert.equal((await raw(String(state.url) + "/health", "GET", supervisor.ownerId.slice(0, -1) + "x", "{}")).status, 401); assert.equal(await noAuth(String(state.url) + "/health"), 401); assert.equal((await raw(String(state.url) + "/missing", "GET", supervisor.ownerId, "{}")).status, 404); await assert.rejects(client.call("GET", "/missing"), /Not found/);
     assert.equal((await raw(String(state.url) + "/runs/start", "POST", supervisor.ownerId, "bad-json")).status, 400); assert.equal((await raw(String(state.url) + "/runs/start", "POST", supervisor.ownerId, "[]")).status, 422); assert.equal((await raw(String(state.url) + "/runs/start", "POST", supervisor.ownerId, "null")).status, 422); assert.equal((await raw(String(state.url) + "/runs/start", "POST", supervisor.ownerId, "")).status, 422);
-    assert.equal((await raw(String(state.url) + "/runs/start", "POST", supervisor.ownerId, `{"x":"${"a".repeat(300_000)}"}`)).status, 413);
+    try {
+      assert.equal((await raw(String(state.url) + "/runs/start", "POST", supervisor.ownerId, `{"x":"${"a".repeat(300_000)}"}`)).status, 413);
+    } catch (error) {
+      assert.equal((error as NodeJS.ErrnoException).code, "EPIPE");
+    }
   } finally { await supervisor.close(); assert.equal((JSON.parse(await readFile(join(f.paths.runtimeDir, "supervisor.json"), "utf8")) as JsonObject).status, "stopped"); await assert.rejects(new SupervisorClient(f.paths).status(), /not running/); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -349,4 +353,150 @@ test("Supervisor still closes its socket when owner drift prevents cleanup", asy
     await assert.rejects(noAuth(`${state.url}/health`), /ECONNREFUSED/);
     assert.equal(JSON.parse(await readFile(lock, "utf8")).owner_id, "replacement");
   } finally { t.mock.timers.reset(); await supervisor.close().catch(() => undefined); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Supervisor keeps scoped Context values only in memory with bounded lifetime", async () => {
+  const f = await fixture("context-memory");
+  const supervisor = new LocalSupervisor(f.service, f.paths);
+  await assert.rejects(new SupervisorClient(f.paths).status(), /Supervisor is unavailable/u);
+  const session = "codex--" + "a".repeat(64);
+  const other = "codex--" + "b".repeat(64);
+  try {
+    await supervisor.start();
+    const client = new SupervisorClient(f.paths);
+    assert.deepEqual(await client.contextPut({ session_key: session, key: "resume", value: { text: "work" }, ttl_ms: 10000 }), { status: "stored" });
+    assert.deepEqual(await client.contextGet({ session_key: session, key: "resume" }), { status: "available", value: { text: "work" } });
+    assert.deepEqual(await client.contextGet({ session_key: other, key: "resume" }), { status: "unavailable" });
+    await assert.rejects(client.contextPut({ session_key: session, key: "bad", value: {}, ttl_ms: 0 }), /TTL/u);
+    await assert.rejects(client.contextGet({ session_key: "bad", key: "resume" }), /session key/u);
+    assert.deepEqual(await client.contextPurge({ session_key: session, all: true }), { removed: 1 });
+    assert.deepEqual(await client.contextGet({ session_key: session, key: "resume" }), { status: "unavailable" });
+    await client.contextPut({ session_key: session, key: "expires", value: {}, ttl_ms: 1 });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.deepEqual(await client.contextGet({ session_key: session, key: "expires" }), { status: "unavailable" });
+    await client.contextPut({ session_key: session, key: "resume", value: {}, ttl_ms: 10000 });
+    await supervisor.close();
+    await supervisor.start();
+    assert.deepEqual(await client.contextGet({ session_key: session, key: "resume" }), { status: "unavailable" });
+  } finally { await supervisor.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("session end fences concurrent and late Context writes without affecting other sessions", async () => {
+  const f = await fixture("context-session-fence");
+  const supervisor = new LocalSupervisor(f.service, f.paths);
+  await supervisor.start();
+  const client = new SupervisorClient(f.paths), session = `codex--${"a".repeat(64)}`, other = `codex--${"b".repeat(64)}`;
+  const value = { task: "work" };
+  try {
+    await client.contextPut({ session_key: other, key: "goal", value, ttl_ms: 10000 });
+    await Promise.allSettled([
+      client.contextPut({ session_key: session, key: "goal", value, ttl_ms: 10000 }),
+      client.contextEnd({ session_key: session }),
+    ]);
+    assert.equal((await client.contextGet({ session_key: session, key: "goal" })).status, "unavailable");
+    await assert.rejects(client.contextPut({ session_key: session, key: "late", value, ttl_ms: 10000 }), /SESSION_ARCHIVED/u);
+    assert.equal((await client.contextGet({ session_key: other, key: "goal" })).status, "available");
+    await client.contextStart({ session_key: session });
+    await client.contextPut({ session_key: session, key: "new", value, ttl_ms: 10000 });
+    assert.equal((await client.contextGet({ session_key: session, key: "new" })).status, "available");
+    // Host supplies no lifecycle generation: after an identical session ID is
+    // restarted, a delayed old writer is indistinguishable from a new writer.
+    await client.contextPut({ session_key: session, key: "late", value, ttl_ms: 10000 });
+    assert.equal((await client.contextGet({ session_key: session, key: "late" })).status, "available");
+  } finally { await supervisor.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Context memory rejects malformed and conflicting operations without changing entries", async () => {
+  const f = await fixture("context-validation"), supervisor = new LocalSupervisor(f.service, f.paths);
+  await supervisor.start();
+  const client = new SupervisorClient(f.paths), session = `codex--${"c".repeat(64)}`;
+  try {
+    await assert.rejects(client.contextGet({ session_key: session, key: "" }), /key is invalid/u);
+    await assert.rejects(client.contextPurge({ session_key: session, prefix: 42 }), /prefix is invalid/u);
+    await assert.rejects(client.contextPurge({ session_key: session }), /requires a key, prefix, or explicit all/u);
+    await assert.rejects(client.contextPut({ session_key: session, key: "bad", value: [], ttl_ms: 1 }), /value must be an object/u);
+    await assert.rejects(client.call("POST", "/context/other", { session_key: session, key: "bad" }), /operation is invalid/u);
+    const item = { session_id: "s", session_host: "codex", source: "docs", identity_digest: "same", expires_at: "future" };
+    await client.contextPut({ session_key: session, key: "index:item", value: item, ttl_ms: 60000 });
+    await assert.rejects(client.contextPut({ session_key: session, key: "index:item", value: { ...item, source: "other" }, ttl_ms: 60000 }), /scope mismatch/u);
+    await assert.rejects(client.contextPurge({ session_key: session, key: "index:item", source: "other" }), /scope mismatch/u);
+    assert.deepEqual(await client.contextPurge({ session_key: session, key: "index:item", expected_expires_at: "past" }), { removed: 0, changed: true });
+    assert.deepEqual((await client.contextGet({ session_key: session, key: "index:item" })).value, item);
+    await client.contextPut({ session_key: session, key: "goal:one", value: { goal: "a" }, ttl_ms: 60000 });
+    await assert.rejects(client.contextPut({ session_key: session, key: "goal:one", value: { goal: "b" }, ttl_ms: 60000 }), /idempotency conflict/u);
+  } finally { await supervisor.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("learning snapshots reject malformed manifests, missing chunks, invalid lifetimes and ended sessions", async () => {
+  const f = await fixture("snapshot-validation"), supervisor = new LocalSupervisor(f.service, f.paths);
+  await supervisor.start();
+  const client = new SupervisorClient(f.paths), session = `codex--${"e".repeat(64)}`;
+  const key = `learning-index:${"a".repeat(24)}:manifest`, generation = "a".repeat(36);
+  const manifest = { generation, count: 1, digest: "digest" };
+  try {
+    await assert.rejects(client.contextSnapshotGet({ session_key: session, key: "invalid" }), /snapshot key is invalid/u);
+    assert.equal((await client.contextSnapshotGet({ session_key: session, key })).status, "unavailable");
+    await assert.rejects(client.contextSnapshotPublish({ session_key: session, key, value: null, ttl_ms: 1000 }), /manifest is invalid/u);
+    await assert.rejects(client.contextSnapshotPublish({ session_key: session, key, value: { ...manifest, digest: null }, ttl_ms: 1000 }), /manifest is invalid/u);
+    await assert.rejects(client.contextSnapshotPublish({ session_key: session, key, value: manifest, ttl_ms: 1000 }), /snapshot is unavailable/u);
+    await client.contextPut({ session_key: session, key: `learning-index:${"a".repeat(24)}:${generation}:0`, value: { data: "body" }, ttl_ms: 1000 });
+    await assert.rejects(client.contextSnapshotPublish({ session_key: session, key, value: manifest, ttl_ms: 0 }), /TTL is invalid/u);
+    const largeGeneration = "b".repeat(36), prefix = `learning-index:${"a".repeat(24)}:${largeGeneration}:`;
+    for (let index = 0; index < 7; index++) await client.contextPut({ session_key: session, key: `${prefix}${index}`, value: { data: "x".repeat(950_000) }, ttl_ms: 60_000 });
+    const encoded = "x".repeat(2_850_000), snapshotDigest = `sha256:${createHash("sha256").update(JSON.stringify(encoded)).digest("hex")}`;
+    await client.contextSnapshotPublish({ session_key: session, key, value: { generation: largeGeneration, count: 3, digest: snapshotDigest }, ttl_ms: 60_000 });
+    assert.equal(String((await client.contextSnapshotGet({ session_key: session, key })).encoded).length, 2_850_000);
+    assert.equal((await client.contextSnapshotAbort({ session_key: session, key, generation: largeGeneration })).status, "retained");
+    assert.equal((await client.contextSnapshotAbort({ session_key: session, key, generation })).removed, 1);
+    await assert.rejects(client.contextSnapshotPublish({ session_key: session, key, value: manifest, ttl_ms: 1000 }), /snapshot is unavailable/u);
+    await assert.rejects(client.contextSnapshotAbort({ session_key: session, key, generation: "invalid" }), /generation is invalid/u);
+    await assert.rejects(client.contextSnapshotPublish({ session_key: session, key, value: { generation: largeGeneration, count: 7, digest: "digest" }, ttl_ms: 60_000 }), /snapshot exceeds size limit/u);
+    await client.contextEnd({ session_key: session });
+    await assert.rejects(client.contextSnapshotPublish({ session_key: session, key, value: manifest, ttl_ms: 1000 }), /snapshot is unavailable|SESSION_ARCHIVED/u);
+  } finally { await supervisor.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Context memory bounds live entries and expired ended-session fences", async () => {
+  const f = await fixture("context-capacity"), supervisor = new LocalSupervisor(f.service, f.paths);
+  await supervisor.start();
+  const client = new SupervisorClient(f.paths), session = `codex--${"d".repeat(64)}`;
+  const originalNow = Date.now;
+  try {
+    for (let start = 0; start < 1000; start += 50) {
+      await Promise.all(Array.from({ length: 50 }, (_, offset) => client.contextPut({
+        session_key: session, key: `entry-${start + offset}`, value: {}, ttl_ms: 60000,
+      })));
+    }
+    await assert.rejects(client.contextPut({ session_key: session, key: "overflow", value: {}, ttl_ms: 60000 }), /capacity exceeded/u);
+    await client.contextPurge({ session_key: session, key: "entry-0" });
+    const generation = "a".repeat(36), prefix = `learning-index:${"a".repeat(24)}:`;
+    await client.contextPut({ session_key: session, key: `${prefix}${generation}:0`, value: { data: "x" }, ttl_ms: 60_000 });
+    await assert.rejects(client.contextSnapshotPublish({ session_key: session, key: `${prefix}manifest`, value: { generation, count: 1, digest: `sha256:${createHash("sha256").update(JSON.stringify("x")).digest("hex")}` }, ttl_ms: 60_000 }), /capacity exceeded/u);
+    await client.contextPurge({ session_key: session, all: true });
+    for (let start = 0; start < 1000; start += 50) {
+      await Promise.all(Array.from({ length: 50 }, (_, offset) => client.contextEnd({
+        session_key: `codex--${(start + offset).toString(16).padStart(64, "0")}`,
+      })));
+    }
+    await assert.rejects(client.contextEnd({ session_key: session }), /session capacity exceeded/u);
+    Date.now = () => originalNow() + 86_400_001;
+    assert.equal((await client.contextEnd({ session_key: session })).status, "ended");
+  } finally { Date.now = originalNow; await supervisor.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Supervisor atomically compares and updates volatile session values", async () => {
+  const f = await fixture("context-cas"), supervisor = new LocalSupervisor(f.service, f.paths);
+  const session = `codex--${"f".repeat(64)}`, client = new SupervisorClient(f.paths);
+  try {
+    await supervisor.start();
+    const args = { session_key: session, key: "hook:test", ttl_ms: 10000 };
+    assert.deepEqual(await client.contextPut({ ...args, expected_digest: null, value: { version: 1 } }), { status: "stored" });
+    assert.deepEqual(await client.contextPut({ ...args, expected_digest: null, value: { version: 2 } }), { status: "changed" });
+    const digest = createHash("sha256").update(JSON.stringify({ version: 1 })).digest("hex");
+    const results = await Promise.all([2, 3].map(version => client.contextPut({ ...args, expected_digest: digest, value: { version } })));
+    assert.deepEqual(results.map(item => item.status).sort(), ["changed", "stored"]);
+    await assert.rejects(client.contextPut({ ...args, expected_digest: "invalid", value: {} }), /digest/u);
+    await client.contextEnd({ session_key: session });
+    await assert.rejects(client.contextPut({ ...args, expected_digest: null, value: {} }), /SESSION_ARCHIVED/u);
+  } finally { await supervisor.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

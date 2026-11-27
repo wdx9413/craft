@@ -1,3 +1,5 @@
+import { MemoryCapture } from "@craft/capability-memory/memory-capture";
+import { seedLegacySession } from "./helpers/legacy-session-fixture.ts";
 import assert from "node:assert/strict";
 import { activeProcedure } from '@craft/capability-experience/procedure-release';
 import { createHash } from "node:crypto";
@@ -20,6 +22,8 @@ import { codexTaskGoalDigest } from "../core/codex-task-prose.ts";
 import { estimateTokens } from "../core/token-budget.ts";
 import { contextAssetRef } from 'craft-common-base/context-assets';
 import { attachVerifiedPromotionFixture } from "./helpers/knowledge-promotion-proof.ts";
+import { LocalSupervisor, SupervisorClient } from "../core/supervisor.ts";
+import { storeExperienceTaskGoal } from "../core/experience-task-goals.ts";
 
 async function fixture(models?: ReturnType<typeof defaultSettings>["models"]) {
   const root = await mkdtemp(join(tmpdir(), "craft-codex-hook-"));
@@ -33,9 +37,20 @@ async function fixture(models?: ReturnType<typeof defaultSettings>["models"]) {
   const service = await CraftService.open(store);
   const projectScope = codexProjectScope(root)!;
   service.scopeAliasBind({ scope_kind: "project", scope_id: projectScope.id, alias_kind: "path", alias: root });
-  return { root, store, service };
+  const supervisor = new LocalSupervisor(service, store.paths);
+  await supervisor.start();
+  return { root, store, service, supervisor };
 }
-async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+async function dispose(f: Awaited<ReturnType<typeof fixture>>) { await f.supervisor.close(); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+
+async function hookSession(f: Awaited<ReturnType<typeof fixture>>, sessionId: string, host = "codex"): Promise<JsonObject | null> {
+  const scope = codexProjectScope(f.root)!;
+  const result = await new SupervisorClient(f.store.paths).contextGet({
+    session_key: sessionStorageScopeId(host, sessionId),
+    key: `hook:session:${stableDigest({ scope }).slice(-24)}`,
+  });
+  return result.status === "available" ? result.value as JsonObject : null;
+}
 
 test("extractDurableStatements captures conventions, preferences and facts conservatively", () => {
   assert.deepEqual(extractDurableStatements("本项目约定：所有提交前必须运行 pnpm test。我偏好深色模式。本项目使用 pnpm 作为包管理器。"),
@@ -118,6 +133,7 @@ test("UserPromptSubmit keeps automatic capture scoped when the Host omits its tu
 
 test("UserPromptSubmit applies value-gate decisions and tolerates non-Error capability failures", async () => {
   const f = await fixture();
+  const supervisor = f.supervisor;
   const originalEvidence = f.service.evidenceRecord;
   const originalCapture = f.service.memoryCaptureObservedFact;
   const originalBind = f.store.bindSessionStorageHost;
@@ -196,6 +212,7 @@ test("UserPromptSubmit applies value-gate decisions and tolerates non-Error capa
 
 test("UserPromptSubmit durable accumulation is fail-open for capability errors", async t => {
   const f = await fixture();
+  const supervisor = f.supervisor;
   try {
     t.mock.method(f.service, "memoryCaptureObservedFact", () => { throw new TypeError("memory private"); });
     t.mock.method(f.service, "evidenceRecord", () => { throw new RangeError("evidence private"); });
@@ -398,22 +415,21 @@ test("session-only Hook events join one generated turn and stop cannot finalize 
   try {
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "generated-turn" };
     await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "verify changes" });
-    const session = f.store.list("context_hook_session", 10)[0]!;
-    assert.equal(session.trace_id, session.id);
-    assert.equal(session.session_host_verified, false, "the Host value from Hook input is a routing hint, not an authenticated identity");
-    assert.equal(f.store.traceShards.find("context_hook_session", String(session.id), undefined, String(session.id))?.session_id, "generated-turn");
+    const session = (await hookSession(f, base.session_id))!;
+    const turnId = String((session.pending_turn_ids as string[])[0]);
+    assert.equal(f.store.list("context_hook_session", 10).length, 0);
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
-    const journal = f.store.list("codex_hook_turn", 10)[0]!;
-    assert.equal(journal.turn_id, session.last_turn_id);
+    const journal = (await bridge.journal.find({ ...base, turn_id: turnId }))!;
+    assert.equal(journal.turn_id, turnId);
     assert.equal(journal.verification_outcome, "passed");
     assert.equal(journal.session_host_verified, false);
     await bridge.handle("context", { ...base, hook_event_name: "Stop" });
     assert(f.store.list("activation_proof_receipt", 100).some(proof => proof.event === "Stop" && proof.component === "experience" && proof.turn_id === journal.turn_id && proof.observation_written === true));
     await bridge.handle("context", { ...base, hook_event_name: "Stop" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
-    assert.equal((f.store.list("codex_hook_turn", 10)[0]!.signals as JsonObject[]).length, 2);
-    assert.deepEqual(f.store.get("context_hook_session", String(session.id)).pending_turn_ids, []);
+    assert.equal(((await bridge.journal.find({ ...base, turn_id: turnId }))!.signals as JsonObject[]).length, 2);
+    assert.deepEqual((await hookSession(f, base.session_id))?.pending_turn_ids, []);
   } finally { await dispose(f); }
 });
 
@@ -478,8 +494,8 @@ test("Hook-mode PostToolUse persists its journal signal without a per-event SQLi
     const bridge = new CodexHookBridge(f.service), input = { cwd: f.root, session_id: "runtime-ledger", turn_id: "runtime-ledger-turn" };
     await bridge.handle("context", { ...input, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "runtime-ledger-edit" });
     assert.equal(f.store.list("trace_event", 100, event => event.operation_id === "handle.context.PostToolUse").length, 0);
-    assert.equal(f.store.list("codex_hook_signal", 10, item => item.session_id === input.session_id && item.turn_id === input.turn_id).length, 1);
-    const journal = bridge.journal.find({ ...input, hook_event_name: "PostToolUse" })!;
+    assert.equal(f.store.list("codex_hook_signal", 10, item => item.session_id === input.session_id && item.turn_id === input.turn_id).length, 0);
+    const journal = (await bridge.journal.find({ ...input, hook_event_name: "PostToolUse" }))!;
     assert.equal((journal.signals as JsonObject[]).length, 1);
     assert.equal((journal.signals as JsonObject[])[0]!.kind, "edit");
   } finally {
@@ -496,15 +512,15 @@ test("Hook signal rows merge with a legacy journal, deduplicate retries and reta
     const bridge = new CodexHookBridge(f.service), input = { cwd: f.root, session_id: "mixed-hook-journal", turn_id: "mixed-turn" };
     const edit = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "mixed-edit" });
     assert(edit);
-    bridge.journal.record(input, edit);
+    (await bridge.journal.record(input, edit));
     process.env.CRAFT_HOOK_MODE = "1";
     const rawVerification = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "mixed-verify",
       tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     assert(rawVerification);
     const verification = { ...rawVerification, scenario_key: "coding.test", coarse_scenario_key: "coding" } as never;
-    bridge.journal.record(input, verification);
-    bridge.journal.record(input, verification);
-    const journal = bridge.journal.find(input, true)!;
+    (await bridge.journal.record(input, verification));
+    (await bridge.journal.record(input, verification));
+    const journal = (await bridge.journal.find(input, true))!;
     assert.equal((journal.signals as JsonObject[]).length, 2);
     assert.equal((journal.verification_receipts as JsonObject[]).length, 1);
     assert.equal(journal.verification_outcome, "passed");
@@ -527,8 +543,8 @@ test("Hook signal journal safely handles a sessionless verification without a pr
     const raw = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "sessionless-check",
       tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     assert(raw);
-    bridge.journal.record(input, { ...raw, scenario_key: "coding.test" } as never);
-    const journal = bridge.journal.find(input, true)!;
+    (await bridge.journal.record(input, { ...raw, scenario_key: "coding.test" } as never));
+    const journal = (await bridge.journal.find(input, true))!;
     assert.equal(journal.session_id, "unknown");
     assert.equal(journal.has_edit, false);
     assert.equal(journal.verification_outcome, "passed");
@@ -538,8 +554,8 @@ test("Hook signal journal safely handles a sessionless verification without a pr
     assert.equal(bridge.signals.signal({ ...unknownInput, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "sessionless-unknown-check",
       tool_input: { command: "npm test" }, tool_response: {} }), null);
     const explicitUnknown = { id: "test-unknown-verification", tool: "Bash", kind: "verification", verifier: "sha256:test", outcome: "unknown", digest: "sha256:test" } as never;
-    bridge.journal.record(unknownInput, explicitUnknown);
-    const unknownJournal = bridge.journal.find(unknownInput, true)!;
+    (await bridge.journal.record(unknownInput, explicitUnknown));
+    const unknownJournal = (await bridge.journal.find(unknownInput, true))!;
     assert.equal((unknownJournal.signals as JsonObject[])[0]!.kind, "verification");
     assert.equal((unknownJournal.signals as JsonObject[])[0]!.outcome, "unknown");
     assert.equal((unknownJournal.verification_receipts as JsonObject[]).length, 1);
@@ -548,8 +564,8 @@ test("Hook signal journal safely handles a sessionless verification without a pr
     const failedSignal = bridge.signals.signal({ ...failedInput, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "sessionless-failed-check",
       tool_input: { command: "npm test" }, tool_response: { exit_code: 1 } });
     assert(failedSignal);
-    bridge.journal.record(failedInput, { ...failedSignal, kind: "verification", verifier: "npm test", outcome: "failed" } as never);
-    assert.equal(bridge.journal.find(failedInput, true)?.verification_outcome, "failed");
+    (await bridge.journal.record(failedInput, { ...failedSignal, kind: "verification", verifier: "npm test", outcome: "failed" } as never));
+    assert.equal((await bridge.journal.find(failedInput, true))?.verification_outcome, "failed");
   } finally {
     if (prior === undefined) delete process.env.CRAFT_HOOK_MODE;
     else process.env.CRAFT_HOOK_MODE = prior;
@@ -565,12 +581,12 @@ test("Hook signal journal rejects late signals after its canonical turn has clos
     const bridge = new CodexHookBridge(f.service), input = { cwd: f.root, session_id: "closed-signal", turn_id: "closed-signal-turn" };
     const raw = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "closed-signal-edit" });
     assert(raw);
-    bridge.journal.record(input, raw);
-    bridge.journal.close(input);
+    (await bridge.journal.record(input, raw));
+    (await bridge.journal.close(input));
     const late = { ...raw, id: "closed-signal-late" };
-    const result = bridge.journal.record(input, late);
+    const result = (await bridge.journal.record(input, late));
     assert.equal(result?.closed_at !== undefined, true);
-    assert.equal(bridge.journal.find(input, true)?.signals && (bridge.journal.find(input, true)!.signals as JsonObject[]).length, 1);
+    assert.equal((await bridge.journal.find(input, true))?.signals && ((await bridge.journal.find(input, true))!.signals as JsonObject[]).length, 1);
   } finally {
     if (prior === undefined) delete process.env.CRAFT_HOOK_MODE;
     else process.env.CRAFT_HOOK_MODE = prior;
@@ -590,7 +606,8 @@ test("PostToolUse journals a verified edit without waiting for the global SQLite
     assert(events.some(event => event.status === "completed"));
     assert(!events.some(event => event.error_class === "STORAGE_BUSY"));
     assert.equal(f.store.database.prepare("SELECT count(*) n FROM records WHERE kind='codex_hook_turn'").get()?.n, 0);
-    assert.equal((f.store.list("codex_hook_turn", 10)[0]!.signals as JsonObject[])[0]!.kind, "edit");
+    const turnId = String(((await hookSession(f, base.session_id))!.pending_turn_ids as string[])[0]);
+    assert.equal(((await bridge.journal.find({ ...base, turn_id: turnId }))!.signals as JsonObject[])[0]!.kind, "edit");
   } finally {
     try { writer.exec("ROLLBACK;"); } catch { /* rollback only when the writer transaction started */ }
     writer.close();
@@ -598,7 +615,7 @@ test("PostToolUse journals a verified edit without waiting for the global SQLite
   }
 });
 
-test("a pre-existing current-format Hook journal keeps its legacy central write path", async () => {
+test("a pre-existing Hook journal is read without writing its legacy record", async () => {
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service), scope = codexProjectScope(f.root)!;
@@ -608,9 +625,9 @@ test("a pre-existing current-format Hook journal keeps its legacy central write 
       .run("codex_hook_turn", id, 1, JSON.stringify({ scope, session_host: "codex", session_id, turn_id, signals: [], has_edit: false,
         verification_outcome: null, content_stored: false }), new Date().toISOString(), new Date().toISOString());
     await bridge.handle("experience", { cwd: f.root, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
-    const journal = f.store.get("codex_hook_turn", id);
+    const journal = (await bridge.journal.find({ cwd: f.root, session_id, turn_id }))!;
     assert.equal((journal.signals as JsonObject[])[0]!.kind, "edit");
-    assert.equal(f.store.database.prepare("SELECT count(*) n FROM records WHERE kind='codex_hook_turn' AND id=?").get(id)?.n, 2);
+    assert.equal(f.store.database.prepare("SELECT count(*) n FROM records WHERE kind='codex_hook_turn' AND id=?").get(id)?.n, 1);
     assert.equal(f.store.traceShards.count("codex_hook_turn"), 0);
   } finally { await dispose(f); }
 });
@@ -630,10 +647,10 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
     const verification = bridge.signals.signal({ ...input, hook_event_name: "PostToolUse", tool_name: "Bash",
       tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
     assert(edit); assert(verification);
-    bridge.journal.record(input, edit);
-    bridge.journal.record(input, verification);
-    bridge.journal.bindContextReceipt(input, { id: "scenario-context-receipt" });
-    const legacyJournal = bridge.journal.find(input)!;
+    (await bridge.journal.record(input, edit));
+    (await bridge.journal.record(input, verification));
+    (await bridge.journal.bindContextReceipt(input, { id: "scenario-context-receipt" }));
+    const legacyJournal = (await bridge.journal.find(input))!;
     assert.equal(legacyJournal.verification_outcome, "passed");
     assert.equal(legacyJournal.context_receipt_id, "scenario-context-receipt");
     const { trace_id: _traceId, ...legacyPayload } = legacyJournal;
@@ -641,9 +658,10 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run("codex_hook_turn", String(legacyJournal.id), 1, JSON.stringify(legacyPayload), timestamp, timestamp);
     f.service.learningCycleFinalize = (() => ({ status: "observed", observation: { id: "observation", scenario_key: "coding.explicit-verification" } })) as typeof f.service.learningCycleFinalize;
-    const result = bridge.learning.finalize({ ...input, scenario_key: "coding.explicit-verification" });
+    const finalizedJournal = await bridge.journal.close({ ...input, scenario_key: "coding.explicit-verification" });
+    const result = bridge.learning.finalize({ ...input, scenario_key: "coding.explicit-verification" }, undefined, undefined, finalizedJournal);
     assert.equal(result?.status, "observed");
-    assert.equal(bridge.journal.find(input)?.scenario_key, "coding.explicit-verification");
+    assert.equal((await bridge.journal.find(input))?.scenario_key, "coding.explicit-verification");
     assert.deepEqual(capturedDomains, ["coding"]);
   } finally {
     f.service.learningCycleFinalize = originalFinalize;
@@ -654,6 +672,7 @@ test("an explicit scenario is persisted when the verified Hook journal has no sc
 
 test("verified Experience finalization derives evolution domains and bounded workflow fallbacks", async () => {
   const f = await fixture();
+  const supervisor = f.supervisor;
   try {
     await mkdir(join(f.root, "src"), { recursive: true });
     await writeFile(join(f.root, "src", "feature.ts"), "export const feature = true;\n");
@@ -747,8 +766,8 @@ test("PostToolUse resolves the canonical project scope without rebinding its ali
     resolutions = 0;
     await bridge.handle("context", { hook_event_name: "PostToolUse", cwd: f.root, session_id: "single-project-resolution", turn_id: "single-resolution-turn", tool_name: "Edit", tool_use_id: "single-resolution-edit" });
     assert.equal(resolutions, 0);
-    const signal = f.store.list("codex_hook_signal", 10, row => row.session_id === "single-project-resolution")[0];
-    assert.deepEqual(signal?.scope, codexProjectScope(f.root));
+    const journal = await bridge.journal.find({ cwd: f.root, session_id: "single-project-resolution", turn_id: "single-resolution-turn" });
+    assert.deepEqual(journal?.scope, codexProjectScope(f.root));
   } finally {
     if (prior === undefined) delete process.env.CRAFT_HOOK_MODE;
     else process.env.CRAFT_HOOK_MODE = prior;
@@ -764,14 +783,19 @@ test("overlapping Hook turns refuse missing IDs even after one explicitly closes
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("context", { ...base, turn_id: "one", hook_event_name: "Stop" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
-    assert(f.store.list("codex_hook_turn", 10).every(turn => (turn.signals as JsonObject[]).length === 0));
-    assert(f.store.list("codex_hook_turn", 10).some(turn => turn.turn_id === "one" && turn.closed_at));
+    const first = (await bridge.journal.find({ ...base, turn_id: "one" }))!;
+    const second = (await bridge.journal.find({ ...base, turn_id: "two" }))!;
+    assert.equal((first.signals as JsonObject[]).length, 0);
+    assert.equal((second.signals as JsonObject[]).length, 0);
+    assert(first.closed_at);
     await bridge.handle("context", { ...base, turn_id: "two", hook_event_name: "PostToolUse", tool_name: "Edit" });
-    assert(f.store.list("codex_hook_turn", 10).some(turn => turn.turn_id === "two" && !turn.closed_at));
+    assert(!(await bridge.journal.find({ ...base, turn_id: "two" }))!.closed_at);
     await bridge.handle("context", { ...base, turn_id: "two", hook_event_name: "Stop" });
     await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "new independent turn" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
-    assert.equal(f.store.list("codex_hook_turn", 10).filter(turn => !turn.closed_at).length, 1);
+    const pending = (await hookSession(f, base.session_id))!.pending_turn_ids as string[];
+    assert.equal(pending.length, 1);
+    assert.equal(((await bridge.journal.find({ ...base, turn_id: pending[0] }))!.signals as JsonObject[]).length, 1);
   } finally { await dispose(f); }
 });
 
@@ -812,48 +836,37 @@ test("automatic Memory facts preserve negation, avoidance, scope and conditional
   }
 });
 
-test("Memory Hook preserves a conditional prohibition through two independent sessions and project promotion", async () => {
+test("Memory Hook preserves a conditional prohibition in project scope", async () => {
   const f = await fixture();
-  const sessions = ["one", "two"].map(id => `negation-${stableDigest(f.root).slice(-12)}-${id}`);
   try {
     const bridge = new CodexHookBridge(f.service);
     const statement = "以后请不要删除历史数据，除非已经完成备份";
     const scope = codexProjectScope(f.root)!;
-    for (const [index, sessionId] of sessions.entries()) {
-      await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: sessionId, prompt: statement });
-      const sessionMemories = f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId }).memories as JsonObject[];
-      assert.equal(sessionMemories.length, 1);
-      assert.equal(sessionMemories[0]!.content, statement);
-      f.service.memoryPromotionRun({ limit: 100 });
-      const projectMemories = f.service.memoryLedgerList({ scope_kind: "project", scope_id: scope.id }).memories as JsonObject[];
-      assert.equal(projectMemories.length, index);
-      if (index === 1) {
-        assert.equal(projectMemories[0]!.content, statement);
-        assert.equal(projectMemories[0]!.status, "active");
-        const path = f.service.memoryGovernance.ledger.files.pathFor(scope)!;
-        assert.match(await readFile(path, "utf8"), /以后请不要删除历史数据，除非已经完成备份/u);
-      }
-    }
-  } finally {
-    for (const sessionId of sessions) f.service.memorySessionArchive({ session_id: sessionId });
-    await dispose(f);
-  }
+    await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "negation-one", prompt: statement });
+    const projectMemories = f.service.memoryLedgerList({ scope_kind: "project", scope_id: scope.id }).memories as JsonObject[];
+    assert.equal(projectMemories.length, 1);
+    assert.equal(projectMemories[0]!.content, statement);
+    assert.equal(f.service.memoryLedgerList({ scope_kind: "session", scope_id: "negation-one" }).count, 0);
+    const path = f.service.memoryGovernance.ledger.files.pathFor(scope)!;
+    assert.match(await readFile(path, "utf8"), /以后请不要删除历史数据，除非已经完成备份/u);
+  } finally { await dispose(f); }
 });
 
-test("Memory Hook automatically captures only classified stable project facts into the session tier", async () => {
+test("Memory Hook captures stable facts in project scope", async () => {
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service);
     await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "automatic-memory-session", prompt: "本项目默认使用 Node.js" });
     await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "automatic-memory-session", prompt: "请修复这个测试" });
-    const records = f.service.memoryLedgerList({ scope_kind: "session", scope_id: "automatic-memory-session", include_history: true }).memories as JsonObject[];
+    const scope = codexProjectScope(f.root)!;
+    const records = f.service.memoryLedgerList({ scope_kind: "project", scope_id: scope.id, include_history: true }).memories as JsonObject[];
     assert.equal(records.length, 1);
     assert.equal(records[0]!.content, "本项目默认使用 Node.js");
     assert.equal(records[0]!.status, "active");
     const evidence = f.store.get("evidence", String((records[0]!.evidence_ids as string[])[0]));
     assert.equal((evidence.metadata as JsonObject).capture_mode, "host-observed-stable-fact");
-    const sessionMemoryPath = f.service.memoryGovernance.ledger.files.pathFor({ kind: "session", id: "automatic-memory-session" });
-    assert.equal(existsSync(sessionMemoryPath!), true);
+    assert.equal(existsSync(f.service.memoryGovernance.ledger.files.pathFor(scope)!), true);
+    assert.equal(f.service.memoryLedgerList({ scope_kind: "session", scope_id: "automatic-memory-session" }).count, 0);
   } finally { await dispose(f); }
 });
 
@@ -891,7 +904,7 @@ test("Memory Hook projects explicit captures with bounded summary fields", async
     const shortSummary = JSON.parse(String(output.additionalContext)) as JsonObject;
     assert.equal((shortSummary.memory_capture as JsonObject).captured_fact, "深色模式");
     assert.match(String((shortSummary.memory_capture as JsonObject).candidate_id), /^memory_candidate_statement_/u);
-    assert.equal((shortSummary.memory_capture as JsonObject).next_action, "memory_promotion_queued");
+    assert.equal((shortSummary.memory_capture as JsonObject).next_action, "available_for_scoped_context");
     assert.deepEqual((shortSummary.memory_capture as JsonObject).topic_suggestions, []);
     assert.deepEqual((shortSummary.memory_capture as JsonObject).promotions, []);
     const output2 = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "explicit-long", prompt: `/remember: ${"深".repeat(33)}` });
@@ -918,65 +931,56 @@ test("Hook Memory output projects promotion summaries and legacy journals defaul
     const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope, turn })).digest("hex").slice(-20)}`;
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run("codex_hook_turn", legacyId, 1, JSON.stringify({ turn_id: turn }), new Date().toISOString(), new Date().toISOString());
-    assert.equal(bridge.journal.find({ cwd: f.root, turn_id: turn }), null);
+    assert.equal((await bridge.journal.find({ cwd: f.root, turn_id: turn })), null);
     f.store.database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=1")
       .run(JSON.stringify({ turn_id: turn, session_host: "codex" }), "codex_hook_turn", legacyId);
-    assert.equal(bridge.journal.find({ cwd: f.root, turn_id: turn })?.id, legacyId);
-    assert.equal(bridge.journal.find({ cwd: f.root, turn_id: turn, session_id: "different" }), null);
+    assert.equal((await bridge.journal.find({ cwd: f.root, turn_id: turn }))?.id, legacyId);
+    assert.equal((await bridge.journal.find({ cwd: f.root, turn_id: turn, session_id: "different" })), null);
   } finally {
     f.service.memoryCaptureUserStatement = originalCapture;
     await dispose(f);
   }
 });
 
-test("Memory SessionEnd removes the temporary Memory body and ledger rows", async () => {
+test("Memory SessionEnd leaves historical session data for explicit reconciliation", async () => {
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service);
     f.service.knowledgeMemoryInstallBuiltins();
     const sessionId = "session-end-memory-cleanup";
-    f.service.memoryCaptureUserStatement({ content: "Temporary session fact", kind: "episodic", topic: "temporary-fact", session_id: sessionId, session_host: "codex" });
+    seedLegacySession(new MemoryCapture(f.service.memoryGovernance, () => f.service.knowledgeMemoryInstallBuiltins(), value => f.service.evidenceRecord(value)), { content: "Temporary session fact", kind: "episodic", topic: "temporary-fact", session_id: sessionId, session_host: "codex" });
     const internalSessionScopeId = sessionStorageScopeId("codex", sessionId);
     const sessionFile = f.service.memoryGovernance.ledger.files.pathFor({ kind: "session", id: internalSessionScopeId });
     assert(sessionFile && existsSync(sessionFile));
 
     await bridge.handle("memory", { hook_event_name: "SessionEnd", cwd: f.root, session_id: sessionId });
 
-    assert.equal(existsSync(sessionFile), false);
-    assert.equal(f.store.listScoped("memory_ledger", [{ kind: "session", id: internalSessionScopeId }], 100).length, 0);
-
-    const originalArchive = f.service.memorySessionArchive;
-    const mutableService = f.service as CraftService & { memorySessionArchive: (args: JsonObject) => JsonObject };
-    for (const [session_id, failure] of [["archive-error", new Error("cleanup failed")], ["archive-opaque-error", "cleanup failed"]] as const) {
-      mutableService.memorySessionArchive = () => { throw failure; };
-      await bridge.handle("memory", { hook_event_name: "SessionEnd", cwd: f.root, session_id });
-    }
-    mutableService.memorySessionArchive = originalArchive;
-    const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed");
-    assert.equal(failures.length, 2);
-    assert.deepEqual(failures.map(event => (event.payload as JsonObject).error_type), ["Error", "unknown"]);
+    assert.equal(existsSync(sessionFile), true);
+    assert.equal(f.store.listScoped("memory_ledger", [{ kind: "session", id: internalSessionScopeId }], 100).length, 1);
+    assert.equal(f.store.list("memory_session_archive", 10).length, 0);
   } finally { await dispose(f); }
 });
 
-test("Memory SessionEnd queues bounded background archive without deleting inline", async () => {
+test("Memory SessionEnd runs maintenance without queuing a session archive", async () => {
   const f = await fixture();
   try {
     const sessionId = "queued-hook-session", scope = sessionStorageScopeId("codex", sessionId);
     f.service.knowledgeMemoryInstallBuiltins();
-    f.service.memoryCaptureUserStatement({ content: "Temporary session fact", kind: "episodic", topic: "temporary-fact", session_id: sessionId, session_host: "codex" });
+    seedLegacySession(new MemoryCapture(f.service.memoryGovernance, () => f.service.knowledgeMemoryInstallBuiltins(), value => f.service.evidenceRecord(value)), { content: "Temporary session fact", kind: "episodic", topic: "temporary-fact", session_id: sessionId, session_host: "codex" });
     let launches = 0;
     const bridge = new CodexHookBridge(f.service, () => { launches++; });
     await bridge.handle("memory", { hook_event_name: "SessionEnd", source: "codex", cwd: f.root, session_id: sessionId });
     assert.equal(launches, 1);
     assert.equal(f.store.listSessionMemoryPage("memory_ledger", scope).records.length, 1);
     const files = f.service.memoryGovernance.ledger.files;
-    assert.equal(files.isSessionArchived(scope), true);
+    assert.equal(files.isSessionArchived(scope), false);
     for (let i = 0; i < 20 && files.runQueuedArchiveSteps().attempted; i++) { /* Advance a bounded page. */ }
-    assert.equal(f.store.listSessionMemoryPage("memory_ledger", scope).records.length, 0);
+    assert.equal(f.store.listSessionMemoryPage("memory_ledger", scope).records.length, 1);
+    assert.equal(f.store.list("memory_session_archive", 10).length, 0);
   } finally { await dispose(f); }
 });
 
-test("a maintenance enqueue failure still starts the already queued session archive", async t => {
+test("a maintenance enqueue failure does not queue a new session archive", async t => {
   const f = await fixture();
   try {
     const sessionId = "maintenance-enqueue-failed", host = "codex", scope = sessionStorageScopeId(host, sessionId);
@@ -991,17 +995,17 @@ test("a maintenance enqueue failure still starts the already queued session arch
     const bridge = new CodexHookBridge(f.service, () => { launches++; });
     assert.deepEqual(await bridge.handle("memory", { hook_event_name: "SessionEnd", source: host, cwd: f.root, session_id: sessionId }), {});
     assert.equal(launches, 1);
-    assert.equal(f.store.list("memory_session_archive", 1)[0]?.status, "archiving");
+    assert.equal(f.store.list("memory_session_archive", 1).length, 0);
     const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed");
     assert.equal(failures.length, 1);
     assert.doesNotMatch(JSON.stringify(failures), /private failure details/u);
     const files = f.service.memoryGovernance.ledger.files;
     for (let i = 0; i < 20 && files.runQueuedArchiveSteps().attempted; i++) { /* Advance archive checkpoints. */ }
-    assert.equal(f.store.listSessionMemoryPage("memory_candidate", scope).records.length, 0);
+    assert.equal(f.store.listSessionMemoryPage("memory_candidate", scope).records.length, 1);
   } finally { t.mock.restoreAll(); await dispose(f); }
 });
 
-test("a lifecycle telemetry failure does not prevent the session archive from starting", async t => {
+test("a lifecycle telemetry failure does not create a session archive", async t => {
   const f = await fixture();
   try {
     const sessionId = "activation-failed", scope = sessionStorageScopeId("codex", sessionId);
@@ -1012,18 +1016,18 @@ test("a lifecycle telemetry failure does not prevent the session archive from st
     const bridge = new CodexHookBridge(f.service, () => { launches++; });
     await bridge.handle("memory", { hook_event_name: "SessionEnd", cwd: f.root, session_id: sessionId });
     assert.equal(launches, 1);
-    assert.equal(f.store.list("memory_session_archive", 1)[0]?.status, "archiving");
+    assert.equal(f.store.list("memory_session_archive", 1).length, 0);
     assert.equal(f.store.list("memory_maintenance_request", 1)[0]?.status, "pending");
     const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed");
     assert.equal(failures.length, 1);
     assert.doesNotMatch(JSON.stringify(failures), /private telemetry failure/u);
     const files = f.service.memoryGovernance.ledger.files;
     for (let i = 0; i < 20 && files.runQueuedArchiveSteps().attempted; i++) { /* Advance archive checkpoints. */ }
-    assert.equal(f.store.listSessionMemoryPage("memory_candidate", scope).records.length, 0);
+    assert.equal(f.store.listSessionMemoryPage("memory_candidate", scope).records.length, 1);
   } finally { t.mock.restoreAll(); await dispose(f); }
 });
 
-test("SessionEnd queues Host-scoped archive when project identity resolution fails", async t => {
+test("SessionEnd does not queue a session archive when project identity resolution fails", async t => {
   const f = await fixture();
   try {
     const sessionId = "project-unavailable", scope = sessionStorageScopeId("codex", sessionId);
@@ -1034,7 +1038,7 @@ test("SessionEnd queues Host-scoped archive when project identity resolution fai
     const bridge = new CodexHookBridge(f.service, () => { launches++; });
     assert.deepEqual(await bridge.handle("context", { hook_event_name: "SessionEnd", cwd: f.root, session_id: sessionId }), {});
     assert.equal(launches, 1);
-    assert.equal(f.store.list("memory_session_archive", 1)[0]?.status, "archiving");
+    assert.equal(f.store.list("memory_session_archive", 1).length, 0);
     assert.equal(f.store.list("memory_maintenance_request", 1).length, 0);
     assert.equal(f.store.list("memory_observation", 10).length, 0);
     const failures = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed");
@@ -1042,7 +1046,7 @@ test("SessionEnd queues Host-scoped archive when project identity resolution fai
     assert.doesNotMatch(JSON.stringify(failures), /private project identity failure/u);
     const files = f.service.memoryGovernance.ledger.files;
     for (let i = 0; i < 20 && files.runQueuedArchiveSteps().attempted; i++) { /* Advance archive checkpoints. */ }
-    assert.equal(f.store.listSessionMemoryPage("memory_candidate", scope).records.length, 0);
+    assert.equal(f.store.listSessionMemoryPage("memory_candidate", scope).records.length, 1);
   } finally { t.mock.restoreAll(); await dispose(f); }
 });
 
@@ -1059,7 +1063,7 @@ test("archive fallback failures preserve the original project identity diagnosti
   } finally { t.mock.restoreAll(); await dispose(f); }
 });
 
-test("the same Host session ID resolves, stores and archives Memory in separate Host partitions", async () => {
+test("Host observations share project scope without session Memory partitions", async () => {
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service);
@@ -1068,15 +1072,12 @@ test("the same Host session ID resolves, stores and archives Memory in separate 
       session_id: sessionId, prompt: "本项目默认使用 Node.js" });
     await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", source: "claude", cwd: f.root,
       session_id: sessionId, prompt: "本项目默认使用 Python" });
-    const codex = f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId, session_host: "codex" }).memories as JsonObject[];
-    const claude = f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId, session_host: "claude" }).memories as JsonObject[];
-    assert.equal(codex.length, 1);
-    assert.equal(claude.length, 1);
-    assert.match(String(codex[0]!.content), /Node\.js/u);
-    assert.match(String(claude[0]!.content), /Python/u);
-    f.service.memorySessionArchive({ session_id: sessionId, session_host: "codex" });
+    const scope = codexProjectScope(f.root)!;
+    const project = f.service.memoryLedgerList({ scope_kind: "project", scope_id: scope.id }).memories as JsonObject[];
+    assert(project.some(item => String(item.content).includes("Node.js")));
+    assert(project.some(item => String(item.content).includes("Python")));
     assert.equal(f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId, session_host: "codex" }).count, 0);
-    assert.equal(f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId, session_host: "claude" }).count, 1);
+    assert.equal(f.service.memoryLedgerList({ scope_kind: "session", scope_id: sessionId, session_host: "claude" }).count, 0);
   } finally { await dispose(f); }
 });
 
@@ -1126,10 +1127,12 @@ test("Stop accepts a passing Node TypeScript test run after the last edit", asyn
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "edit" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "test",
       tool_input: { command: "node --experimental-strip-types --test tests/craft-notes.test.ts" }, tool_response: { exit_code: 0 } });
-    const journal = bridge.journal.find(base)!;
+    const journal = (await bridge.journal.find(base))!;
     assert.equal(journal.verification_outcome, "passed");
     const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
     assert.match(String(stop.systemMessage), /craft_experience_runbook_capture/u);
+    assert.match(String(stop.systemMessage), /project_binding/u);
+    assert.match(String(stop.systemMessage), /host=codex.*session_id=node-strip-types-verification.*turn_id=node-strip-types-turn.*context_receipt_id=/u);
   } finally { await dispose(f); }
 });
 
@@ -1149,11 +1152,11 @@ test("Knowledge, Memory and Experience hooks resolve only their named Context me
     assert.doesNotMatch(String(knowledge.additionalContext), /short feedback/u);
     const memory = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: scope, session_id: "memory-session", prompt: "记住：我本周只喝无糖咖啡" });
     assert.match(String(memory.additionalContext), /无糖咖啡/u);
-    const stored = f.service.memoryLedgerList({ scope_kind: "session", scope_id: "memory-session", include_history: true }).memories as JsonObject[];
-    assert.equal(stored.length, 1);
+    const stored = f.service.memoryLedgerList({ scope_kind: "project", scope_id: canonicalScope.id, include_history: true }).memories as JsonObject[];
+    assert.equal(stored.length, 2);
     assert(stored.some((item) => String(item.content).includes("无糖咖啡")));
     await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: scope, session_id: "memory-session", prompt: "这句话不能被存成长期记忆" });
-    assert.equal((f.service.memoryLedgerList({ scope_kind: "session", scope_id: "memory-session", include_history: true }).memories as JsonObject[]).length, 1);
+    assert.equal((f.service.memoryLedgerList({ scope_kind: "project", scope_id: canonicalScope.id, include_history: true }).memories as JsonObject[]).length, 2);
     const procedureRef = f.store.contentStore.writeSync({ kind: "experience", folder: "prompts", record_id: "hook-procedure", version: 1, scope: `project:${canonicalScope.id}`, status: "routeable", sensitivity: "internal", source_id: "fixture", title: "终态验证", body: "# 终态验证\n\n先运行验证。" });
     f.store.create("experience_procedure", "hook-procedure", { scope: `project:${canonicalScope.id}`, lifecycle: "routeable", routeable: true, procedure_kind: "prompt", trigger: "verification", title: "终态验证", acceptance_ref: "acceptance:fixture", scenario_signature: { project: canonicalScope.id }, content_ref: procedureRef, content_digest: procedureRef.digest });
     const experience = await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd: scope, prompt: "Which verification command should I use?" });
@@ -1165,13 +1168,10 @@ test("Knowledge, Memory and Experience hooks resolve only their named Context me
     assert.equal(components.find((item) => item.component === "knowledge")!.status, "executed");
     assert.equal(components.find((item) => item.component === "memory")!.explicit_memory_written, true);
     assert.equal(components.find((item) => item.component === "experience")!.context_receipt_id !== null, true);
-    const sessionMemoryPath = f.service.memoryGovernance.ledger.files.pathFor({ kind: "session", id: "memory-session" })!;
-    assert.equal(sessionMemoryPath, join(sessionStorageDirectory(f.store.paths, "codex", "memory-session"), "memory", "memory.md"));
-    assert.equal(existsSync(sessionMemoryPath), true);
+    const projectMemoryPath = f.service.memoryGovernance.ledger.files.pathFor(canonicalScope)!;
+    assert.equal(existsSync(projectMemoryPath), true);
     await bridge.handle("memory", { hook_event_name: "SessionEnd", cwd: scope, session_id: "memory-session" });
-    f.service.memoryPromotionRun({ limit: 100 });
-    assert.equal(existsSync(sessionMemoryPath), false);
-    assert.equal(f.service.memoryLedgerList({ scope_kind: "session", scope_id: "memory-session", include_history: true }).count, 0);
+    assert.equal(f.service.memoryLedgerList({ scope_kind: "project", scope_id: canonicalScope.id }).count, 2);
   } finally { await dispose(f); }
 });
 
@@ -1201,7 +1201,7 @@ test("Context Hook resolves one shared receipt and records each component withou
     assert(proofs.every((item) => item.context_receipt_id === receipt.id));
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd, session_id: "context-session", turn_id: "context-turn", prompt: "verification feedback" }), {});
     await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "context-session", prompt: "记住：我偏好无糖咖啡" });
-    assert.equal((f.service.memoryLedgerList({ scope_kind: "session", scope_id: "context-session", include_history: true }).memories as JsonObject[]).length, 1);
+    assert.equal((f.service.memoryLedgerList({ scope_kind: "project", scope_id: scope.id, include_history: true }).memories as JsonObject[]).length, 2);
   } finally { await dispose(f); }
 });
 
@@ -1319,6 +1319,7 @@ test("parallel Context and component Hooks atomically divide shared material wit
 
 test("Context Hook keeps sibling recall available after a rejected memory capture and records Experience once", async () => {
   const f = await fixture();
+  const supervisor = f.supervisor;
   try {
     const bridge = new CodexHookBridge(f.service); const cwd = f.root;
     const original = f.service.memoryCaptureUserStatement;
@@ -1337,8 +1338,7 @@ test("Context Hook keeps sibling recall available after a rejected memory captur
     f.service.memoryCaptureUserStatement = original;
     await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "capture-success", prompt: "/remember: 以后默认使用 Node.js" });
     await bridge.handle("context", { hook_event_name: "SessionStart", cwd, session_id: "session" });
-    const resumedSession = f.store.list("context_hook_session", 10).find(item => item.session_id === "session");
-    assert.deepEqual(resumedSession?.pending_turn_ids, []);
+    assert.equal(await hookSession(f, "session"), null);
     await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "turn", prompt: "Fix the failing test" });
     await bridge.handle("context", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: "turn", tool_name: "Edit" });
     await bridge.handle("context", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: "turn", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
@@ -1368,9 +1368,9 @@ test("Experience hooks persist only redacted verified signals and propose after 
     for (const scenario_key of ["coding.feature-implementation", "bad scenario", "coding.other-scenario"]) {
       await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "session-two", turn_id: "two", scenario_key });
     }
-    const journals = f.store.list("codex_hook_turn", 10);
+    const journals = await Promise.all(["one", "two"].map(turn_id => bridge.journal.find({ cwd, session_id: `session-${turn_id}`, turn_id })));
     assert.equal(journals.length, 2);
-    assert(journals.every(journal => (journal.signals as JsonObject[]).filter(item => item.kind === "verification")
+    assert(journals.every(journal => journal && (journal.signals as JsonObject[]).filter(item => item.kind === "verification")
       .every(item => item.scenario_key === "coding.feature-implementation")));
     assert.doesNotMatch(JSON.stringify(journals), /abcdefghijklmnop|pnpm test/u);
     const observations = f.store.list("workflow_evolution_observation", 10);
@@ -1397,12 +1397,12 @@ test("explicit Experience scenario aligns a legacy journal with no signal array"
     await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "verify a legacy turn" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
-    const journal = f.store.list("codex_hook_turn", 10).find(item => item.turn_id === base.turn_id)!;
-    f.store.save("codex_hook_turn", String(journal.id), { ...journal, signals: null });
+    const key = `hook:turn:${stableDigest({ scope: codexProjectScope(f.root)!, turn: base.turn_id }).slice(-32)}`;
+    await bridge.journal.update(base, key, prior => ({ ...prior, signals: null }));
 
     await bridge.handle("experience", { ...base, hook_event_name: "Stop", scenario_key: "coding.explicit-legacy" });
 
-    const finalized = f.store.get("codex_hook_turn", String(journal.id));
+    const finalized = (await bridge.journal.find(base))!;
     assert.equal(finalized.scenario_key, "coding.explicit-legacy");
     assert.deepEqual(finalized.signals, []);
     assert.equal(typeof finalized.closed_at, "string");
@@ -1428,7 +1428,7 @@ test("project Experience scenario catalog uses exact mappings and leaves unmappe
       await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "UserPromptSubmit", prompt: "make a verified project change" });
       await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
       await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
-      const journal = f.store.list("codex_hook_turn", 10).find(item => item.turn_id === turn_id)!;
+      const journal = (await bridge.journal.find({ ...base, session_id, turn_id }))!;
       assert.deepEqual((journal.signals as JsonObject[]).map(item => ({ kind: item.kind, outcome: item.outcome, scenario_key: item.scenario_key })), [
         { kind: "edit", outcome: "unknown", scenario_key: undefined }, { kind: "verification", outcome: "passed", scenario_key: "coding.test-failure-recovery" },
       ]);
@@ -1443,7 +1443,7 @@ test("project Experience scenario catalog uses exact mappings and leaves unmappe
     await bridge.handle("experience", { ...base, turn_id: "unmatched", hook_event_name: "UserPromptSubmit", prompt: "make another verified project change" });
     await bridge.handle("experience", { ...base, turn_id: "unmatched", hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("experience", { ...base, turn_id: "unmatched", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
-    const unmatched = f.store.list("codex_hook_turn", 10).find(item => item.turn_id === "unmatched")!;
+    const unmatched = (await bridge.journal.find({ ...base, turn_id: "unmatched" }))!;
     assert.equal(unmatched.scenario_key, null);
     await bridge.handle("experience", { ...base, turn_id: "unmatched", hook_event_name: "Stop" });
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 3);
@@ -1458,7 +1458,7 @@ test("project Experience scenario catalog uses exact mappings and leaves unmappe
     await bridge.handle("experience", { ...base, turn_id: "ambiguous", hook_event_name: "UserPromptSubmit", prompt: "make an ambiguous project change" });
     await bridge.handle("experience", { ...base, turn_id: "ambiguous", hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("experience", { ...base, turn_id: "ambiguous", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
-    assert.equal(f.store.list("codex_hook_turn", 10).find(item => item.turn_id === "ambiguous")?.scenario_key, null);
+    assert.equal((await bridge.journal.find({ ...base, turn_id: "ambiguous" }))?.scenario_key, null);
     await bridge.handle("experience", { ...base, turn_id: "ambiguous", hook_event_name: "Stop" });
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 4);
     assert.equal(f.store.list("workflow_evolution_request", 10).length, 1);
@@ -1482,7 +1482,7 @@ test("Experience scenario catalogs keep coarse and fine identities distinct thro
       await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "UserPromptSubmit", prompt: "repair the type check" });
       await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
       await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
-      const turn = f.store.list("codex_hook_turn", 10).find(item => item.turn_id === turn_id)!;
+      const turn = (await bridge.journal.find({ ...base, session_id, turn_id }))!;
       assert.equal(turn.scenario_key, "engineering.change.typescript-tests");
       assert.equal(turn.coarse_scenario_key, "engineering.change");
       await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "Stop" });
@@ -1510,7 +1510,7 @@ test("Experience scenario catalogs keep coarse and fine identities distinct thro
       await bridge.handle("experience", { ...base, turn_id, hook_event_name: "UserPromptSubmit", prompt: "another change" });
       await bridge.handle("experience", { ...base, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
       await bridge.handle("experience", { ...base, turn_id, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
-      assert.equal(f.store.list("codex_hook_turn", 20).find(item => item.turn_id === turn_id)?.scenario_key, null);
+      assert.equal((await bridge.journal.find({ ...base, turn_id }))?.scenario_key, null);
     }
   } finally { await dispose(f); }
 });
@@ -1540,7 +1540,7 @@ test("Hook scenario catalog rejects malformed, linked and oversized metadata bef
       await writeFile(catalogPath, JSON.stringify(value));
       await bridge.handle("experience", { ...base, turn_id: `invalid-${index}`, hook_event_name: "PostToolUse", tool_name: "Bash",
         tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
-      const turn = f.store.list("codex_hook_turn", 100).find(item => item.turn_id === `invalid-${index}`)!;
+      const turn = (await bridge.journal.find({ ...base, turn_id: `invalid-${index}` }))!;
       assert.equal(turn.scenario_key, null);
     }
     await writeFile(catalogPath, "{");
@@ -1561,16 +1561,16 @@ test("Hook scenario catalog rejects malformed, linked and oversized metadata bef
       tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
 
     const turn = { cwd: f.root, session_id: "bound", turn_id: "bound-turn" };
-    bridge.journal.bindContextReceipt(turn, { id: "context-receipt" });
-    bridge.journal.bindContextReceipt(turn, { id: "context-receipt" });
-    assert.equal(bridge.journal.find(turn)?.context_receipt_id, "context-receipt");
+    (await bridge.journal.bindContextReceipt(turn, { id: "context-receipt" }));
+    (await bridge.journal.bindContextReceipt(turn, { id: "context-receipt" }));
+    assert.equal((await bridge.journal.find(turn))?.context_receipt_id, "context-receipt");
     for (const [turn_id, session_id] of [["legacy-match", "legacy-session"], ["legacy-mismatch", "different-session"]] as const) {
       const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope: codexProjectScope(f.root), turn: turn_id })).digest("hex").slice(-20)}`;
       f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
         .run("codex_hook_turn", legacyId, 1, JSON.stringify({ session_host: "codex", session_id, turn_id }), new Date().toISOString(), new Date().toISOString());
     }
-    assert.equal(bridge.journal.find({ cwd: f.root, session_id: "legacy-session", turn_id: "legacy-match" })?.turn_id, "legacy-match");
-    assert.equal(bridge.journal.find({ cwd: f.root, session_id: "other-session", turn_id: "legacy-mismatch" }), null);
+    assert.equal((await bridge.journal.find({ cwd: f.root, session_id: "legacy-session", turn_id: "legacy-match" }))?.turn_id, "legacy-match");
+    assert.equal((await bridge.journal.find({ cwd: f.root, session_id: "other-session", turn_id: "legacy-mismatch" })), null);
 
     const dispatch = bridge as unknown as { dispatch: () => Promise<undefined> };
     const originalDispatch = dispatch.dispatch;
@@ -1583,14 +1583,14 @@ test("Hook scenario catalog rejects malformed, linked and oversized metadata bef
     ] }));
     for (const [turn_id, input] of [["tool-input-alias", { toolInput: { cmd: "pnpm test" } }], ["input-alias", { input: { script: "pnpm test" } }]] as const) {
       await bridge.handle("experience", { ...base, turn_id, hook_event_name: "PostToolUse", tool_name: "Bash", ...input, tool_response: { exit_code: 0 } });
-      const aliasTurn = f.store.list("codex_hook_turn", 100).find(item => item.turn_id === turn_id)!;
+      const aliasTurn = (await bridge.journal.find({ ...base, turn_id }))!;
       assert.equal(((aliasTurn.signals as JsonObject[])[0]!.scenario_key), "scene.verified");
     }
     for (const turn_id of ["invalid-supplied-scene", "conflicting-supplied-scene"]) {
       const input = { cwd: f.root, session_id: "finalize-scenes", turn_id };
       await bridge.handle("experience", { ...input, hook_event_name: "PostToolUse", tool_name: "Edit" });
       await bridge.handle("experience", { ...input, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
-      bridge.journal.bindContextReceipt(input, { id: `receipt-${turn_id}` });
+      (await bridge.journal.bindContextReceipt(input, { id: `receipt-${turn_id}` }));
     }
     const errorsBefore = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed").length;
     await bridge.handle("experience", { cwd: f.root, session_id: "finalize-scenes", turn_id: "invalid-supplied-scene", hook_event_name: "Stop", scenario_key: "bad scene" });
@@ -1609,7 +1609,7 @@ test("Experience cold start does not treat matching verifier commands as semanti
       await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "complete a verified project change" });
       await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
       await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command }, tool_response: { exit_code: 0 } });
-      const journal = f.store.list("codex_hook_turn", 10).find(item => item.turn_id === turn_id)!;
+      const journal = (await bridge.journal.find({ ...base, session_id, turn_id }))!;
       await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
       return journal.scenario_key;
     };
@@ -1645,7 +1645,7 @@ test("project Experience command mapping fails closed on linked and oversized ca
       await bridge.handle("experience", { ...base, turn_id, hook_event_name: "UserPromptSubmit", prompt: "make a verified change" });
       await bridge.handle("experience", { ...base, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
       await bridge.handle("experience", { ...base, turn_id, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
-      const journal = f.store.list("codex_hook_turn", 10).find(item => item.turn_id === turn_id)!;
+      const journal = (await bridge.journal.find({ ...base, turn_id }))!;
       assert.equal(journal.scenario_key, null);
       assert.equal((journal.signals as JsonObject[])[1]?.scenario_key, undefined);
       await bridge.handle("experience", { ...base, turn_id, hook_event_name: "Stop" });
@@ -1790,7 +1790,7 @@ test("MCP Host completion enters the same verified Experience proposal loop idem
     await bridge.handle("experience", { ...hookBase, hook_event_name: "UserPromptSubmit", prompt: "Implement a verified feature" });
     await bridge.handle("experience", { ...hookBase, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("experience", { ...hookBase, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: verifierCommand }, tool_response: { exit_code: 0 } });
-    const hookTurn = f.store.list("codex_hook_turn", 10).find(turn => turn.turn_id === hookBase.turn_id)!;
+    const hookTurn = (await bridge.journal.find(hookBase))!;
     assert.equal(hookTurn.scenario_key, "coding.feature-implementation");
     assert.equal(hookTurn.coarse_scenario_key, "engineering.code-change");
     const ignored = await server.handle({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "craft_learning_cycle_finalize", arguments: { host: "mcp_host", task_id: "task-three", turn_id: "turn", context_receipt_id: receiptId, verified: false, verification_outcome: "passed", verification_ref: "test-run:three" } } }) as any;
@@ -1806,7 +1806,7 @@ test("Stop Hook does not count an MCP-classified completion twice for the same H
     await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "Implement and verify a feature" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:feature" }, tool_response: { exit_code: 0 } });
-    const journal = f.store.list("codex_hook_turn", 10, row => row.turn_id === turn)[0]!;
+    const journal = (await bridge.journal.find(base))!;
     const receipt = f.store.find("context_resolution_receipt", String(journal.context_receipt_id))!;
     const classified = f.service.learningCycleFinalize({ host: "codex", task_id: String(receipt.task_id ?? "model-task"), turn_id: turn,
       context_receipt_id: String(journal.context_receipt_id), verified: true, verification_outcome: "passed", verification_ref: "model-verifier-receipt",
@@ -1831,7 +1831,7 @@ test("Stop Hook rejects a second terminal outcome for a turn already finalized b
     await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "Implement and verify a feature" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:feature" }, tool_response: { exit_code: 0 } });
-    const journal = f.store.list("codex_hook_turn", 10, row => row.turn_id === turn)[0]!;
+    const journal = (await bridge.journal.find(base))!;
     const receipt = f.store.find("context_resolution_receipt", String(journal.context_receipt_id))!;
     f.service.learningCycleFinalize({ host: "codex", task_id: String(receipt.task_id ?? "model-task"), turn_id: turn,
       context_receipt_id: String(journal.context_receipt_id), verified: true, verification_outcome: "failed", verification_ref: "mismatched-model-outcome" });
@@ -1850,7 +1850,7 @@ test("Stop Hook recovers a terminal signal when its matching completion Evidence
     await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "Implement and verify a feature" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:feature" }, tool_response: { exit_code: 0 } });
-    const journal = f.store.list("codex_hook_turn", 10, row => row.turn_id === turn)[0]!;
+    const journal = (await bridge.journal.find(base))!;
     f.service.evidenceRecord({ evidence_id: "orphan-host-completion", source_type: "host_completion_signal", confidence: "bounded",
       claim: "Host reported terminal verification passed.", locator: `context-receipt:${journal.context_receipt_id}`,
       metadata: { provenance: "host_completion_signal", host: "codex", turn_id: turn, context_receipt_id: journal.context_receipt_id, content_stored: false } });
@@ -2290,21 +2290,21 @@ test("Hook journal covers missing identity, updates signals, and learning record
     const sanitizer = new HookSignalSanitizer();
     const signal = sanitizer.signal({ tool_name: "Edit", tool_input: {} });
     assert(signal);
-    assert.equal(bridge.journal.record({ cwd }, signal), null);
-    assert.equal(bridge.journal.find({ cwd }), null);
-    bridge.journal.bindContextReceipt({ cwd }, { id: "orphan" });
-    assert.equal(bridge.journal.find({ cwd, session_id: "missing-session" }), null);
-    const first = bridge.journal.record({ cwd, turn_id: "duplicate" }, signal);
+    assert.equal((await bridge.journal.record({ cwd }, signal)), null);
+    assert.equal((await bridge.journal.find({ cwd })), null);
+    (await bridge.journal.bindContextReceipt({ cwd }, { id: "orphan" }));
+    assert.equal((await bridge.journal.find({ cwd, session_id: "missing-session" })), null);
+    const first = (await bridge.journal.record({ cwd, turn_id: "duplicate" }, signal));
     assert(first);
-    assert.equal(bridge.journal.record({ cwd, turn_id: "duplicate" }, signal)?.id, first.id);
-    bridge.journal.record({ cwd, turn_id: "no-receipt" }, signal);
+    assert.equal((await bridge.journal.record({ cwd, turn_id: "duplicate" }, signal))?.id, first.id);
+    (await bridge.journal.record({ cwd, turn_id: "no-receipt" }, signal));
     const passed = sanitizer.signal({ tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
-    assert(passed); bridge.journal.record({ cwd, turn_id: "no-receipt" }, passed);
+    assert(passed); (await bridge.journal.record({ cwd, turn_id: "no-receipt" }, passed));
     assert.equal(bridge.learning.finalize({ cwd, turn_id: "no-receipt" }), null);
-    bridge.journal.bindContextReceipt({ cwd, turn_id: "orphan-without-session" }, { id: "orphan-receipt" });
+    (await bridge.journal.bindContextReceipt({ cwd, turn_id: "orphan-without-session" }, { id: "orphan-receipt" }));
     for (const turn of ["failed-one", "failed-two"]) {
       await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: turn, turn_id: turn, prompt: "Fix and verify" });
-      assert.equal(typeof bridge.journal.find({ cwd, session_id: turn, turn_id: turn })?.context_receipt_id, "string");
+      assert.equal(typeof (await bridge.journal.find({ cwd, session_id: turn, turn_id: turn }))?.context_receipt_id, "string");
       await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Edit",
         tool_input: { file_path: "src/feature.ts" } });
       await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { status: "failed" } });
@@ -2332,6 +2332,9 @@ test("Hook bridge is fail-open for unsupported events and component failures", a
     f.service.contextWorkingSets.resolve = async () => ({ items: [{ memory_id: "stub", memory_version: 1, content: "stub" }], contributions: [{ items: "not-an-array" }], receipt: null }) as never;
     const projected = await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: f.root, prompt: "context" });
     assert.match(String(projected.additionalContext), /"receipt_id":null/u);
+    const bindingBridge = new CodexHookBridge(f.service, undefined, true);
+    const withoutReceipt = await bindingBridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "missing-receipt", turn_id: "turn", prompt: "context" });
+    assert.equal(JSON.parse(String(withoutReceipt.additionalContext)).receipt_id, null);
     f.service.contextWorkingSets.resolve = async () => { throw "fixture failure"; };
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: f.root, prompt: "context" }), {});
     f.service.contextWorkingSets.resolve = original;
@@ -2345,14 +2348,14 @@ test("Hook mints a fresh turn when the Host omits its native turn identifier", a
   try {
     const bridge = new CodexHookBridge(f.service); const cwd = f.root;
     await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: "native-less", prompt: "Review this change" });
-    const firstTurn = String(f.store.list("context_hook_session", 10)[0]!.last_turn_id);
+    const firstTurn = String(((await hookSession(f, "native-less"))!.pending_turn_ids as string[])[0]);
     await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Edit" });
     await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "native-less" });
     await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: "native-less", prompt: "Review the next change" });
-    const secondTurn = String(f.store.list("context_hook_session", 10)[0]!.last_turn_id);
+    const secondTurn = String(((await hookSession(f, "native-less"))!.pending_turn_ids as string[])[0]);
     assert.match(firstTurn, /^hook_turn_/u); assert.match(secondTurn, /^hook_turn_/u); assert.notEqual(firstTurn, secondTurn);
-    assert.equal(f.store.list("context_hook_session", 10)[0]!.sequence, 2);
+    assert.equal((await hookSession(f, "native-less"))!.sequence, 2);
     await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Edit" });
     await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "native-less" });
@@ -2403,16 +2406,15 @@ test("identical session and turn IDs remain separate across Hosts", async () => 
       await bridge.handle("context", { ...base, session_host: host, hook_event_name: "UserPromptSubmit", prompt: "Verify the change" });
       await bridge.handle("context", { ...base, session_host: host, hook_event_name: "PostToolUse", tool_name: "Edit", tool_use_id: "same-tool" });
     }
-    const sessions = f.store.list("context_hook_session", 10);
-    assert.equal(sessions.length, 2);
-    assert.deepEqual(new Set(sessions.map(session => session.session_host)), new Set(["codex", "claude"]));
-    const codex = bridge.journal.find({ ...base, session_host: "codex" });
-    const claude = bridge.journal.find({ ...base, session_host: "claude" });
+    assert(await hookSession(f, "shared", "codex"));
+    assert(await hookSession(f, "shared", "claude"));
+    const codex = (await bridge.journal.find({ ...base, session_host: "codex" }));
+    const claude = (await bridge.journal.find({ ...base, session_host: "claude" }));
     assert(codex && claude);
     assert.notEqual(codex.id, claude.id);
     assert.notEqual((codex.signals as JsonObject[])[0]?.id, (claude.signals as JsonObject[])[0]?.id);
     await bridge.handle("context", { ...base, session_host: "codex", hook_event_name: "SessionEnd" });
-    const activeClaude = f.store.list("context_hook_session", 10).find(session => session.session_host === "claude");
+    const activeClaude = await hookSession(f, "shared", "claude");
     assert.deepEqual(activeClaude?.pending_turn_ids, ["same-turn"]);
   } finally { await dispose(f); }
 });
@@ -2426,7 +2428,7 @@ test("explicit stopped turns reject late signals and repeated learning, includin
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     await bridge.handle("context", { ...base, hook_event_name: "Stop" });
-    const closed = bridge.journal.find(base)!;
+    const closed = (await bridge.journal.find(base))!;
     assert(closed.closed_at);
     const observed = f.store.list("context_feedback", 10).find(item => item.receipt_id === closed.context_receipt_id);
     assert(observed, "Stop should record an automatic observation for the exact Context receipt");
@@ -2434,12 +2436,12 @@ test("explicit stopped turns reject late signals and repeated learning, includin
     assert.equal(observed.evidence_verified, false, "a successful Host turn must not be presented as causal Memory evidence");
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("context", { ...base, hook_event_name: "Stop" });
-    assert.deepEqual(bridge.journal.find(base), closed);
+    assert.deepEqual((await bridge.journal.find(base)), closed);
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
     const empty = { ...base, turn_id: "empty" };
     await bridge.handle("context", { ...empty, hook_event_name: "Stop" });
     await bridge.handle("context", { ...empty, hook_event_name: "PostToolUse", tool_name: "Edit" });
-    assert.deepEqual(bridge.journal.find(empty)!.signals, []);
+    assert.deepEqual((await bridge.journal.find(empty))!.signals, []);
   } finally { await dispose(f); }
 });
 
@@ -2451,7 +2453,9 @@ test("Context feedback failures remain fail-open and record only a safe diagnost
       const base = { cwd: f.root, session_id, turn_id: "turn" };
       await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "Review this project change" });
       f.service.contextResolutionFeedback = (() => { throw thrown; }) as typeof f.service.contextResolutionFeedback;
-      assert.deepEqual(await bridge.handle("context", { ...base, hook_event_name: "Stop" }), {});
+      const response = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+      assert.match(String(response.systemMessage), /capture_unverified/u);
+      assert.doesNotMatch(String(response.systemMessage), /private feedback detail/u);
       const failure = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed" && (event.payload as JsonObject).event === "Stop").at(-1);
       assert(failure);
       assert.deepEqual(failure.payload, { member: "context", event: "Stop", error_type: expectedType });
@@ -2471,9 +2475,9 @@ test("reused native turn IDs remain distinct across sessions and legacy journals
       await bridge.handle("experience", { ...input, hook_event_name: "PostToolUse", tool_use_id: "same-check-id", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
       await bridge.handle("experience", { ...input, hook_event_name: "Stop", scenario_key: "coding.feature-implementation" });
     }
-    const journals = f.store.list("codex_hook_turn", 10);
+    const journals = await Promise.all(["session-a", "session-b"].map(session_id => bridge.journal.find({ ...base, session_id })));
     assert.equal(journals.length, 2);
-    assert(journals.every(journal => journal.closed_at && (journal.signals as JsonObject[]).length === 2));
+    assert(journals.every(journal => journal && journal.closed_at && (journal.signals as JsonObject[]).length === 2));
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 2);
     assert.equal(f.store.list("workflow_evolution_request", 10).length, 1);
     const scope = codexProjectScope(f.root)!;
@@ -2482,10 +2486,11 @@ test("reused native turn IDs remain distinct across sessions and legacy journals
     f.store.database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)")
       .run("codex_hook_turn", legacyId, 1, JSON.stringify({ scope, session_host: "codex", turn_id: turn, session_id: "legacy-session", signals: [], content_stored: false }),
         new Date().toISOString(), new Date().toISOString());
-    assert.equal(bridge.journal.find({ ...base, turn_id: turn, session_id: "legacy-session" })?.id, legacyId);
-    assert.equal(bridge.journal.find({ ...base, turn_id: turn, session_id: "foreign-session" }), null);
+    assert.equal((await bridge.journal.find({ ...base, turn_id: turn, session_id: "legacy-session" }))?.id, legacyId);
+    assert.equal((await bridge.journal.find({ ...base, turn_id: turn, session_id: "foreign-session" })), null);
     await bridge.handle("experience", { ...base, turn_id: turn, session_id: "legacy-session", hook_event_name: "Stop" });
-    assert(f.store.get("codex_hook_turn", legacyId).closed_at);
+    assert((await bridge.journal.find({ ...base, turn_id: turn, session_id: "legacy-session" }))?.closed_at);
+    assert.equal(f.store.get("codex_hook_turn", legacyId).closed_at, undefined);
   } finally { await dispose(f); }
 });
 
@@ -2493,6 +2498,7 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
   const previousHost = process.env.CRAFT_LEARNING_MODEL_HOST;
   process.env.CRAFT_LEARNING_MODEL_HOST = "codex-cli";
   const f = await fixture();
+  const supervisor = f.supervisor;
   try {
     await mkdir(join(f.root, "src"), { recursive: true });
     await writeFile(join(f.root, "src", "index.ts"), "export const ready = true;\n");
@@ -2548,7 +2554,7 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "auto-classification-session", turn_id: "auto-classification-turn" };
     await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: rawPrompt });
     const experienceDir = localExperienceDir(f), pendingDir = join(experienceDir, "scenario-classification", "pending");
-    assert.equal((await readdir(pendingDir)).length, 1);
+    await assert.rejects(readdir(pendingDir), { code: "ENOENT" });
     await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: rawPrompt });
     await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "Use a different goal for this same turn" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
@@ -2662,10 +2668,10 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
       expected_version: request.version, status: "unclassified", result_digest: `sha256:${"c".repeat(64)}` }), /conflicts/u);
     assert.throws(() => f.service.evaluationModelTicketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact model and result Trace/u);
     assert.notEqual(f.store.get("evaluation_model_ticket", String(ticket.id)).status, "completed");
-    assert.equal((await readdir(pendingDir)).length, 0);
+    await assert.rejects(readdir(pendingDir), { code: "ENOENT" });
     const requestFile = await readFile(join(experienceDir, "scenario-classification", `${requestId}.json`), "utf8");
     assert.doesNotMatch(requestFile, /must-not-persist/u);
-    const journal = f.store.list("codex_hook_turn", 10)[0]!;
+    const journal = (await bridge.journal.find(base))!;
     assert.doesNotMatch(JSON.stringify(journal), /must-not-persist/u);
   } finally {
     if (previousHost === undefined) delete process.env.CRAFT_LEARNING_MODEL_HOST;
@@ -2682,10 +2688,11 @@ test("Experience Hook finalization validates project receipt identity and finds 
     const signalVerify = new HookSignalSanitizer().signal({ tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } })!;
     const foreign = await f.service.contextOpen({ project_root: otherRoot, query: "foreign receipt", include_codebase: false });
     const base = { cwd: f.root, session_id: "foreign-context-session", turn_id: "foreign-context-turn" };
-    bridge.journal.record(base, signalEdit);
-    bridge.journal.record(base, signalVerify);
-    bridge.journal.bindContextReceipt(base, foreign.receipt as JsonObject);
-    assert.throws(() => bridge.learning.finalize(base), /does not match the Context receipt/u);
+    (await bridge.journal.record(base, signalEdit));
+    (await bridge.journal.record(base, signalVerify));
+    (await bridge.journal.bindContextReceipt(base, foreign.receipt as JsonObject));
+    const foreignJournal = await bridge.journal.find(base);
+    assert.throws(() => bridge.learning.finalize(base, undefined, undefined, foreignJournal), /does not match the Context receipt/u);
 
     const evidence = f.service.evidenceRecord({ source_type: "host_completion_signal", confidence: "bounded", claim: "user scope outcome",
       metadata: { provenance: "host_completion_signal", host: "codex", turn_id: "user-turn", context_receipt_id: "user-receipt", content_stored: false } });
@@ -2719,19 +2726,148 @@ test("Hook-mode project identity errors retain Trace and do not retry a busy cen
 
 test("PreCompact captures a bounded resume snapshot without blocking compaction", async () => {
   const f = await fixture();
+  const supervisor = f.supervisor;
   try {
-    const bridge = new CodexHookBridge(f.service);
+      const bridge = new CodexHookBridge(f.service);
     assert.deepEqual(await bridge.handle("context", { cwd: f.root, hook_event_name: "PreCompact" }), {});
     assert.equal(f.store.list("context_resume_snapshot", 10).length, 0);
     assert.deepEqual(await bridge.handle("context", { cwd: f.root, session_id: "compact-session", hook_event_name: "PreCompact",
       files_touched: ["a.ts"], tasks: ["finish"], errors: [], decisions: ["use X"], open_questions: ["next?"] }), {});
     const snapshots = f.store.list("context_resume_snapshot", 10);
-    assert.equal(snapshots.length, 1);
-    assert.equal((snapshots[0]!.files_touched as unknown[]).length, 1);
-    const projected = f.service.contextExtensionsResolveResume({ session_host: "codex", session_id: "compact-session" });
+    assert.equal(snapshots.length, 0);
+    const projected = await f.service.contextExtensionsResolveResume({ session_host: "codex", session_id: "compact-session" });
     assert.equal(projected.resume_available, true);
     assert.match(String(projected.content), /a\.ts/u);
   } finally { await dispose(f); }
+});
+
+test("Hook stores task goals in supervisor memory and removes them at session end", async () => {
+  const f = await fixture();
+  const supervisor = f.supervisor;
+  try {
+      const bridge = new CodexHookBridge(f.service);
+    const session = "goal-memory", turn = "goal-memory-turn";
+    await bridge.handle("context", { cwd: f.root, session_id: session, turn_id: turn,
+      hook_event_name: "UserPromptSubmit", prompt: "分析这个项目的存储迁移问题并给出方案" });
+    const identity = f.service.scopeIdentityResolveProject({ project_root: f.root }).identity as JsonObject;
+    const scope = String((identity.canonical_scope as JsonObject).id);
+    const key = `goal:${stableDigest({ scope, session_host: "codex", session_id: session, turn_id: turn }).slice(-32)}`;
+    const client = new SupervisorClient(f.store.paths);
+    const sessionKey = sessionStorageScopeId("codex", session);
+    assert.equal((await client.contextGet({ session_key: sessionKey, key })).status, "available");
+    await bridge.handle("context", { cwd: f.root, session_id: session, hook_event_name: "SessionEnd" });
+    assert.equal((await client.contextGet({ session_key: sessionKey, key })).status, "unavailable");
+  } finally { await dispose(f); }
+});
+
+test("non-code work without a verification command receives an unverified learning decision prompt", async () => {
+  const f = await fixture();
+  const supervisor = f.supervisor;
+  try {
+    const bridge = new CodexHookBridge(f.service, undefined, true), base = { cwd: f.root, session_id: "non-code", turn_id: "non-code-turn" };
+    const prompt = await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "整理排障操作步骤" });
+    const projectBinding = (JSON.parse(String(prompt.additionalContext)) as JsonObject).project_binding;
+    const result = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert.match(String(result.systemMessage), /capture_unverified/u);
+    assert.match(String(result.systemMessage), /no_new_learning_unverified/u);
+    assert.match(String(result.systemMessage), /待验证且不可执行/u);
+    assert.equal(f.store.list("workflow_evolution_observation", 100).length, 0);
+    const receipt = f.store.list("context_resolution_receipt", 10)[0]!;
+    const identity = f.service.scopeIdentityResolveProject({ project_root: f.root }).identity as JsonObject;
+    const scope = String((identity.canonical_scope as JsonObject).id);
+    const capture = { decision: "capture_unverified", scope, host: "codex", project_binding: projectBinding,
+      session_id: base.session_id, turn_id: base.turn_id, context_receipt_id: receipt.id,
+      title: "排障步骤", applies_when: "排查服务启动问题", exclude_when: "服务尚未部署", pitfall: "配置目标错误",
+      cause: "环境配置混淆", correct_method: "核对进程参数和目标环境", synthetic_example: "查看进程启动参数",
+      done_criteria: "需要在目标环境复核", failure_handling: "保留证据并继续排查" };
+    assert.throws(() => f.service.experienceRunbookCapture({ ...capture, project_binding: "invalid" }), /trusted Host project authorization/u);
+    assert.throws(() => f.service.experienceRunbookCapture({ ...capture, decision: "no_new_learning_unverified", reason: "no_reusable_learning", project_binding: "invalid" }), /trusted Host project authorization/u);
+    assert.throws(() => f.service.experienceRunbookCapture({ ...capture, turn_id: "other" }), /receipt Host turn/u);
+    f.store.create("context_resolution_receipt", "other-project-receipt", { canonical_scope: { kind: "project", id: "project:other" }, execution_context: true, host_turn: { host: "codex", session_id: base.session_id, turn_id: base.turn_id } });
+    assert.throws(() => f.service.experienceRunbookCapture({ ...capture, scope: "project:other", context_receipt_id: "other-project-receipt" }), /trusted Host project authorization/u);
+    for (const [id, turn, status, expires] of [
+      ["wrong-host", { host: "claude", session_id: base.session_id, turn_id: base.turn_id }, "active", undefined],
+      ["wrong-session", { host: "codex", session_id: "other", turn_id: base.turn_id }, "active", undefined],
+      ["revoked-receipt", { host: "codex", session_id: base.session_id, turn_id: base.turn_id }, "revoked", undefined],
+      ["expired-receipt", { host: "codex", session_id: base.session_id, turn_id: base.turn_id }, "active", 1],
+    ] as const) {
+      f.store.create("context_resolution_receipt", id, { canonical_scope: { kind: "project", id: scope }, execution_context: true, host_turn: turn, status, ...(expires ? { expires_at_ms: expires } : {}) });
+      assert.throws(() => f.service.experienceRunbookCapture({ ...capture, context_receipt_id: id }), /receipt Host turn/u);
+    }
+    f.store.create("context_resolution_receipt", "legacy-unbound", { canonical_scope: { kind: "project", id: scope }, execution_context: true });
+    assert.throws(() => f.service.experienceRunbookCapture({ ...capture, context_receipt_id: "legacy-unbound" }), /receipt Host turn/u);
+    f.store.create("context_resolution_receipt", "same-turn-other-receipt", { canonical_scope: { kind: "project", id: scope }, execution_context: true, host_turn: { host: "codex", session_id: base.session_id, turn_id: base.turn_id } });
+    assert.throws(() => f.service.experienceRunbookCapture({ ...capture, context_receipt_id: "same-turn-other-receipt" }), /trusted Host project authorization/u);
+    const candidate = f.service.experienceRunbookCapture(capture).procedure as JsonObject;
+    assert.equal(candidate.routeable, false);
+    const read = f.service.experienceProcedureGet({ procedure_id: candidate.id });
+    assert.equal((read.runbook as JsonObject).executable, false);
+    assert.match(String((read.runbook as JsonObject).body), /核对进程参数/u);
+    const binding = f.store.list("context_evolution_project_binding", 10)[0]!;
+    f.store.updateIfVersion("context_evolution_project_binding", String(binding.id), Number(binding.version), { ...binding, expires_at_ms: 1 });
+    assert.throws(() => f.service.experienceRunbookCapture(capture), /trusted Host project authorization/u);
+  } finally { await dispose(f); }
+});
+
+test("legacy Hook finalization reads a pending goal for an existing verified turn", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), session = "legacy-goal", turn = "legacy-goal-turn";
+    const base = { cwd: f.root, session_id: session, turn_id: turn };
+    await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "检查历史目标迁移" });
+    await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+    const identity = f.service.scopeIdentityResolveProject({ project_root: f.root }).identity as JsonObject;
+    const scope = (identity.canonical_scope as { kind: "project"; id: string });
+    storeExperienceTaskGoal({ experience_dir: localExperienceDir(f), scope: scope.id, session_host: "codex", session_id: session, turn_id: turn, task_goal: "检查历史目标迁移" });
+    const journal = await bridge.journal.find(base);
+    assert.ok(bridge.learning.finalize(base, scope, undefined, journal)?.observation);
+    assert.ok(bridge.learning.finalize({ session_id: session, turn_id: turn }, scope, undefined, journal)?.observation);
+    assert(f.store.list("program_memory_candidate", 100).some(item => String(item.statement).includes("检查历史目标迁移")));
+    assert.deepEqual(await bridge.handle("context", { hook_event_name: "SessionStart" }), {});
+  } finally { await dispose(f); }
+});
+
+test("a lost Context supervisor leaves the verified turn retryable without dropping its goal", async () => {
+  const f = await fixture();
+  const supervisor = f.supervisor;
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "goal-retry", turn_id: "goal-retry-turn" };
+    await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "修复并验证这个问题" });
+    await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+    const original = SupervisorClient.prototype.contextGet;
+    try {
+      SupervisorClient.prototype.contextGet = async () => { throw new Error("temporarily unavailable"); };
+      const result = await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
+      assert.match(String(result.systemMessage), /尚未完成.*重试/u);
+      assert.equal(f.store.list("workflow_evolution_observation", 10).length, 0);
+    } finally { SupervisorClient.prototype.contextGet = original; }
+    await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
+  } finally { await dispose(f); }
+});
+
+test("Context lifecycle reports a failed supervisor and preserves observed work when cleanup fails", async () => {
+  const f = await fixture();
+  const start = SupervisorClient.prototype.contextStart, end = SupervisorClient.prototype.contextEnd, purge = SupervisorClient.prototype.contextPurge;
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "lifecycle-unavailable", turn_id: "turn" };
+    SupervisorClient.prototype.contextStart = async () => { throw new Error("offline"); };
+    SupervisorClient.prototype.contextEnd = async () => { throw new Error("offline"); };
+    assert.match(String((await bridge.handle("context", { ...base, hook_event_name: "SessionStart" })).systemMessage), /不可用/u);
+    assert.match(String((await bridge.handle("context", { ...base, hook_event_name: "SessionEnd" })).systemMessage), /不可用/u);
+    SupervisorClient.prototype.contextStart = start; SupervisorClient.prototype.contextEnd = end;
+    await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "修复并验证测试" });
+    await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+    SupervisorClient.prototype.contextPurge = async () => { throw new Error("offline"); };
+    await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
+  } finally {
+    SupervisorClient.prototype.contextStart = start; SupervisorClient.prototype.contextEnd = end; SupervisorClient.prototype.contextPurge = purge;
+    await dispose(f);
+  }
 });
 
 test("Stop surfaces a bounded hint when edits have no verification", async () => {
@@ -2752,6 +2888,17 @@ test("Stop surfaces a bounded hint when edits have no verification", async () =>
     assert.equal(diagnostic?.content_free, true);
     const reentered = await bridge.handle("context", { ...base, hook_event_name: "Stop", stop_hook_active: true });
     assert.equal(reentered.systemMessage, undefined);
+  } finally { await dispose(f); }
+});
+
+test("Stop offers a Runbook choice after a verified task without edits", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "verified-no-edit" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "diagnose the service" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert.match(String(stop.systemMessage), /craft_experience_runbook_capture/u);
   } finally { await dispose(f); }
 });
 
@@ -2825,19 +2972,19 @@ test("PreCompact tolerates missing arrays, no project scope and a failing snapsh
   try {
     const bridge = new CodexHookBridge(f.service);
     assert.deepEqual(await bridge.handle("context", { session_id: "compact-bare", hook_event_name: "PreCompact" }), {});
-    assert.equal(f.store.list("context_resume_snapshot", 10).length, 1);
+    assert.equal(f.store.list("context_resume_snapshot", 10).length, 0);
     Object.defineProperty(f.service, "contextExtensionsCheckpointResume", { configurable: true, value: () => { throw new Error("boom"); } });
-    assert.deepEqual(await bridge.handle("context", { cwd: f.root, session_id: "compact-fail", hook_event_name: "PreCompact" }), {});
+    assert.match(String((await bridge.handle("context", { cwd: f.root, session_id: "compact-fail", hook_event_name: "PreCompact" })).systemMessage), /不可用/u);
   } finally { await dispose(f); }
 });
 
-test("Stop stays quiet when the turn made no edits", async () => {
+test("Stop asks for a learning decision when the turn made no edits", async () => {
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "no-edit-turn" };
     await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "just answer" });
     const stop = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
-    assert.equal(stop.systemMessage, undefined);
+    assert.match(String(stop.systemMessage), /no_new_learning_unverified/u);
   } finally { await dispose(f); }
 });
 
@@ -2857,7 +3004,7 @@ test("Claude native background completion finalizes its original receipt after a
       const waiting = await bridge.handle("context", { ...origin, hook_event_name: "Stop" });
       assert.match(String(waiting.systemMessage), /后台验证/);
       assert.equal(f.store.list("workflow_evolution_observation", 10).length, 0, "one passed verifier must not finalize while another remains pending");
-      const old = bridge.journal.find({ ...origin, turn_id: origin.prompt_id })!;
+      const old = (await bridge.journal.find({ ...origin, turn_id: origin.prompt_id }))!;
       assert.ok(old.closed_at); assert.equal(old.verification_outcome, null);
       const notification = { ...origin, prompt_id: "notification-prompt" };
       await bridge.handle("context", { ...notification, hook_event_name: "UserPromptSubmit", prompt: "Background task completed." });
@@ -2879,8 +3026,8 @@ test("Claude native background completion finalizes its original receipt after a
       }
       const observations = f.store.list("workflow_evolution_observation", 10);
       assert.equal(observations.length, 1); assert.equal(observations[0]!.outcome, "passed");
-      assert.equal(bridge.journal.find({ ...origin, turn_id: origin.prompt_id })!.context_receipt_id, old.context_receipt_id);
-      assert.equal(bridge.journal.find({ ...notification, turn_id: notification.prompt_id })!.verification_outcome, null);
+      assert.equal((await bridge.journal.find({ ...origin, turn_id: origin.prompt_id }))!.context_receipt_id, old.context_receipt_id);
+      assert.equal((await bridge.journal.find({ ...notification, turn_id: notification.prompt_id }))!.verification_outcome, null);
     } finally { if (previous === undefined) delete process.env.CRAFT_HOOK_MODE; else process.env.CRAFT_HOOK_MODE = previous; await dispose(f); }
   }
 });
@@ -2895,7 +3042,7 @@ test("Stop exposes an unsupported native terminal envelope without claiming Host
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "unsupported-verify", tool_input: { command: "node --test fixture.test.mjs" }, tool_response: "completed without a native exit status" });
     const stopped = await bridge.handle("context", { ...base, hook_event_name: "Stop" });
     assert.match(String(stopped.systemMessage), /原生回执格式不受支持/);
-    assert.equal(bridge.journal.find(base)!.verification_outcome, null);
+    assert.equal((await bridge.journal.find(base))!.verification_outcome, null);
   } finally { await dispose(f); }
 });
 

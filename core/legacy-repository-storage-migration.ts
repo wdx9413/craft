@@ -63,7 +63,7 @@ function mapping(path: string): { capability: string; path: string } {
   return { capability: "context", path: `unclassified/${path}` };
 }
 
-async function snapshot(source: string): Promise<{ directories: DirectoryEntry[]; files: FileEntry[]; bytes: number; digest: string }> {
+async function snapshot(source: string, prior?: Manifest, ignoreBackup?: string): Promise<{ directories: DirectoryEntry[]; files: FileEntry[]; bytes: number; digest: string }> {
   const directories: DirectoryEntry[] = [], files: FileEntry[] = [];
   let bytes = 0;
   const pending = [source];
@@ -74,11 +74,32 @@ async function snapshot(source: string): Promise<{ directories: DirectoryEntry[]
       const absolute = join(directory, name), stat = lstatSync(absolute);
       if (stat.isSymbolicLink()) throw new Error("migration_tree_unsafe");
       const path = relative(source, absolute).split(sep).join("/");
+      if (prior) {
+        const original = [...prior.directories, ...prior.files];
+        const generated = [...PROJECT_CAPABILITIES].map(capability => `${capability}/legacy-import/${prior.migration_id}`);
+        if (generated.some(prefix => path === prefix || path.startsWith(`${prefix}/`))) continue;
+        if ((path === "project.json" || path === ".gitignore") && !original.some(item => item.path === path)) {
+          const expected = path === ".gitignore" ? "*\n" : `${JSON.stringify({ schema_version: 1, ...projectStorageIdentity(prior.project_root) })}\n`;
+          if (!stat.isFile() || readFileSync(absolute, "utf8") !== expected) throw new Error("legacy_source_changed_since_preflight");
+          continue;
+        }
+        if (stat.isDirectory() && !original.some(item => item.path === path) && generated.some(prefix => prefix.startsWith(`${path}/`))) {
+          pending.push(absolute); continue;
+        }
+      }
       const target = mapping(path);
       if (stat.isDirectory()) {
         directories.push({ path, capability: target.capability, target_path: target.path });
         pending.push(absolute);
       } else if (stat.isFile()) {
+        if (path === ".gitignore" && prior && ignoreBackup && prior.files.some(item => item.path === path)) {
+          const original = readFileSync(ignoreBackup), current = readFileSync(absolute);
+          const adjusted = Buffer.concat([original, Buffer.from(original.length && original[original.length - 1] !== 10 ? "\n*\n" : "*\n")]);
+          if (!current.equals(original) && !current.equals(adjusted)) throw new Error("legacy_source_changed_since_preflight");
+          const size = original.length, fileDigest = createHash("sha256").update(original).digest("hex");
+          bytes += size; files.push({ path, size_bytes: size, digest: fileDigest, capability: target.capability, target_path: target.path });
+          continue;
+        }
         const fileDigest = await digestFile(absolute);
         bytes += stat.size;
         files.push({ path, size_bytes: stat.size, digest: fileDigest, capability: target.capability, target_path: target.path });
@@ -161,16 +182,34 @@ export async function migrateLegacyRepositoryStorage(paths: CraftPaths, entry: L
   const identity = projectStorageIdentity(projectRoot);
   const sourceRoot = join(projectRoot, ".craft_data");
   if (identity.canonical_root !== projectRoot || entry.source_root !== sourceRoot
-    || entry.project_directory !== join(paths.root, "projects", identity.directory_name)) throw new Error("legacy_source_identity_mismatch");
+    || entry.project_directory !== sourceRoot) throw new Error("legacy_source_identity_mismatch");
   const sourceStat = lstatSync(sourceRoot);
   if (sourceStat.isSymbolicLink() || !sourceStat.isDirectory()) throw new Error("legacy_source_unsafe");
-  const tree = await snapshot(sourceRoot);
-  if (tree.files.length !== entry.file_count || tree.bytes !== entry.size_bytes) throw new Error("legacy_source_changed_since_preflight");
-  const projectDirectory = ensureProjectStorageDirectory(paths, projectRoot);
+  const backupDirectory = join(paths.backupsDir, "legacy-repository-storage", "v1", identity.path_sha256);
+  const priorManifests: Manifest[] = [];
+  if (existsSync(backupDirectory)) for (const name of readdirSync(backupDirectory)) {
+    if (!/^[a-f0-9]{64}\.json$/u.test(name)) continue;
+    const manifest = JSON.parse(readFileSync(join(backupDirectory, name), "utf8")) as Manifest;
+    if (manifest.schema !== "craft.legacy-repository-storage-migration.v1" || manifest.source_root !== sourceRoot
+      || manifest.project_path_sha256 !== identity.path_sha256 || manifest.migration_id !== name.slice(0, -5)
+      || !Array.isArray(manifest.files) || !Array.isArray(manifest.directories)) throw new Error("migration_manifest_conflict");
+    if (manifest.file_count !== manifest.files.length || manifest.bytes !== manifest.files.reduce((sum, item) => sum + item.size_bytes, 0)
+      || createHash("sha256").update(JSON.stringify({ directories: manifest.directories, files: manifest.files })).digest("hex") !== manifest.migration_id) throw new Error("migration_manifest_conflict");
+    priorManifests.push(manifest);
+  }
+  if (priorManifests.length > 1) throw new Error("migration_manifest_conflict");
+  const prior = priorManifests[0];
+  const tree = await snapshot(sourceRoot, prior, prior ? join(backupDirectory, `${prior.migration_id}.gitignore`) : undefined);
+  if (tree.files.length !== (priorManifests[0]?.file_count ?? entry.file_count)
+    || tree.bytes !== (priorManifests[0]?.bytes ?? entry.size_bytes)) throw new Error("legacy_source_changed_since_preflight");
   const manifest: Manifest = { schema: "craft.legacy-repository-storage-migration.v1", project_root: projectRoot,
     project_path_sha256: identity.path_sha256, source_root: sourceRoot, migration_id: tree.digest,
     directories: tree.directories, files: tree.files, file_count: tree.files.length, bytes: tree.bytes };
   const migrationId = tree.digest;
+  if (priorManifests[0] && priorManifests[0].migration_id !== migrationId) throw new Error("legacy_source_changed_since_preflight");
+  const generatedRoots = [...PROJECT_CAPABILITIES].map(capability => `${capability}/legacy-import/${migrationId}`);
+  if (!priorManifests.length && [...tree.directories, ...tree.files].some(item => generatedRoots.some(prefix => item.path === prefix || item.path.startsWith(`${prefix}/`)))) throw new Error("migration_target_conflict");
+  const projectDirectory = sourceRoot;
   const manifestPath = join(paths.backupsDir, "legacy-repository-storage", "v1", identity.path_sha256, `${migrationId}.json`);
   const projectManifestPath = join(projectDirectory, "context", "legacy-import", migrationId, "manifest.json");
   ensureDirectory(paths.backupsDir);
@@ -182,15 +221,39 @@ export async function migrateLegacyRepositoryStorage(paths: CraftPaths, entry: L
   ensureDirectory(join(paths.backupsDir, "legacy-repository-storage"));
   ensureDirectory(join(paths.backupsDir, "legacy-repository-storage", "v1"));
   ensureDirectory(join(paths.backupsDir, "legacy-repository-storage", "v1", identity.path_sha256));
-  for (const root of projectRoots.values()) ensureDirectory(root);
-  ensureDirectory(projectImportRoot);
-
   const expectedManifest = manifestText(manifest);
   const priorGlobal = existsSync(manifestPath) ? readFileSync(manifestPath, "utf8") : null;
   const priorProject = existsSync(projectManifestPath) ? readFileSync(projectManifestPath, "utf8") : null;
   if ((priorGlobal !== null && priorGlobal !== expectedManifest) || (priorProject !== null && priorProject !== expectedManifest))
     throw new Error("migration_manifest_conflict");
-  const alreadyStarted = priorGlobal !== null || priorProject !== null;
+  const completionPath = join(backupDirectory, `${migrationId}.complete`);
+  const completion = existsSync(completionPath) ? readFileSync(completionPath, "utf8") : null;
+  if (completion !== null && completion !== expectedManifest) throw new Error("migration_manifest_conflict");
+  const alreadyCompleted = completion !== null || priorProject !== null;
+  const ignoreBackup = join(backupDirectory, `${migrationId}.gitignore`);
+  const originalIgnore = tree.files.find(item => item.path === ".gitignore");
+  if (originalIgnore && !existsSync(ignoreBackup)) {
+    const temp = join(backupDirectory, `.${migrationId}.${randomUUID()}.ignore.tmp`);
+    try {
+      copyFileSync(join(sourceRoot, ".gitignore"), temp, constants.COPYFILE_EXCL);
+      chmodSync(temp, 0o600);
+      if (!await verifyFile(temp, originalIgnore)) throw new Error("migration_source_changed_during_copy");
+      try { linkSync(temp, ignoreBackup); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST" || !await verifyFile(ignoreBackup, originalIgnore)) throw new Error("migration_target_conflict"); }
+    } finally { if (existsSync(temp)) unlinkSync(temp); }
+  }
+  if (originalIgnore && !await verifyFile(ignoreBackup, originalIgnore)) throw new Error("migration_target_conflict");
+  if (priorGlobal === null) {
+    const temp = join(dirname(manifestPath), `.${migrationId}.${randomUUID()}.tmp`);
+    try {
+      writeFileSync(temp, expectedManifest, { mode: 0o600, flag: "wx" });
+      try { linkSync(temp, manifestPath); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST" || readFileSync(manifestPath, "utf8") !== expectedManifest) throw new Error("migration_manifest_conflict"); }
+    } finally { if (existsSync(temp)) unlinkSync(temp); }
+  }
+  ensureProjectStorageDirectory(paths, projectRoot);
+  for (const root of projectRoots.values()) ensureDirectory(root);
+  ensureDirectory(projectImportRoot);
 
   for (const item of tree.directories) {
     const targetRoot = projectRoots.get(item.capability)!;
@@ -210,7 +273,7 @@ export async function migrateLegacyRepositoryStorage(paths: CraftPaths, entry: L
       if (!await verifyFile(target, item)) throw new Error("migration_target_conflict");
       continue;
     }
-    const source = checkedPath(sourceRoot, item.path);
+    const source = item.path === ".gitignore" ? ignoreBackup : checkedPath(sourceRoot, item.path);
     const temporary = join(parent, `.${randomUUID()}.tmp`);
     try {
       copyFileSync(source, temporary, constants.COPYFILE_EXCL);
@@ -228,7 +291,10 @@ export async function migrateLegacyRepositoryStorage(paths: CraftPaths, entry: L
   }
   for (const [capability, targetRoot] of projectRoots) {
     if (!verifyPayloadTree(join(targetRoot, "payload"), tree, capability)) throw new Error("migration_target_tree_conflict");
+    if (readdirSync(targetRoot).some(name => name !== "payload" && !(capability === "context" && name === "manifest.json"))) throw new Error("migration_target_tree_conflict");
   }
+  if (!projectRoots.has("context") && readdirSync(projectImportRoot).some(name => name !== "manifest.json")) throw new Error("migration_target_tree_conflict");
+  if ((await snapshot(sourceRoot, manifest, originalIgnore ? ignoreBackup : undefined)).digest !== migrationId) throw new Error("legacy_source_changed_since_preflight");
   const text = expectedManifest;
   for (const path of [manifestPath, projectManifestPath]) {
     if (existsSync(path)) continue;
@@ -241,6 +307,14 @@ export async function migrateLegacyRepositoryStorage(paths: CraftPaths, entry: L
       }
     } finally { if (existsSync(temp)) unlinkSync(temp); }
   }
-  return { status: alreadyStarted ? "already_migrated" : "migrated", migration_id: migrationId,
+  if (!existsSync(completionPath)) {
+    const temp = join(backupDirectory, `.${migrationId}.${randomUUID()}.complete.tmp`);
+    try {
+      writeFileSync(temp, expectedManifest, { mode: 0o600, flag: "wx" });
+      try { linkSync(temp, completionPath); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST" || readFileSync(completionPath, "utf8") !== expectedManifest) throw new Error("migration_manifest_conflict"); }
+    } finally { if (existsSync(temp)) unlinkSync(temp); }
+  }
+  return { status: alreadyCompleted ? "already_migrated" : "migrated", migration_id: migrationId,
     file_count: tree.files.length, bytes: tree.bytes, manifest_path: manifestPath };
 }

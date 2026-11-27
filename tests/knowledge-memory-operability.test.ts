@@ -499,26 +499,26 @@ test("explicit user memory is scoped, conflict-aware and retires only the replac
   const f = await fixture();
   try {
     const old = f.service.memoryCaptureUserStatement({ content: "I take sugar in coffee.", kind: "preference", topic: "preference:diet:sugar",
-      scope_kind: "user", scope_id: "didi", memory_id: "sugar-old" });
+      scope_kind: "project", scope_id: "project:p", memory_id: "sugar-old" });
     assert.equal(old.auto_committed, true);
     const replacement = f.service.memoryCaptureUserStatement({ content: "I am now avoiding sugar.", kind: "preference", topic: "preference:diet:sugar",
-      scope_kind: "user", scope_id: "didi", candidate_id: "sugar-new" });
+      scope_kind: "project", scope_id: "project:p", candidate_id: "sugar-new" });
     assert.equal((replacement.candidate as JsonObject).status, "conflict_pending");
     const committed = f.service.memoryConflictResolve({ candidate_id: "sugar-new", resolution: "supersede", actor: "user", reason: "newer preference" });
     assert.equal(committed.auto_committed, true);
     assert.equal((committed.memory as JsonObject).status, "active");
     assert.equal(f.store.get("memory_ledger", "sugar-old").status, "superseded");
-    const context = await f.service.contextResolutionResolve({ query: "sugar coffee", scope_kind: "user", scope_id: "didi", receipt_id: "diet-context" });
+    const context = await f.service.contextResolutionResolve({ query: "sugar coffee", scope_kind: "project", scope_id: "project:p", receipt_id: "diet-context" });
     const memories = context.items as JsonObject[];
     assert.equal(memories.length, 1);
     assert.match(String(memories[0]!.content), /avoiding sugar/u);
     const gate = await f.service.decisionContextGateOpen({ gate_id: "diet-decision", decision_kind: "prepare_order", query: "sugar coffee",
-      scope_kind: "user", scope_id: "didi", require_context: true, required_constraint_ids: ["diet-sugar", "scope-user"], recalled_constraint_ids: ["diet-sugar"],
+      scope_kind: "project", scope_id: "project:p", require_context: true, required_constraint_ids: ["diet-sugar", "scope-user"], recalled_constraint_ids: ["diet-sugar"],
       context_input_tokens: 42, error_injection_count: 0, cost_units: 0.01, latency_ms: 5, cache_observation: "unavailable" });
     assert.equal((gate.gate as JsonObject).status, "ready");
     assert.equal(((gate.gate as JsonObject).decision_metrics as JsonObject).constraint_recall_at_decision, 0.5);
     assert.equal(((gate.gate as JsonObject).decision_metrics as JsonObject).cache_observation, "unavailable");
-    await assert.rejects(() => f.service.decisionContextGateOpen({ gate_id: "invalid-recall", decision_kind: "prepare_order", query: "sugar coffee", scope_kind: "user", scope_id: "didi", required_constraint_ids: ["diet-sugar"], recalled_constraint_ids: ["unknown"] }), /subset/);
+    await assert.rejects(() => f.service.decisionContextGateOpen({ gate_id: "invalid-recall", decision_kind: "prepare_order", query: "sugar coffee", scope_kind: "project", scope_id: "project:p", required_constraint_ids: ["diet-sugar"], recalled_constraint_ids: ["unknown"] }), /subset/);
     const skipped = await f.service.decisionContextGateOpen({ gate_id: "scope-required", decision_kind: "prepare_order", query: "sugar", require_context: true });
     assert.equal((skipped.gate as JsonObject).status, "skipped");
     assert.equal(((await f.service.decisionContextGateGet({ gate_id: "scope-required" })).gate as JsonObject).status, "skipped");

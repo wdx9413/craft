@@ -117,8 +117,10 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   if (retrievalBudgetExhausted) reasons.push("context_budget_exhausted");
   if (receipt?.partial === true) {
     const failures = Array.isArray(receipt.contributor_failures) ? receipt.contributor_failures as JsonObject[] : [];
+    const partialContributions = Array.isArray(receipt.contributions) ? receipt.contributions as JsonObject[] : [];
+    if (partialContributions.some(item => item.member === "experience" && (item.diagnostics as JsonObject | undefined)?.partial_reason === "runbook_candidate_scan_limit")) reasons.push("experience_runbook_candidate_scan_limit");
     if (failures.some(item => item.member === "knowledge" && item.reason === "source_verification_incomplete")) reasons.push("knowledge_source_verification_incomplete");
-    if (!failures.length || failures.some(item => item.member !== "knowledge" || item.reason !== "source_verification_incomplete")) reasons.push("context_contribution_unavailable");
+    if ((!failures.length && !partialContributions.some(item => (item.diagnostics as JsonObject | undefined)?.partial === true)) || failures.some(item => item.member !== "knowledge" || item.reason !== "source_verification_incomplete")) reasons.push("context_contribution_unavailable");
   }
   if (!notesService) reasons.push("notes_owner_unavailable");
   if (knowledgeSourceDiscovery.status === "unavailable") reasons.push("knowledge_source_discovery_unavailable");

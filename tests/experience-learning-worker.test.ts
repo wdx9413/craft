@@ -13,6 +13,24 @@ import { McpStdioClient, boundedPollInterval, learningComponents, learningMcpReq
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
 import { openCapabilityService } from "../core/interfaces/mcp/runtime.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { LocalSupervisor } from "../core/supervisor.ts";
+import { readVolatileLearningState } from "../core/codex-session-archive.ts";
+
+const fixtureSupervisors = new Map<string, { supervisor: LocalSupervisor; store: CraftStore }>();
+async function startFixtureSupervisor(root: string): Promise<void> {
+  const paths = craftPaths(root), store = await new CraftStore(paths).open();
+  const supervisor = new LocalSupervisor(new CraftService(store), paths);
+  await supervisor.start(); fixtureSupervisors.set(root, { supervisor, store });
+}
+async function closeFixtureSupervisor(root: string): Promise<void> {
+  const current = fixtureSupervisors.get(root);
+  if (!current) return;
+  fixtureSupervisors.delete(root); await current.supervisor.close(); current.store.close();
+}
+after(async () => { for (const root of [...fixtureSupervisors.keys()]) await closeFixtureSupervisor(root); });
 
 test("reports Knowledge recovery waits without including untrusted detail", () => {
   for (const [key, label] of [["task_candidates", "candidate"], ["evaluation_cases", "evaluation"]] as const) {
@@ -670,6 +688,7 @@ test("worker CLI negotiates real newline MCP stdio and completes one empty poll"
   const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-cli-"));
+  await startFixtureSupervisor(dataDir);
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
     ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
   }, stdio: ["ignore", "pipe", "pipe"] });
@@ -683,13 +702,14 @@ test("worker CLI negotiates real newline MCP stdio and completes one empty poll"
   assert.equal(exitCode, 0, stderr);
   assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
-  rmSync(dataDir, { recursive: true, force: true });
+  await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true });
 });
 
 test("worker selects the Codex Host transport for an empty poll without starting a model call", async () => {
   const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-codex-host-empty-"));
+  await startFixtureSupervisor(dataDir);
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
     ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_LEARNING_MODEL_HOST: "codex-cli",
     CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
@@ -704,13 +724,14 @@ test("worker selects the Codex Host transport for an empty poll without starting
   assert.equal(exitCode, 0, stderr);
   assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
-  rmSync(dataDir, { recursive: true, force: true });
+  await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true });
 });
 
 test("Knowledge-only worker CLI polls its mounted Knowledge product without Experience calls", async () => {
   const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-knowledge-worker-cli-"));
+  await startFixtureSupervisor(dataDir);
   const runtimeDir = join(dataDir, "runtime"); mkdirSync(runtimeDir, { recursive: true });
   const lockPath = join(runtimeDir, "learning-worker-knowledge.lock.json");
   writeFileSync(lockPath, JSON.stringify({ pid: process.pid, owner_id: "supervisor-owner" }));
@@ -729,7 +750,7 @@ test("Knowledge-only worker CLI polls its mounted Knowledge product without Expe
   assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], skipped: true, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).owner_id, "supervisor-owner", "the child must leave its supervisor-owned lock untouched");
-  rmSync(dataDir, { recursive: true, force: true });
+  await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true });
 });
 
 test("one-shot worker skips MCP and model work when another process owns its component lock", async () => {
@@ -802,6 +823,7 @@ test("Worker links archived task indexes to exact Host verification Evidence", a
   const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-session-evidence-worker-"));
+  await startFixtureSupervisor(dataDir);
   const codexHome = join(dataDir, "codex-home"), sessions = join(codexHome, "sessions", "2026", "10");
   mkdirSync(sessions, { recursive: true });
   const sessionId = "session-evidence-worker", turnId = "turn-evidence-worker";
@@ -834,11 +856,11 @@ test("Worker links archived task indexes to exact Host verification Evidence", a
     assert.equal(result.session_collection.evidence_reconciliation.tasks_verified, 1);
     assert.equal(result.session_collection.evidence_lookup.excluded_unusable_receipt_count, 2);
     assert.deepEqual(result.session_collection.evidence_batch, { status: "advanced", sessions_queried: 1, cursor_stored: true, raw_content_stored: false });
-    const state = readFileSync(join(dataDir, "runtime", "codex-session-collection.json"), "utf8");
+    const state = JSON.stringify(await readVolatileLearningState(join(dataDir, "runtime", "codex-session-collection.json"), { CRAFT_DATA_DIR: dataDir }));
     assert.match(state, /evidence-hook/u);
     assert.doesNotMatch(state, /private source prompt|private result text/u);
     assert.equal(JSON.parse(state).evidence_cursor_session_id, "session-evidence-worker");
-  } finally { rmSync(dataDir, { recursive: true, force: true }); }
+  } finally { await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true }); }
 });
 
 test("Worker does not reconcile or advance an incomplete evidence lookup", async () => {
@@ -856,6 +878,7 @@ test("Worker does not reconcile or advance an incomplete evidence lookup", async
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   for (const partial of ["true", "missing"]) {
     const dataDir = mkdtempSync(join(tmpdir(), "craft-incomplete-session-evidence-"));
+  await startFixtureSupervisor(dataDir);
     try {
       const codexHome = join(dataDir, "codex-home"), sessions = join(codexHome, "sessions");
       mkdirSync(sessions, { recursive: true });
@@ -877,8 +900,8 @@ test("Worker does not reconcile or advance an incomplete evidence lookup", async
       assert.equal(exitCode, 1, stderr);
       assert.match(stderr, /session evidence lookup is incomplete/u);
       assert.equal(JSON.parse(stdout.trim()).session_collection.evidence_reconciliation.reason, "evidence_lookup_incomplete_or_unknown");
-      assert.equal(JSON.parse(readFileSync(join(dataDir, "runtime", "codex-session-collection.json"), "utf8")).evidence_cursor_session_id, undefined);
-    } finally { rmSync(dataDir, { recursive: true, force: true }); }
+      assert.equal((await readVolatileLearningState(join(dataDir, "runtime", "codex-session-collection.json"), { CRAFT_DATA_DIR: dataDir }))?.evidence_cursor_session_id, undefined);
+    } finally { await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true }); }
   }
 });
 
@@ -1241,6 +1264,7 @@ test("polling worker exits cleanly after a termination signal", async (t) => {
   const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-poll-"));
+  await startFixtureSupervisor(dataDir);
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath], { env: {
     ...process.env, CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_EXPERIENCE_POLL_MS: "1000",
   }, stdio: ["ignore", "pipe", "pipe"] });
@@ -1257,7 +1281,7 @@ test("polling worker exits cleanly after a termination signal", async (t) => {
   assert.equal(exitCode, 0, stderr);
   assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], program_memory_submission: { processed: 0, waiting: 0, reason: "waiting_configuration", outcomes: [] }, evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
-  rmSync(dataDir, { recursive: true, force: true });
+  await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true });
 });
 
 test("runOnce contains scenario-classification queue failures and continues evaluation", async () => {
@@ -1279,6 +1303,7 @@ test("Knowledge worker incrementally executes session candidate, held-out evalua
   for (const stage of ["session_candidate", "session_evaluation"] as const) {
     for (const malformedState of [false, true]) {
       const dataDir = mkdtempSync(join(tmpdir(), "craft-knowledge-stage-worker-"));
+  await startFixtureSupervisor(dataDir);
       const codexHome = join(dataDir, "codex-home");
       const knowledgeDir = join(dataDir, "knowledge");
       mkdirSync(join(codexHome, "sessions"), { recursive: true });
@@ -1295,17 +1320,14 @@ test("Knowledge worker incrementally executes session candidate, held-out evalua
         assert.deepEqual(result.session_collection, { status: "completed", tasks_indexed: 0 });
         const knowledge = result.knowledge as JsonObject;
         assert.ok(knowledge);
-        if (malformedState) {
-          assert.equal(stage === "session_candidate" ? knowledge.task_candidates && (knowledge.task_candidates as JsonObject).status : knowledge.evaluation_cases && (knowledge.evaluation_cases as JsonObject).status, "failed");
-          assert.equal(knowledge.failure_kind, "SyntaxError");
-        } else {
-          assert.equal(knowledge.task_candidates, undefined);
-          assert.equal(knowledge.evaluation_cases, undefined);
-        }
-      } finally { rmSync(dataDir, { recursive: true, force: true }); }
+        assert.equal(knowledge.task_candidates, undefined);
+        assert.equal(knowledge.evaluation_cases, undefined);
+        if (malformedState) assert.equal(readFileSync(stageStatePath, "utf8"), "invalid state", "legacy files are not rewritten by the volatile scheduler");
+      } finally { await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true }); }
     }
   }
   const dataDir = mkdtempSync(join(tmpdir(), "craft-knowledge-adjudication-stage-"));
+  await startFixtureSupervisor(dataDir);
   const cursorPath = join(dataDir, "knowledge", "learning-stage-cursor.json");
   mkdirSync(join(dataDir, "knowledge"), { recursive: true });
   writeFileSync(cursorPath, JSON.stringify({ schema: "craft.knowledge-learning-stage-cursor.v1", cursor: 3 }));
@@ -1327,7 +1349,7 @@ test("Knowledge worker incrementally executes session candidate, held-out evalua
       ["knowledge"], async () => ({ status: "completed", tasks_indexed: 0 }));
     assert.deepEqual((failed.knowledge as JsonObject).session_adjudication, { status: "failed", failure_kind: "TypeError", raw_content_stored: false });
     assert.equal((failed.knowledge as JsonObject).failure_kind, "TypeError");
-  } finally { rmSync(dataDir, { recursive: true, force: true }); }
+  } finally { await closeFixtureSupervisor(dataDir); rmSync(dataDir, { recursive: true, force: true }); }
   const noOp: ExperienceLearningClient = { async call() { throw new Error("no component should call the Host"); } };
   assert.equal((await runLearningTick({ client: noOp, contentLanguage: "en", env: directWorkerEnv }, false, [])).knowledge, null);
   const configuredDataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-language-config-"));

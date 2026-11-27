@@ -77,18 +77,28 @@ export class TraceKernel {
   readonly archives: TraceArchiveStore;
   constructor(store: CraftStore, archives: TraceArchiveStore = new LocalTraceArchiveStore(store.paths.logsDir)) { this.store = store; this.archives = archives; }
 
+  private archiveStore(traceId: string): TraceArchiveStore {
+    const root = this.store.projectTraceArchiveRoot(traceId);
+    return root ? new LocalTraceArchiveStore(root) : this.archives;
+  }
+
   start(args: JsonObject): JsonObject {
-    const traceId = String(args.trace_id ?? `trace_${randomUUID().replaceAll("-", "")}`);
+    const traceId = text(args.trace_id ?? `trace_${randomUUID().replaceAll("-", "")}`, "trace_id");
+    const taskId = text(args.task_id, "task_id");
+    const identity = { task_id: taskId, launch_id: optional(args.launch_id), run_id: optional(args.run_id), trial_id: optional(args.trial_id), attempt_id: optional(args.attempt_id), operation_id: optional(args.operation_id), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), capability_fingerprint: optional(args.capability_fingerprint), policy_fingerprint: optional(args.policy_fingerprint) };
+    const identityDigest = stableDigest(identity), metadataDigest = stableDigest(safeData(args.metadata, "metadata"));
+    const prior = this.store.find("trace", traceId);
+    if (prior && prior.identity_digest !== identityDigest) throw new Error("Trace idempotency conflict");
+    if (args.project_scope_id !== undefined || args.project_root !== undefined) {
+      this.store.bindProjectTrace(traceId, text(args.project_scope_id, "project_scope_id"), args.project_root === undefined ? undefined : text(args.project_root, "project_root"));
+    }
     return this.store.traceTransaction(traceId, () => {
-      const taskId = text(args.task_id, "task_id");
-      const identity = { task_id: taskId, launch_id: optional(args.launch_id), run_id: optional(args.run_id), trial_id: optional(args.trial_id), attempt_id: optional(args.attempt_id), operation_id: optional(args.operation_id), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), capability_fingerprint: optional(args.capability_fingerprint), policy_fingerprint: optional(args.policy_fingerprint) };
-      const identityDigest = stableDigest(identity);
       const existing = this.store.find("trace", traceId);
       if (existing) {
         if (existing.identity_digest !== identityDigest) throw new Error("Trace idempotency conflict");
         return { trace: existing, idempotent: true };
       }
-      return { trace: this.store.create("trace", traceId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, ...(args.telemetry_only === true ? { telemetry_only: true } : {}), identity_digest: identityDigest, status: "running", next_sequence: 0, event_count: 0, started_at: new Date().toISOString(), metadata_digest: stableDigest(safeData(args.metadata, "metadata")) }), idempotent: false };
+      return { trace: this.store.create("trace", traceId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, ...(args.telemetry_only === true ? { telemetry_only: true } : {}), identity_digest: identityDigest, status: "running", next_sequence: 0, event_count: 0, started_at: new Date().toISOString(), metadata_digest: metadataDigest }), idempotent: false };
     });
   }
 
@@ -183,7 +193,7 @@ export class TraceKernel {
       throw new Error("Trace changed during lookup; retry");
     }
     const archive = this.store.find("trace_archive", traceId); if (!archive) throw new Error(`Unknown trace: ${traceId}`);
-    const bundle = this.archives.read(this.archivePointer(archive));
+    const bundle = this.archiveStore(traceId).read(this.archivePointer(archive));
     return { trace: bundle.trace, events: bundle.events, feedback: bundle.feedback, ...(bundle.telemetry_events ? { telemetry_events: bundle.telemetry_events } : {}), archived: true, archive };
   }
 
@@ -192,7 +202,7 @@ export class TraceKernel {
     const traceId = args.trace_id === undefined ? null : text(args.trace_id, "trace_id"); const taskId = args.task_id === undefined ? null : text(args.task_id, "task_id"); const eventKind = args.event_kind === undefined ? null : text(args.event_kind, "event_kind"); const operationId = args.operation_id === undefined ? null : text(args.operation_id, "operation_id");
     const hot = this.store.list("trace_event", Number.MAX_SAFE_INTEGER, (item) => (traceId === null || item.trace_id === traceId) && (eventKind === null || item.event_kind === eventKind) && (operationId === null || item.operation_id === operationId) && (taskId === null || this.store.find("trace", String(item.trace_id))?.task_id === taskId));
     const archived: JsonObject[] = this.store.list("trace_archive", Number.MAX_SAFE_INTEGER, (archive) => (traceId === null || archive.trace_id === traceId) && (taskId === null || archive.task_id === taskId)).flatMap((archive): JsonObject[] => {
-      const bundle = this.archives.read(this.archivePointer(archive));
+      const bundle = this.archiveStore(String(archive.trace_id)).read(this.archivePointer(archive));
       return bundle.events.filter((event) => (eventKind === null || event.event_kind === eventKind) && (operationId === null || event.operation_id === operationId)).map((event) => ({ ...event, archived: true, archive_uri: archive.archive_uri }));
     });
     const events = [...hot, ...archived].sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""))).slice(0, limit);
@@ -286,9 +296,9 @@ export class TraceKernel {
       const legacyOnly = legacy && ["trace_event", "trace_feedback", "telemetry_event"].every(kind =>
         shardChildren(kind as "trace_event" | "trace_feedback" | "telemetry_event").length === 0);
       const existing = this.store.find("trace_archive", traceId);
-      const archive = existing ? this.archivePointer(existing) : this.archives.write({ trace_id: String(trace.id), trace_version: Number(trace.version), archived_at: now, trace, events, feedback, ...(telemetry.length ? { telemetry_events: telemetry } : {}) });
+      const archive = existing ? this.archivePointer(existing) : this.archiveStore(String(trace.id)).write({ trace_id: String(trace.id), trace_version: Number(trace.version), archived_at: now, trace, events, feedback, ...(telemetry.length ? { telemetry_events: telemetry } : {}) });
       // Verify durable bytes even when retrying a previously published archive pointer.
-      const archived = this.archives.read(archive);
+      const archived = this.archiveStore(String(trace.id)).read(archive);
       if (archived.trace_id !== trace.id || archived.trace_version !== trace.version) throw new Error("Trace archive does not match terminal record");
       const versions = (records: JsonObject[]): string => stableDigest(records.map(item => [item.id, item.version]).sort());
       if (versions(archived.events) !== versions(events) || versions(archived.feedback) !== versions(feedback)

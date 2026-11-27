@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -101,14 +101,16 @@ test("confirmations affect exact revision only, are time bounded, and never exte
   } finally { f.close(); }
 });
 
-test("session finalization archives using either the bound session identity or the explicit Host", async () => {
+test("session finalization does not persist session data", async () => {
   const f = await fixture(); try {
     const local = f.governance.sessionFinalize({ session_id: "finalize-local", summary: "Session finished", candidate_ids: [] });
     assert.equal(local.content_free, true);
-    assert.equal((local.archive as JsonObject).status, "archived");
+    assert.equal((local.archive as JsonObject).status, "not_persisted");
     const hosted = f.governance.sessionFinalize({ session_id: "finalize-hosted", session_host: "codex", summary: "Session finished", candidate_ids: [] });
     assert.equal(hosted.content_free, true);
-    assert.equal((hosted.archive as JsonObject).status, "archived");
+    assert.equal((hosted.archive as JsonObject).status, "not_persisted");
+    assert.equal(f.store.list("memory_session_archive", 10).length, 0);
+    assert.equal(f.store.list("session_storage_identity", 10).length, 0);
   } finally { f.close(); }
 });
 
@@ -117,7 +119,7 @@ test("Memory content writes preserve the verified project root supplied by the H
     const memory = f.ledger.remember({ memory_id: "root-pinned", source_id: "s", kind: "preference", scope_kind: "project", scope_id: "p",
       content: "Use the registered project root", project_root: f.projectRoot }).memory as JsonObject;
     assert.deepEqual(memory.scope, { kind: "project", id: "p" });
-    assert.match(String((memory.content_ref as JsonObject).path), /projects/u);
+    assert(String((memory.content_ref as JsonObject).path).startsWith(join(realpathSync(f.projectRoot), ".craft_data", "memory") + "/"));
   } finally { f.close(); }
 });
 

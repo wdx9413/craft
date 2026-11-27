@@ -9,7 +9,7 @@ import { productSurfaceOf } from "../core/interfaces/mcp/product-launch.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
-test("standalone Memory MCP captures Host-classified facts into session scope without an explicit remember request", async () => {
+test("standalone Memory MCP captures Host-classified facts into project scope without an explicit remember request", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-memory-observed-fact-"));
   const dataRoot = join(root, "data"), projectRoot = join(root, "project");
   await mkdir(projectRoot);
@@ -18,8 +18,8 @@ test("standalone Memory MCP captures Host-classified facts into session scope wi
   service.scopeAliasBind({ scope_kind: "project", scope_id: "project-a", alias_kind: "path", alias: projectRoot });
   try {
     assert.throws(() => service.memoryCaptureObservedFact({ content: "stable", project_scope_id: "project-a" }), /session_id/u);
-    assert.throws(() => service.memoryCaptureObservedFact({ content: "stable", session_id: "session-a", project_scope_id: "project-a", scope_kind: "global" }), /session scope/u);
-    assert.throws(() => service.memoryCaptureObservedFact({ content: "stable", session_id: "session-a", project_scope_id: "project-a", scope_id: "session-b" }), /match session_id/u);
+    assert.throws(() => service.memoryCaptureObservedFact({ content: "stable", session_id: "session-a", project_scope_id: "project-a", scope_kind: "global" }), /project scope/u);
+    assert.throws(() => service.memoryCaptureObservedFact({ content: "stable", session_id: "session-a", project_scope_id: "project-a", scope_id: "session-b" }), /does not match/u);
 
     const listed = await memory.handle({ jsonrpc: "2.0", id: "list", method: "tools/list" });
     const tools = ((listed!.result as JsonObject).tools as JsonObject[]);
@@ -35,10 +35,10 @@ test("standalone Memory MCP captures Host-classified facts into session scope wi
     assert.equal((called!.result as JsonObject).isError, false, JSON.stringify(called));
     assert.equal(result.auto_committed, true);
     assert.equal((result.candidate as JsonObject).proposed_by, "host-observed-stable-fact");
-    assert.deepEqual((result.memory as JsonObject).scope, { kind: "session", id: "session-a" });
+    assert.deepEqual((result.memory as JsonObject).scope, { kind: "project", id: "project-a" });
     assert.equal((result.evidence as JsonObject).source_type, "host_observed_fact");
     assert.equal((result.evidence as JsonObject).confidence, "bounded");
-    assert.equal((store.list("memory_ledger", 10)[0]!.scope as JsonObject).kind, "session");
+    assert.equal((store.list("memory_ledger", 10)[0]!.scope as JsonObject).kind, "project");
     const replay = await memory.handle({ jsonrpc: "2.0", id: "capture-replay", method: "tools/call", params: { name: "craft_memory_capture_observed_fact",
       arguments: { content: "Project uses pnpm for focused tests", session_id: "session-a", project_scope_id: "project-a", project_root: projectRoot,
         kind: "procedural", topic: "project.test-command" } } });

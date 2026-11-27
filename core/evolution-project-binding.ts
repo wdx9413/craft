@@ -15,6 +15,7 @@ type HookProjectBinding = {
   session_id: string;
   turn_id: string;
   project_root: string;
+  context_receipt_id?: string;
   scope: EvolutionProjectScope;
 };
 
@@ -76,7 +77,8 @@ function readBinding(store: CraftStore, token: unknown): HookProjectBinding {
   const scope = evolutionProjectScope(binding.scope);
   if (!scope || typeof binding.project_root !== "string" || typeof binding.session_id !== "string"
     || typeof binding.turn_id !== "string" || (binding.host !== "codex" && binding.host !== "claude")) throw denied();
-  return { scope, project_root: binding.project_root, host: binding.host, session_id: binding.session_id, turn_id: binding.turn_id };
+  return { scope, project_root: binding.project_root, host: binding.host, session_id: binding.session_id, turn_id: binding.turn_id,
+    ...(typeof binding.context_receipt_id === "string" ? { context_receipt_id: binding.context_receipt_id } : {}) };
 }
 
 export function bindEvolutionProjectArgs(store: CraftStore, args: JsonObject, operation: string): JsonObject {
@@ -85,6 +87,8 @@ export function bindEvolutionProjectArgs(store: CraftStore, args: JsonObject, op
   const { scope } = binding;
   if (suppliedScope !== undefined && evolutionProjectScope(suppliedScope)?.id !== scope.id) throw denied();
   if (projectRoot !== undefined && projectRoot !== binding.project_root) throw denied();
+  if (operation === "craft_experience_runbook_capture" && (args.host !== binding.host || args.session_id !== binding.session_id || args.turn_id !== binding.turn_id
+    || !binding.context_receipt_id || args.context_receipt_id !== binding.context_receipt_id)) throw denied();
   return {
     ...rest, scope, project_root: binding.project_root,
     ...(PROGRAM_MEMORY_CAPTURE_TOOLS.has(operation) ? { source_refs: [evolutionHostTurnSource(binding)] } : {}),

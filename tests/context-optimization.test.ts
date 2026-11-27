@@ -8,7 +8,10 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { KnowledgeContribution } from '@craft/capability-knowledge/contribution';
-import { KeywordRetrievalPort } from 'craft-common-base/retrieval-port';
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+const knowledgeRequire = createRequire(import.meta.resolve("@craft/capability-knowledge/contribution"));
+const { KeywordRetrievalPort } = await import(pathToFileURL(knowledgeRequire.resolve("craft-common-base/keyword-retrieval")).href) as typeof import("craft-common-base/keyword-retrieval");
 import { ContextBudget, ContextBudgetError } from 'craft-common-base/context-assets';
 import { ContextReadGuard } from 'craft-common-store-local/context-access-guard';
 import { payload } from "../core/digest.ts";
@@ -32,7 +35,7 @@ for (const mutation of ["claim", "source", "document", "alias", "delete"] as con
       const claim = f.store.create("knowledge_claim", "claim", { source_id: "source", document_id: "doc", document_digest: "document", scope: "project:p", status: "candidate", scope_envelope: envelope, content: "alpha", content_digest: "body", evidence_ids: [] });
       attachVerifiedPromotionFixture(f.store, claim);
       const original = KeywordRetrievalPort.prototype.search;
-      t.mock.method(KeywordRetrievalPort.prototype, "search", async function(this: KeywordRetrievalPort, query: string, documents: readonly { id: string; body: string }[]) {
+      t.mock.method(KeywordRetrievalPort.prototype, "search", async function(this: InstanceType<typeof KeywordRetrievalPort>, query: string, documents: readonly { id: string; body: string }[]) {
         const kind = mutation === "claim" || mutation === "delete" ? "knowledge_claim" : mutation === "source" ? "knowledge_source" : mutation === "document" ? "knowledge_document" : "scope_alias";
         const id = mutation === "claim" || mutation === "delete" ? "claim" : mutation === "source" ? "source" : mutation === "document" ? "doc" : "alias";
         if (mutation === "delete") f.writer.database.prepare("DELETE FROM records WHERE kind=? AND id=?").run(kind, id);

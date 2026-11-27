@@ -66,6 +66,11 @@ async function openServiceRuntime(mode: string, environment = process.env): Prom
     }
     const peerStores = new Map(stores);
     if (primaryOwner) peerStores.set(primaryOwner, store);
+    const contextAliasStore = peerStores.get("context");
+    if (contextAliasStore) {
+      const experienceStore = peerStores.get("experience");
+      if (experienceStore && experienceStore !== contextAliasStore) experienceStore.setProjectAliasSource(contextAliasStore);
+    }
     for (const [owner, ownerStore] of stores) {
       const peerContributors: ContextContributionProvider[] = owner === "knowledge" ? [new KnowledgeContribution(ownerStore)]
         : owner === "memory" ? [new MemoryContribution(ownerStore)] : owner === "experience" ? [new ExperienceContribution(ownerStore)] : [];

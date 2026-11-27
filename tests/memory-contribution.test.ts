@@ -9,7 +9,10 @@ import { MemoryContribution } from '@craft/capability-memory/contribution';
 import { memoryCapability } from '@craft/capability-memory/capability';
 import { MemoryLedgerKernel } from '@craft/capability-memory/memory-ledger';
 import { buildCapabilityRegistry, CORE_KERNELS, type ContextRequest } from 'craft-common-base/capability-protocol';
-import { Bm25Index } from 'craft-common-base/bm25';
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+const memoryRequire = createRequire(import.meta.resolve("@craft/capability-memory/contribution"));
+const { Bm25Index } = await import(pathToFileURL(memoryRequire.resolve("craft-common-base/bm25")).href) as typeof import("craft-common-base/bm25");
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { payload } from "../core/digest.ts";
 const scope = { kind: "project", id: "p" };
@@ -45,7 +48,18 @@ async function fixture() {
   store.create("scope_alias", "project-other", { scope: { kind: "project", id: "other" }, alias_kind: "path", alias: otherProjectRoot, status: "active" });
   store.create("knowledge_source", "source", { status: "active", trust: "verified", scope });
   const ledger = new MemoryLedgerKernel(store), reader = new MemoryContribution(store);
-  const remember = (id: string, extra: JsonObject = {}) => ledger.remember({ memory_id: id, source_id: "source", kind: "preference", scope_kind: "project", scope_id: "p", content: `alpha ${id}`, observed_at: "2020-01-01T00:00:00Z", ...extra }).memory as JsonObject;
+  const remember = (id: string, extra: JsonObject = {}) => {
+    if (extra.scope_kind !== "task") return ledger.remember({ memory_id: id, source_id: "source", kind: "preference", scope_kind: "project", scope_id: "p", content: `alpha ${id}`, observed_at: "2020-01-01T00:00:00Z", ...extra }).memory as JsonObject;
+    // Historical compatibility fixture: public APIs no longer create task
+    // memories, but reads must still apply scope and temporal precedence.
+    const { scope_kind: _kind, scope_id: taskId, ...rest } = extra;
+    const original = ledger.remember({ memory_id: id, source_id: "source", kind: "preference", scope_kind: "project", scope_id: "p", content: `alpha ${id}`, observed_at: "2020-01-01T00:00:00Z", ...rest }).memory as JsonObject;
+    const taskScope = { kind: "task", id: taskId };
+    const envelope = original.scope_envelope as JsonObject;
+    const legacy = { ...payload(original), scope: taskScope, scope_envelope: { ...envelope, applicability: taskScope, custody: taskScope } };
+    store.database.prepare("UPDATE records SET payload_json=? WHERE kind='memory_ledger' AND id=? AND version=?").run(JSON.stringify(legacy), id, Number(original.version));
+    return store.get("memory_ledger", id);
+  };
   return { store, writer, ledger, reader, remember, async close() { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
@@ -217,7 +231,7 @@ for (const mutation of ["audience", "source", "delete"] as const) {
     try {
       f.remember("private", { scope_envelope: { audience: { mode: "private", principal_ids: ["owner"] } } });
       const original = Bm25Index.prototype.score;
-      t.mock.method(Bm25Index.prototype, "score", function(this: Bm25Index, ...args: Parameters<typeof original>) {
+      t.mock.method(Bm25Index.prototype, "score", function(this: InstanceType<typeof Bm25Index>, ...args: Parameters<typeof original>) {
         if (mutation === "delete") f.writer.database.prepare("DELETE FROM records WHERE kind='memory_ledger' AND id='private'").run();
         else {
           const kind = mutation === "source" ? "knowledge_source" : "memory_ledger", id = mutation === "source" ? "source" : "private";

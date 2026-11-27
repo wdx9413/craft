@@ -89,7 +89,7 @@ test("Context plugin serves scoped artifact, intention, travel, and research lif
     await run("research_link", { source_id: "result", target_id: "premise", relation: "derives_from" });
     assert.deepEqual((await run("research_recall", {}, beta)).items, []);
     assert.equal((await call("research_impact", { node_id: "premise" }, beta)).isError, true);
-    assert.equal(((await run("research_impact", { node_id: "premise" })).impacted as JsonObject[]).length, 1);
+    assert.equal(((await run("research_impact", { node_id: "premise", as_of: "2099-01-01T00:00:00.000Z" })).impacted as JsonObject[]).length, 1);
     const candidate = await run("replication_propose", { id: "replicate", title: "Reproduce the measurement",
       source_id: "premise", steps: ["Repeat the measurement"] });
     assert.deepEqual(candidate.source_ref, { id: "premise", kind: "knowledge_claim", version: 1 });

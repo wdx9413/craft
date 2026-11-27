@@ -1,9 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { lstat, mkdir, open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { atomicPrivateJson, craftPaths, dataRoot } from 'craft-common-store-local/paths';
+import { gzipSync, gunzipSync } from "node:zlib";
+import { craftPaths, dataRoot, sessionStorageScopeId } from 'craft-common-store-local/paths';
+import { SupervisorClient } from "./infrastructure/supervisor-client.ts";
 import { projectIdentityFromRoot } from "./scope-identity.ts";
 import { codexTaskGoalDigest } from "./codex-task-prose.ts";
 import { stableDigest } from "./digest.ts";
@@ -18,6 +20,10 @@ const MAX_LINE_BYTES = 64 * 1024 * 1024;
 const MAX_TASK_EXCERPT_BYTES = 8 * 1024 * 1024;
 const MAX_TASK_STREAM_BYTES = 128 * 1024 * 1024;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
+const volatileIndexPaths = new Map<string, SupervisorClient>();
+const indexSessionKey = sessionStorageScopeId("codex", "craft-learning-session-index");
+const indexChunkSize = 512 * 1024;
+const indexTtlMs = 24 * 60 * 60 * 1000;
 
 export interface CodexSessionCollectionOptions {
   readonly sessions_root?: string;
@@ -455,6 +461,50 @@ function validateState(value: unknown, now: string): CollectionState {
 }
 
 async function readState(path: string, now: string): Promise<CollectionState> {
+  const value = await readVolatileLearningState(path);
+  return value === null ? emptyState(now) : validateState(value, now);
+}
+
+export function registerVolatileLearningState(path: string, env: NodeJS.ProcessEnv = process.env): void {
+  volatileIndexPaths.set(resolve(path), new SupervisorClient(craftPaths(dataRoot(env))));
+}
+
+/** Shared process-independent volatile state for learning workers. */
+export async function readVolatileLearningState(path: string, env: NodeJS.ProcessEnv = process.env): Promise<JsonObject | null> {
+  path = resolve(path);
+  const client = volatileIndexPaths.get(path) ?? new SupervisorClient(craftPaths(dataRoot(env)));
+  const prefix = `learning-index:${stableDigest(path).slice(-24)}:`;
+  const snapshot = await client.contextSnapshotGet({ session_key: indexSessionKey, key: `${prefix}manifest` });
+  if (snapshot.status === "unavailable") return null;
+  const metadata = snapshot.manifest as JsonObject;
+  const encoded = snapshot.encoded;
+  if (typeof encoded !== "string") throw new Error("Learning state snapshot is unavailable");
+  if (stableDigest(encoded) !== metadata.digest) throw new Error("Learning state snapshot digest mismatch");
+  const value: unknown = JSON.parse(gunzipSync(Buffer.from(encoded, "base64"), { maxOutputLength: 128 * 1024 * 1024 }).toString("utf8"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Learning state snapshot is invalid");
+  return value as JsonObject;
+}
+
+/** Read an explicitly selected old index for migration; this never publishes or mutates it. */
+export async function readLegacyCodexSessionIndex(stateFile: string, now = new Date().toISOString()): Promise<JsonObject> {
+  if (typeof stateFile !== "string" || !stateFile.trim()) throw new Error("Legacy session index path is required");
+  return readLegacyStateFile(resolve(stateFile), now) as unknown as JsonObject;
+}
+
+/** Inspect an explicitly selected legacy learning state without importing or modifying it. */
+export async function readLegacyLearningState(stateFile: string): Promise<JsonObject> {
+  if (typeof stateFile !== "string" || !stateFile.trim()) throw new Error("Legacy learning state path is required");
+  const path = resolve(stateFile);
+  const directory = await lstat(dirname(path));
+  if (directory.isSymbolicLink() || !directory.isDirectory()) throw new Error("Legacy learning state directory is invalid");
+  const info = await lstat(path);
+  if (info.isSymbolicLink() || !info.isFile() || info.size > 8 * 1024 * 1024) throw new Error("Legacy learning state file is invalid");
+  const value: unknown = JSON.parse(await readFile(path, "utf8"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Legacy learning state is invalid");
+  return value as JsonObject;
+}
+
+async function readLegacyStateFile(path: string, now: string): Promise<CollectionState> {
   try {
     const info = await lstat(path);
     if (info.isSymbolicLink() || !info.isFile() || info.size > 128 * 1024 * 1024) throw new Error("Codex session collection state file is invalid");
@@ -463,6 +513,41 @@ async function readState(path: string, now: string): Promise<CollectionState> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyState(now);
     throw error;
   }
+}
+
+async function writeState(path: string, state: CollectionState): Promise<void> {
+  await writeVolatileLearningState(path, state as unknown as JsonObject);
+}
+
+export async function writeVolatileLearningState(path: string, state: JsonObject, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  path = resolve(path);
+  const client = volatileIndexPaths.get(path) ?? new SupervisorClient(craftPaths(dataRoot(env)));
+  const encoded = gzipSync(Buffer.from(JSON.stringify(state))).toString("base64");
+  if (encoded.length > 6 * 1024 * 1024) throw new Error("Codex session index exceeds in-memory capacity");
+  const prefix = `learning-index:${stableDigest(path).slice(-24)}:`;
+  const generation = randomUUID();
+  const count = Math.max(1, Math.ceil(encoded.length / indexChunkSize));
+  try {
+    for (let index = 0; index < count; index++) {
+      await client.contextPut({ session_key: indexSessionKey, key: `${prefix}${generation}:${index}`,
+        value: { data: encoded.slice(index * indexChunkSize, (index + 1) * indexChunkSize) }, ttl_ms: indexTtlMs });
+    }
+    await client.contextSnapshotPublish({ session_key: indexSessionKey, key: `${prefix}manifest`,
+      value: { generation, count, digest: stableDigest(encoded) }, ttl_ms: indexTtlMs });
+  } catch (error) {
+    // The Supervisor atomically retains a committed generation or removes its
+    // staged chunks. A late publish then fails because its chunks are gone.
+    await client.contextSnapshotAbort({ session_key: indexSessionKey, key: `${prefix}manifest`, generation }).catch(() => undefined);
+    throw error;
+  }
+
+}
+
+export async function clearVolatileLearningState(path: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  path = resolve(path);
+  const client = volatileIndexPaths.get(path) ?? new SupervisorClient(craftPaths(dataRoot(env)));
+  const prefix = `learning-index:${stableDigest(path).slice(-24)}:`;
+  await client.contextPurge({ session_key: indexSessionKey, prefix });
 }
 
 async function listSessionFiles(root: string): Promise<string[]> {
@@ -539,7 +624,10 @@ function sourceKey(path: string, archived: boolean): string {
 }
 
 function statePath(options: CodexSessionCollectionOptions, env: NodeJS.ProcessEnv): string {
-  return resolve(options.state_file ?? join(craftPaths(dataRoot(env)).runtimeDir, "codex-session-collection.json"));
+  const paths = craftPaths(dataRoot(env));
+  const path = resolve(options.state_file ?? join(paths.runtimeDir, "codex-session-collection.json"));
+  volatileIndexPaths.set(path, new SupervisorClient(paths));
+  return path;
 }
 
 /** Serialize only writers of the same index; readers continue using atomic snapshots. */
@@ -595,7 +683,7 @@ export async function requestCodexSessionSourceRecheck(taskId: string, sourceRef
     source.force_recheck = true;
     source.discovery_status = "changed";
     state.updated_at = options.now ?? new Date().toISOString();
-    await atomicPrivateJson(path, state);
+    await writeState(path, state);
     return { status: "scheduled", raw_content_stored: false };
   });
 }
@@ -716,7 +804,7 @@ async function collectCodexSessions(options: CodexSessionCollectionOptions, env:
   if (processedFiles > 0 || discoveryChanged || Object.keys(state.sources).length === 0) {
     state.updated_at = now;
     await mkdir(dirname(outputPath), { recursive: true, mode: 0o700 });
-    await atomicPrivateJson(outputPath, state);
+    await writeState(outputPath, state);
   }
   const indexed = Object.values(state.tasks);
   const remaining = candidates.filter(candidate => {
@@ -911,7 +999,7 @@ async function commitSessionEvidenceBatch(sessionIdsValue: unknown,
   state.evidence_cursor_session_id = sessionIds.at(-1)!;
   state.updated_at = options.now ?? new Date().toISOString();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await atomicPrivateJson(path, state);
+  await writeState(path, state);
   return { status: "advanced", sessions_queried: sessionIds.length, cursor_stored: true, raw_content_stored: false };
 }
 
@@ -1032,7 +1120,7 @@ async function reconcileSessionTaskEvidence(evidenceValue: unknown,
   if (verified > 0 || conflicted > 0 || invalidated > 0) {
     state.updated_at = options.now ?? new Date().toISOString();
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-    await atomicPrivateJson(path, state);
+    await writeState(path, state);
   }
   return { status: verified > 0 || conflicted > 0 || invalidated > 0 ? "reconciled" : "no_match", tasks_verified: verified, tasks_conflicted: conflicted, tasks_invalidated: invalidated, evidence_received: evidence.length,
     raw_content_stored: false, state_file: path };

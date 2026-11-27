@@ -424,14 +424,14 @@ test("Memory capture SDK preserves policy-off, conflict and governed commit cont
     f.service.memoryGovernance.policySave({ mode: "off" }); const before = f.store.count("evidence");
     assert.equal(capture.captureUserStatement({ content: "x" }).status, "disabled"); assert.equal(f.store.count("evidence"), before);
     f.service.memoryGovernance.policySave({ mode: "propose" });
-    const captured = capture.captureUserStatement({ content: "Python preference", scope_kind: "user", scope_id: "local", topic: "language", evidence_id: "user1", candidate_id: "candidate1", memory_id: "memory1", sensitivity: "internal", scope_envelope: { applicability: { kind: "user", id: "local" }, audience: { mode: "scoped", principal_ids: [] }, purpose: "preference", tenant_id: null } });
+    const captured = capture.captureUserStatement({ content: "Python preference", scope_kind: "global", scope_id: "global", topic: "language", evidence_id: "user1", candidate_id: "candidate1", memory_id: "memory1", sensitivity: "internal", scope_envelope: { applicability: { kind: "global", id: "global" }, audience: { mode: "scoped", principal_ids: [] }, purpose: "preference", tenant_id: null } });
     assert.equal(captured.auto_committed, false);
     const reviewed = f.service.memoryCandidateReview({ candidate_id: "candidate1", decision: "approve", reviewer: "fixture", reason: "manual policy mode" }).candidate as JsonObject;
     f.service.memoryLedgerRememberApproved({ candidate_id: reviewed.id, memory_id: "memory1" });
     const conflict = capture.captureUserStatement({ explicit_consent: true, content: "Java preference", topic: "language", auto_accept: true }); assert.equal(conflict.next_action, "resolve_conflict");
     assert.equal(capture.captureUserStatement({ explicit_consent: true, content: "keep task notes", kind: "working" }).next_action, "review_or_accept");
     f.service.memoryGovernance.policySave({ mode: "governed", min_confidence: "bounded" });
-    assert.equal(capture.captureUserStatement({ explicit_consent: true, content: "new user instruction", kind: "procedural", scope_id: "another" }).auto_committed, true);
+    assert.equal(capture.captureUserStatement({ explicit_consent: true, content: "new user instruction", kind: "procedural", scope_kind: "project", scope_id: f.scope.id }).auto_committed, true);
   } finally { f.close(); }
 });
 
@@ -648,10 +648,10 @@ test("unclassified conflicting preferences are held for topic/replacement confir
     assert.equal(incoming.next_action, "confirm_topic_or_explicit_replacement"); assert.equal(incoming.auto_committed, false); assert.equal(f.store.get("memory_ledger", String(first.id)).status, "active");
     f.service.memoryGovernance.policySave({ mode: "governed", min_confidence: "bounded" });
     const held = f.service.memoryCaptureUserStatement({ explicit_consent: true, content: "Rust", auto_accept: true }); assert.equal(held.auto_committed, false);
-    f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", memory_id: "restricted", kind: "preference", scope_kind: "user", scope_id: "restricted", content: "Python", sensitivity: "restricted" });
-    assert.deepEqual(f.service.memoryGovernance.topicSuggestions({ scope_kind: "user", scope_id: "restricted", content: "Python" }).suggestions, []);
-    assert.equal((f.service.memoryGovernance.topicSuggestions({ scope_kind: "user", scope_id: "restricted", content: "Python", allow_restricted: true }).suggestions as unknown[]).length, 1);
-    const unrelated = f.service.memoryGovernance.topicSuggestions({ scope_kind: "user", scope_id: "local", content: "unrelated" }); assert.deepEqual(unrelated.suggestions, []);
+    f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", memory_id: "restricted", kind: "preference", scope_kind: "project", scope_id: f.scope.id, content: "Python", sensitivity: "restricted" });
+    assert.deepEqual(f.service.memoryGovernance.topicSuggestions({ scope_kind: "project", scope_id: f.scope.id, content: "Python" }).suggestions, []);
+    assert.equal((f.service.memoryGovernance.topicSuggestions({ scope_kind: "project", scope_id: f.scope.id, content: "Python", allow_restricted: true }).suggestions as unknown[]).length, 1);
+    const unrelated = f.service.memoryGovernance.topicSuggestions({ scope_kind: "global", scope_id: "global", content: "unrelated" }); assert.deepEqual(unrelated.suggestions, []);
   } finally { f.close(); }
 });
 
@@ -659,13 +659,13 @@ test("governed Memory policy cannot auto-commit a conflict with a directly writt
   const f = await fixture();
   try {
     f.store.create("evidence", "proof", { source_type: "human", confidence: "confirmed" });
-    f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "preference", memory_id: "direct", scope_kind: "user", scope_id: "local", topic: "language", content: "Python", evidence_ids: ["proof"] });
+    f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "preference", memory_id: "direct", scope_kind: "global", scope_id: "global", topic: "language", content: "Python", evidence_ids: ["proof"] });
     f.service.memoryGovernance.policySave({ mode: "governed" });
-    const result = f.service.memoryGovernance.propose({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "user", scope_id: "local", topic: "language", content: "Java", confidence: "confirmed", evidence_ids: ["proof"] });
+    const result = f.service.memoryGovernance.propose({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "global", scope_id: "global", topic: "language", content: "Java", confidence: "confirmed", evidence_ids: ["proof"] });
     assert.equal(result.auto_committed, false); assert.equal((result.candidate as JsonObject).status, "conflict_pending"); assert.equal(f.store.count("memory_ledger"), 1);
-    const captured = f.service.memoryCaptureUserStatement({ content: "Quartz", scope_id: "separate" }); const memory = captured.memory as JsonObject;
+    const captured = f.service.memoryCaptureUserStatement({ content: "Quartz", scope_kind: "project", scope_id: f.scope.id }); const memory = captured.memory as JsonObject;
     f.service.memoryLedgerTransition({ memory_id: memory.id, status: "revoked", reason: "user request" });
-    assert.equal(f.service.memoryCaptureUserStatement({ content: "Quartz", scope_id: "separate" }).already_retained, undefined);
+    assert.equal(f.service.memoryCaptureUserStatement({ content: "Quartz", scope_kind: "project", scope_id: f.scope.id }).already_retained, undefined);
   } finally { f.close(); }
 });
 

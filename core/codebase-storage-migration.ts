@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { constants, copyFileSync, createReadStream, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { canonicalCandidatePath, ensureProjectStorageDirectory, projectStorageDirectory, type CraftPaths } from 'craft-common-store-local/paths';
+import { canonicalCandidatePath, ensureProjectStorageDirectory, projectStorageDirectory, projectStorageIdentity, type CraftPaths } from 'craft-common-store-local/paths';
 import type { CodebaseMigrationEntry } from "./codebase-storage-preflight.ts";
 
 type SnapshotFile = { path: string; digest: string; size_bytes: number };
@@ -97,6 +97,7 @@ async function verifiedPeer(database: DatabaseSync, paths: CraftPaths, projectRo
     if (unavailablePeerRoot || peerRoots.size !== 1 || !peerRoots.has(projectRoot)) continue;
     if (typeof payload.snapshot_root !== "string") continue;
     const expected = [join(projectStorageDirectory(paths, projectRoot), "codebase", "snapshots", peerWorkspaceId, row.id),
+      join(paths.root, "projects", projectStorageIdentity(projectRoot).directory_name, "codebase", "snapshots", peerWorkspaceId, row.id),
       join(projectRoot, ".craft_data", "codebase", "snapshots", peerWorkspaceId, row.id),
       join(projectRoot, ".craft_data", "codebase", "runtime", "workspaces", peerWorkspaceId, "snapshots", row.id),
       join(paths.runtimeDir, "workspaces", peerWorkspaceId, "snapshots", row.id)];
@@ -299,6 +300,7 @@ export async function migrateCodebaseSnapshots(store: { paths: CraftPaths; datab
         throw new Error("project_mapping_changed");
       }
       const allowedSources = [join(root, ".craft_data", "codebase", "snapshots", entry.workspace_id, entry.id),
+        join(store.paths.root, "projects", projectStorageIdentity(root).directory_name, "codebase", "snapshots", entry.workspace_id, entry.id),
         join(root, ".craft_data", "codebase", "runtime", "workspaces", entry.workspace_id, "snapshots", entry.id),
         join(store.paths.runtimeDir, "workspaces", entry.workspace_id, "snapshots", entry.id)];
       if (!allowedSources.some(source => canonicalCandidatePath(source) === canonicalCandidatePath(entry.source_root))) {

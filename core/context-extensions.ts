@@ -8,10 +8,9 @@ import { retrievalExcerpt } from 'craft-common-base/retrieval-excerpt';
 import { sessionStorageScopeId } from 'craft-common-store-local/paths';
 import { codebaseUsageWeights, recordCodebaseSymbolUsage } from '@craft/capability-codebase/usage-signals';
 import { payload, stableDigest } from "./digest.ts";
+import { SupervisorClient } from "./infrastructure/supervisor-client.ts";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 
-const EPHEMERAL_KIND = "context_ephemeral_index";
-const RESUME_KIND = "context_resume_snapshot";
 const DEFAULT_TTL_SECONDS = 3_600;
 const MAX_TTL_SECONDS = 86_400;
 const MAX_EPHEMERAL_ITEMS = 500;
@@ -128,7 +127,7 @@ export class ContextExtensionsKernel {
   }
 
   /** P1-1: store a bounded, session-scoped, purgeable index. Never promoted to Knowledge. */
-  recordEphemeral(args: JsonObject): JsonObject {
+  async recordEphemeral(args: JsonObject): Promise<JsonObject> {
     const sessionId = nonEmpty(args.session_id, "session_id");
     const host = nonEmpty(args.session_host, "session_host");
     const sessionScopeId = sessionStorageScopeId(host, sessionId);
@@ -155,18 +154,19 @@ export class ContextExtensionsKernel {
     const identityDigest = stableDigest({ session_scope_id: sessionScopeId, source, items });
     const payload = { session_id: sessionId, session_host: host, session_scope_id: sessionScopeId, source, items, item_count: items.length, total_chars: totalChars,
       expires_at: expiresAt, identity_digest: identityDigest, content_free: false, ephemeral: true };
-    const record = this.store.transaction(() => {
-      assertSessionActive(this.store, sessionScopeId);
-      const existing = this.store.find(EPHEMERAL_KIND, indexId, undefined, false);
-      if (existing) assertEphemeralOwner(existing, sessionId, host, source);
-      return existing ? this.store.save(EPHEMERAL_KIND, indexId, payload) : this.store.create(EPHEMERAL_KIND, indexId, payload);
-    });
+    assertSessionActive(this.store, sessionScopeId);
+    const client = new SupervisorClient(this.store.paths);
+    const key = `index:${indexId}`;
+    const current = await client.contextGet({ session_key: sessionScopeId, key });
+    if (current.status === "available") assertEphemeralOwner(current.value as JsonObject, sessionId, host, source);
+    await client.contextPut({ session_key: sessionScopeId, key, value: payload, ttl_ms: ttlSeconds * 1000 });
+    const record = { id: indexId };
     return { index_id: record.id, session_id: sessionId, source, item_count: items.length, total_chars: totalChars,
       expires_at: expiresAt, identity_digest: identityDigest, ephemeral: true };
   }
 
   /** P1-1: BM25 search over an ephemeral index; expired indexes are removed on read. */
-  searchEphemeral(args: JsonObject): JsonObject {
+  async searchEphemeral(args: JsonObject, retryCount = 0): Promise<JsonObject> {
     const sessionId = nonEmpty(args.session_id, "session_id");
     const host = nonEmpty(args.session_host, "session_host");
     assertSessionActive(this.store, sessionStorageScopeId(host, sessionId));
@@ -174,18 +174,20 @@ export class ContextExtensionsKernel {
     const query = nonEmpty(args.query, "query");
     const limit = boundedInteger(args.limit ?? 5, "limit", 1, 50);
     const indexId = String(args.index_id ?? ephemeralId(sessionId, host, source));
-    let record = this.store.find(EPHEMERAL_KIND, indexId, undefined, false);
-    if (!record) return { hits: [], reason: "index_missing", index_id: indexId, execution_context: false };
+    const client = new SupervisorClient(this.store.paths);
+    const key = `index:${indexId}`;
+    const result = await client.contextGet({ session_key: sessionStorageScopeId(host, sessionId), key });
+    let record = result.status === "available" ? result.value as JsonObject : undefined;
+    if (!record) return { hits: [], reason: "index_unavailable", index_id: indexId, execution_context: false };
     assertEphemeralOwner(record, sessionId, host, source);
     if (Date.parse(String(record.expires_at)) <= Date.parse(isoNow(args.now))) {
-      record = this.store.transaction(() => {
-        const current = this.store.find(EPHEMERAL_KIND, indexId, undefined, false);
-        if (!current) return null;
-        assertEphemeralOwner(current, sessionId, host, source);
-        if (Date.parse(String(current.expires_at)) > Date.parse(isoNow(args.now))) return current;
-        this.store.remove(EPHEMERAL_KIND, indexId);
-        return null;
-      });
+      const purged = await client.contextPurge({ session_key: sessionStorageScopeId(host, sessionId), key,
+        expected_identity_digest: record.identity_digest, expected_expires_at: record.expires_at });
+      if (purged.changed === true) {
+        if (retryCount >= 2) throw new Error("ephemeral index changed repeatedly; retry the search");
+        return this.searchEphemeral(args, retryCount + 1);
+      }
+      record = undefined;
       if (!record) return { hits: [], reason: "index_expired", index_id: indexId, execution_context: false };
     }
     const items = (Array.isArray(record.items) ? record.items : []) as JsonObject[];
@@ -217,36 +219,35 @@ export class ContextExtensionsKernel {
   }
 
   /** P1-1: permanently remove session-scoped ephemeral content. */
-  purgeEphemeral(args: JsonObject): JsonObject {
+  async purgeEphemeral(args: JsonObject): Promise<JsonObject> {
     const sessionId = nonEmpty(args.session_id, "session_id");
     const host = nonEmpty(args.session_host, "session_host");
     const sessionScopeId = sessionStorageScopeId(host, sessionId);
     const source = args.source === undefined ? null : nonEmpty(args.source, "source");
-    const removed = this.store.transaction(() => {
-      const ids = source === null
-        ? this.store.list(EPHEMERAL_KIND, SCAN_LIMIT, (item) => item.session_id === sessionId && item.session_host === host && item.session_scope_id === sessionScopeId, false).map((item) => String(item.id))
-        : [String(args.index_id ?? ephemeralId(sessionId, host, source))];
-      let count = 0;
-      for (const id of ids) {
-        const record = this.store.find(EPHEMERAL_KIND, id, undefined, false);
-        if (!record) continue;
-        assertEphemeralOwner(record, sessionId, host, source ?? String(record.source));
-        count += this.store.remove(EPHEMERAL_KIND, id);
-      }
-      return count;
-    });
+    const client = new SupervisorClient(this.store.paths);
+    let expected: JsonObject | undefined;
+    if (source !== null) {
+      const current = await client.contextGet({ session_key: sessionScopeId, key: `index:${String(args.index_id ?? ephemeralId(sessionId, host, source))}` });
+      if (current.status !== "available") return { removed: 0, session_id: sessionId, source, execution_context: false };
+      expected = current.value as JsonObject;
+      assertEphemeralOwner(expected, sessionId, host, source);
+    }
+    const result = await client.contextPurge({ session_key: sessionScopeId,
+      ...(source === null ? { prefix: "index:" } : { key: `index:${String(args.index_id ?? ephemeralId(sessionId, host, source))}`, source,
+        expected_identity_digest: expected!.identity_digest, expected_expires_at: expected!.expires_at }) });
+    const removed = Number(result.removed);
     return { removed, session_id: sessionId, source, execution_context: false };
   }
 
   /** P0-2: keep a large tool result out of context and index it for later queries. */
-  captureOutput(args: JsonObject): JsonObject {
+  async captureOutput(args: JsonObject): Promise<JsonObject> {
     const content = nonEmpty(args.content, "content");
     const limit = boundedInteger(args.max_chars ?? 8_000, "max_chars", 1, 100_000);
     if (content.length <= limit) return { action: "pass", bytes: content.length, execution_context: false };
     const toolName = args.tool_name === undefined ? "tool" : nonEmpty(args.tool_name, "tool_name");
     const sessionId = nonEmpty(args.session_id, "session_id");
     const host = nonEmpty(args.session_host, "session_host");
-    const indexed = this.recordEphemeral({ session_id: sessionId, session_host: host, source: toolName,
+    const indexed = await this.recordEphemeral({ session_id: sessionId, session_host: host, source: toolName,
       items: [{ id: "output", text: content, title: toolName }], ...(args.ttl_seconds === undefined ? {} : { ttl_seconds: args.ttl_seconds }) });
     return { action: "indexed", bytes: content.length, limit, index_id: indexed.index_id, source: toolName,
       preview: "", preview_reason: "requires_search",
@@ -284,7 +285,7 @@ export class ContextExtensionsKernel {
   }
 
   /** P1-2: capture a bounded resume snapshot before compaction. */
-  checkpointResume(args: JsonObject): JsonObject {
+  async checkpointResume(args: JsonObject): Promise<JsonObject> {
     const sessionId = nonEmpty(args.session_id, "session_id");
     const host = nonEmpty(args.session_host, "session_host");
     const sessionScopeId = sessionStorageScopeId(host, sessionId);
@@ -296,35 +297,41 @@ export class ContextExtensionsKernel {
       decisions: stringList(args.decisions, "decisions", 100),
       open_questions: stringList(args.open_questions, "open_questions", 100),
       content_free: false };
+    if (Buffer.byteLength(JSON.stringify(snapshot), "utf8") > 1_000_000) throw new Error("resume snapshot exceeds the 1000000-byte size limit");
     const id = resumeId(sessionId, host);
-    const record = this.store.transaction(() => {
-      assertSessionActive(this.store, sessionScopeId);
-      const existing = this.store.find(RESUME_KIND, id, undefined, false);
-      if (existing && (existing.session_id !== sessionId || existing.session_host !== host || existing.session_scope_id !== sessionScopeId)) throw new Error("resume snapshot scope mismatch");
-      return existing ? this.store.save(RESUME_KIND, id, snapshot) : this.store.create(RESUME_KIND, id, snapshot);
-    });
+    assertSessionActive(this.store, sessionScopeId);
+    const record = { ...snapshot, id };
+    const client = new SupervisorClient(this.store.paths);
+    const prior = await client.contextGet({ session_key: sessionScopeId, key: `resume:${id}` });
+    if (prior.status === "available") {
+      const existing = prior.value as JsonObject;
+      if (existing.session_id !== sessionId || existing.session_host !== host || existing.session_scope_id !== sessionScopeId) throw new Error("resume snapshot scope mismatch");
+    }
+    await client.contextPut({ session_key: sessionScopeId, key: `resume:${id}`, value: record, ttl_ms: MAX_TTL_SECONDS * 1000 });
     return { snapshot: record, resume_id: record.id, content_free: false, execution_context: false };
   }
 
   /** P1-2: read the latest resume snapshot for one session. */
-  getResume(args: JsonObject): JsonObject {
+  async getResume(args: JsonObject): Promise<JsonObject> {
     const sessionId = nonEmpty(args.session_id, "session_id");
     const host = nonEmpty(args.session_host, "session_host");
     assertSessionActive(this.store, sessionStorageScopeId(host, sessionId));
     const id = resumeId(sessionId, host);
-    const record = this.store.find(RESUME_KIND, id, undefined, false);
+    const result = await new SupervisorClient(this.store.paths).contextGet({ session_key: sessionStorageScopeId(host, sessionId), key: `resume:${id}` });
+    const record = result.status === "available" ? result.value as JsonObject : null;
     if (record && (record.session_id !== sessionId || record.session_host !== host || record.session_scope_id !== sessionStorageScopeId(host, sessionId))) throw new Error("resume snapshot scope mismatch");
-    return { resume_id: id, snapshot: record ?? null, resume_available: record !== null, execution_context: false };
+    return { resume_id: id, snapshot: record ?? null, resume_available: record !== null, ...(record ? {} : { reason: "snapshot_unavailable" }), execution_context: false };
   }
 
   /** P1-2: project the resume snapshot into a bounded text block for injection. */
-  resolveResume(args: JsonObject): JsonObject {
+  async resolveResume(args: JsonObject): Promise<JsonObject> {
     const sessionId = nonEmpty(args.session_id, "session_id");
     const host = nonEmpty(args.session_host, "session_host");
     assertSessionActive(this.store, sessionStorageScopeId(host, sessionId));
     const maxChars = boundedInteger(args.max_chars ?? 1_200, "max_chars", 1, 8_000);
-    const record = this.store.find(RESUME_KIND, resumeId(sessionId, host), undefined, false);
-    if (!record) return { content: "", resume_available: false, truncated: false, execution_context: false };
+    const result = await new SupervisorClient(this.store.paths).contextGet({ session_key: sessionStorageScopeId(host, sessionId), key: `resume:${resumeId(sessionId, host)}` });
+    const record = result.status === "available" ? result.value as JsonObject : null;
+    if (!record) return { content: "", resume_available: false, truncated: false, reason: "snapshot_unavailable", execution_context: false };
     if (record.session_id !== sessionId || record.session_host !== host || record.session_scope_id !== sessionStorageScopeId(host, sessionId)) throw new Error("resume snapshot scope mismatch");
     const section = (label: string, key: string): string => {
       const values = Array.isArray(record[key]) ? (record[key] as unknown[]).map(String) : [];
@@ -344,7 +351,6 @@ export class ContextExtensionsKernel {
     const workingSets = this.store.list("context_working_set_receipt", SCAN_LIMIT, undefined, false);
     const emissions = this.store.list("context_emission", SCAN_LIMIT, undefined, false);
     const feedback = this.store.list("context_feedback", SCAN_LIMIT, undefined, false);
-    const ephemeral = this.store.list(EPHEMERAL_KIND, SCAN_LIMIT, undefined, false);
     let usedChars = 0, omitted = 0, deduplicated = 0, items = 0;
     for (const receipt of receipts) {
       usedChars += Number(receipt.total_used_chars ?? 0);
@@ -358,7 +364,7 @@ export class ContextExtensionsKernel {
       outcomes[key] = (outcomes[key] ?? 0) + 1;
     }
     return { receipts: receipts.length, working_sets: workingSets.length, emissions: emissions.length,
-      feedback: feedback.length, ephemeral_indexes: ephemeral.length, selected_items: items, used_chars: usedChars,
+      feedback: feedback.length, ephemeral_indexes: null, selected_items: items, used_chars: usedChars,
       omitted_count: omitted, deduplicated_count: deduplicated, estimated_tokens: Math.ceil(usedChars / 3),
       token_provenance: "estimated", feedback_outcomes: outcomes, execution_context: false };
   }
@@ -375,8 +381,8 @@ export class ContextExtensionsKernel {
     checks.push({ name: "retrieval_adapters", ok: true, count: adapters.length, eligible });
     const receipts = this.store.list("context_resolution_receipt", 1, undefined, false);
     checks.push({ name: "context_receipts", ok: true, present: receipts.length > 0 });
-    checks.push({ name: "ephemeral_indexes", ok: true, count: this.store.list(EPHEMERAL_KIND, 1, undefined, false).length });
-    checks.push({ name: "resume_snapshots", ok: true, count: this.store.list(RESUME_KIND, 1, undefined, false).length });
+    checks.push({ name: "ephemeral_indexes", ok: true, count: null });
+    checks.push({ name: "resume_snapshots", ok: true, count: null });
     return { ok: checks.every((check) => check.ok === true), checks, execution_context: false };
   }
 

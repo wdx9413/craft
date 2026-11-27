@@ -28,7 +28,7 @@ test("project graph records are immutable, digestible and isolated under the pro
     assert.equal(store.recordsDigest([shardId, routeId, shardId]), store.recordsDigest([routeId, shardId]));
     assert.equal(store.directory, join(projectStorageDirectory(paths, project), "codebase", "indexes", "workspace_1", "graph_records"));
     assert.equal(existsSync(join(store.directory, `${shardId}.json`)), true);
-    assert.equal(existsSync(join(project, ".craft_data")), false);
+    assert.equal(existsSync(join(project, ".craft_data")), true);
     assert.throws(() => store.put(shardId, record(shardId, "changed")), /integrity failure/u);
     assert.throws(() => store.put("wrong_id", record("wrong_id")), /Invalid Codebase graph record/u);
     assert.throws(() => store.put(shardId, record(routeId)), /Invalid Codebase graph record/u);
@@ -65,9 +65,9 @@ test("project graph store rejects unsafe roots, directories, links and malformed
     assert.equal(new ProjectGraphStore(linkedRoot, "workspace", paths).directory,
       new ProjectGraphStore(external, "workspace", paths).directory);
 
-    const linkedDataRoot = join(root, "linked-data-root"); mkdirSync(linkedDataRoot);
-    linkDirectorySync(external, join(linkedDataRoot, "projects"));
-    assert.throws(() => new ProjectGraphStore(project, "workspace", craftPaths(linkedDataRoot)), /regular directories/u);
+    const linkedProject = join(root, "linked-project"); mkdirSync(linkedProject);
+    linkDirectorySync(external, join(linkedProject, ".craft_data"));
+    assert.throws(() => new ProjectGraphStore(linkedProject, "workspace", paths), /regular directories/u);
 
     const store = new ProjectGraphStore(project, "workspace_2", paths);
     const id = "codebase_shard_0123456789abcdef0123456789abcdef";

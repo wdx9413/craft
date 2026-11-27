@@ -155,7 +155,9 @@ export function contextReadinessDoctor(store: CraftStore, args: JsonObject = {},
       corrections: correctionStatus.counts,
       correction_status_counts_status: correctionStatus.status,
       correction_states: CORRECTION_STATES,
-      resume_snapshots: recordCount(contextStore, "context_resume_snapshot"),
+      // Session snapshots live in Supervisor memory; a legacy database count
+      // cannot describe the active sessions of this process.
+      resume_snapshots: null,
       latest_injected_tokens: contextStore ? latestInjectedTokens(contextStore) : null,
     },
     usage_statusline: contextStore ? contextUsageStatusline(contextStore, { session_id: sessionId ?? undefined }) : { status: "owner_unavailable" },
