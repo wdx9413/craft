@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
+import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
+import { PassThrough } from "node:stream";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
-import { appendFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { zstdCompressSync } from "node:zlib";
+import { appendFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { linkDirectory, supportsFileSymlinks } from "./symlink-support.ts";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -146,6 +149,272 @@ test("collection reports indexed sources absent from the current discovery scope
     assert.equal((await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition })).reason, "task_source_not_current");
     const stateAfter = JSON.parse(await indexText(f.state)) as { tasks: Record<string, unknown> };
     assert.deepEqual(Object.keys(stateAfter.tasks), Object.keys(stateBefore.tasks));
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("indexes archived zstd sessions and replays a verified excerpt without reactivating the session", async () => {
+  const f = await fixture();
+  try {
+    const archive = join(f.root, "codex", "archived_sessions");
+    await mkdir(archive, { recursive: true });
+    await f.writeSession(f.turn("archived-turn", "检查归档会话是否可安全回放", "归档会话回放内容已核实"));
+    const original = await readFile(f.file);
+    const archivedFile = join(archive, "session-a.jsonl.zst");
+    await writeFile(archivedFile, zstdCompressSync(original.subarray(0, -1)));
+    const archivedBytes = await readFile(archivedFile);
+    const archivedInfo = await stat(archivedFile);
+    await rm(f.file);
+    const options = { sessions_root: f.sessions, archived_sessions_root: archive, state_file: f.state };
+    let result = await runCodexSessionCollectionOnce({ ...options, max_bytes: 1_024 });
+    while (result.sessions_pending === 1) result = await runCodexSessionCollectionOnce({ ...options, max_bytes: 1_024 });
+    assert.equal(result.status, "completed");
+    assert.equal(result.sessions_seen, 1);
+    const state = JSON.parse(await indexText(f.state)) as { sources: Record<string, { compressed?: boolean; complete?: boolean; processed_bytes: number }>; tasks: Record<string, CodexSessionTaskIndex> };
+    const task = Object.values(state.tasks)[0]!;
+    assert.equal(task.source_root, "archived_sessions");
+    assert.equal(Object.values(state.sources)[0]?.compressed, true);
+    assert.equal(Object.values(state.sources)[0]?.complete, true);
+    assert.ok(Object.values(state.sources)[0]!.processed_bytes > (await stat(archivedFile)).size);
+    const archiveDigest = `sha256:${createHash("sha256").update(archivedBytes).digest("hex")}`;
+    const boundRead = await readCodexSessionChunk(archivedFile, 0, archivedInfo.size, 1_024, 512 * 1024 * 1024,
+      { dev: archivedInfo.dev, ino: archivedInfo.ino, size: archivedInfo.size, mtimeMs: archivedInfo.mtimeMs }, archiveDigest);
+    assert.ok(boundRead.bytes.length > 0);
+    await assert.rejects(readCodexSessionChunk(archivedFile, 0, archivedInfo.size, 1_024, 512 * 1024 * 1024,
+      { dev: archivedInfo.dev + 1, ino: archivedInfo.ino, size: archivedInfo.size, mtimeMs: archivedInfo.mtimeMs }, archiveDigest), /task_source_changed_during_read/u);
+    await assert.rejects(readCodexSessionChunk(archivedFile, 0, archivedInfo.size, 1_024, 512 * 1024 * 1024,
+      { dev: archivedInfo.dev, ino: archivedInfo.ino, size: archivedInfo.size, mtimeMs: archivedInfo.mtimeMs }, `sha256:${"0".repeat(64)}`), /task_source_changed_during_read/u);
+    const legacyCursor = JSON.parse(await indexText(f.state)) as { sources: Record<string, { compressed?: boolean; complete?: boolean; processed_bytes: number }> };
+    const legacySource = Object.values(legacyCursor.sources)[0]!;
+    delete legacySource.compressed;
+    delete legacySource.complete;
+    delete (legacySource as typeof legacySource & { archive_digest?: string; decompressed_work_bytes?: number }).archive_digest;
+    delete (legacySource as typeof legacySource & { archive_digest?: string; decompressed_work_bytes?: number }).decompressed_work_bytes;
+    legacySource.processed_bytes = 0;
+    await writeVolatileLearningState(f.state, legacyCursor);
+    await runCodexSessionCollectionOnce(options);
+    const upgradedCursor = JSON.parse(await indexText(f.state)) as { sources: Record<string, { compressed?: boolean; complete?: boolean }> };
+    assert.equal(Object.values(upgradedCursor.sources)[0]?.compressed, true);
+    assert.equal(Object.values(upgradedCursor.sources)[0]?.complete, true);
+    await reconcileCodexSessionTaskEvidence([{ evidence_id: "archived-evidence", session_id: task.session_id, turn_id: task.turn_id,
+      context_receipt_id: "archived-receipt", verification_ref_digest: `sha256:${"c".repeat(64)}`,
+      terminal_identity_digest: `sha256:${"d".repeat(64)}`, verification_outcome: "passed", verified: true, content_stored: false }], options);
+    const excerpt = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+    assert.equal(excerpt.status, "ready", JSON.stringify(excerpt));
+    assert.equal(excerpt.task_goal, "检查归档会话是否可安全回放");
+    assert.equal(excerpt.raw_content_stored, false);
+    const originalCreateReadStream = fs.createReadStream;
+    let archiveStreams = 0;
+    try {
+      fs.createReadStream = ((...args: Parameters<typeof originalCreateReadStream>) => {
+        if (String(args[0]) !== archivedFile || ++archiveStreams !== 2) return originalCreateReadStream(...args);
+        const stream = new PassThrough();
+        queueMicrotask(() => stream.end(zstdCompressSync(Buffer.concat([original.subarray(0, -1), Buffer.from("\n")] ))));
+        return stream as ReturnType<typeof originalCreateReadStream>;
+      }) as typeof originalCreateReadStream;
+      syncBuiltinESMExports();
+      const differentSnapshot = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+      assert.equal(archiveStreams, 2);
+      assert.equal(differentSnapshot.reason, "task_source_changed_during_read");
+    } finally { fs.createReadStream = originalCreateReadStream; syncBuiltinESMExports(); }
+    const indexedState = await indexText(f.state);
+    const missingDigest = JSON.parse(indexedState) as { sources: Record<string, { archive_digest?: string }> };
+    delete Object.values(missingDigest.sources)[0]!.archive_digest;
+    await writeVolatileLearningState(f.state, missingDigest);
+    assert.equal((await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition })).reason, "task_source_not_current");
+    await writeVolatileLearningState(f.state, JSON.parse(indexedState));
+    const originalStat = fsPromises.stat;
+    for (const mismatchAt of [1, 2] as const) {
+      let calls = 0;
+      try {
+        fsPromises.stat = async (...args: Parameters<typeof originalStat>) => {
+          const value = await originalStat(...args);
+          if (String(args[0]) !== archivedFile) return value;
+          return ++calls === mismatchAt ? { ...value, mtimeMs: value.mtimeMs + 1 } : value;
+        };
+        syncBuiltinESMExports();
+        const changedDuringRead = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+        assert.equal(changedDuringRead.reason, "task_source_changed_during_read", JSON.stringify(changedDuringRead));
+      } finally { fsPromises.stat = originalStat; syncBuiltinESMExports(); }
+    }
+    let stats = 0;
+    try {
+      fsPromises.stat = async (...args: Parameters<typeof originalStat>) => {
+        if (String(args[0]) === archivedFile && ++stats === 2) throw Object.assign(new Error("source disappeared"), { code: "ENOENT" });
+        return originalStat(...args);
+      };
+      syncBuiltinESMExports();
+      const missingDuringRead = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+      assert.equal(missingDuringRead.reason, "task_source_changed_during_read");
+    } finally { fsPromises.stat = originalStat; syncBuiltinESMExports(); }
+    await assert.rejects(stat(f.file));
+    assert.deepEqual(await readFile(archivedFile), archivedBytes);
+    const archivedStat = await stat(archivedFile);
+    const sameSizeRewrite = Buffer.from(archivedBytes);
+    sameSizeRewrite[sameSizeRewrite.length - 1] ^= 1;
+    await writeFile(archivedFile, sameSizeRewrite);
+    await utimes(archivedFile, archivedStat.atime, archivedStat.mtime);
+    assert.equal((await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition })).reason, "task_source_not_current");
+    await writeFile(archivedFile, archivedBytes);
+    await utimes(archivedFile, archivedStat.atime, archivedStat.mtime);
+    await appendFile(archivedFile, zstdCompressSync(Buffer.from("\n")));
+    assert.equal((await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition })).reason, "task_source_not_current");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("bounds empty, unterminated, oversized, and truncated compressed session reads", async () => {
+  const f = await fixture();
+  try {
+    const compressed = join(f.root, "compressed.jsonl.zst");
+    await writeFile(compressed, zstdCompressSync(Buffer.alloc(0)));
+    assert.deepEqual(await readCodexSessionChunk(compressed, 0, 1, 1_024), { bytes: Buffer.alloc(0), nextOffset: 0, complete: true, work_bytes: 0 });
+    await writeFile(compressed, zstdCompressSync(Buffer.from("unterminated record")));
+    assert.deepEqual(await readCodexSessionChunk(compressed, 0, 1, 1_024), { bytes: Buffer.from("unterminated record"), nextOffset: 19, complete: true, work_bytes: 19 });
+    await assert.rejects(readCodexSessionChunk(compressed, 0, 1, 1_024, 0), /replay limit/u);
+    const withLongUnterminatedTail = Buffer.concat([Buffer.from("x\n"), Buffer.alloc(32 * 1024, 120)]);
+    await writeFile(compressed, zstdCompressSync(withLongUnterminatedTail));
+    const partialTail = await readCodexSessionChunk(compressed, 0, 1, 1_024);
+    assert.deepEqual({ ...partialTail, work_bytes: undefined }, { bytes: Buffer.from("x\n"), nextOffset: 2, complete: false, work_bytes: undefined });
+    assert.ok(partialTail.work_bytes! >= 1_024 && partialTail.work_bytes! <= withLongUnterminatedTail.length);
+    const longLine = Buffer.concat([Buffer.alloc(4 * 1024, 120), Buffer.from("\n")]);
+    await writeFile(compressed, zstdCompressSync(longLine));
+    await assert.rejects(readCodexSessionChunk(compressed, 512 * 1024 * 1024 + 1, 1, 1_024), /replay limit/u);
+    assert.deepEqual(await readCodexSessionChunk(compressed, longLine.length, 1, 1_024), { bytes: Buffer.alloc(0), nextOffset: longLine.length, complete: true, work_bytes: longLine.length });
+    assert.deepEqual(await readCodexSessionChunk(compressed, 0, 1, 1_024), { bytes: longLine, nextOffset: longLine.length, complete: false, work_bytes: longLine.length });
+    const longSource = Buffer.alloc(100 * 1024, 120);
+    longSource[longSource.length - 1] = 10;
+    await writeFile(compressed, zstdCompressSync(longSource));
+    const resumed = await readCodexSessionChunk(compressed, 80 * 1024, 1, 1_024);
+    assert.equal(resumed.nextOffset, 100 * 1024);
+    assert.equal(resumed.work_bytes, 100 * 1024);
+    await writeFile(compressed, zstdCompressSync(Buffer.alloc(64 * 1024 * 1024, 120)));
+    await assert.rejects(readCodexSessionChunk(compressed, 0, 1, 1_024), /size limit/u);
+    await writeFile(compressed, zstdCompressSync(Buffer.alloc(64 * 1024 * 1024 + 2_048, 120)));
+    await assert.rejects(readCodexSessionChunk(compressed, 0, 1, 1_024), /size limit/u);
+
+    const archive = join(f.root, "codex", "archived_sessions");
+    await mkdir(archive, { recursive: true });
+    await f.writeSession(f.turn("truncated-archive", "测试压缩归档片段截断保护", "已经完成归档片段截断保护"));
+    const archivedFile = join(archive, "truncated.jsonl.zst");
+    await writeFile(archivedFile, zstdCompressSync(await readFile(f.file)));
+    await rm(f.file);
+    const options = { sessions_root: f.sessions, archived_sessions_root: archive, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    const state = JSON.parse(await indexText(f.state)) as { tasks: Record<string, CodexSessionTaskIndex> };
+    const task = Object.values(state.tasks)[0]!;
+    await reconcileCodexSessionTaskEvidence([{ evidence_id: "truncated-evidence", session_id: task.session_id, turn_id: task.turn_id,
+      context_receipt_id: "truncated-receipt", verification_ref_digest: `sha256:${"e".repeat(64)}`,
+      terminal_identity_digest: `sha256:${"f".repeat(64)}`, verification_outcome: "passed", verified: true, content_stored: false }], options);
+    const changed = JSON.parse(await indexText(f.state)) as { tasks: Record<string, CodexSessionTaskIndex> };
+    const replayLimited = changed.tasks[task.task_id] as { source_start_byte: number; source_end_byte: number };
+    replayLimited.source_start_byte = 512 * 1024 * 1024;
+    replayLimited.source_end_byte = replayLimited.source_start_byte + 32;
+    await writeVolatileLearningState(f.state, changed);
+    const limited = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+    assert.equal(limited.reason, "task_archive_replay_limit_exceeded");
+    replayLimited.source_start_byte = task.source_start_byte;
+    replayLimited.source_end_byte = task.source_end_byte;
+    (changed.tasks[task.task_id] as { source_end_byte: number }).source_end_byte += 32;
+    await writeVolatileLearningState(f.state, changed);
+    const excerpt = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition });
+    assert.equal(excerpt.reason, "task_source_changed_during_read");
+    const oversizedArchive = join(archive, "oversized.jsonl.zst");
+    const oversizedHandle = await open(oversizedArchive, "w");
+    await oversizedHandle.truncate(128 * 1024 * 1024 + 1);
+    await oversizedHandle.close();
+    const limitedScan = await runCodexSessionCollectionOnce(options);
+    assert.equal(limitedScan.status, "partial");
+    assert.equal(limitedScan.sessions_replay_limited, 1);
+    const limitedState = JSON.parse(await indexText(f.state)) as { sources: Record<string, { processed_bytes: number; complete?: true; verification_artifact_index_version?: number }> };
+    const replaySource = Object.entries(limitedState.sources).find(([key]) => key.includes("truncated.jsonl.zst"))![1];
+    replaySource.processed_bytes = 512 * 1024 * 1024 + 1;
+    delete replaySource.complete;
+    replaySource.verification_artifact_index_version = 0;
+    await writeVolatileLearningState(f.state, limitedState);
+    const decompressionLimited = await runCodexSessionCollectionOnce(options);
+    assert.equal(decompressionLimited.sessions_replay_limited, 2);
+    assert.equal((await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition })).reason,
+      "task_archive_replay_limit_exceeded");
+    const stableLimit = await runCodexSessionCollectionOnce(options);
+    assert.equal(stableLimit.sessions_replay_limited, 2);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("isolates archived source read failures so active sessions still index", async () => {
+  const f = await fixture();
+  try {
+    const archive = join(f.root, "codex", "archived_sessions");
+    await mkdir(archive, { recursive: true });
+    await f.writeSession(f.turn("active-after-archive-error", "索引仍可处理健康会话", "健康会话已完成"));
+    const archivedFile = join(archive, "unreadable.jsonl.zst");
+    await writeFile(archivedFile, zstdCompressSync(await readFile(f.file)));
+    await rename(f.file, join(f.sessions, "active.jsonl"));
+    const options = { sessions_root: f.sessions, archived_sessions_root: archive, state_file: f.state };
+    const originalCreateReadStream = fs.createReadStream;
+    try {
+      fs.createReadStream = ((...args: Parameters<typeof originalCreateReadStream>) => {
+        if (String(args[0]) !== archivedFile) return originalCreateReadStream(...args);
+        const stream = new PassThrough();
+        queueMicrotask(() => stream.destroy(new Error("injected archive read failure")));
+        return stream as ReturnType<typeof originalCreateReadStream>;
+      }) as typeof originalCreateReadStream;
+      syncBuiltinESMExports();
+      const result = await runCodexSessionCollectionOnce(options);
+      assert.equal(result.status, "partial");
+      assert.equal(result.sessions_read_failed, 1);
+      assert.ok(Number(result.tasks_indexed) > 0);
+    } finally { fs.createReadStream = originalCreateReadStream; syncBuiltinESMExports(); }
+    let archiveStreams = 0;
+    try {
+      fs.createReadStream = ((...args: Parameters<typeof originalCreateReadStream>) => {
+        if (String(args[0]) !== archivedFile || ++archiveStreams !== 2) return originalCreateReadStream(...args);
+        const stream = new PassThrough();
+        queueMicrotask(() => stream.destroy(new Error("injected decompression input failure")));
+        return stream as ReturnType<typeof originalCreateReadStream>;
+      }) as typeof originalCreateReadStream;
+      syncBuiltinESMExports();
+      const result = await runCodexSessionCollectionOnce(options);
+      assert.equal(result.status, "partial");
+      assert.equal(result.sessions_read_failed, 1);
+      assert.ok(Number(result.tasks_indexed) > 0);
+    } finally { fs.createReadStream = originalCreateReadStream; syncBuiltinESMExports(); }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("persists a failed compressed source as non-current and excludes its old tasks", async () => {
+  const f = await fixture();
+  try {
+    const archive = join(f.root, "codex", "archived_sessions");
+    await mkdir(archive, { recursive: true });
+    await f.writeSession(f.turn("archive-prior", "检查失败归档是否失效", "已完成归档检查"));
+    const archivedFile = join(archive, "prior.jsonl.zst");
+    await writeFile(archivedFile, zstdCompressSync(await readFile(f.file)));
+    await rm(f.file);
+    const options = { sessions_root: f.sessions, archived_sessions_root: archive, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    const indexed = JSON.parse(await indexText(f.state)) as { sources: Record<string, { force_recheck?: boolean }> };
+    Object.values(indexed.sources)[0]!.force_recheck = true;
+    await writeVolatileLearningState(f.state, indexed);
+    const originalCreateReadStream = fs.createReadStream;
+    try {
+      fs.createReadStream = ((...args: Parameters<typeof originalCreateReadStream>) => {
+        if (String(args[0]) === archivedFile) {
+          const stream = new PassThrough();
+          queueMicrotask(() => stream.destroy(new Error("injected digest read failure")));
+          return stream as ReturnType<typeof originalCreateReadStream>;
+        }
+        return originalCreateReadStream(...args);
+      }) as typeof originalCreateReadStream;
+      syncBuiltinESMExports();
+      const failed = await runCodexSessionCollectionOnce(options);
+      assert.equal(failed.sessions_read_failed, 1);
+    } finally { fs.createReadStream = originalCreateReadStream; syncBuiltinESMExports(); }
+    const failedState = JSON.parse(await indexText(f.state)) as { sources: Record<string, { discovery_status?: string; verification_artifact_index_version?: number; complete?: boolean }> };
+    const source = Object.values(failedState.sources)[0]!;
+    assert.equal(source.discovery_status, "changed");
+    assert.equal(source.verification_artifact_index_version, 0);
+    assert.equal(source.complete, undefined);
+    const taskBatch = await codexSessionTaskBatch("candidate_generation", options);
+    assert.equal((taskBatch.tasks as unknown[]).length, 0);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 

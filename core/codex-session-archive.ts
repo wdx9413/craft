@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { createReadStream } from "node:fs";
 import { lstat, mkdir, open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { gzipSync, gunzipSync } from "node:zlib";
+import { pipeline } from "node:stream/promises";
+import { gzipSync, gunzipSync, createZstdDecompress } from "node:zlib";
 import { craftPaths, dataRoot, sessionStorageScopeId } from 'craft-common-store-local/paths';
 import { SupervisorClient } from "./infrastructure/supervisor-client.ts";
 import { projectIdentityFromRoot } from "./scope-identity.ts";
@@ -19,6 +21,9 @@ const DEFAULT_MAX_BYTES = 20 * 1024 * 1024;
 const MAX_LINE_BYTES = 64 * 1024 * 1024;
 const MAX_TASK_EXCERPT_BYTES = 8 * 1024 * 1024;
 const MAX_TASK_STREAM_BYTES = 128 * 1024 * 1024;
+const MAX_TASK_ARCHIVE_REPLAY_BYTES = 512 * 1024 * 1024;
+const MAX_ARCHIVE_SESSION_COMPRESSED_BYTES = 128 * 1024 * 1024;
+const MAX_ARCHIVE_SESSION_DECOMPRESSED_BYTES = 512 * 1024 * 1024;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const volatileIndexPaths = new Map<string, SupervisorClient>();
 const indexSessionKey = sessionStorageScopeId("codex", "craft-learning-session-index");
@@ -102,6 +107,11 @@ interface SourceState {
   size: number;
   mtime_ms: number;
   processed_bytes: number;
+  compressed?: true;
+  complete?: true;
+  archive_replay_limit_exceeded?: true;
+  archive_digest?: string;
+  decompressed_work_bytes?: number;
   session_id: string | null;
   project_scope_id: string | null;
   active_turn: ActiveTurn | null;
@@ -381,7 +391,13 @@ function validateState(value: unknown, now: string): CollectionState {
     const source = object(raw);
     if (!source || typeof source.size !== "number" || !Number.isSafeInteger(source.size) || source.size < 0
       || typeof source.mtime_ms !== "number" || !Number.isFinite(source.mtime_ms)
-      || typeof source.processed_bytes !== "number" || !Number.isSafeInteger(source.processed_bytes) || source.processed_bytes < 0 || source.processed_bytes > source.size
+      || typeof source.processed_bytes !== "number" || !Number.isSafeInteger(source.processed_bytes) || source.processed_bytes < 0
+      || source.compressed !== undefined && source.compressed !== true
+      || source.complete !== undefined && source.complete !== true
+      || source.archive_replay_limit_exceeded !== undefined && source.archive_replay_limit_exceeded !== true
+      || source.archive_digest !== undefined && (typeof source.archive_digest !== "string" || !SHA256.test(source.archive_digest))
+      || source.decompressed_work_bytes !== undefined && (typeof source.decompressed_work_bytes !== "number" || !Number.isSafeInteger(source.decompressed_work_bytes) || source.decompressed_work_bytes < 0)
+      || source.compressed !== true && source.processed_bytes > source.size
       || source.session_id !== null && typeof source.session_id !== "string"
       || source.project_scope_id !== null && typeof source.project_scope_id !== "string"
       || source.active_turn !== null && !object(source.active_turn)
@@ -580,14 +596,91 @@ async function listSessionFiles(root: string): Promise<string[]> {
       if (entry.isSymbolicLink()) continue;
       const path = join(directory, entry.name);
       if (entry.isDirectory()) await visit(path);
-      else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path);
+      else if (entry.isFile() && (entry.name.endsWith(".jsonl") || entry.name.endsWith(".jsonl.zst"))) files.push(path);
     }
   };
   await visit(root);
   return files;
 }
 
-export async function readCodexSessionChunk(path: string, start: number, fileSize: number, budget: number): Promise<{ bytes: Buffer; nextOffset: number }> {
+async function* zstdChunks(path: string, expected?: { readonly dev: number; readonly ino: number; readonly size: number; readonly mtimeMs: number },
+  expectedArchiveDigest?: string): AsyncGenerator<Buffer> {
+  const decoder = createZstdDecompress(), archiveDigest = createHash("sha256");
+  let source: ReturnType<typeof createReadStream> | null = null, inputPipeline: Promise<void> | null = null;
+  try {
+    const before = await stat(path);
+    if (expected && (before.dev !== expected.dev || before.ino !== expected.ino || before.size !== expected.size || before.mtimeMs !== expected.mtimeMs))
+      throw new Error("task_source_changed_during_read");
+    source = createReadStream(path);
+    source.on("data", chunk => archiveDigest.update(chunk));
+    inputPipeline = pipeline(source, decoder);
+    for await (const chunk of decoder) yield Buffer.from(chunk as Buffer);
+    await inputPipeline;
+    if (expectedArchiveDigest && `sha256:${archiveDigest.digest("hex")}` !== expectedArchiveDigest)
+      throw new Error("task_source_changed_during_read");
+  } finally {
+    source?.destroy(); decoder?.destroy();
+    if (inputPipeline) await inputPipeline.catch(() => undefined);
+    try {
+      const after = await stat(path);
+      if (expected && (after.dev !== expected.dev || after.ino !== expected.ino || after.size !== expected.size || after.mtimeMs !== expected.mtimeMs))
+        throw new Error("task_source_changed_during_read");
+    } catch (error) { if (expected && (error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("task_source_changed_during_read", { cause: error }); throw error; }
+  }
+}
+
+async function digestCompressedSession(path: string): Promise<string> {
+  const digest = createHash("sha256");
+  for await (const chunk of createReadStream(path)) {
+    digest.update(chunk);
+  }
+  return `sha256:${digest.digest("hex")}`;
+}
+
+function isCompressedSession(path: string): boolean { return path.endsWith(".jsonl.zst"); }
+function sourceComplete(source: SourceState | undefined): boolean {
+  return Boolean(source && (source.compressed === true ? source.complete === true : source.processed_bytes >= source.size));
+}
+
+export async function readCodexSessionChunk(path: string, start: number, fileSize: number, budget: number,
+  maxDecompressedBytes = MAX_ARCHIVE_SESSION_DECOMPRESSED_BYTES,
+  expectedSource?: { readonly dev: number; readonly ino: number; readonly size: number; readonly mtimeMs: number },
+  expectedArchiveDigest?: string): Promise<{ bytes: Buffer; nextOffset: number; complete?: boolean; work_bytes?: number }> {
+  if (isCompressedSession(path)) {
+    if (maxDecompressedBytes <= 0) throw new Error("Codex compressed session exceeds the configured replay limit");
+    const assertCurrentSource = async (): Promise<void> => {
+      const info = await stat(path);
+      if (expectedSource && (info.dev !== expectedSource.dev || info.ino !== expectedSource.ino || info.size !== expectedSource.size || info.mtimeMs !== expectedSource.mtimeMs))
+        throw new Error("task_source_changed_during_read");
+      if (expectedArchiveDigest && await digestCompressedSession(path) !== expectedArchiveDigest) throw new Error("task_source_changed_during_read");
+    };
+    await assertCurrentSource();
+    const chunks: Buffer[] = [];
+    let skipped = 0, collected = 0, complete = true, lastNewline = -1;
+    for await (const chunk of zstdChunks(path)) {
+      if (Math.max(start, skipped + chunk.length) > maxDecompressedBytes)
+        throw new Error("Codex compressed session exceeds the configured replay limit");
+      if (skipped + chunk.length <= start) { skipped += chunk.length; continue; }
+      const from = Math.max(0, start - skipped);
+      const available = chunk.subarray(from);
+      skipped += chunk.length;
+      if (collected >= budget && lastNewline >= 0) { complete = false; break; }
+      chunks.push(available);
+      const newline = available.lastIndexOf(0x0a);
+      if (newline >= 0) lastNewline = collected + newline;
+      collected += available.length;
+      if (collected > MAX_LINE_BYTES + budget) throw new Error("Codex session record exceeds the configured size limit");
+      if (lastNewline >= 0 && lastNewline + 1 >= budget) { complete = false; break; }
+    }
+    await assertCurrentSource();
+    const bytes = Buffer.concat(chunks);
+    if (lastNewline >= 0 && complete) return { bytes, nextOffset: start + bytes.length, complete, work_bytes: skipped };
+    if (lastNewline >= 0) return { bytes: bytes.subarray(0, lastNewline + 1), nextOffset: start + lastNewline + 1, complete, work_bytes: skipped };
+    if (bytes.length === 0) return { bytes, nextOffset: start, complete: true, work_bytes: skipped };
+    if (bytes.length >= MAX_LINE_BYTES) throw new Error("Codex session record exceeds the configured size limit");
+    // EOF seals the compressed snapshot, so a valid final JSONL record needs no newline.
+    return { bytes, nextOffset: start + bytes.length, complete: true, work_bytes: skipped };
+  }
   if (start >= fileSize) return { bytes: Buffer.alloc(0), nextOffset: start };
   let length = Math.min(fileSize - start, budget);
   const handle = await open(path, "r");
@@ -695,7 +788,8 @@ function updateFile(bytes: Buffer, start: number, sourcePath: string, source: So
   let lineStart = 0;
   let malformedLines = 0;
   while (lineStart < bytes.length) {
-    const lineEnd = bytes.indexOf(0x0a, lineStart);
+    let lineEnd = bytes.indexOf(0x0a, lineStart);
+    if (lineEnd < 0) lineEnd = bytes.length;
     let line = bytes.subarray(lineStart, lineEnd);
     if (line.at(-1) === 0x0d) line = line.subarray(0, line.length - 1);
     if (line.length > MAX_LINE_BYTES) throw new Error("Codex session record exceeds the configured size limit");
@@ -703,7 +797,7 @@ function updateFile(bytes: Buffer, start: number, sourcePath: string, source: So
     const parsed = recordFromLine(line);
     if (line.length > 0 && parsed === null) malformedLines++;
     updateTurn(parsed, line, absoluteOffset, sourcePath, source, state.tasks, state.session_partitions, state.session_split_versions, scopeCache, archived, verification);
-    lineStart = lineEnd + 1;
+    lineStart = lineEnd < bytes.length ? lineEnd + 1 : lineEnd;
   }
   if (source.active_turn && source.active_turn.turn_id === verification.turnId) source.active_turn.verification_collector = verification.collector.snapshot();
   return { next_offset: start + lineStart, malformed_lines: malformedLines };
@@ -731,7 +825,8 @@ async function collectCodexSessions(options: CodexSessionCollectionOptions, env:
   for (const source of roots) for (const path of await listSessionFiles(source.root)) files.push({ ...source, path });
   const availableSources = new Set(files.map(source => sourceKey(relative(source.root, source.path).split(sep).join("/"), source.archived)));
   const discoveredVersions = new Map<string, { size: number; mtimeMs: number }>();
-  const candidates: Array<{ path: string; relativePath: string; key: string; archived: boolean; relocated: boolean; size: number; mtimeMs: number; prior: SourceState | null }> = [];
+  const sourceReadFailures = new Set<string>();
+  const candidates: Array<{ path: string; relativePath: string; key: string; archived: boolean; relocated: boolean; size: number; mtimeMs: number; dev: number; ino: number; prior: SourceState | null; archiveDigest?: string }> = [];
   for (const { path, root, archived } of files) {
     const info = await stat(path);
     const relativePath = relative(root, path).split(sep).join("/");
@@ -742,9 +837,21 @@ async function collectCodexSessions(options: CodexSessionCollectionOptions, env:
       const task = state.tasks[id];
       return task !== undefined && !availableSources.has(sourceKey(task.source_path, task.source_root === "archived_sessions"));
     });
-    if (prior && !prior.force_recheck && !relocated && prior.size === info.size && prior.mtime_ms === info.mtimeMs && prior.processed_bytes >= info.size
+    if (prior && !prior.force_recheck && !relocated && prior.size === info.size && prior.mtime_ms === info.mtimeMs && sourceComplete(prior)
       && prior.task_goal_digest_version === 1 && prior.verification_artifact_index_version === 3 && prior.project_identity_index_version === 1) continue;
-    candidates.push({ path, relativePath, key, archived, relocated, size: info.size, mtimeMs: info.mtimeMs, prior });
+    if (prior?.archive_replay_limit_exceeded && prior.size === info.size && prior.mtime_ms === info.mtimeMs) continue;
+    let archiveDigest: string | undefined;
+    try { archiveDigest = isCompressedSession(path) && info.size <= MAX_ARCHIVE_SESSION_COMPRESSED_BYTES ? await digestCompressedSession(path) : undefined; }
+    catch {
+      sourceReadFailures.add(key);
+      if (prior) {
+        const failed = { ...prior, verification_artifact_index_version: 0 as const, discovery_status: "changed" as const };
+        delete failed.complete;
+        state.sources[key] = failed;
+      }
+      continue;
+    }
+    candidates.push({ path, relativePath, key, archived, relocated, size: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino, prior, archiveDigest });
   }
   // Oldest sources first ensure a stream of newly-created sessions cannot
   // starve the historical archive. A growing source resumes from its offset.
@@ -755,31 +862,76 @@ async function collectCodexSessions(options: CodexSessionCollectionOptions, env:
   for (const candidate of candidates.slice(0, maxFiles)) {
     if (bytesLeft <= 0) break;
     const previous = candidate.prior;
-    const sourceChanged = previous !== null && (previous.force_recheck === true || candidate.size < previous.size
-      || candidate.size === previous.size && candidate.mtimeMs !== previous.mtime_ms);
+    const compressedSource = isCompressedSession(candidate.path);
+    const sourceChanged = previous !== null && (previous.force_recheck === true
+      || compressedSource && (candidate.size !== previous.size || candidate.mtimeMs !== previous.mtime_ms)
+      || compressedSource && previous.archive_digest !== undefined && candidate.archiveDigest !== previous.archive_digest
+      || candidate.size < previous.size || candidate.size === previous.size && candidate.mtimeMs !== previous.mtime_ms);
     const backfillTaskGoalDigests = previous !== null && previous.task_goal_digest_version === undefined && !sourceChanged;
     const backfillVerificationArtifacts = previous !== null && previous.verification_artifact_index_version !== 3 && !sourceChanged;
     const backfillProjectIdentity = previous !== null && previous.project_identity_index_version === undefined && !sourceChanged;
-    const restartVerificationBackfill = backfillVerificationArtifacts && (previous.processed_bytes >= previous.size
+    const restartVerificationBackfill = backfillVerificationArtifacts && (sourceComplete(previous)
       || previous.verification_collector_version !== 2 || previous.verification_artifact_index_version === 2);
     const shouldRestart = sourceChanged || backfillTaskGoalDigests || restartVerificationBackfill || backfillProjectIdentity || candidate.relocated;
     const current: SourceState = shouldRestart || !previous
-      ? { size: candidate.size, mtime_ms: candidate.mtimeMs, processed_bytes: 0, session_id: null, project_scope_id: null, active_turn: null, task_ids: [],
+      ? { size: candidate.size, mtime_ms: candidate.mtimeMs, processed_bytes: 0, ...(compressedSource ? { compressed: true as const, archive_digest: candidate.archiveDigest, decompressed_work_bytes: 0 } : {}), session_id: null, project_scope_id: null, active_turn: null, task_ids: [],
         task_goal_digest_version: backfillTaskGoalDigests ? 0 : 1,
         verification_artifact_index_version: 0, verification_collector_version: 2, project_identity_index_version: 0 }
       : { ...previous, size: candidate.size, mtime_ms: candidate.mtimeMs,
+        ...(compressedSource ? { compressed: true as const } : {}),
+        ...(compressedSource && (previous.archive_digest === undefined || previous.decompressed_work_bytes === undefined)
+          ? { archive_digest: previous.archive_digest ?? candidate.archiveDigest, decompressed_work_bytes: previous.decompressed_work_bytes ?? 0 } : {}),
         ...(backfillVerificationArtifacts ? { verification_artifact_index_version: 0 as const } : {}) };
     if (sourceChanged && previous) removeSourceTasks(state, candidate.relativePath, previous, candidate.archived);
-    const amount = Math.min(bytesLeft, Math.max(1, candidate.size - current.processed_bytes));
-    const chunk = await readCodexSessionChunk(candidate.path, current.processed_bytes, candidate.size, amount);
+    if (compressedSource && candidate.size > MAX_ARCHIVE_SESSION_COMPRESSED_BYTES) {
+      current.archive_replay_limit_exceeded = true;
+      current.verification_artifact_index_version = 0;
+      delete current.complete;
+      state.sources[candidate.key] = current;
+      processedFiles++;
+      continue;
+    }
+    // This is an absolute expanded-size ceiling, not a cumulative CPU budget.
+    // Re-reading the prefix on later polls must not make a valid archive appear
+    // larger than its actual expanded size or permanently consume its allowance.
+    const decompressionBudget = MAX_ARCHIVE_SESSION_DECOMPRESSED_BYTES;
+    const amount = compressedSource ? bytesLeft : Math.min(bytesLeft, Math.max(1, candidate.size - current.processed_bytes));
+    let chunk: Awaited<ReturnType<typeof readCodexSessionChunk>>;
+    try { chunk = await readCodexSessionChunk(candidate.path, current.processed_bytes, candidate.size, amount, decompressionBudget,
+      compressedSource ? { dev: candidate.dev, ino: candidate.ino, size: candidate.size, mtimeMs: candidate.mtimeMs } : undefined,
+      compressedSource ? candidate.archiveDigest : undefined); }
+    catch (error) {
+      if (error instanceof Error && error.message.includes("Codex compressed session exceeds the configured replay limit")) {
+        current.archive_replay_limit_exceeded = true;
+        current.verification_artifact_index_version = 0;
+        delete current.complete;
+        state.sources[candidate.key] = current;
+        processedFiles++;
+        continue;
+      }
+      if (compressedSource) {
+        sourceReadFailures.add(candidate.key);
+        current.verification_artifact_index_version = 0;
+        current.discovery_status = "changed";
+        delete current.complete;
+        state.sources[candidate.key] = current;
+        processedFiles++;
+        continue;
+      }
+      throw error;
+    }
     const oldOffset = current.processed_bytes;
+    if (compressedSource) current.decompressed_work_bytes = chunk.work_bytes!;
     const update = updateFile(chunk.bytes, oldOffset, candidate.relativePath, current, state, scopeCache, candidate.archived);
     const nextOffset = update.next_offset;
     malformedLines += update.malformed_lines;
     current.processed_bytes = nextOffset;
-    if (current.processed_bytes >= candidate.size) current.task_goal_digest_version = 1;
-    if (current.processed_bytes >= candidate.size) current.verification_artifact_index_version = 3;
-    if (current.processed_bytes >= candidate.size) current.project_identity_index_version = 1;
+    if (chunk.complete) current.complete = true;
+    else delete current.complete;
+    const sourceFinished = compressedSource ? chunk.complete === true : current.processed_bytes >= candidate.size;
+    if (sourceFinished) current.task_goal_digest_version = 1;
+    if (sourceFinished) current.verification_artifact_index_version = 3;
+    if (sourceFinished) current.project_identity_index_version = 1;
     if (chunk.bytes.length === 0 && nextOffset === oldOffset && oldOffset < candidate.size) {
       // A final non-newline JSONL record is reread next pass so a later append
       // cannot split or lose an event.
@@ -794,14 +946,14 @@ async function collectCodexSessions(options: CodexSessionCollectionOptions, env:
   let discoveryChanged = false;
   for (const [key, source] of Object.entries(state.sources)) {
     const discovered = discoveredVersions.get(key);
-    const status = !discovered ? "not_discovered"
+    const status = sourceReadFailures.has(key) ? "changed" : !discovered ? "not_discovered"
       : source.size === discovered.size && source.mtime_ms === discovered.mtimeMs ? "discovered" : "changed";
     if (source.discovery_status !== status) discoveryChanged = true;
     source.discovery_status = status;
   }
   // A quiet poll has no state to publish; avoid rewriting a potentially large
   // index and racing another writer merely to refresh the timestamp.
-  if (processedFiles > 0 || discoveryChanged || Object.keys(state.sources).length === 0) {
+  if (processedFiles > 0 || discoveryChanged || sourceReadFailures.size > 0 || Object.keys(state.sources).length === 0) {
     state.updated_at = now;
     await mkdir(dirname(outputPath), { recursive: true, mode: 0o700 });
     await writeState(outputPath, state);
@@ -810,17 +962,19 @@ async function collectCodexSessions(options: CodexSessionCollectionOptions, env:
   const remaining = candidates.filter(candidate => {
     const source = state.sources[candidate.key];
     return !source || source.size !== candidate.size || source.mtime_ms !== candidate.mtimeMs
-      || source.processed_bytes < candidate.size || source.task_goal_digest_version !== 1
+      || !sourceComplete(source) && source.archive_replay_limit_exceeded !== true || source.task_goal_digest_version !== 1
       || source.verification_artifact_index_version !== 3 || source.project_identity_index_version !== 1;
   }).length;
   const indexedSourcesNotDiscovered = Object.keys(state.sources).filter(key => !availableSources.has(key));
   const tasksFromUndiscoveredSources = indexed.filter(task => !availableSources.has(sourceKey(task.source_path, task.source_root === "archived_sessions"))).length;
   return {
-    status: files.length === 0 ? "source_unavailable" : remaining > 0 || indexedSourcesNotDiscovered.length > 0 ? "partial" : "completed",
+    status: files.length === 0 ? "source_unavailable" : remaining > 0 || sourceReadFailures.size > 0 || indexedSourcesNotDiscovered.length > 0 || Object.values(state.sources).some(source => source.archive_replay_limit_exceeded === true) ? "partial" : "completed",
     sessions_seen: files.length,
     indexed_sources_not_discovered: indexedSourcesNotDiscovered.length,
     tasks_from_undiscovered_sources: tasksFromUndiscoveredSources,
     sessions_pending: remaining,
+    sessions_replay_limited: Object.values(state.sources).filter(source => source.archive_replay_limit_exceeded === true).length,
+    sessions_read_failed: sourceReadFailures.size,
     sessions_processed: processedFiles,
     bytes_processed: processedBytes,
     tasks_indexed: indexed.length,
@@ -873,7 +1027,7 @@ export async function codexSessionTaskBatch(partition: CodexSessionTaskIndex["da
   const allTasks = Object.values(state.tasks);
   const eligibleTasks = allTasks.filter(task => {
     const source = state.sources[sourceKey(task.source_path, task.source_root === "archived_sessions")];
-    if (!source || source.discovery_status !== "discovered" || source.verification_artifact_index_version !== 3 || source.processed_bytes < source.size) return false;
+    if (!source || source.discovery_status !== "discovered" || source.verification_artifact_index_version !== 3 || !sourceComplete(source)) return false;
     if (!hasCanonicalProjectIdentity(task)) return false;
     if (task.verification_conflict || task.verification_invalidated || task.verification_source_recheck || task.verification_transcript_error) return false;
     const contextVerified = hasContextVerification(task);
@@ -912,7 +1066,7 @@ export async function codexSessionTaskBatch(partition: CodexSessionTaskIndex["da
     indexed_partition_tasks: allTasks.filter(task => task.dataset_partition === partition).length,
     excluded_verification_index_incomplete: allTasks.filter(task => {
       const source = state.sources[sourceKey(task.source_path, task.source_root === "archived_sessions")];
-      return task.dataset_partition === partition && (!source || source.verification_artifact_index_version !== 3 || source.processed_bytes < source.size);
+      return task.dataset_partition === partition && (!source || source.verification_artifact_index_version !== 3 || !sourceComplete(source));
     }).length,
     excluded_source_not_current: allTasks.filter(task => task.dataset_partition === partition
       && state.sources[sourceKey(task.source_path, task.source_root === "archived_sessions")]?.discovery_status !== "discovered").length,
@@ -1141,6 +1295,8 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
   const sourceState = task ? state.sources[sourceKey(task.source_path, task.source_root === "archived_sessions")] : undefined;
   if (sourceState && sourceState.discovery_status !== "discovered")
     return { status: "ineligible", reason: "task_source_not_current", raw_content_stored: false };
+  if (sourceState?.archive_replay_limit_exceeded)
+    return { status: "ineligible", reason: "task_archive_replay_limit_exceeded", raw_content_stored: false };
   if (task && !hasCanonicalProjectIdentity(task)) return { status: "ineligible", reason: "task_project_identity_unverified", raw_content_stored: false };
   if (task?.verification_conflict) return { status: "ineligible", reason: "task_terminal_evidence_conflict", raw_content_stored: false };
   if (task?.verification_invalidated) return { status: "ineligible", reason: "task_terminal_evidence_invalidated", raw_content_stored: false };
@@ -1171,31 +1327,55 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "ineligible", reason: "task_source_span_invalid_or_oversized", raw_content_stored: false }; throw error; }
   if (!canonicalSource.startsWith(`${canonicalRoot}${sep}`)) throw new Error("Codex task source escaped the sessions root");
   const indexedSource = state.sources[sourceKey(task.source_path, task.source_root === "archived_sessions")];
-  if (!indexedSource || indexedSource.discovery_status !== "discovered" || indexedSource.verification_artifact_index_version !== 3 || indexedSource.processed_bytes < indexedSource.size)
+  if (!indexedSource || indexedSource.discovery_status !== "discovered" || indexedSource.verification_artifact_index_version !== 3 || !sourceComplete(indexedSource))
     return { status: "ineligible", reason: "task_verification_index_incomplete", raw_content_stored: false };
   const info = await lstat(sourcePath);
+  if (isCompressedSession(sourcePath) && (info.size !== indexedSource.size || info.mtimeMs !== indexedSource.mtime_ms))
+    return { status: "ineligible", reason: "task_source_not_current", raw_content_stored: false };
+  if (isCompressedSession(sourcePath) && (!indexedSource.archive_digest || await digestCompressedSession(sourcePath) !== indexedSource.archive_digest))
+    return { status: "ineligible", reason: "task_source_not_current", raw_content_stored: false };
   if (info.isSymbolicLink() || !info.isFile() || task.source_end_byte <= task.source_start_byte
-    || task.source_end_byte > info.size || task.source_end_byte - task.source_start_byte > MAX_TASK_STREAM_BYTES) {
+    || !isCompressedSession(sourcePath) && task.source_end_byte > info.size || task.source_end_byte - task.source_start_byte > MAX_TASK_STREAM_BYTES) {
     return { status: "ineligible", reason: "task_source_span_invalid_or_oversized", raw_content_stored: false };
   }
+  if (isCompressedSession(sourcePath) && task.source_end_byte > MAX_TASK_ARCHIVE_REPLAY_BYTES)
+    return { status: "ineligible", reason: "task_archive_replay_limit_exceeded", raw_content_stored: false };
   // Large spans are processed a bounded chunk at a time below. Small spans
   // retain the original injected-reader contract.
   const spanBytes = task.source_end_byte - task.source_start_byte;
   const buffer = Buffer.alloc(Math.min(spanBytes, MAX_TASK_EXCERPT_BYTES));
   async function* lines(): AsyncGenerator<string> {
-    const handle = rangeReader ? null : await open(sourcePath, "r");
+    const compressed = isCompressedSession(sourcePath);
+    const handle = rangeReader || compressed ? null : await open(sourcePath, "r");
     try {
     if (handle) {
       const opened = await handle.stat();
       if (opened.dev !== info.dev || opened.ino !== info.ino || !opened.isFile()) throw new Error("task_source_changed_during_read");
     }
-    let offset = task.source_start_byte, pending = Buffer.alloc(0);
-    while (offset < task.source_end_byte) {
-      const size = Math.min(buffer.length, task.source_end_byte - offset);
-      const block = buffer.subarray(0, size);
-      const bytesRead = rangeReader ? await rangeReader(sourcePath, block, offset) : (await handle!.read(block, 0, size, offset)).bytesRead;
-      if (bytesRead !== size) throw new Error("task_source_changed_during_read");
-      offset += size;
+    let offset = 0, pending: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+    async function* blocks(): AsyncGenerator<Buffer> {
+      if (compressed) {
+        let decompressedOffset = 0;
+        for await (const chunk of zstdChunks(sourcePath, { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs }, indexedSource.archive_digest)) {
+          const chunkStart = decompressedOffset, chunkEnd = chunkStart + chunk.length;
+          decompressedOffset = chunkEnd;
+          const from = Math.max(task.source_start_byte, chunkStart), to = Math.min(task.source_end_byte, chunkEnd);
+          if (to > from) yield chunk.subarray(from - chunkStart, to - chunkStart);
+        }
+        if (decompressedOffset < task.source_end_byte) throw new Error("task_source_changed_during_read");
+        return;
+      }
+      while (offset < spanBytes) {
+        const size = Math.min(buffer.length, spanBytes - offset);
+        const block = buffer.subarray(0, size);
+        const absoluteOffset = task.source_start_byte + offset;
+        const bytesRead = rangeReader ? await rangeReader(sourcePath, block, absoluteOffset) : (await handle!.read(block, 0, size, absoluteOffset)).bytesRead;
+        if (bytesRead !== size) throw new Error("task_source_changed_during_read");
+        offset += size;
+        yield block;
+      }
+    }
+    for await (const block of blocks()) {
       const combined = pending.length > 0;
       const bytes = combined ? Buffer.concat([pending, block]) : block;
       let start = 0, end: number;
@@ -1240,7 +1420,7 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
     if (payload.role === "assistant" && payload.phase === "final_answer") taskResult = sanitizedTaskProse(content, 1_000);
   }
   } catch (error) {
-    if (error instanceof Error && ["task_source_changed_during_read", "task_source_line_oversized"].includes(error.message))
+    if (error instanceof Error && ["task_source_changed_during_read", "task_source_line_oversized", "Codex compressed session exceeds the configured replay limit"].includes(error.message))
       return { status: "ineligible", reason: error.message, raw_content_stored: false };
     throw error;
   }
