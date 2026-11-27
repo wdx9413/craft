@@ -1,7 +1,8 @@
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
 import { ContextExtensionsKernel } from "../../context-extensions.ts";
-import { contextReadinessDoctor } from "../../context-readiness-doctor.ts";
+import { contextReadinessDoctor, type ContextDoctorSources } from "../../context-readiness-doctor.ts";
+import { capabilityIterationGaps } from "../../capability-iteration-gaps.ts";
 
 declare module "../craft-service.ts" {
   interface CraftService {
@@ -16,6 +17,7 @@ declare module "../craft-service.ts" {
     contextExtensionsResolveResume(args: JsonObject): Promise<JsonObject>;
     contextExtensionsStats(args: JsonObject): JsonObject;
     contextReadinessDoctor(args: JsonObject): JsonObject;
+    contextCapabilityIterationGaps(args: JsonObject): JsonObject;
     contextExtensionsHealth(args: JsonObject): JsonObject;
     contextExtensionsListCorrections(args: JsonObject): JsonObject;
     contextExtensionsDecideCorrection(args: JsonObject): JsonObject;
@@ -37,7 +39,14 @@ export function installContextExtensionsMethods(serviceClass: typeof CraftServic
   serviceClass.prototype.contextExtensionsGetResume = function (args) { return kernel(this).getResume(args); };
   serviceClass.prototype.contextExtensionsResolveResume = function (args) { return kernel(this).resolveResume(args); };
   serviceClass.prototype.contextExtensionsStats = function (args) { return kernel(this).stats(args); };
-  serviceClass.prototype.contextReadinessDoctor = function (args) { return contextReadinessDoctor(this.store, args, this.capabilityOwned ? { stores: new Map([[this.storageOwner ?? "context", this.store], ...[...this.ownerServices].map(([name, service]) => [name, service.store] as const)]) } : {}); };
+  const doctorSources = (service: CraftService): ContextDoctorSources => service.capabilityOwned
+    ? { stores: new Map([[service.storageOwner ?? "context", service.store], ...[...service.ownerServices].map(([name, owner]) => [name, owner.store] as const)]) }
+    : {};
+  serviceClass.prototype.contextReadinessDoctor = function (args) { return contextReadinessDoctor(this.store, args, doctorSources(this)); };
+  serviceClass.prototype.contextCapabilityIterationGaps = function (args) {
+    const evalOwner = !this.capabilityOwned || this.storageOwner === "eval" ? this : this.ownerServices.get("eval");
+    return capabilityIterationGaps(this.store, args, { ...doctorSources(this), evaluation: evalOwner?.evaluationContracts });
+  };
   serviceClass.prototype.contextExtensionsHealth = function (args) { return kernel(this).health(args); };
   serviceClass.prototype.contextExtensionsListCorrections = function (args) { return kernel(this).listCorrections(args); };
   serviceClass.prototype.contextExtensionsDecideCorrection = function (args) { return kernel(this).decideCorrection(args); };

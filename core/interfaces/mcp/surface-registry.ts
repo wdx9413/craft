@@ -103,6 +103,14 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+// The long-running learning worker uses the complete Context surface to create
+// and adjudicate held-out Knowledge cases. Keep these lifecycle operations off
+// the smaller daily surface, but mount them for the worker's MCP client.
+const ASYNC_KNOWLEDGE_EVALUATION_TOOLS = [
+  "craft_knowledge_evaluation_case_adjudicate", "craft_knowledge_evaluation_case_list", "craft_knowledge_evaluation_case_save",
+  "craft_knowledge_evaluation_run", "craft_knowledge_evaluation_run_get", "craft_knowledge_evaluation_run_list",
+] as const;
+
 const OWNED_ONLY_SURFACES: Readonly<Record<string, RegExp>> = {
   "component-runtime-owned": /^craft_(?:task_|work_|host_|trace_|evidence_|artifact_|workspace_|runtime_|execution_|sandbox_|local_)/u,
   "component-notes-owned": /^craft_notes_(?:location_list_devices|create_device|observe_directory|observe_file|candidate_list|qualification_run|confirm|revoke|resolve)$/u,
@@ -151,7 +159,7 @@ export function surfaceToolNames(surface: string, activeTools: readonly Tool[], 
     return [...new Set([...direct, ...SYSCALL_VERBS, ...passthrough])];
   }
   if (surface === "component-context-complete") {
-    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", "craft_notes_context_resolve", "craft_notes_qualification_run", "craft_context_doctor", "craft_context_usage_statusline", "craft_capability_iteration_plan", "craft_capability_iteration_gaps", "craft_lsp_readiness", "craft_learning_cycle_task_evidence_list", ...Object.values(DAILY_COMPONENT_TOOLS).flat()]);
+    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", "craft_notes_context_resolve", "craft_notes_qualification_run", "craft_context_doctor", "craft_context_usage_statusline", "craft_capability_iteration_plan", "craft_capability_iteration_gaps", "craft_lsp_readiness", "craft_learning_cycle_task_evidence_list", ...Object.values(DAILY_COMPONENT_TOOLS).flat(), ...ASYNC_KNOWLEDGE_EVALUATION_TOOLS]);
     const components = ["component-knowledge", "component-memory", "component-experience", "component-codebase"] as const;
     return activeTools.filter(tool => names.has(tool.name) || components.some(component => COMPONENT_SURFACES[component].test(tool.name))).map(tool => tool.name);
   }

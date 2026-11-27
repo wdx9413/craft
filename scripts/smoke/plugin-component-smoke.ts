@@ -57,7 +57,8 @@ async function smoke(name: string): Promise<void> {
       command: process.execPath, args: [join(root, "scripts", "smoke", "fixtures", "go-lsp-fixture.cjs")], analyzer_version: "go-mcp-smoke-1",
       relations: ["calls"], max_documents: 10, relation_symbol_limit: 10 }] }));
   }
-  const child = spawn(server.command, server.args, { cwd: pluginRoot, env: { ...process.env, CRAFT_DATA_DIR: data }, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(server.command, server.args, { cwd: pluginRoot, env: { ...process.env, CRAFT_DATA_DIR: data,
+    ...(name === "craft-context" ? { CRAFT_LEARNING_WORKER_MODE: "embedded", CRAFT_CONTINUOUS_LEARNING: "1" } : {}) }, stdio: ["pipe", "pipe", "pipe"] });
   try {
     let childStderr = "";
     child.stderr.setEncoding("utf8");

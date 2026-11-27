@@ -10,7 +10,6 @@ import { createEvaluationHandlers } from "./evaluation-handlers.ts";
 import { createWorkspaceHandlers } from "./workspace-handlers.ts";
 import { verifyCodexSessionEvidenceInput } from "../../codex-session-archive.ts";
 import { buildCapabilityIterationPlan } from "../../capability-iteration-plan.ts";
-import { capabilityIterationGaps } from "../../capability-iteration-gaps.ts";
 import { contextUsageStatusline } from "../../context-usage-statusline.ts";
 import { codebaseLspReadiness } from "../../codebase-lsp-readiness.ts";
 import { lspCommandIsAbsolute } from "../../codebase-lsp-readiness.ts";
@@ -34,7 +33,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_context_tools_discover: service.contextToolsDiscover.bind(service),
       craft_context_doctor: service.contextReadinessDoctor.bind(service),
       craft_capability_iteration_plan: (args) => buildCapabilityIterationPlan(service.store, args),
-      craft_capability_iteration_gaps: (args) => capabilityIterationGaps(service.store, args),
+      craft_capability_iteration_gaps: service.contextCapabilityIterationGaps.bind(service),
       craft_context_usage_statusline: (args) => contextUsageStatusline(service.store, args),
       craft_lsp_readiness: (args) => ({ ...codebaseLspReadiness(service.store, args),
         ...(args.command === undefined ? {} : { command_is_absolute: lspCommandIsAbsolute(args.command) }) }),

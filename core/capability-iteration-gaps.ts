@@ -1,58 +1,199 @@
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
-import { contextReadinessDoctor } from "./context-readiness-doctor.ts";
+import { catalogOwner } from "./infrastructure/owned-catalog.ts";
+import { contextReadinessDoctor, type ContextDoctorSources } from "./context-readiness-doctor.ts";
+import { contextAssetMatches } from "craft-common-base/context-assets";
 import { buildCapabilityIterationPlan } from "./capability-iteration-plan.ts";
+import type { EvaluationContractKernel } from "./evaluation-contract.ts";
+import { validateJsonSchema, type JsonValue } from "./json-schema.ts";
+import { projectIdentityFromRoot, ScopeIdentityKernel } from "./scope-identity.ts";
+import { text } from "./validation.ts";
 
 const CONTROL_PLANE = ["context_readiness_doctor", "capability_iteration_plan", "context_tools_discover", "correction_status_contract",
   "task_ledger_schema", "migration_dry_run", "activation_profile_plan", "quality_canary_plan", "skill_closeout"] as const;
+const SAFETY = { automatic_apply_allowed: false, execution_context: false, generated_without_writes: true, content_free: true };
 
-function missingCapabilities(): string[] { return []; }
+const refText = { type: "string", minLength: 1, maxLength: 2_000 };
+export const EFFECT_EVALUATION_REF_SCHEMA = {
+  type: "object", required: ["contract_id", "evaluation_id", "candidate_ref"], additionalProperties: false,
+  properties: {
+    contract_id: refText, evaluation_id: refText,
+    candidate_ref: {
+      type: "object", required: ["kind", "id", "version", "digest"], additionalProperties: false,
+      properties: { kind: refText, id: refText, version: { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER }, digest: refText },
+    },
+  },
+};
 
-function gap(status: "resolved" | "runtime_pending" | "evidence_pending" | "authorization_pending", id: string, reason: string, nextAction: string): JsonObject {
+type EffectEvaluationRef = Required<Parameters<EvaluationContractKernel["verifyTaskEffectEvaluation"]>[0]>;
+interface GapSources extends ContextDoctorSources { evaluation?: EvaluationContractKernel }
+type GapStatus = "resolved" | "runtime_pending" | "evidence_pending" | "authorization_pending" | "owner_unavailable";
+
+function gap(status: GapStatus, id: string, reason: string, nextAction: string): JsonObject {
   return { id, status, reason, next_action: nextAction };
 }
 
-export function capabilityIterationGaps(store: CraftStore, args: JsonObject = {}): JsonObject {
-  const projectScope = typeof args.project_scope_id === "string" && args.project_scope_id.trim() ? args.project_scope_id.trim() : "global";
-  const doctor = contextReadinessDoctor(store, { ...args, project_scope_id: projectScope });
-  const plan = buildCapabilityIterationPlan(store, { ...args, project_scope_id: projectScope });
-  const context = doctor.context as JsonObject;
+function identityFailure(status: string, issue?: JsonObject): JsonObject {
+  return { status, project_scope_id: null, gaps: issue ? [issue] : [], unresolved_count: 1, ...SAFETY };
+}
+
+function exactContextAssetRef(value: unknown): value is JsonObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const ref = value as JsonObject;
+  return typeof ref.member === "string" && typeof ref.id === "string"
+    && Number.isSafeInteger(ref.version) && Number(ref.version) > 0
+    && typeof ref.digest === "string" && ref.digest.length > 0;
+}
+
+class EvalOwnerReadFailure extends Error {}
+
+function verifyEffect(evaluation: EvaluationContractKernel, ref: EffectEvaluationRef): JsonObject {
+  const ownerStore = evaluation.store;
+  const read = <T>(operation: () => T, missingMessage?: string): T => {
+    try { return operation(); }
+    catch (error) {
+      if (error instanceof Error && error.message === missingMessage) throw error;
+      throw new EvalOwnerReadFailure("Eval owner record read failed", { cause: error });
+    }
+  };
+  const store: Pick<CraftStore, "get" | "find"> = {
+    get: (kind, id, version) => read(() => ownerStore.get(kind, id, version), `Unknown ${kind}: ${id}`),
+    find: (...args) => read(() => ownerStore.find(...args)),
+  };
+  // Preserve the owner's trusted evaluators and reference readers on a per-call receiver.
+  const verifier: EvaluationContractKernel = Object.create(evaluation, { store: { value: store } });
+  return verifier.verifyTaskEffectEvaluation(ref);
+}
+
+function effectGap(scope: JsonObject, raw: unknown, evaluation: GapSources["evaluation"]): JsonObject | null {
+  if (!evaluation) return gap("owner_unavailable", "controlled_task_effect", "The Eval owner is unavailable.", "mount_eval_owner");
+  const pending = gap("evidence_pending", "controlled_task_effect", "An eligible candidate-bound evaluation in this scope is required.",
+    "freeze_contract_then_run_three_pair_screening_and_at_least_five_pairs_for_effect_decision");
+  if (raw === undefined) return pending;
+  try { validateJsonSchema(raw as JsonValue, EFFECT_EVALUATION_REF_SCHEMA); }
+  catch { return pending; }
+
+  const ref = raw as EffectEvaluationRef;
+  const unavailable = gap("owner_unavailable", "controlled_task_effect", "The Eval owner could not provide the requested evaluation.", "restore_eval_owner_access");
+  try {
+    const contract = evaluation.store.find("evaluation_contract", ref.contract_id, undefined, false);
+    const contractScope = contract?.scope as JsonObject | undefined;
+    if (contractScope?.kind !== scope.kind || contractScope?.id !== scope.id) return pending;
+    if (!evaluation.store.find("task_effect_evaluation", ref.evaluation_id, undefined, false)) return pending;
+  } catch {
+    return unavailable;
+  }
+
+  try {
+    const verified = verifyEffect(evaluation, ref);
+    return verified.eligible === true ? null : pending;
+  } catch (error) {
+    return error instanceof EvalOwnerReadFailure ? unavailable : pending;
+  }
+}
+
+function contextUsageGaps(contextStore: CraftStore | null, scope: JsonObject, context: JsonObject): JsonObject[] {
+  const unavailable = () => [gap("owner_unavailable", "context_usage", "The Context owner data is unavailable.", "restore_context_owner_access")];
+  if (!contextStore || context.emissions === null || context.feedback === null) return unavailable();
+  const matches = (record: JsonObject) => {
+    const recordScope = record.scope as JsonObject | undefined;
+    return recordScope?.kind === scope.kind && recordScope?.id === scope.id;
+  };
+  try {
+    const emissions = contextStore.list("context_emission", 10_000, record => matches(record)
+      && typeof record.source_receipt_id === "string" && Array.isArray(record.asset_refs) && record.asset_refs.length > 0, false);
+    const feedback = contextStore.list("context_feedback", 10_000, matches, false);
+    const referencesMatchEmission = (entry: JsonObject) => emissions.some(emission => emission.source_receipt_id === entry.receipt_id
+      && Array.isArray(entry.asset_refs) && entry.asset_refs.some(ref => exactContextAssetRef(ref)
+        && (emission.asset_refs as JsonObject[]).some(emitted => exactContextAssetRef(emitted) && contextAssetMatches(ref, emitted))));
+    const ratedUse = feedback.some(entry => referencesMatchEmission(entry)
+      && (entry.usage_stage === "used" || entry.usage_stage === "verified")
+      && ["helpful", "irrelevant", "incorrect", "stale"].includes(String(entry.outcome)));
+    const gaps: JsonObject[] = [];
+    if (!ratedUse) gaps.push(gap("evidence_pending", "context_usage",
+      "No exact emitted asset reference has rated used or verified feedback in this scope.",
+      "run_real_host_turns_and_record_asset_ref_usage_and_token_measurement"));
+    const unratedShown = feedback.some(entry => entry.outcome === "unrated" && entry.usage_stage === "shown" && referencesMatchEmission(entry));
+    if (unratedShown) gaps.push(gap("evidence_pending", "context_feedback",
+      "Context was shown, but feedback remains unrated and does not prove asset use or effect.",
+      "record_a_rated_outcome_for_the_exact_emitted_asset_reference"));
+    return gaps;
+  } catch { return unavailable(); }
+}
+
+export function capabilityIterationGaps(store: CraftStore, args: JsonObject = {}, sources: GapSources = {}): JsonObject {
+  const requestedScope = args.project_scope_id === undefined ? null : text(args.project_scope_id, "project_scope_id");
+  let projectScope = requestedScope ?? "global";
+  let projectRoot: string | undefined;
+  let identity: JsonObject | undefined;
+  if (args.project_root !== undefined) {
+    try {
+      identity = projectIdentityFromRoot(text(args.project_root, "project_root"));
+    } catch { return identityFailure("identity_unresolved"); }
+    projectScope = String((identity.canonical_scope as JsonObject).id);
+    if (requestedScope !== null && requestedScope !== projectScope) return identityFailure("identity_conflict");
+    projectRoot = String(identity.local_path_alias);
+  }
+
+  const own = catalogOwner(store.paths.databaseDir);
+  const contextStore = sources.stores?.get("context") ?? (own === "context" || (sources.stores === undefined && own === undefined) ? store : null);
+  if (identity) {
+    if (!contextStore) return identityFailure("owner_unavailable");
+    let diagnosis: JsonObject;
+    try { diagnosis = new ScopeIdentityKernel(contextStore).diagnoseProject(identity); }
+    catch { return identityFailure("owner_unavailable"); }
+    if (diagnosis.status === "migration_required") return identityFailure("identity_unresolved",
+      gap("authorization_pending", "project_identity_migration", "A legacy project identity requires migration review.",
+        "backup_then_review_and_explicitly_authorize_apply_migrations"));
+    if (diagnosis.status !== "current") return identityFailure("identity_unresolved");
+  }
+
+  const scope = { kind: projectScope === "global" ? "global" : "project", id: projectScope };
+  const doctor = contextReadinessDoctor(store, { ...args, project_root: projectRoot, project_scope_id: projectScope }, sources);
   const activation = doctor.activation as JsonObject;
-  const learning = plan.learning_record as JsonObject;
+  const migration = doctor.migration as JsonObject;
   const remediation = [
     gap("resolved", "diagnostic_errors", "Dispatch failures now expose stable codes and bounded messages.", "none"),
     gap("resolved", "readiness_doctor", "Doctor separates configured state from observed Host execution and worker state.", "none"),
     gap("resolved", "minimal_sufficient_context", "Context planning keeps refs, versions, digests, constraints and omission reasons first.", "none"),
     gap("resolved", "task_ledger_schema", "Sanitized task-ledger schema and threshold checks are available read-only.", "none"),
     gap("resolved", "governed_quality_plan", "Activation, Quality and Canary stages are explicit without automatic publication.", "none"),
-    gap("runtime_pending", "codex_plugin_cache", "The installed Codex plugin cache is an older build until a new marketplace package is installed.",
-      "build_and_install_new_marketplace_package_then_restart_host"),
-    gap("authorization_pending", "project_identity_migration", "Old project scope is fail-closed and may not enter Context.",
-      "backup_then_review_and_explicitly_authorize_apply_migrations"),
   ];
-  if ((plan.migration as JsonObject).status === "registry_plan_observed") remediation.push(
+  if (migration.state === "applied" && migration.data_migrated !== true) remediation.push(
     gap("authorization_pending", "business_data_migration", "Registry migration does not import business records or authority.",
       "inventory_then_plan_selected_record_refs_before_explicit_apply"));
-  if (Number(context.emissions ?? 0) === 0 || Number(context.feedback ?? 0) === 0) remediation.push(
-    gap("evidence_pending", "context_usage", "No durable injection/feedback evidence is present in this data space.",
-      "run_real_host_turns_and_record_asset_ref_usage_and_token_measurement"));
-  if (learning.outcome === "inconclusive") remediation.push(
-    gap("evidence_pending", "project_asset_recurrence", "No exact asset has verified use across two independent sessions.",
-      "capture_two_verified_uses_of_the_same_asset_across_independent_sessions"));
-  remediation.push(gap("evidence_pending", "controlled_task_effect", "Asset usage or recurrence does not establish task benefit; independent matched results are still required.",
-    "freeze_contract_then_run_three_pair_screening_and_at_least_five_pairs_for_effect_decision"));
-  if ((activation.components as JsonObject[] | undefined)?.some(item => item.status !== "executed")) remediation.push(
+  remediation.push(...contextUsageGaps(contextStore, scope, doctor.context as JsonObject));
+  if (!contextStore) remediation.push(gap("owner_unavailable", "project_asset_recurrence", "The Context owner is unavailable.", "mount_context_owner"));
+  else {
+    const plan = args.records === undefined
+      ? doctor.iteration_plan as JsonObject
+      : buildCapabilityIterationPlan(contextStore, { project_scope_id: projectScope, records: args.records });
+    const learning = plan.learning_record as JsonObject | undefined;
+    if (learning?.outcome !== "project_candidate_ready_for_paired_assessment") remediation.push(
+      gap("evidence_pending", "project_asset_recurrence", "No exact asset has verified use across two independent sessions.",
+        "capture_two_verified_uses_of_the_same_asset_across_independent_sessions"));
+  }
+  const effect = effectGap(scope, args.effect_evaluation_ref, sources.evaluation);
+  if (effect) remediation.push(effect);
+  if (activation.status === "owner_unavailable") remediation.push(
+    gap("owner_unavailable", "hook_execution_proof", "The Hook proof owners are unavailable.", "mount_hook_proof_owners"));
+  else if ((activation.components as JsonObject[]).some(item => item.status !== "executed")) remediation.push(
     gap("runtime_pending", "hook_execution_proof", "Configuration and installed manifests do not prove a Hook executed in this session.",
       "run_one_real_host_turn_then_recheck_this_session"));
+
+  const workers = doctor.learning_workers as Record<string, JsonObject>;
+  const learningWorkers = Object.fromEntries(Object.entries(workers).map(([component, worker]) => [component, {
+    status: worker.status, owner_version: worker.owner_version ?? null, version_relation: worker.version_relation ?? "unknown",
+    liveness: worker.liveness ?? "unverified",
+  }]));
   const unresolved = remediation.filter(item => item.status !== "resolved");
   return {
     status: unresolved.length ? "partial" : "resolved",
     project_scope_id: projectScope,
-    control_plane: { implemented: CONTROL_PLANE, missing_subcapabilities: missingCapabilities() },
+    runtime: { version: doctor.release, source: "mcp_runtime", learning_workers: learningWorkers },
+    control_plane: { implemented: CONTROL_PLANE, missing_subcapabilities: [] },
     capability_boundary: "No fifth Context member, vector store, reranker, autonomous publisher or self-modifying Agent is missing; adding them would widen the governed boundary without evidence.",
     gaps: remediation,
     unresolved_count: unresolved.length,
-    automatic_apply_allowed: false,
-    execution_context: false,
-    generated_without_writes: true,
+    ...SAFETY,
   };
 }

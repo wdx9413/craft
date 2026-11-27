@@ -122,7 +122,8 @@
       ],
       "tests": [
         "tests/context-readiness-doctor.test.ts"
-      ]
+      ],
+      "branches": true
     },
     {
       "name": "hook-verification-gap",

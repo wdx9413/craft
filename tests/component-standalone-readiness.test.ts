@@ -429,6 +429,26 @@ test("standalone Knowledge exposes Host-managed review without a separate model 
   } finally { await dispose(f); }
 });
 
+test("complete Context surface exposes the Knowledge evaluation lifecycle used by the async worker", async () => {
+  const f = await fixture();
+  try {
+    const complete = new McpServer(f.service, "component-context-complete");
+    const daily = new McpServer(f.service, "component-context-daily");
+    const workerTools = [
+      "craft_knowledge_evaluation_case_adjudicate", "craft_knowledge_evaluation_case_list", "craft_knowledge_evaluation_case_save",
+      "craft_knowledge_evaluation_run", "craft_knowledge_evaluation_run_get", "craft_knowledge_evaluation_run_list",
+    ];
+    for (const name of workerTools) {
+      assert(complete.tools.some(tool => tool.name === name), `${name} must be mounted for the async learning worker`);
+    }
+    for (const name of ["craft_knowledge_evaluation_case_adjudicate", "craft_knowledge_evaluation_case_save", "craft_knowledge_evaluation_run", "craft_knowledge_evaluation_run_list"]) {
+      assert.equal(daily.tools.some(tool => tool.name === name), false, `${name} stays off the daily surface`);
+    }
+    assert(daily.tools.some(tool => tool.name === "craft_knowledge_evaluation_case_list"));
+    assert(daily.tools.some(tool => tool.name === "craft_knowledge_evaluation_run_get"));
+  } finally { await dispose(f); }
+});
+
 test("memory maintenance evaluates the governed ledger first and keeps expiry as a review finding", async () => {
   const f = await fixture();
   try {

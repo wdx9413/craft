@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { CodexHookBridge } from "../core/codex-hook-bridge.ts";
@@ -277,7 +277,7 @@ test("Context SessionStart records its completed runtime receipt", async () => {
 
 test("Context SessionStart ensures and reloads the user LaunchAgent", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "craft-hook-launch-agent-"));
-  const home = join(temporary, "home"), data = join(temporary, "data"), bin = join(temporary, "bin");
+  const home = join(temporary, "home"), data = await mkdtemp(join(homedir(), ".craft-hook-launch-agent-data-")), bin = join(temporary, "bin");
   const state = join(temporary, "launch-agent-loaded"), log = join(temporary, "launchctl.log");
   await Promise.all([mkdir(home, { recursive: true }), mkdir(bin, { recursive: true })]);
   const launchctl = join(bin, "launchctl");
@@ -290,7 +290,7 @@ else if (action === "bootstrap") writeFileSync(${JSON.stringify(state)}, "loaded
 else if (action === "bootout") { try { unlinkSync(${JSON.stringify(state)}); } catch {} }
 `, { mode: 0o700 });
   await chmod(launchctl, 0o700);
-  const hook = join(root, "bin/craft-codex-hook.ts");
+  const hook = hookBundle;
   const run = () => new Promise<{ stdout: string; stderr: string; code: number | null }>((resolveResult, reject) => {
     const child = spawn(process.execPath, ["--experimental-strip-types", hook, "--member", "context"], { cwd: root,
       env: { ...process.env, HOME: home, CRAFT_DATA_DIR: data, PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`, NODE_NO_WARNINGS: "1" },
@@ -310,6 +310,7 @@ else if (action === "bootout") { try { unlinkSync(${JSON.stringify(state)}); } c
     assert.equal(await readFile(state, "utf8"), "loaded");
     const plist = await readFile(join(home, "Library", "LaunchAgents", "com.craft.learning-worker.plist"), "utf8");
     assert.match(plist, /CRAFT_LEARNING_COMPONENTS/u);
+    assert(plist.includes(join(resolve(hookBundle, ".."), "craft-experience-learning-worker.js")), "LaunchAgent must point into this packaged plugin");
     const second = await run();
     assert.equal(second.code, 0, second.stderr);
     const invocations = (await readFile(log, "utf8")).trim().split("\n");
@@ -327,7 +328,10 @@ else if (action === "bootout") { try { unlinkSync(${JSON.stringify(state)}); } c
     assert.equal(finished.length, 3);
     assert.equal(finished.filter(record => record.outcome === "completed" && record.store_open_ms === 0).length, 2);
     assert(finished.some(record => record.outcome === "failed" && record.error_code));
-  } finally { await rm(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }
+  } finally {
+    await rm(temporary, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    await rm(data, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  }
 });
 
 test("packaged Hook records event and phase timings without logging prompt content", async () => {
